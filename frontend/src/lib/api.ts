@@ -1,0 +1,300 @@
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+
+interface ApiOptions {
+    method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+    body?: unknown;
+    headers?: Record<string, string>;
+}
+
+class ApiClient {
+    private baseUrl: string;
+
+    constructor(baseUrl: string) {
+        this.baseUrl = baseUrl;
+    }
+
+    private getToken(): string | null {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('accessToken');
+        }
+        return null;
+    }
+
+    private setTokens(accessToken: string, refreshToken: string): void {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('accessToken', accessToken);
+            localStorage.setItem('refreshToken', refreshToken);
+        }
+    }
+
+    private clearTokens(): void {
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
+        }
+    }
+
+    async request<T>(endpoint: string, options: ApiOptions = {}): Promise<T> {
+        const { method = 'GET', body, headers = {} } = options;
+
+        const token = this.getToken();
+        const requestHeaders: Record<string, string> = {
+            'Content-Type': 'application/json',
+            ...headers,
+        };
+
+        if (token) {
+            requestHeaders['Authorization'] = `Bearer ${token}`;
+        }
+
+        const response = await fetch(`${this.baseUrl}${endpoint}`, {
+            method,
+            headers: requestHeaders,
+            body: body ? JSON.stringify(body) : undefined,
+        });
+
+
+        if (response.status === 401) {
+            // Skip redirect for demo token
+            const token = this.getToken();
+            if (token?.startsWith('demo-')) {
+                // Demo mode - don't redirect, just throw
+                throw new Error('Demo mode - API not available');
+            }
+            // Token expired, try to refresh
+            const refreshed = await this.refreshToken();
+            if (refreshed) {
+                // Retry the request
+                return this.request<T>(endpoint, options);
+            }
+            // Redirect to login
+            if (typeof window !== 'undefined') {
+                window.location.href = '/login';
+            }
+            throw new Error('Unauthorized');
+        }
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ message: 'An error occurred' }));
+            throw new Error(error.message || 'Request failed');
+        }
+
+        return response.json();
+    }
+
+    private async refreshToken(): Promise<boolean> {
+        if (typeof window === 'undefined') return false;
+
+        const refreshToken = localStorage.getItem('refreshToken');
+        if (!refreshToken) return false;
+
+        try {
+            const response = await fetch(`${this.baseUrl}/auth/refresh`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refreshToken }),
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                this.setTokens(data.accessToken, data.refreshToken);
+                return true;
+            }
+        } catch {
+            // Refresh failed
+        }
+
+        this.clearTokens();
+        return false;
+    }
+
+    // Auth endpoints
+    async login(email: string, password: string) {
+        const data = await this.request<{
+            accessToken: string;
+            refreshToken: string;
+            user: { id: string; email: string; firstName: string; lastName: string; role: string };
+        }>('/auth/login', {
+            method: 'POST',
+            body: { email, password },
+        });
+        this.setTokens(data.accessToken, data.refreshToken);
+        return data;
+    }
+
+    async logout() {
+        const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('refreshToken') : null;
+        await this.request('/auth/logout', {
+            method: 'POST',
+            body: { refreshToken },
+        });
+        this.clearTokens();
+    }
+
+    async getProfile() {
+        return this.request<{
+            id: string;
+            email: string;
+            firstName: string;
+            lastName: string;
+            role: { name: string; permissions: string[] };
+        }>('/auth/me');
+    }
+
+    // Dashboard
+    async getDashboard() {
+        return this.request('/reports/dashboard');
+    }
+
+    // Risks
+    async getRisks(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request(`/risks${query}`);
+    }
+
+    async getRisk(id: string) {
+        return this.request(`/risks/${id}`);
+    }
+
+    async createRisk(data: unknown) {
+        return this.request('/risks', { method: 'POST', body: data });
+    }
+
+    async updateRisk(id: string, data: unknown) {
+        return this.request(`/risks/${id}`, { method: 'PUT', body: data });
+    }
+
+    async assessRisk(id: string, data: unknown) {
+        return this.request(`/risks/${id}/assess`, { method: 'POST', body: data });
+    }
+
+    async treatRisk(id: string, data: unknown) {
+        return this.request(`/risks/${id}/treat`, { method: 'POST', body: data });
+    }
+
+    async deleteRisk(id: string) {
+        return this.request(`/risks/${id}`, { method: 'DELETE' });
+    }
+
+    // Controls
+    async getControls(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request(`/controls${query}`);
+    }
+
+    async getControl(id: string) {
+        return this.request(`/controls/${id}`);
+    }
+
+    async createControl(data: unknown) {
+        return this.request('/controls', { method: 'POST', body: data });
+    }
+
+    async updateControl(id: string, data: unknown) {
+        return this.request(`/controls/${id}`, { method: 'PUT', body: data });
+    }
+
+    async deleteControl(id: string) {
+        return this.request(`/controls/${id}`, { method: 'DELETE' });
+    }
+
+    async mapControlRisk(controlId: string, riskId: string, mappingType?: string) {
+        return this.request(`/controls/${controlId}/map-risk`, {
+            method: 'POST',
+            body: { riskId, mappingType }
+        });
+    }
+
+    async unmapControlRisk(controlId: string, riskId: string) {
+        return this.request(`/controls/${controlId}/unmap-risk/${riskId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    // Findings
+    async getFindings(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request(`/findings${query}`);
+    }
+
+    async getFinding(id: string) {
+        return this.request(`/findings/${id}`);
+    }
+
+    async createFinding(data: unknown) {
+        return this.request('/findings', { method: 'POST', body: data });
+    }
+
+    async updateFinding(id: string, data: unknown) {
+        return this.request(`/findings/${id}`, { method: 'PUT', body: data });
+    }
+
+    async deleteFinding(id: string) {
+        return this.request(`/findings/${id}`, { method: 'DELETE' });
+    }
+
+    // Actions
+    async getActions(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request(`/actions${query}`);
+    }
+
+    async getAction(id: string) {
+        return this.request(`/actions/${id}`);
+    }
+
+    async createAction(data: unknown) {
+        return this.request('/actions', { method: 'POST', body: data });
+    }
+
+    async completeAction(id: string) {
+        return this.request(`/actions/${id}/complete`, { method: 'POST' });
+    }
+
+    // Reports
+    async getExecutiveSummary() {
+        return this.request('/reports/executive-summary');
+    }
+
+    async getRiskTrends(months?: number) {
+        const query = months ? `?months=${months}` : '';
+        return this.request(`/reports/risk-trends${query}`);
+    }
+
+    async getControlHeatmap() {
+        return this.request('/reports/control-heatmap');
+    }
+
+    // Risk Entries (Excel-like grid)
+    async getRiskEntries(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request(`/risk-entries${query}`);
+    }
+
+    async getRiskEntry(id: string) {
+        return this.request(`/risk-entries/${id}`);
+    }
+
+    async createRiskEntry(data: unknown) {
+        return this.request('/risk-entries', { method: 'POST', body: data });
+    }
+
+    async updateRiskEntry(id: string, data: unknown) {
+        return this.request(`/risk-entries/${id}`, { method: 'PUT', body: data });
+    }
+
+    async deleteRiskEntry(id: string) {
+        return this.request(`/risk-entries/${id}`, { method: 'DELETE' });
+    }
+
+    async bulkCreateRiskEntries(entries: unknown[]) {
+        return this.request('/risk-entries/bulk', { method: 'POST', body: { entries } });
+    }
+
+    async syncRiskEntriesToInventory(ids: string[]) {
+        return this.request('/risk-entries/sync-to-inventory', { method: 'POST', body: { ids } });
+    }
+}
+
+export const api = new ApiClient(API_BASE_URL);
+export default api;

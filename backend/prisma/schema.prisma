@@ -1,0 +1,767 @@
+// GRC (Risk Management & Internal Control) Database Schema
+// PostgreSQL with Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// USER & ROLE MANAGEMENT
+// ==========================================
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  department   String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  role          Role     @relation(fields: [roleId], references: [id])
+  roleId        String
+  ownedRisks    Risk[]   @relation("RiskOwner")
+  ownedControls Control[] @relation("ControlOwner")
+  ownedActions  Action[] @relation("ActionOwner")
+  auditLogs     AuditLog[]
+  refreshTokens RefreshToken[]
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  permissions Json     // Permission list as JSON array
+  users       User[]
+  createdAt   DateTime @default(now())
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+// ==========================================
+// RISK MANAGEMENT
+// ==========================================
+
+model Risk {
+  id          String     @id @default(cuid())
+  riskId      String     @unique // R-2024-001
+  name        String
+  description String     @db.Text
+  status      RiskStatus @default(IDENTIFIED)
+
+  // Owner
+  owner   User   @relation("RiskOwner", fields: [ownerId], references: [id])
+  ownerId String
+
+  // Category
+  category   RiskCategory @relation(fields: [categoryId], references: [id])
+  categoryId String
+
+  // Inherent Risk Scoring
+  inherentProbability Int @default(1) // 1-5
+  inherentImpact      Int @default(1) // 1-5
+  inherentRiskScore   Int @default(1) // Auto-calculated: probability * impact
+
+  // Residual Risk Scoring (after controls)
+  residualProbability Int?
+  residualImpact      Int?
+  residualRiskScore   Int?
+
+  // Risk Appetite
+  riskAppetite    Int?
+  isAboveAppetite Boolean @default(false)
+
+  // Treatment Decision
+  treatmentDecision   TreatmentDecision?
+  treatmentApproval   Boolean   @default(false)
+  treatmentApprovedBy String?
+  treatmentApprovedAt DateTime?
+
+  // Version Control
+  version Int @default(1)
+
+  // Relations
+  controls    ControlRiskMapping[]
+  findings    Finding[]
+  actions     Action[]
+  regulations RiskRegulation[]
+  assessments RiskAssessment[]
+  history     RiskHistory[]
+  processes   ProcessRisk[]
+  systems     SystemRisk[]
+  riskEntries RiskEntry[]  // Synced from Risk Entry screen
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([ownerId])
+  @@index([categoryId])
+}
+
+model RiskCategory {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+  color       String? // For UI display
+  risks       Risk[]
+  createdAt   DateTime @default(now())
+}
+
+model RiskAssessment {
+  id             String   @id @default(cuid())
+  risk           Risk     @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  riskId         String
+  assessmentDate DateTime @default(now())
+  assessor       String
+
+  // Inherent Assessment
+  probability   Int // 1-5
+  impact        Int // 1-5
+  inherentScore Int // probability * impact
+
+  // Mitigating Controls
+  mitigatingControlIds String[] // Control IDs
+
+  // Residual Assessment (after controls selected)
+  residualProbability Int?
+  residualImpact      Int?
+  residualScore       Int?
+
+  // Treatment
+  treatmentDecision TreatmentDecision?
+  justification     String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([riskId])
+}
+
+model RiskHistory {
+  id         String   @id @default(cuid())
+  risk       Risk     @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  riskId     String
+  version    Int
+  changeType String   // CREATE, UPDATE, ASSESSMENT, TREATMENT
+  changeData Json
+  changedBy  String
+  changedAt  DateTime @default(now())
+
+  @@index([riskId])
+  @@index([changedAt])
+}
+
+// Process and System relations
+model Process {
+  id          String        @id @default(cuid())
+  name        String        @unique
+  description String?
+  risks       ProcessRisk[]
+  createdAt   DateTime      @default(now())
+}
+
+model ProcessRisk {
+  id        String  @id @default(cuid())
+  process   Process @relation(fields: [processId], references: [id])
+  processId String
+  risk      Risk    @relation(fields: [riskId], references: [id])
+  riskId    String
+
+  @@unique([processId, riskId])
+}
+
+model System {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  description String?
+  risks       SystemRisk[]
+  createdAt   DateTime     @default(now())
+}
+
+model SystemRisk {
+  id       String @id @default(cuid())
+  system   System @relation(fields: [systemId], references: [id])
+  systemId String
+  risk     Risk   @relation(fields: [riskId], references: [id])
+  riskId   String
+
+  @@unique([systemId, riskId])
+}
+
+enum RiskStatus {
+  IDENTIFIED
+  ASSESSED
+  TREATED
+  ACCEPTED
+  CLOSED
+}
+
+enum TreatmentDecision {
+  ACCEPT
+  MITIGATE
+  TRANSFER
+  AVOID
+}
+
+// ==========================================
+// CONTROL MANAGEMENT
+// ==========================================
+
+model Control {
+  id          String            @id @default(cuid())
+  controlId   String            @unique // C-2024-001
+  name        String
+  description String            @db.Text
+  type        ControlType
+  nature      ControlNature
+  automation  ControlAutomation
+  frequency   ControlFrequency
+  controlDate DateTime?         // For AD_HOC controls
+
+  // Owner
+  owner   User   @relation("ControlOwner", fields: [ownerId], references: [id])
+  ownerId String
+
+  // Effectiveness
+  effectivenessStatus EffectivenessStatus @default(NOT_TESTED)
+  lastTestDate        DateTime?
+  lastTestResult      TestResult?
+
+  // Relations
+  risks       ControlRiskMapping[]
+  regulations ControlRegulation[]
+  tests       ControlTest[]
+  findings    Finding[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([effectivenessStatus])
+}
+
+model ControlRiskMapping {
+  id          String  @id @default(cuid())
+  control     Control @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  controlId   String
+  risk        Risk    @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  riskId      String
+  mappingType String  @default("PRIMARY") // PRIMARY, SECONDARY
+
+  createdAt DateTime @default(now())
+
+  @@unique([controlId, riskId])
+  @@index([riskId])
+}
+
+model ControlTest {
+  id           String     @id @default(cuid())
+  control      Control    @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  controlId    String
+  testDate     DateTime
+  tester       String
+  result       TestResult
+  evidenceUrls String[]
+  findings     String?    @db.Text
+  notes        String?    @db.Text
+
+  // Approval
+  approvedBy String?
+  approvedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([controlId])
+  @@index([testDate])
+}
+
+enum ControlType {
+  IT_GENERAL
+  IT_APPLICATION
+  OPERATIONAL
+  FINANCIAL
+  COMPLIANCE
+}
+
+enum ControlNature {
+  PREVENTIVE
+  DETECTIVE
+}
+
+enum ControlAutomation {
+  MANUAL
+  AUTOMATED
+  SEMI_AUTOMATED
+}
+
+enum ControlFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+  AD_HOC
+}
+
+enum EffectivenessStatus {
+  NOT_TESTED
+  EFFECTIVE
+  INEFFECTIVE
+  PARTIALLY_EFFECTIVE
+}
+
+enum TestResult {
+  EFFECTIVE
+  INEFFECTIVE
+  PARTIALLY_EFFECTIVE
+}
+
+// ==========================================
+// AUDIT & FINDINGS
+// ==========================================
+
+model AuditPlan {
+  id         String          @id @default(cuid())
+  planId     String          @unique // AP-2024-001
+  name       String
+  year       Int
+  periodType PeriodType
+  objectives String          @db.Text
+  scope      String          @db.Text
+  status     AuditPlanStatus @default(DRAFT)
+
+  // Linked entities (stored as IDs)
+  riskIds    String[]
+  controlIds String[]
+
+  // Relations
+  executions AuditExecution[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([year])
+  @@index([status])
+}
+
+model AuditExecution {
+  id          String               @id @default(cuid())
+  auditPlan   AuditPlan            @relation(fields: [auditPlanId], references: [id])
+  auditPlanId String
+  startDate   DateTime
+  endDate     DateTime?
+  auditor     String
+  status      AuditExecutionStatus @default(IN_PROGRESS)
+
+  // Test results stored as JSON
+  controlTests Json? // [{controlId, result, evidence, notes}]
+
+  // Relations
+  findings Finding[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([auditPlanId])
+  @@index([status])
+}
+
+model Finding {
+  id          String          @id @default(cuid())
+  findingId   String          @unique // F-2024-001
+  description String          @db.Text
+  impact      String          @db.Text
+  severity    FindingSeverity
+  isRecurrent Boolean         @default(false)
+  status      FindingStatus   @default(OPEN)
+
+  // Optional relations - Finding can be linked to risk, control, or neither (audit execution only)
+  risk      Risk?    @relation(fields: [riskId], references: [id])
+  riskId    String?
+  control   Control? @relation(fields: [controlId], references: [id])
+  controlId String?
+
+  // Optional audit execution link
+  auditExecution   AuditExecution? @relation(fields: [auditExecutionId], references: [id])
+  auditExecutionId String?
+
+  // New fields for extended detail
+  source              FindingSource   @default(INTERNAL_AUDIT)
+  affectedSystem      String?
+  recommendation      String?         @db.Text
+  managementResponse  String?         @db.Text
+  targetResolutionDate DateTime?
+  closedDate          DateTime?
+  relatedDepartment   String?
+  responsiblePerson   String?
+
+  // Actions
+  actions Action[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([riskId])
+  @@index([controlId])
+  @@index([status])
+  @@index([severity])
+}
+
+enum FindingSource {
+  INTERNAL_AUDIT
+  EXTERNAL_AUDIT
+  CONTROL_TEST
+  INCIDENT
+  SELF_ASSESSMENT
+  OTHER
+}
+
+enum PeriodType {
+  ANNUAL
+  SEMI_ANNUAL
+  QUARTERLY
+}
+
+enum AuditPlanStatus {
+  DRAFT
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum AuditExecutionStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum FindingSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum FindingStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+  VERIFIED
+}
+
+// ==========================================
+// ACTION MANAGEMENT
+// ==========================================
+
+model Action {
+  id          String       @id @default(cuid())
+  actionId    String       @unique // A-2024-001
+  description String       @db.Text
+  source      ActionSource
+  status      ActionStatus @default(OPEN)
+
+  // Owner
+  owner   User   @relation("ActionOwner", fields: [ownerId], references: [id])
+  ownerId String
+
+  // Source relations (at least one required by business logic)
+  risk      Risk?    @relation(fields: [riskId], references: [id])
+  riskId    String?
+  finding   Finding? @relation(fields: [findingId], references: [id])
+  findingId String?
+
+  // SLA and Dates
+  dueDate           DateTime
+  slaInDays         Int
+  extensionReason   String?  @db.Text // Mandatory if overdue
+  extensionApproved Boolean  @default(false)
+  completedAt       DateTime?
+
+  // Effectiveness Review
+  effectivenessReview EffectivenessReview?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+model EffectivenessReview {
+  id       String @id @default(cuid())
+  action   Action @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  actionId String @unique
+
+  riskScoreBefore      Int
+  riskScoreAfter       Int
+  controlEffectiveness EffectivenessStatus
+
+  isEffective Boolean
+  reviewedBy  String
+  reviewedAt  DateTime @default(now())
+
+  // Management Approval
+  managementApproval Boolean   @default(false)
+  approvedBy         String?
+  approvedAt         DateTime?
+
+  notes String? @db.Text
+}
+
+enum ActionSource {
+  RISK
+  FINDING
+  AUDIT
+  CONTROL_TEST
+}
+
+enum ActionStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CLOSED
+  OVERDUE
+}
+
+// ==========================================
+// COMPLIANCE & REGULATION
+// ==========================================
+
+model Regulation {
+  id          String  @id @default(cuid())
+  code        String  @unique // BDDK, DORA, ISO27001
+  name        String
+  description String? @db.Text
+  isActive    Boolean @default(true)
+
+  // Relations
+  articles RegulationArticle[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RegulationArticle {
+  id           String     @id @default(cuid())
+  regulation   Regulation @relation(fields: [regulationId], references: [id], onDelete: Cascade)
+  regulationId String
+  articleCode  String     // Article number/code
+  title        String
+  description  String     @db.Text
+
+  // Mappings
+  risks    RiskRegulation[]
+  controls ControlRegulation[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([regulationId, articleCode])
+  @@index([regulationId])
+}
+
+model RiskRegulation {
+  id        String            @id @default(cuid())
+  risk      Risk              @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  riskId    String
+  article   RegulationArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  articleId String
+
+  @@unique([riskId, articleId])
+  @@index([articleId])
+}
+
+model ControlRegulation {
+  id        String            @id @default(cuid())
+  control   Control           @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  controlId String
+  article   RegulationArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  articleId String
+
+  @@unique([controlId, articleId])
+  @@index([articleId])
+}
+
+// ==========================================
+// AUDIT LOG (System-wide logging)
+// ==========================================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  user       User?    @relation(fields: [userId], references: [id])
+  userId     String?
+  action     String   // CREATE, UPDATE, DELETE, LOGIN, LOGOUT, APPROVAL
+  entityType String   // Risk, Control, Finding, Action, etc.
+  entityId   String
+  oldValue   Json?
+  newValue   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+// ==========================================
+// PARAMETERS & CONFIGURATION
+// ==========================================
+
+model Parameter {
+  id          String   @id @default(cuid())
+  category    String   // RISK_SCORING, SLA, GENERAL
+  key         String   @unique
+  value       Json
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+}
+
+// ==========================================
+// SYSTEM OPTIONS (Dynamic Dropdowns)
+// ==========================================
+
+model SystemOption {
+  id        String   @id @default(cuid())
+  category  String   // CONTROL_FREQUENCY, CONTROL_TYPE, CONTROL_NATURE, etc.
+  value     String   // DAILY, WEEKLY, IT_GENERAL, etc.
+  label     String   // Günlük, Haftalık, IT Genel, etc.
+  labelEn   String?  // English label (optional)
+  color     String?  // Badge color (optional)
+  icon      String?  // Icon name (optional)
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  isDefault Boolean  @default(false) // Default selection
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([category, value])
+  @@index([category])
+  @@index([isActive])
+}
+
+// ==========================================
+// RISK ENTRY AND CALCULATION (Excel-like Grid)
+// ==========================================
+
+enum RiskEntryRecordType {
+  RISK
+  OPPORTUNITY
+  ISSUE
+}
+
+enum RiskEntryStatus {
+  AKTIF
+  PASIF
+  KAPATILDI
+  BEKLEMEDE
+}
+
+enum RiskEntryLevel {
+  KRITIK
+  YUKSEK
+  ORTA
+  DUSUK
+}
+
+enum ControlEffectivenessLevel {
+  ETKIN
+  KISMEN_ETKIN
+  ETKIN_DEGIL
+}
+
+enum RiskTreatmentOption {
+  KABUL_ET
+  AZALT
+  TRANSFER_ET
+  KACIN
+}
+
+model RiskEntry {
+  id                      String   @id @default(cuid())
+  
+  // Group 1: Kimlik (Identity)
+  riskId                  String   @unique // Auto: R-YYYY-NNNN
+  kayitId                 String   @unique // Unique record identifier
+  kayitTipi               RiskEntryRecordType @default(RISK)
+  riskStatus              RiskEntryStatus @default(AKTIF)
+  
+  // Group 2: Organizasyon (Organization)
+  riskSahibi              String?  // User reference (text for now, LDAP later)
+  surec                   String?  // Process name
+  altSurec                String?  // Sub-process name
+  riskTanimi              String   @db.Text // Risk definition (multi-line)
+  
+  // Group 3: IT Flag
+  flagForIT               Boolean  @default(false)
+  
+  // Group 4: Etki Boyutları (Impact Dimensions) - All 1-5 scale
+  finansalEtki            Int?     @default(1) // (%30)
+  itibarEtkisi            Int?     @default(1) // (%30)
+  regulasyonEtkisi        Int?     @default(1) // (%20)
+  musteriEtkisi           Int?     @default(1) // (%20)
+  gizlilikEtkisi          Int?     @default(1) // (%35) - CIA
+  butunlukEtkisi          Int?     @default(1) // (%30) - CIA
+  erisebilirlikEtkisi     Int?     @default(1) // (%35) - CIA
+  
+  // Group 5: Doğal Risk Skorlama (Inherent Risk Scoring)
+  etki                    Float?   // CALCULATED: Weighted average of impacts
+  olasilik                Int?     @default(1) // 1-5 scale, user input
+  dogalRiskPuani          Float?   // CALCULATED: Etki × Olasılık
+  dogalRiskSkoru          Int?     // CALCULATED: Normalized 0-100
+  dogalRiskSeviyesi       RiskEntryLevel? // CALCULATED: Threshold-based
+  
+  // Group 6: Kontrol Değerlendirmesi (Control Assessment)
+  butunlesikKontrolPuani  Float?   // User input or from controls
+  butunlesikKontrolSkoru  Int?     // CALCULATED
+  butunlesikKontrolSeviyesi ControlEffectivenessLevel? // CALCULATED
+  
+  // Group 7: Kalıntı Risk (Residual Risk)
+  kalintiRiskPuani        Float?   // CALCULATED
+  kalintiRiskSkoru        Int?     // CALCULATED
+  kalintiRiskSeviyesi     RiskEntryLevel? // CALCULATED
+  
+  // Group 8: İşleme & Tarihler (Treatment & Dates)
+  riskIsleme              RiskTreatmentOption?
+  mutabakatTarihi         DateTime?
+  olusturmaTarihi         DateTime @default(now()) // SYSTEM
+  guncellemeTarihi        DateTime @updatedAt      // SYSTEM
+  
+  // Group 9: Sorumluluk (Responsibility)
+  riskSorumlusu           String?  // User reference
+  atanan                  String?  // User reference
+  olusturan               String?  // SYSTEM: Current user
+  kaydiAcan               String?  // SYSTEM: Current user
+  
+  // Audit & Version
+  version                 Int      @default(1)
+  
+  // Relation to main Risk table (optional sync)
+  syncedRisk              Risk?    @relation(fields: [syncedRiskId], references: [id])
+  syncedRiskId            String?
+  
+  @@index([riskStatus])
+  @@index([dogalRiskSeviyesi])
+  @@index([kalintiRiskSeviyesi])
+  @@index([surec])
+  @@index([olusturmaTarihi])
+}
+
