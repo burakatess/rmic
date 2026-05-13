@@ -46,6 +46,8 @@ export default function UsersPage() {
         department: '',
         roleId: '',
     });
+    const [resettingPasswordUser, setResettingPasswordUser] = useState<User | null>(null);
+    const [newPassword, setNewPassword] = useState('');
 
     useEffect(() => {
         loadData();
@@ -134,6 +136,24 @@ export default function UsersPage() {
         } catch (error) {
             console.error('Failed to delete user:', error);
             alert('Kullanıcı silinemedi. İlişkili kayıtlar olabilir.');
+        }
+    };
+
+    const handlePasswordReset = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!resettingPasswordUser || !newPassword) return;
+
+        try {
+            await api.request(`/admin/users/${resettingPasswordUser.id}/reset-password`, {
+                method: 'POST',
+                body: { newPassword }
+            });
+            setResettingPasswordUser(null);
+            setNewPassword('');
+            alert('Şifre başarıyla güncellendi');
+        } catch (error) {
+            console.error('Failed to reset password:', error);
+            alert('Şifre sıfırlanırken bir hata oluştu');
         }
     };
 
@@ -243,6 +263,19 @@ export default function UsersPage() {
                                         </td>
                                         <td className="px-6 py-4">
                                             <div className="flex items-center justify-end gap-1">
+                                                {/* Reset Password Button */}
+                                                <button
+                                                    onClick={() => {
+                                                        setResettingPasswordUser(user);
+                                                        setNewPassword('');
+                                                    }}
+                                                    className="p-2 text-slate-500 hover:bg-slate-50 rounded-lg transition-colors"
+                                                    title="Şifre Sıfırla"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                                                    </svg>
+                                                </button>
                                                 {/* Edit Button */}
                                                 <button
                                                     onClick={() => handleEditClick(user)}
@@ -446,6 +479,50 @@ export default function UsersPage() {
                                     className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
                                 >
                                     Güncelle
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Reset Password Modal */}
+            {resettingPasswordUser && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-2xl">
+                        <h2 className="text-xl font-semibold text-gray-900 mb-4">Şifre Sıfırla</h2>
+                        <p className="text-sm text-gray-500 mb-4">
+                            <span className="font-medium text-gray-900">{resettingPasswordUser.firstName} {resettingPasswordUser.lastName}</span> ({resettingPasswordUser.email}) için yeni şifre belirleyin.
+                        </p>
+                        <form onSubmit={handlePasswordReset} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Yeni Şifre</label>
+                                <input
+                                    type="password"
+                                    required
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    placeholder="Yeni şifreyi girin"
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="flex justify-end gap-3 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setResettingPasswordUser(null);
+                                        setNewPassword('');
+                                    }}
+                                    className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                                >
+                                    İptal
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800"
+                                >
+                                    Şifreyi Güncelle
                                 </button>
                             </div>
                         </form>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 
 interface User {
@@ -11,6 +12,7 @@ interface User {
     lastName: string;
     role: { name: string };
 }
+
 
 interface SearchResult {
     id: string;
@@ -42,6 +44,7 @@ const TYPE_CONFIG: Record<string, { label: string; color: string; bg: string }> 
 };
 
 export default function Header() {
+    const router = useRouter();
     const [user, setUser] = useState<User | null>(null);
     const [showDropdown, setShowDropdown] = useState(false);
     const [showNotifications, setShowNotifications] = useState(false);
@@ -116,6 +119,37 @@ export default function Header() {
             <div className="flex h-full items-center justify-between px-6">
                 {/* Organization */}
                 <div className="flex items-center gap-4">
+                    {/* Navigation Buttons */}
+                    <div className="flex items-center gap-0.5 border-r border-gray-200 pr-3 mr-1">
+                        <button
+                            onClick={() => router.push('/')}
+                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Ana Sayfa"
+                        >
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                            </svg>
+                        </button>
+                        <button
+                            onClick={() => router.back()}
+                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                            title="Geri"
+                        >
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                            </svg>
+                        </button>
+                        <button
+                            onClick={() => router.forward()}
+                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                            title="İleri"
+                        >
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                        </button>
+                    </div>
+
                     <h1 className="text-lg font-semibold text-gray-800">
                         Burak GRC
                     </h1>

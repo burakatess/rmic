@@ -116,6 +116,79 @@ export class ReportsService {
         return trend;
     }
 
+    async getRiskHeatmapData() {
+        const risks = await this.prisma.risk.findMany({
+            select: {
+                id: true,
+                riskId: true,
+                name: true,
+                inherentProbability: true,
+                inherentImpact: true,
+                residualProbability: true,
+                residualImpact: true,
+            }
+        });
+
+        // 5x5 matrix - rows: probability (5 to 1), cols: impact (1 to 5)
+        const matrix: Array<Array<{ count: number; risks: Array<{ id: string; riskId: string; name: string }> }>> =
+            Array(5).fill(null).map(() =>
+                Array(5).fill(null).map(() => ({ count: 0, risks: [] }))
+            );
+
+        risks.forEach(risk => {
+            const prob = (risk.residualProbability || risk.inherentProbability) - 1;
+            const impact = (risk.residualImpact || risk.inherentImpact) - 1;
+            if (prob >= 0 && prob < 5 && impact >= 0 && impact < 5) {
+                matrix[4 - prob][impact].count++;
+                matrix[4 - prob][impact].risks.push({
+                    id: risk.id,
+                    riskId: risk.riskId,
+                    name: risk.name
+                });
+            }
+        });
+
+        return matrix;
+    }
+
+    async getRiskTrendEnhanced() {
+        const now = new Date();
+        const trend = [];
+
+        for (let i = 11; i >= 0; i--) {
+            const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const endDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+
+            const risks = await this.prisma.risk.findMany({
+                where: { createdAt: { lte: endDate } },
+                select: { inherentRiskScore: true, residualRiskScore: true }
+            });
+
+            let high = 0, medium = 0, low = 0;
+            let totalScore = 0;
+
+            risks.forEach(r => {
+                const score = r.residualRiskScore || r.inherentRiskScore;
+                totalScore += score;
+                if (score >= 15) high++;
+                else if (score >= 8) medium++;
+                else low++;
+            });
+
+            trend.push({
+                month: date.toLocaleString('tr-TR', { month: 'short' }),
+                year: date.getFullYear(),
+                total: risks.length,
+                high,
+                medium,
+                low,
+                avgScore: risks.length > 0 ? Math.round(totalScore / risks.length * 10) / 10 : 0,
+            });
+        }
+
+        return trend;
+    }
+
     async getRiskTrends(months: number = 12) {
         return this.getRiskTrend();
     }

@@ -81,6 +81,7 @@ export class ControlsService {
     }
 
     async update(id: string, data: any, userId: string) {
+        console.log('Updating control:', id, data);
         const existing = await this.findOne(id);
         const control = await this.prisma.control.update({
             where: { id },

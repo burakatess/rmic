@@ -18,6 +18,9 @@ interface Action {
     risk?: { id: string; riskId: string; name: string };
     finding?: { id: string; findingId: string; title: string };
     updates: { date: string; note: string; user: string }[];
+    attachments: { id: string; name: string; size: string; uploadedBy: string; uploadDate: string }[];
+    extensionRequests: { id: string; requestDate: string; requestedDate: string; reason: string; status: 'PENDING' | 'APPROVED' | 'REJECTED' }[];
+    closureNote?: string;
 }
 
 const DEMO_ACTION: Action = {
@@ -37,6 +40,14 @@ const DEMO_ACTION: Action = {
         { date: '2024-12-15', note: 'Çalışma başlatıldı, envanter çıkarma işlemi devam ediyor.', user: 'Ahmet Yılmaz' },
         { date: '2024-12-05', note: 'Aksiyon oluşturuldu.', user: 'Sistem' },
     ],
+    attachments: [
+        { id: '1', name: 'guvenlik_duvari_envanteri_v1.xlsx', size: '2.4 MB', uploadedBy: 'Ahmet Yılmaz', uploadDate: '2024-12-20' },
+        { id: '2', name: 'onay_mail_kaniti.pdf', size: '156 KB', uploadedBy: 'Ahmet Yılmaz', uploadDate: '2024-12-22' },
+    ],
+    extensionRequests: [
+        { id: '1', requestDate: '2025-01-10', requestedDate: '2025-02-01', reason: 'Tedarikçi kaynaklı gecikme', status: 'PENDING' },
+    ],
+    closureNote: 'Tüm aksiyon maddeleri tamamlanmış ve kanıtlar eklenmiştir.',
 };
 
 const priorityConfig: Record<string, { label: string; color: string }> = {
@@ -67,6 +78,7 @@ export default function ActionDetailPage() {
     const [activeTab, setActiveTab] = useState<'summary' | 'updates' | 'history'>('summary');
     const [newUpdate, setNewUpdate] = useState('');
     const action = DEMO_ACTION;
+    const [closureNote, setClosureNote] = useState(action.closureNote || '');
 
     const daysRemaining = Math.ceil((new Date(action.dueDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
 
@@ -175,17 +187,101 @@ export default function ActionDetailPage() {
 
                     <div className="p-6">
                         {activeTab === 'summary' && (
-                            <div className="grid grid-cols-2 gap-8">
-                                <div>
-                                    <h3 className="font-semibold text-gray-900 mb-3">Aksiyon Detayı</h3>
-                                    <p className="text-gray-600 text-sm leading-relaxed">{action.description}</p>
+                            <div className="space-y-8">
+                                <div className="grid grid-cols-2 gap-8">
+                                    <div>
+                                        <h3 className="font-semibold text-gray-900 mb-3">Aksiyon Detayı</h3>
+                                        <p className="text-gray-600 text-sm leading-relaxed">{action.description}</p>
+                                    </div>
+                                    <div>
+                                        <h3 className="font-semibold text-gray-900 mb-3">Aksiyon Sahibi</h3>
+                                        <div className="bg-gray-50 rounded-xl p-4">
+                                            <p className="font-medium text-gray-900">{action.owner.name}</p>
+                                            <p className="text-sm text-gray-500">{action.owner.department}</p>
+                                            <p className="text-sm text-orange-600">{action.owner.email}</p>
+                                        </div>
+                                    </div>
                                 </div>
+
+                                <div className="grid grid-cols-2 gap-8">
+                                    {/* Extension Requests */}
+                                    <div>
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h3 className="font-semibold text-gray-900">Erteleme Talepleri</h3>
+                                            <button className="text-sm text-orange-600 font-medium hover:text-orange-700">Talep Oluştur</button>
+                                        </div>
+                                        {action.extensionRequests.length > 0 ? (
+                                            <div className="bg-white border border-gray-100 rounded-xl divide-y divide-gray-100">
+                                                {action.extensionRequests.map(req => (
+                                                    <div key={req.id} className="p-4">
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${req.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700' : req.status === 'APPROVED' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                                {req.status === 'PENDING' ? 'Bekliyor' : req.status === 'APPROVED' ? 'Onaylandı' : 'Reddedildi'}
+                                                            </span>
+                                                            <span className="text-xs text-gray-500">{new Date(req.requestDate).toLocaleDateString('tr-TR')}</span>
+                                                        </div>
+                                                        <p className="text-sm text-gray-900 mt-2">{req.reason}</p>
+                                                        <p className="text-xs text-gray-500 mt-1">Talep Edilen: <span className="font-medium text-gray-700">{new Date(req.requestedDate).toLocaleDateString('tr-TR')}</span></p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="bg-gray-50 rounded-xl p-6 text-center text-sm text-gray-500">
+                                                Henüz erteleme talebi bulunmuyor.
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Attachments */}
+                                    <div>
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h3 className="font-semibold text-gray-900">Ekler</h3>
+                                            <button className="text-sm text-orange-600 font-medium hover:text-orange-700">Dosya Yükle</button>
+                                        </div>
+                                        {action.attachments.length > 0 ? (
+                                            <div className="bg-white border border-gray-100 rounded-xl divide-y divide-gray-100">
+                                                {action.attachments.map(file => (
+                                                    <div key={file.id} className="p-3 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center text-lg">
+                                                                📄
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-sm font-medium text-gray-900">{file.name}</p>
+                                                                <p className="text-xs text-gray-500">{file.size} • {file.uploadedBy} • {file.uploadDate}</p>
+                                                            </div>
+                                                        </div>
+                                                        <button className="text-gray-400 hover:text-gray-600">
+                                                            ⬇️
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="bg-gray-50 rounded-xl p-6 text-center text-sm text-gray-500 border-2 border-dashed border-gray-200">
+                                                Dosyaları buraya sürükleyin veya yüklemek için tıklayın
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Closure Note */}
                                 <div>
-                                    <h3 className="font-semibold text-gray-900 mb-3">Aksiyon Sahibi</h3>
-                                    <div className="bg-gray-50 rounded-xl p-4">
-                                        <p className="font-medium text-gray-900">{action.owner.name}</p>
-                                        <p className="text-sm text-gray-500">{action.owner.department}</p>
-                                        <p className="text-sm text-orange-600">{action.owner.email}</p>
+                                    <h3 className="font-semibold text-gray-900 mb-3">Kapama Notu ve Sonuç</h3>
+                                    <div className="bg-white border border-gray-200 rounded-xl p-4">
+                                        <textarea
+                                            placeholder="Aksiyon kapatılırken girilecek notlar..."
+                                            value={closureNote}
+                                            onChange={(e) => setClosureNote(e.target.value)}
+                                            readOnly={action.status === 'CLOSED'}
+                                            className="w-full text-sm text-gray-900 placeholder-gray-400 focus:outline-none resize-none"
+                                            rows={3}
+                                        />
+                                        {action.status !== 'CLOSED' && (
+                                            <div className="flex justify-end mt-2 pt-2 border-t border-gray-100">
+                                                <button className="text-xs font-medium text-orange-600 hover:text-orange-700">Notu Kaydet</button>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>

@@ -10,7 +10,7 @@ interface RiskEntry {
     riskId: string;
     kayitId: string;
     kayitTipi: 'RISK' | 'OPPORTUNITY' | 'ISSUE';
-    riskStatus: 'AKTIF' | 'PASIF' | 'KAPATILDI' | 'BEKLEMEDE';
+    riskStatus: 'AKTIF' | 'PASIF' | 'KAPATILDI' | 'BEKLEMEDE' | 'ONAYLI' | 'TASLAK';
     riskSahibi?: string;
     surec?: string;
     altSurec?: string;
@@ -58,13 +58,35 @@ const COLUMN_GROUPS = [
     { id: 'sorumluluk', label: 'Sorumluluk', color: 'bg-emerald-50', columns: ['riskSorumlusu', 'atanan', 'olusturan', 'kaydiAcan'] },
 ];
 
+const RISK_DEPARTMENTS = [
+    'Bilgi Güvenliği Direktörlüğü',
+    'Bilgi Yönetimi Uygulama Geliştirme Direktörlüğü',
+    'Borçlanma Araçları Piyasası Direktörlüğü',
+    'Çevresel Sistemler Geliştirme Direktörlüğü',
+    'Destek Hizmetleri Direktörlüğü',
+    'Endeks Direktörlüğü',
+    'Güvenlik ve İdari İşler Direktörlüğü',
+    'Hukuk Müşavirliği ve Uyum Direktörlüğü',
+    'İşlem Sistemleri Geliştirme Direktörlüğü',
+    'Kıymetli Madenler ve Kıymetli Taşlar Piyasası Direktörlüğü',
+    'Kotasyon Direktörlüğü',
+    'Kurumsal Çözümler Direktörlüğü',
+    'Pay Piyasası Direktörlüğü',
+    'Proje Yönetimi ve Planlama Direktörlüğü',
+    'Sistem Operasyon Direktörlüğü',
+    'Sistem Yönetimi Direktörlüğü',
+    'Türev Piyasalar Direktörlüğü',
+    'Uluslararası İlişkiler Direktörlüğü',
+    'Veri Teknoloji ve Üye Hizmetleri Direktörlüğü',
+];
+
 // Column definitions
 const COLUMNS: { key: keyof RiskEntry; label: string; width: number; type: 'text' | 'number' | 'enum' | 'boolean' | 'date' | 'calculated'; editable: boolean; options?: string[] }[] = [
     { key: 'riskId', label: 'Risk ID', width: 120, type: 'text', editable: false },
     { key: 'kayitId', label: 'Kayıt ID', width: 120, type: 'text', editable: true },
     { key: 'kayitTipi', label: 'Kayıt Tipi', width: 100, type: 'enum', editable: true, options: ['RISK', 'OPPORTUNITY', 'ISSUE'] },
-    { key: 'riskStatus', label: 'Risk Statü', width: 100, type: 'enum', editable: true, options: ['AKTIF', 'PASIF', 'KAPATILDI', 'BEKLEMEDE'] },
-    { key: 'riskSahibi', label: 'Risk Sahibi', width: 130, type: 'text', editable: true },
+    { key: 'riskStatus', label: 'Risk Statü', width: 100, type: 'enum', editable: true, options: ['ONAYLI', 'TASLAK'] },
+    { key: 'riskSahibi', label: 'Risk Sahibi', width: 250, type: 'enum', editable: true, options: RISK_DEPARTMENTS },
     { key: 'surec', label: 'Süreç', width: 150, type: 'text', editable: true },
     { key: 'altSurec', label: 'Alt Süreç', width: 150, type: 'text', editable: true },
     { key: 'riskTanimi', label: 'Risk Tanımı', width: 250, type: 'text', editable: true },

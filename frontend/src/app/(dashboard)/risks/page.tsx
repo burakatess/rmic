@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
+import { useResizableColumns } from '@/hooks/useResizableColumns';
 
 // Types
 interface Risk {
@@ -104,10 +105,36 @@ export default function RiskInventoryPage() {
     // Bulk selection state
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
 
+    // Sorting state
+    const [sortColumn, setSortColumn] = useState<string>('riskId');
+    const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
     // New risk form state
     const [newRisk, setNewRisk] = useState({
         name: '', category: 'BT Riski', ownerName: '', ownerDept: '',
         inherentScore: 12, residualScore: 6, riskLevel: 'MEDIUM' as const, status: 'IDENTIFIED' as const
+    });
+
+    // Resizable columns
+    const { getHeaderStyle, getResizeHandleProps, resizingCol } = useResizableColumns({
+        storageKey: 'risk-inventory',
+        defaultWidths: {
+            riskId: 90,
+            name: 200,
+            category: 110,
+            owner: 120,
+            inherent: 70,
+            residual: 70,
+            level: 80,
+            appetite: 60,
+            status: 110,
+            controls: 130,
+            findings: 110,
+            lastReview: 100,
+            actions: 80,
+        },
+        minWidth: 50,
+        maxWidth: 400,
     });
 
     // Fetch risks from API
@@ -177,14 +204,81 @@ export default function RiskInventoryPage() {
         fetchRisks();
     }, []);
 
-    // Filter
+    // Filter and sort
     const filteredRisks = risks.filter(r => {
         if (search && !r.name.toLowerCase().includes(search.toLowerCase()) && !r.riskId.toLowerCase().includes(search.toLowerCase())) return false;
         if (categoryFilter && r.category !== categoryFilter) return false;
         if (levelFilter && r.riskLevel !== levelFilter) return false;
         if (statusFilter && r.status !== statusFilter) return false;
         return true;
+    }).sort((a, b) => {
+        let aVal: string | number = '';
+        let bVal: string | number = '';
+
+        switch (sortColumn) {
+            case 'riskId':
+                aVal = a.riskId;
+                bVal = b.riskId;
+                break;
+            case 'name':
+                aVal = a.name.toLowerCase();
+                bVal = b.name.toLowerCase();
+                break;
+            case 'category':
+                aVal = a.category;
+                bVal = b.category;
+                break;
+            case 'owner':
+                aVal = a.owner.name.toLowerCase();
+                bVal = b.owner.name.toLowerCase();
+                break;
+            case 'inherent':
+                aVal = a.inherentScore;
+                bVal = b.inherentScore;
+                break;
+            case 'residual':
+                aVal = a.residualScore;
+                bVal = b.residualScore;
+                break;
+            case 'level':
+                const levelOrder = { 'LOW': 1, 'MEDIUM': 2, 'HIGH': 3, 'CRITICAL': 4 };
+                aVal = levelOrder[a.riskLevel] || 0;
+                bVal = levelOrder[b.riskLevel] || 0;
+                break;
+            case 'status':
+                aVal = a.status;
+                bVal = b.status;
+                break;
+            default:
+                aVal = a.riskId;
+                bVal = b.riskId;
+        }
+
+        if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
     });
+
+    // Handle column sort
+    const handleSort = (column: string) => {
+        if (sortColumn === column) {
+            setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortColumn(column);
+            setSortDirection('asc');
+        }
+    };
+
+    // Sort indicator component
+    const SortIndicator = ({ column }: { column: string }) => (
+        <span className="ml-1 inline-flex">
+            {sortColumn === column ? (
+                sortDirection === 'asc' ? '↑' : '↓'
+            ) : (
+                <span className="text-gray-300">↕</span>
+            )}
+        </span>
+    );
 
     // KPIs
     const totalRisks = risks.length;
@@ -505,7 +599,7 @@ export default function RiskInventoryPage() {
                         <table className="w-full text-sm">
                             <thead className="bg-gray-50 border-b border-gray-200">
                                 <tr>
-                                    <th className="px-3 py-3 text-center w-10">
+                                    <th className="px-3 py-3 text-center w-10 bg-gray-50">
                                         <input
                                             type="checkbox"
                                             checked={filteredRisks.length > 0 && selectedItems.size === filteredRisks.length}
@@ -513,19 +607,57 @@ export default function RiskInventoryPage() {
                                             className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                                         />
                                     </th>
-                                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Risk ID</th>
-                                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase min-w-[200px]">Risk Adı</th>
-                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Kategori</th>
-                                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Risk Sahibi</th>
-                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Doğal</th>
-                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Rezidüel</th>
-                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Seviye</th>
-                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase">İştah</th>
-                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Durum</th>
-                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase">İlişkili Kontrol</th>
-                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase">İlişkili Bulgu</th>
-                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Son İnceleme</th>
-                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase">İşlemler</th>
+                                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase relative select-none bg-gray-50 cursor-pointer hover:bg-gray-100" style={getHeaderStyle('riskId')} onClick={() => handleSort('riskId')}>
+                                        <span className="truncate">Risk ID</span><SortIndicator column="riskId" />
+                                        <div {...getResizeHandleProps('riskId')}><div className={`absolute right-0.5 top-1/3 bottom-1/3 w-0.5 ${resizingCol === 'riskId' ? 'bg-blue-600' : 'bg-gray-300'}`} /></div>
+                                    </th>
+                                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase relative select-none bg-gray-50 cursor-pointer hover:bg-gray-100" style={getHeaderStyle('name')} onClick={() => handleSort('name')}>
+                                        <span className="truncate">Risk Adı</span><SortIndicator column="name" />
+                                        <div {...getResizeHandleProps('name')}><div className={`absolute right-0.5 top-1/3 bottom-1/3 w-0.5 ${resizingCol === 'name' ? 'bg-blue-600' : 'bg-gray-300'}`} /></div>
+                                    </th>
+                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase relative select-none bg-gray-50 cursor-pointer hover:bg-gray-100" style={getHeaderStyle('category')} onClick={() => handleSort('category')}>
+                                        <span className="truncate">Kategori</span><SortIndicator column="category" />
+                                        <div {...getResizeHandleProps('category')}><div className={`absolute right-0.5 top-1/3 bottom-1/3 w-0.5 ${resizingCol === 'category' ? 'bg-blue-600' : 'bg-gray-300'}`} /></div>
+                                    </th>
+                                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase relative select-none bg-gray-50 cursor-pointer hover:bg-gray-100" style={getHeaderStyle('owner')} onClick={() => handleSort('owner')}>
+                                        <span className="truncate">Risk Sahibi</span><SortIndicator column="owner" />
+                                        <div {...getResizeHandleProps('owner')}><div className={`absolute right-0.5 top-1/3 bottom-1/3 w-0.5 ${resizingCol === 'owner' ? 'bg-blue-600' : 'bg-gray-300'}`} /></div>
+                                    </th>
+                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase relative select-none bg-gray-50 cursor-pointer hover:bg-gray-100" style={getHeaderStyle('inherent')} onClick={() => handleSort('inherent')}>
+                                        <span className="truncate">Doğal</span><SortIndicator column="inherent" />
+                                        <div {...getResizeHandleProps('inherent')}><div className={`absolute right-0.5 top-1/3 bottom-1/3 w-0.5 ${resizingCol === 'inherent' ? 'bg-blue-600' : 'bg-gray-300'}`} /></div>
+                                    </th>
+                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase relative select-none bg-gray-50 cursor-pointer hover:bg-gray-100" style={getHeaderStyle('residual')} onClick={() => handleSort('residual')}>
+                                        <span className="truncate">Rezidüel</span><SortIndicator column="residual" />
+                                        <div {...getResizeHandleProps('residual')}><div className={`absolute right-0.5 top-1/3 bottom-1/3 w-0.5 ${resizingCol === 'residual' ? 'bg-blue-600' : 'bg-gray-300'}`} /></div>
+                                    </th>
+                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase relative select-none bg-gray-50 cursor-pointer hover:bg-gray-100" style={getHeaderStyle('level')} onClick={() => handleSort('level')}>
+                                        <span className="truncate">Seviye</span><SortIndicator column="level" />
+                                        <div {...getResizeHandleProps('level')}><div className={`absolute right-0.5 top-1/3 bottom-1/3 w-0.5 ${resizingCol === 'level' ? 'bg-blue-600' : 'bg-gray-300'}`} /></div>
+                                    </th>
+                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase relative select-none bg-gray-50" style={getHeaderStyle('appetite')}>
+                                        <span className="truncate">İştah</span>
+                                        <div {...getResizeHandleProps('appetite')}><div className={`absolute right-0.5 top-1/3 bottom-1/3 w-0.5 ${resizingCol === 'appetite' ? 'bg-blue-600' : 'bg-gray-300'}`} /></div>
+                                    </th>
+                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase relative select-none bg-gray-50 cursor-pointer hover:bg-gray-100" style={getHeaderStyle('status')} onClick={() => handleSort('status')}>
+                                        <span className="truncate">Durum</span><SortIndicator column="status" />
+                                        <div {...getResizeHandleProps('status')}><div className={`absolute right-0.5 top-1/3 bottom-1/3 w-0.5 ${resizingCol === 'status' ? 'bg-blue-600' : 'bg-gray-300'}`} /></div>
+                                    </th>
+                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase relative select-none bg-gray-50" style={getHeaderStyle('controls')}>
+                                        <span className="truncate">İlişkili Kontrol</span>
+                                        <div {...getResizeHandleProps('controls')}><div className={`absolute right-0.5 top-1/3 bottom-1/3 w-0.5 ${resizingCol === 'controls' ? 'bg-blue-600' : 'bg-gray-300'}`} /></div>
+                                    </th>
+                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase relative select-none bg-gray-50" style={getHeaderStyle('findings')}>
+                                        <span className="truncate">İlişkili Bulgu</span>
+                                        <div {...getResizeHandleProps('findings')}><div className={`absolute right-0.5 top-1/3 bottom-1/3 w-0.5 ${resizingCol === 'findings' ? 'bg-blue-600' : 'bg-gray-300'}`} /></div>
+                                    </th>
+                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase relative select-none bg-gray-50" style={getHeaderStyle('lastReview')}>
+                                        <span className="truncate">Son İnceleme</span>
+                                        <div {...getResizeHandleProps('lastReview')}><div className={`absolute right-0.5 top-1/3 bottom-1/3 w-0.5 ${resizingCol === 'lastReview' ? 'bg-blue-600' : 'bg-gray-300'}`} /></div>
+                                    </th>
+                                    <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase bg-gray-50" style={getHeaderStyle('actions')}>
+                                        <span className="truncate">İşlemler</span>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">

@@ -230,6 +230,7 @@ model Control {
   nature      ControlNature
   automation  ControlAutomation
   frequency   ControlFrequency
+  controlPeriod String?         // For QUARTERLY, SEMI_ANNUAL, ANNUAL
   controlDate DateTime?         // For AD_HOC controls
 
   // Owner
@@ -313,6 +314,7 @@ enum ControlFrequency {
   WEEKLY
   MONTHLY
   QUARTERLY
+  SEMI_ANNUAL
   ANNUAL
   AD_HOC
 }
@@ -673,6 +675,8 @@ enum RiskEntryStatus {
   PASIF
   KAPATILDI
   BEKLEMEDE
+  ONAYLI
+  TASLAK
 }
 
 enum RiskEntryLevel {

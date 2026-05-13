@@ -18,7 +18,7 @@ interface Control {
     lastTestDate: string;
     lastTestResult: string;
     effectivenessStatus: string;
-    linkedRisks: number;
+    linkedRisks: { id: string; riskId: string }[];
     linkedHighRisks: number;
     openActions: number;
     hasEvidence: boolean;
@@ -108,7 +108,8 @@ export default function ControlInventoryPage() {
                     lastTestDate: c.lastTestDate ? new Date(c.lastTestDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
                     lastTestResult: String(c.lastTestResult || 'NOT_TESTED'),
                     effectivenessStatus: String(c.effectivenessStatus || 'NOT_TESTED'),
-                    linkedRisks: c.riskMappings?.length || 0,
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    linkedRisks: (c.risks || c.riskMappings || []).map((r: any) => ({ id: r.risk?.id, riskId: r.risk?.riskId })).filter((r: any) => r.id && r.riskId),
                     linkedHighRisks: 0,
                     openActions: 0,
                     hasEvidence: false,
@@ -555,9 +556,31 @@ export default function ControlInventoryPage() {
                                                 </span>
                                             </td>
                                             <td className="px-3 py-2.5 text-center">
-                                                <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium ${control.linkedHighRisks > 0 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
-                                                    {control.linkedRisks}
-                                                </span>
+                                                {control.linkedRisks.length > 0 ? (
+                                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                                        <div className="flex flex-wrap justify-center gap-1">
+                                                            {control.linkedRisks.slice(0, 2).map((risk, idx) => (
+                                                                <Link
+                                                                    key={risk.id}
+                                                                    href={`/risks/${risk.id}`}
+                                                                    className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                                                                >
+                                                                    {risk.riskId}{idx < Math.min(control.linkedRisks.length, 2) - 1 ? ',' : ''}
+                                                                </Link>
+                                                            ))}
+                                                        </div>
+                                                        {control.linkedRisks.length > 2 && (
+                                                            <span
+                                                                className="text-[10px] text-gray-500 cursor-help"
+                                                                title={control.linkedRisks.slice(2).map(r => r.riskId).join(', ')}
+                                                            >
+                                                                (+{control.linkedRisks.length - 2} daha)
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-gray-300">—</span>
+                                                )}
                                             </td>
                                             <td className="px-3 py-2.5 text-center">
                                                 {control.openActions > 0 ? (

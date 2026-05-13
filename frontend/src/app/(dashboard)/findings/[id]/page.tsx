@@ -360,24 +360,29 @@ export default function FindingDetailPage() {
                                 </div>
                                 <div className="space-y-3">
                                     {actions.map(action => (
-                                        <div key={action.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
-                                            <div className="flex items-center gap-4">
-                                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${action.status === 'COMPLETED' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
-                                                    {action.status === 'COMPLETED' ? '✓' : '📌'}
+                                        <Link key={action.id} href={`/actions/${action.id}`} className="block">
+                                            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer">
+                                                <div className="flex items-center gap-4">
+                                                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${action.status === 'COMPLETED' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
+                                                        {action.status === 'COMPLETED' ? '✓' : '📌'}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-mono text-sm text-orange-600 group-hover:underline">{action.actionId}</p>
+                                                        <p className="text-gray-900">{action.description}</p>
+                                                        <p className="text-xs text-gray-500">Sorumlu: {action.owner}</p>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <p className="font-mono text-sm text-orange-600">{action.actionId}</p>
-                                                    <p className="text-gray-900">{action.description}</p>
-                                                    <p className="text-xs text-gray-500">Sorumlu: {action.owner}</p>
+                                                <div className="flex items-center gap-4 text-sm">
+                                                    <span className={`px-2 py-1 rounded text-xs font-medium ${actionStatusConfig[action.status]?.color}`}>
+                                                        {actionStatusConfig[action.status]?.label}
+                                                    </span>
+                                                    <span className="text-gray-500">{new Date(action.dueDate).toLocaleDateString('tr-TR')}</span>
+                                                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                    </svg>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-4 text-sm">
-                                                <span className={`px-2 py-1 rounded text-xs font-medium ${actionStatusConfig[action.status]?.color}`}>
-                                                    {actionStatusConfig[action.status]?.label}
-                                                </span>
-                                                <span className="text-gray-500">{new Date(action.dueDate).toLocaleDateString('tr-TR')}</span>
-                                            </div>
-                                        </div>
+                                        </Link>
                                     ))}
                                 </div>
                             </div>

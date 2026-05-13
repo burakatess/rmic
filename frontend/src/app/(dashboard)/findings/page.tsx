@@ -65,7 +65,7 @@ const formatDate = (dateString: string): string => {
 // Column definitions
 const allColumns = [
     { id: 'checkbox', label: '', width: 40, fixed: true },
-    { id: 'findingId', label: 'Bulgu ID', width: 110 },
+    { id: 'findingId', label: 'Bulgu ID', width: 140 },
     { id: 'findingType', label: 'Bulgu Tipi', width: 130 },
     { id: 'description', label: 'Açıklama', width: 250 },
     { id: 'affectedSystem', label: 'Etkilenen Sistem', width: 140 },
@@ -438,14 +438,6 @@ export default function FindingsPage() {
                             <table className="w-full">
                                 <thead className="bg-gray-50 sticky top-0 z-10">
                                     <tr>
-                                        <th className="px-3 py-3 text-center w-10 border-b border-gray-100">
-                                            <input
-                                                type="checkbox"
-                                                checked={filteredFindings.length > 0 && selectedIds.length === filteredFindings.length}
-                                                onChange={toggleSelectAll}
-                                                className="w-4 h-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500"
-                                            />
-                                        </th>
                                         {allColumns.filter(c => visibleColumns.includes(c.id)).map(col => (
                                             <th
                                                 key={col.id}
@@ -497,7 +489,7 @@ export default function FindingsPage() {
                                                 )}
                                                 {visibleColumns.includes('findingId') && (
                                                     <td className="px-4 py-3" style={{ width: columnWidths['findingId'] }}>
-                                                        <Link href={`/findings/${finding.id}`} className="font-mono text-sm text-purple-600 hover:underline">
+                                                        <Link href={`/findings/${finding.id}`} className="font-mono text-sm text-purple-600 hover:underline whitespace-nowrap">
                                                             {finding.findingId}
                                                         </Link>
                                                     </td>

@@ -31,6 +31,25 @@ const navigation: NavItem[] = [
         ),
     },
     {
+        label: 'İlişki Keşfi',
+        href: '/dashboard/relations',
+        icon: (
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
+                <defs>
+                    <linearGradient id="grad_rel" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#60a5fa" />
+                        <stop offset="100%" stopColor="#a78bfa" />
+                    </linearGradient>
+                </defs>
+                <circle cx="18" cy="5" r="3" stroke="url(#grad_rel)" strokeWidth="1.5" />
+                <circle cx="6" cy="12" r="3" stroke="url(#grad_rel)" strokeWidth="1.5" />
+                <circle cx="18" cy="19" r="3" stroke="url(#grad_rel)" strokeWidth="1.5" />
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" stroke="url(#grad_rel)" strokeWidth="1.5" />
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" stroke="url(#grad_rel)" strokeWidth="1.5" />
+            </svg>
+        ),
+    },
+    {
         label: 'Risk Yönetimi',
         icon: (
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">

@@ -104,30 +104,30 @@ export default function CompliancePage() {
                                 <div key={item.id} className="bg-white/10 backdrop-blur rounded-2xl p-5">
                                     <div className="flex items-center justify-between mb-3">
                                         <span className="font-mono text-sm text-indigo-200">{item.code}</span>
-                                        <span className={`px-2 py-1 rounded-lg text-xs font-medium ${getComplianceColor(item.overallCompliance)}`}>
-                                            %{item.overallCompliance.toFixed(0)}
+                                        <span className={`px-2 py-1 rounded-lg text-xs font-medium ${getComplianceColor(item.overallCompliance || 0)}`}>
+                                            %{item.overallCompliance?.toFixed(0) || '0'}
                                         </span>
                                     </div>
                                     <h3 className="font-semibold text-white mb-4 text-sm">{item.name}</h3>
                                     <div className="space-y-2">
                                         <div className="flex justify-between text-sm">
                                             <span className="text-indigo-200">Risk Kapsamı</span>
-                                            <span>%{item.riskCoverage.toFixed(0)}</span>
+                                            <span>%{item.riskCoverage?.toFixed(0) || '0'}</span>
                                         </div>
                                         <div className="w-full bg-white/20 rounded-full h-1.5">
                                             <div
                                                 className="bg-white h-1.5 rounded-full transition-all"
-                                                style={{ width: `${Math.min(item.riskCoverage, 100)}%` }}
+                                                style={{ width: `${Math.min(item.riskCoverage || 0, 100)}%` }}
                                             ></div>
                                         </div>
                                         <div className="flex justify-between text-sm">
                                             <span className="text-indigo-200">Kontrol Etkinliği</span>
-                                            <span>%{item.controlEffectiveness.toFixed(0)}</span>
+                                            <span>%{item.controlEffectiveness?.toFixed(0) || '0'}</span>
                                         </div>
                                         <div className="w-full bg-white/20 rounded-full h-1.5">
                                             <div
                                                 className="bg-white h-1.5 rounded-full transition-all"
-                                                style={{ width: `${Math.min(item.controlEffectiveness, 100)}%` }}
+                                                style={{ width: `${Math.min(item.controlEffectiveness || 0, 100)}%` }}
                                             ></div>
                                         </div>
                                     </div>

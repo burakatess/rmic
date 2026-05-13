@@ -446,28 +446,30 @@ export default function RiskDetailPage() {
                                 </div>
                                 <div className="space-y-3">
                                     {controls.map(control => (
-                                        <div key={control.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center text-green-600">
-                                                    🛡️
+                                        <Link key={control.id} href={`/controls/${control.id}`} className="block">
+                                            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer group">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center text-green-600">
+                                                        🛡️
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-mono text-sm text-green-600 group-hover:underline">{control.controlId}</p>
+                                                        <p className="font-medium text-gray-900">{control.name}</p>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <p className="font-mono text-sm text-green-600">{control.controlId}</p>
-                                                    <p className="font-medium text-gray-900">{control.name}</p>
+                                                <div className="flex items-center gap-4">
+                                                    <span className="text-sm text-gray-500">{control.type}</span>
+                                                    <span className={`px-2 py-1 rounded text-xs font-medium ${effectivenessConfig[control.effectiveness]?.color}`}>
+                                                        {effectivenessConfig[control.effectiveness]?.label}
+                                                    </span>
+                                                    <div className="text-gray-400 group-hover:text-blue-600">
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                        </svg>
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-4">
-                                                <span className="text-sm text-gray-500">{control.type}</span>
-                                                <span className={`px-2 py-1 rounded text-xs font-medium ${effectivenessConfig[control.effectiveness]?.color}`}>
-                                                    {effectivenessConfig[control.effectiveness]?.label}
-                                                </span>
-                                                <Link href={`/controls/${control.id}`} className="text-gray-400 hover:text-blue-600">
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                                    </svg>
-                                                </Link>
-                                            </div>
-                                        </div>
+                                        </Link>
                                     ))}
                                 </div>
                             </div>
@@ -483,26 +485,31 @@ export default function RiskDetailPage() {
                                 </div>
                                 <div className="space-y-3">
                                     {actions.map(action => (
-                                        <div key={action.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center text-orange-600">
-                                                    📌
+                                        <Link key={action.id} href={`/actions/${action.id}`} className="block">
+                                            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer group">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center text-orange-600">
+                                                        📌
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-mono text-sm text-orange-600 group-hover:underline">{action.actionId}</p>
+                                                        <p className="text-gray-900">{action.description}</p>
+                                                        <p className="text-xs text-gray-500">Sorumlu: {action.owner}</p>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <p className="font-mono text-sm text-orange-600">{action.actionId}</p>
-                                                    <p className="text-gray-900">{action.description}</p>
-                                                    <p className="text-xs text-gray-500">Sorumlu: {action.owner}</p>
+                                                <div className="flex items-center gap-4 text-sm">
+                                                    <span className={`px-2 py-1 rounded text-xs font-medium ${actionStatusConfig[action.status]?.color}`}>
+                                                        {actionStatusConfig[action.status]?.label}
+                                                    </span>
+                                                    <span className="text-gray-500">
+                                                        {new Date(action.dueDate).toLocaleDateString('tr-TR')}
+                                                    </span>
+                                                    <svg className="w-5 h-5 text-gray-400 group-hover:text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                    </svg>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-4 text-sm">
-                                                <span className={`px-2 py-1 rounded text-xs font-medium ${actionStatusConfig[action.status]?.color}`}>
-                                                    {actionStatusConfig[action.status]?.label}
-                                                </span>
-                                                <span className="text-gray-500">
-                                                    {new Date(action.dueDate).toLocaleDateString('tr-TR')}
-                                                </span>
-                                            </div>
-                                        </div>
+                                        </Link>
                                     ))}
                                 </div>
                             </div>
@@ -536,36 +543,35 @@ export default function RiskDetailPage() {
                                             const status = findingStatusConfig[finding.status] || findingStatusConfig.OPEN;
 
                                             return (
-                                                <div key={finding.id} className="bg-gray-50 p-4 rounded-xl border border-gray-100">
-                                                    <div className="flex items-start justify-between gap-4">
-                                                        <div className="flex-1">
-                                                            <div className="flex items-center gap-2 mb-2">
-                                                                <span className="text-sm font-mono text-gray-500">{finding.findingId}</span>
-                                                                <span className={`text-xs px-2 py-0.5 rounded-full ${severity.color}`}>
-                                                                    {severity.label}
-                                                                </span>
-                                                                <span className={`text-xs px-2 py-0.5 rounded-full ${status.color}`}>
-                                                                    {status.label}
-                                                                </span>
+                                                <Link key={finding.id} href={`/findings/${finding.id}`} className="block">
+                                                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer group">
+                                                        <div className="flex items-start justify-between gap-4">
+                                                            <div className="flex-1">
+                                                                <div className="flex items-center gap-2 mb-2">
+                                                                    <span className="text-sm font-mono text-gray-500 group-hover:text-blue-600">{finding.findingId}</span>
+                                                                    <span className={`text-xs px-2 py-0.5 rounded-full ${severity.color}`}>
+                                                                        {severity.label}
+                                                                    </span>
+                                                                    <span className={`text-xs px-2 py-0.5 rounded-full ${status.color}`}>
+                                                                        {status.label}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="text-sm text-gray-900 mb-2">{finding.description}</p>
+                                                                <div className="flex items-center gap-4 text-xs text-gray-500">
+                                                                    <span className="flex items-center gap-1">
+                                                                        🛡️ {finding.controlId} - {finding.controlName}
+                                                                    </span>
+                                                                    <span className="flex items-center gap-1">
+                                                                        📌 {finding.actionsCount} aksiyon
+                                                                    </span>
+                                                                </div>
                                                             </div>
-                                                            <p className="text-sm text-gray-900 mb-2">{finding.description}</p>
-                                                            <div className="flex items-center gap-4 text-xs text-gray-500">
-                                                                <span className="flex items-center gap-1">
-                                                                    🛡️ {finding.controlId} - {finding.controlName}
-                                                                </span>
-                                                                <span className="flex items-center gap-1">
-                                                                    📌 {finding.actionsCount} aksiyon
-                                                                </span>
+                                                            <div className="text-blue-600 group-hover:text-blue-700 text-sm">
+                                                                Detay →
                                                             </div>
                                                         </div>
-                                                        <Link
-                                                            href={`/findings/${finding.id}`}
-                                                            className="text-blue-600 hover:text-blue-700 text-sm"
-                                                        >
-                                                            Detay →
-                                                        </Link>
                                                     </div>
-                                                </div>
+                                                </Link>
                                             );
                                         })}
                                     </div>

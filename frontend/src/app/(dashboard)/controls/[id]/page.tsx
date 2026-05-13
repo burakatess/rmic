@@ -18,6 +18,7 @@ interface Control {
     effectivenessStatus: string;
     lastTestDate: string;
     nextTestDate: string;
+    controlPeriod?: string;
     linkedRisks: { id: string; riskId: string; name: string; score: number }[];
 }
 
@@ -57,7 +58,30 @@ const DEMO_TESTS: TestResult[] = [
 const typeLabels: Record<string, string> = { IT_GENERAL: 'IT Genel', IT_APPLICATION: 'IT Uygulama', OPERATIONAL: 'Operasyonel', FINANCIAL: 'Finansal', COMPLIANCE: 'Uyum' };
 const natureLabels: Record<string, string> = { PREVENTIVE: 'Önleyici', DETECTIVE: 'Tespit Edici', CORRECTIVE: 'Düzeltici' };
 const automationLabels: Record<string, string> = { AUTOMATED: 'Otomatik', SEMI_AUTOMATED: 'Yarı Otomatik', MANUAL: 'Manuel' };
-const frequencyLabels: Record<string, string> = { DAILY: 'Günlük', WEEKLY: 'Haftalık', MONTHLY: 'Aylık', QUARTERLY: '3 Aylık', ANNUAL: 'Yıllık', AD_HOC: 'Arızi' };
+const frequencyLabels: Record<string, string> = { DAILY: 'Günlük', WEEKLY: 'Haftalık', MONTHLY: 'Aylık', QUARTERLY: '3 Aylık', SEMI_ANNUAL: '6 Aylık', ANNUAL: 'Yıllık', AD_HOC: 'Arızi' };
+const periodLabels: Record<string, string> = {
+    JAN_APR_JUL_OCT: 'Ocak - Nisan - Temmuz - Ekim',
+    FEB_MAY_AUG_NOV: 'Şubat - Mayıs - Ağustos - Kasım',
+    MAR_JUN_SEP_DEC: 'Mart - Haziran - Eylül - Aralık',
+    JAN_JUL: 'Ocak - Temmuz',
+    FEB_AUG: 'Şubat - Ağustos',
+    MAR_SEP: 'Mart - Eylül',
+    APR_OCT: 'Nisan - Ekim',
+    MAY_NOV: 'Mayıs - Kasım',
+    JUN_DEC: 'Haziran - Aralık',
+    JANUARY: 'Ocak',
+    FEBRUARY: 'Şubat',
+    MARCH: 'Mart',
+    APRIL: 'Nisan',
+    MAY: 'Mayıs',
+    JUNE: 'Haziran',
+    JULY: 'Temmuz',
+    AUGUST: 'Ağustos',
+    SEPTEMBER: 'Eylül',
+    OCTOBER: 'Ekim',
+    NOVEMBER: 'Kasım',
+    DECEMBER: 'Aralık',
+};
 const effectivenessConfig: Record<string, { label: string; color: string }> = {
     EFFECTIVE: { label: 'Etkin', color: 'bg-green-100 text-green-700' },
     PARTIALLY_EFFECTIVE: { label: 'Kısmen Etkin', color: 'bg-yellow-100 text-yellow-700' },
@@ -87,6 +111,7 @@ export default function ControlDetailPage() {
                         nature: String(data.nature || 'PREVENTIVE'),
                         automation: String(data.automation || 'MANUAL'),
                         frequency: String(data.frequency || 'MONTHLY'),
+                        controlPeriod: String(data.controlPeriod || ''),
                         owner: {
                             name: `${data.owner?.firstName || ''} ${data.owner?.lastName || ''}`.trim() || 'Bilinmiyor',
                             department: String(data.owner?.department || ''),
@@ -95,12 +120,16 @@ export default function ControlDetailPage() {
                         effectivenessStatus: String(data.effectivenessStatus || 'NOT_TESTED'),
                         lastTestDate: data.lastTestDate || new Date().toISOString(),
                         nextTestDate: data.nextTestDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-                        linkedRisks: (data.riskMappings || []).map((rm: { risk: { id: string; riskId: string; name: string; residualRiskScore: number } }) => ({
-                            id: String(rm.risk?.id || ''),
-                            riskId: String(rm.risk?.riskId || ''),
-                            name: String(rm.risk?.name || ''),
-                            score: Number(rm.risk?.residualRiskScore || 0)
-                        }))
+                        // Check both 'risks' and 'riskMappings' for backward compatibility
+                        linkedRisks: (data.risks || data.riskMappings || []).map((rm: { risk?: { id: string; riskId: string; name: string; residualRiskScore: number }; id?: string; riskId?: string; name?: string; residualRiskScore?: number }) => {
+                            const risk = rm.risk || rm;
+                            return {
+                                id: String(risk?.id || ''),
+                                riskId: String(risk?.riskId || ''),
+                                name: String(risk?.name || ''),
+                                score: Number(risk?.residualRiskScore || 0)
+                            };
+                        })
                     });
                 }
             } catch (err) {
@@ -180,6 +209,12 @@ export default function ControlDetailPage() {
                             <p className="text-xs text-gray-500 mb-1">Uygulama Sıklığı</p>
                             <p className="font-medium text-gray-900">{frequencyLabels[control.frequency]}</p>
                         </div>
+                        {control.controlPeriod && (
+                            <div className="bg-gray-50 rounded-xl p-4">
+                                <p className="text-xs text-gray-500 mb-1">Kontrol Periyodu</p>
+                                <p className="font-medium text-blue-700">{periodLabels[control.controlPeriod] || control.controlPeriod}</p>
+                            </div>
+                        )}
                     </div>
                 </div>
 

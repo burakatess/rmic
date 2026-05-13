@@ -33,6 +33,16 @@ export class ReportsController {
         return this.reportsService.getActionPerformance();
     }
 
+    @Get('risk-heatmap')
+    async getRiskHeatmap() {
+        return this.reportsService.getRiskHeatmapData();
+    }
+
+    @Get('risk-trend-enhanced')
+    async getRiskTrendEnhanced() {
+        return this.reportsService.getRiskTrendEnhanced();
+    }
+
     @Get('executive-summary')
     async getExecutiveSummary() {
         return this.reportsService.getExecutiveSummary();
