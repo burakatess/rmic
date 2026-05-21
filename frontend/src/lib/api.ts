@@ -211,6 +211,37 @@ class ApiClient {
         });
     }
 
+    // Control Tests
+    async createControlTest(controlId: string, data: unknown) {
+        return this.request(`/controls/${controlId}/test`, {
+            method: 'POST',
+            body: data
+        });
+    }
+
+    async getControlTests(controlId: string) {
+        return this.request(`/controls/${controlId}/tests`);
+    }
+
+    async submitTestForApproval(testId: string) {
+        return this.request(`/controls/tests/${testId}/submit`, {
+            method: 'PUT'
+        });
+    }
+
+    async approveTest(testId: string) {
+        return this.request(`/controls/tests/${testId}/approve`, {
+            method: 'PUT'
+        });
+    }
+
+    async rejectTest(testId: string, reason: string) {
+        return this.request(`/controls/tests/${testId}/reject`, {
+            method: 'PUT',
+            body: { reason }
+        });
+    }
+
     // Findings
     async getFindings(params?: Record<string, string | number>) {
         const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
@@ -241,6 +272,23 @@ class ApiClient {
 
     async getAction(id: string) {
         return this.request(`/actions/${id}`);
+    }
+
+    // Relations endpoints
+    async getRiskRelations(id: string) {
+        return this.request(`/risks/${id}/relations`);
+    }
+
+    async getControlRelations(id: string) {
+        return this.request(`/controls/${id}/relations`);
+    }
+
+    async getFindingRelations(id: string) {
+        return this.request(`/findings/${id}/relations`);
+    }
+
+    async getActionRelations(id: string) {
+        return this.request(`/actions/${id}/relations`);
     }
 
     async createAction(data: unknown) {
@@ -293,6 +341,59 @@ class ApiClient {
 
     async syncRiskEntriesToInventory(ids: string[]) {
         return this.request('/risk-entries/sync-to-inventory', { method: 'POST', body: { ids } });
+    }
+
+    // Risk Management Controls (RYK)
+    async getRiskManagementControls(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request(`/risk-management-controls${query}`);
+    }
+
+    async getRiskManagementControl(id: string) {
+        return this.request(`/risk-management-controls/${id}`);
+    }
+
+    async createRiskManagementControl(data: unknown) {
+        return this.request('/risk-management-controls', { method: 'POST', body: data });
+    }
+
+    async updateRiskManagementControl(id: string, data: unknown) {
+        return this.request(`/risk-management-controls/${id}`, { method: 'PUT', body: data });
+    }
+
+    async deleteRiskManagementControl(id: string) {
+        return this.request(`/risk-management-controls/${id}`, { method: 'DELETE' });
+    }
+
+    async mapRYKControlToRiskEntry(controlId: string, riskEntryId: string, applicabilityScore?: number) {
+        return this.request(`/risk-management-controls/${controlId}/map-risk/${riskEntryId}`, {
+            method: 'POST',
+            body: { applicabilityScore }
+        });
+    }
+
+    async unmapRYKControlFromRiskEntry(controlId: string, riskEntryId: string) {
+        return this.request(`/risk-management-controls/${controlId}/map-risk/${riskEntryId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    async updateRYKApplicabilityScore(controlId: string, riskEntryId: string, applicabilityScore: number) {
+        return this.request(`/risk-management-controls/${controlId}/map-risk/${riskEntryId}/applicability`, {
+            method: 'PUT',
+            body: { applicabilityScore }
+        });
+    }
+
+    async getRYKControlTests(controlId: string) {
+        return this.request(`/risk-management-controls/${controlId}/tests`);
+    }
+
+    async createRYKControlTest(controlId: string, data: unknown) {
+        return this.request(`/risk-management-controls/${controlId}/tests`, {
+            method: 'POST',
+            body: data
+        });
     }
 }
 

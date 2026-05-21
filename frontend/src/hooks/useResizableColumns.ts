@@ -13,30 +13,34 @@ export function useResizableColumns({
     minWidth = 50,
     maxWidth = 500,
 }: UseResizableColumnsOptions) {
-    // Initialize from localStorage or defaults
-    const getInitialWidths = useCallback(() => {
+    // Always initialize with defaultWidths to avoid SSR hydration mismatch
+    const [columnWidths, setColumnWidths] = useState<Record<string, number>>(defaultWidths);
+    const [resizingCol, setResizingCol] = useState<string | null>(null);
+    const [isClient, setIsClient] = useState(false);
+    const startX = useRef(0);
+    const startWidth = useRef(0);
+
+    // Load from localStorage on client side only (after hydration)
+    useEffect(() => {
+        setIsClient(true);
         if (storageKey && typeof window !== 'undefined') {
             try {
                 const saved = localStorage.getItem(`col-widths-${storageKey}`);
-                if (saved) return JSON.parse(saved);
+                if (saved) {
+                    setColumnWidths(JSON.parse(saved));
+                }
             } catch {
                 // Ignore
             }
         }
-        return defaultWidths;
-    }, [storageKey, defaultWidths]);
-
-    const [columnWidths, setColumnWidths] = useState<Record<string, number>>(getInitialWidths);
-    const [resizingCol, setResizingCol] = useState<string | null>(null);
-    const startX = useRef(0);
-    const startWidth = useRef(0);
+    }, [storageKey]);
 
     // Save to localStorage
     useEffect(() => {
-        if (storageKey && typeof window !== 'undefined') {
+        if (isClient && storageKey && typeof window !== 'undefined') {
             localStorage.setItem(`col-widths-${storageKey}`, JSON.stringify(columnWidths));
         }
-    }, [columnWidths, storageKey]);
+    }, [columnWidths, storageKey, isClient]);
 
     const handleMouseDown = useCallback((e: React.MouseEvent, colKey: string) => {
         e.preventDefault();

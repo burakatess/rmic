@@ -95,7 +95,7 @@ export default function NewControlPage() {
 
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                                Açıklama <span className="text-red-500">*</span>
+                                Kontrol Tanımı <span className="text-red-500">*</span>
                             </label>
                             <textarea
                                 required
@@ -142,11 +142,8 @@ export default function NewControlPage() {
                                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
                             >
                                 <option value="">Tip seçin</option>
-                                <option value="IT_GENERAL">IT Genel Kontrol</option>
-                                <option value="IT_APPLICATION">IT Uygulama Kontrolü</option>
-                                <option value="OPERATIONAL">Operasyonel Kontrol</option>
-                                <option value="FINANCIAL">Finansal Kontrol</option>
-                                <option value="COMPLIANCE">Uyum Kontrolü</option>
+                                <option value="BT">BT</option>
+                                <option value="BT_DISI">BT Dışı</option>
                             </select>
                         </div>
 
@@ -163,23 +160,6 @@ export default function NewControlPage() {
                                 <option value="">Nitelik seçin</option>
                                 <option value="PREVENTIVE">Önleyici</option>
                                 <option value="DETECTIVE">Tespit Edici</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                                Otomasyon Seviyesi <span className="text-red-500">*</span>
-                            </label>
-                            <select
-                                required
-                                value={formData.automation}
-                                onChange={(e) => setFormData({ ...formData, automation: e.target.value })}
-                                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
-                            >
-                                <option value="">Seviye seçin</option>
-                                <option value="MANUAL">Manuel</option>
-                                <option value="SEMI_AUTOMATED">Yarı Otomatik</option>
-                                <option value="AUTOMATED">Tam Otomatik</option>
                             </select>
                         </div>
 

@@ -8,11 +8,8 @@ import api from '@/lib/api';
 
 
 const typeOptions = [
-    { value: 'IT_GENERAL', label: 'IT Genel' },
-    { value: 'IT_APPLICATION', label: 'IT Uygulama' },
-    { value: 'OPERATIONAL', label: 'Operasyonel' },
-    { value: 'FINANCIAL', label: 'Finansal' },
-    { value: 'COMPLIANCE', label: 'Uyum' },
+    { value: 'BT', label: 'BT' },
+    { value: 'BT_DISI', label: 'BT Dışı' },
 ];
 
 const natureOptions = [
@@ -92,13 +89,13 @@ export default function ControlEditPage() {
         controlId: '',
         name: '',
         description: '',
-        type: 'IT_GENERAL',
+        type: 'BT',
         nature: 'PREVENTIVE',
         automation: 'MANUAL',
         frequency: 'MONTHLY',
         controlPeriod: '',
-        owner: '',
-        department: '',
+        testPerformer: '',
+        reviewer: '',
         testFrequency: 'ANNUAL',
         linkedRegulations: [] as string[],
         status: 'ACTIVE',
@@ -115,13 +112,13 @@ export default function ControlEditPage() {
                         controlId: data.controlId || '',
                         name: data.name || '',
                         description: data.description || '',
-                        type: data.type || 'IT_GENERAL',
+                        type: data.type || 'BT',
                         nature: data.nature || 'PREVENTIVE',
                         automation: data.automation || 'MANUAL',
                         frequency: data.frequency || 'MONTHLY',
                         controlPeriod: data.controlPeriod || '',
-                        owner: `${data.owner?.firstName || ''} ${data.owner?.lastName || ''}`.trim(),
-                        department: data.owner?.department || '',
+                        testPerformer: data.testPerformerId || '',
+                        reviewer: data.reviewerId || '',
                         testFrequency: data.testFrequency || 'ANNUAL',
                         linkedRegulations: [],
                         status: data.status || 'ACTIVE',
@@ -210,7 +207,7 @@ export default function ControlEditPage() {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Açıklama</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Kontrol Tanımı</label>
                             <textarea
                                 value={formData.description}
                                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -247,31 +244,17 @@ export default function ControlEditPage() {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-6">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Otomasyon Seviyesi</label>
-                                <select
-                                    value={formData.automation}
-                                    onChange={(e) => setFormData({ ...formData, automation: e.target.value })}
-                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
-                                >
-                                    {automationOptions.map(opt => (
-                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Uygulama Sıklığı</label>
-                                <select
-                                    value={formData.frequency}
-                                    onChange={(e) => setFormData({ ...formData, frequency: e.target.value, controlPeriod: '' })}
-                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
-                                >
-                                    {frequencyOptions.map(opt => (
-                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                    ))}
-                                </select>
-                            </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Uygulama Sıklığı</label>
+                            <select
+                                value={formData.frequency}
+                                onChange={(e) => setFormData({ ...formData, frequency: e.target.value, controlPeriod: '' })}
+                                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                            >
+                                {frequencyOptions.map(opt => (
+                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
+                            </select>
                         </div>
 
                         {/* Conditional Control Period */}
@@ -313,22 +296,32 @@ export default function ControlEditPage() {
                             <h3 className="font-semibold text-gray-900 mb-4">Kontrol Sahibi</h3>
                             <div className="grid grid-cols-2 gap-6">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Sorumlu Kişi</label>
-                                    <input
-                                        type="text"
-                                        value={formData.owner}
-                                        onChange={(e) => setFormData({ ...formData, owner: e.target.value })}
-                                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
-                                    />
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Testi Gerçekleştiren</label>
+                                    <select
+                                        value={formData.testPerformer || ''}
+                                        onChange={(e) => setFormData({ ...formData, testPerformer: e.target.value })}
+                                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                                    >
+                                        <option value="">Kişi seçin</option>
+                                        <option value="user1">Ayşe Kaya</option>
+                                        <option value="user2">Ahmet Yılmaz</option>
+                                        <option value="user3">Mehmet Demir</option>
+                                    </select>
+                                    <p className="text-xs text-gray-500 mt-1">Test sonuçlarını girecek kişi</p>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Departman</label>
-                                    <input
-                                        type="text"
-                                        value={formData.department}
-                                        onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
-                                    />
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Kontrol Eden</label>
+                                    <select
+                                        value={formData.reviewer || ''}
+                                        onChange={(e) => setFormData({ ...formData, reviewer: e.target.value })}
+                                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                                    >
+                                        <option value="">Kişi seçin</option>
+                                        <option value="user1">Ayşe Kaya</option>
+                                        <option value="user2">Ahmet Yılmaz</option>
+                                        <option value="user3">Mehmet Demir</option>
+                                    </select>
+                                    <p className="text-xs text-gray-500 mt-1">Test sonuçlarını onaylayacak kişi</p>
                                 </div>
                             </div>
                         </div>
@@ -363,9 +356,27 @@ export default function ControlEditPage() {
                             </div>
                         </div>
 
-                        {/* Regulations */}
+                        {/* Mehaz */}
                         <div className="pt-6 border-t border-gray-100">
-                            <h3 className="font-semibold text-gray-900 mb-3">İlişkili Regülasyonlar</h3>
+                            <h3 className="font-semibold text-gray-900 mb-3">Mehaz</h3>
+                            <div className="grid grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Yönetmelik Adı</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Örn: BDDK Bilgi Sistemleri Yönetmeliği"
+                                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Madde No</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Örn: Madde 5/1-a"
+                                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
+                                    />
+                                </div>
+                            </div>
                             <div className="flex flex-wrap gap-2">
                                 {regulations.map(reg => (
                                     <button

@@ -270,4 +270,158 @@ export class ReportsService {
             },
         };
     }
+
+    // ==========================================
+    // EK-6 REPORT GENERATION
+    // ==========================================
+
+    private readonly frequencyLabels: Record<string, string> = {
+        DAILY: 'Günlük',
+        WEEKLY: 'Haftalık',
+        MONTHLY: 'Aylık',
+        QUARTERLY: 'Üç Aylık',
+        SEMI_ANNUAL: 'Altı Aylık',
+        ANNUAL: 'Yıllık',
+        AD_HOC: 'İhtiyaç Halinde',
+    };
+
+    async getEK6ReportData(year: number, month?: number) {
+        // Build date filter based on year/month
+        let startDate: Date, endDate: Date;
+
+        if (month) {
+            startDate = new Date(year, month - 1, 1);
+            endDate = new Date(year, month, 0, 23, 59, 59);
+        } else {
+            startDate = new Date(year, 0, 1);
+            endDate = new Date(year, 11, 31, 23, 59, 59);
+        }
+
+        // Get all controls with their findings
+        const controls = await this.prisma.control.findMany({
+            include: {
+                owner: {
+                    select: {
+                        department: true,
+                    }
+                },
+                findings: {
+                    select: {
+                        findingId: true,
+                    }
+                },
+            },
+            orderBy: [
+                { owner: { department: 'asc' } },
+                { controlId: 'asc' },
+            ]
+        });
+
+        // Transform to report format
+        const reportData = controls.map((control, index) => ({
+            siraNo: index + 1,
+            direktorluk: control.owner?.department || 'Belirtilmemiş',
+            kontrolNo: control.controlId,
+            kontrolSikligi: this.frequencyLabels[control.frequency] || control.frequency,
+            kontrolTanimi: control.description,
+            bulgu: control.findings.length > 0
+                ? control.findings.map(f => f.findingId).join(', ')
+                : 'Bulgu Yok',
+        }));
+
+        return {
+            title: `EK-6 – ${year} Yılında Gerçekleştirilen Periyodik Kontroller (BT Birimleri)`,
+            period: month
+                ? `${month}/${year}`
+                : `${year}`,
+            generatedAt: new Date().toISOString(),
+            totalControls: reportData.length,
+            data: reportData,
+        };
+    }
+
+    async generateEK6Word(year: number, month?: number): Promise<Buffer> {
+        const { Document, Packer, Table, TableRow, TableCell, Paragraph, TextRun, WidthType, AlignmentType, BorderStyle, HeadingLevel, PageOrientation } = await import('docx');
+
+        const reportData = await this.getEK6ReportData(year, month);
+
+        // Table header row
+        const headerRow = new TableRow({
+            tableHeader: true,
+            children: [
+                this.createHeaderCell('Sıra No', Document, TableCell, Paragraph, TextRun, WidthType, AlignmentType, BorderStyle),
+                this.createHeaderCell('İlgili Direktörlük', Document, TableCell, Paragraph, TextRun, WidthType, AlignmentType, BorderStyle),
+                this.createHeaderCell('Kontrol No', Document, TableCell, Paragraph, TextRun, WidthType, AlignmentType, BorderStyle),
+                this.createHeaderCell('Kontrol Sıklığı', Document, TableCell, Paragraph, TextRun, WidthType, AlignmentType, BorderStyle),
+                this.createHeaderCell('Kontrol Tanımı', Document, TableCell, Paragraph, TextRun, WidthType, AlignmentType, BorderStyle),
+                this.createHeaderCell('Bulgu', Document, TableCell, Paragraph, TextRun, WidthType, AlignmentType, BorderStyle),
+            ].map((cell, index) => {
+                const widths = [600, 1500, 1200, 1000, 3500, 1500];
+                return new TableCell({
+                    children: [new Paragraph({
+                        children: [new TextRun({ text: ['Sıra No', 'İlgili Direktörlük', 'Kontrol No', 'Kontrol Sıklığı', 'Kontrol Tanımı', 'Bulgu'][index], bold: true, size: 20 })],
+                        alignment: AlignmentType.CENTER,
+                    })],
+                    width: { size: widths[index], type: WidthType.DXA },
+                    shading: { fill: 'B8CCE4' }, // Light blue
+                    verticalAlign: 'center' as any,
+                });
+            }),
+        });
+
+        // Data rows
+        const dataRows = reportData.data.map(row =>
+            new TableRow({
+                children: [
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(row.siraNo), size: 18 })], alignment: AlignmentType.CENTER })] }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: row.direktorluk, size: 18 })] })] }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: row.kontrolNo, size: 18 })] })] }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: row.kontrolSikligi, size: 18 })] })] }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: row.kontrolTanimi, size: 18 })] })] }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: row.bulgu, size: 18, color: row.bulgu === 'Bulgu Yok' ? '008000' : 'CC0000' })] })] }),
+                ],
+            })
+        );
+
+        // Create document
+        const doc = new Document({
+            sections: [{
+                properties: {
+                    page: {
+                        size: {
+                            orientation: PageOrientation.LANDSCAPE,
+                        },
+                        margin: {
+                            top: 720,
+                            right: 720,
+                            bottom: 720,
+                            left: 720,
+                        },
+                    },
+                },
+                children: [
+                    new Paragraph({
+                        children: [new TextRun({ text: reportData.title, bold: true, size: 28 })],
+                        alignment: AlignmentType.CENTER,
+                        spacing: { after: 400 },
+                    }),
+                    new Table({
+                        rows: [headerRow, ...dataRows],
+                        width: { size: 100, type: WidthType.PERCENTAGE },
+                    }),
+                    new Paragraph({
+                        children: [new TextRun({ text: `Oluşturulma Tarihi: ${new Date().toLocaleDateString('tr-TR')}`, size: 16, italics: true })],
+                        alignment: AlignmentType.RIGHT,
+                        spacing: { before: 400 },
+                    }),
+                ],
+            }],
+        });
+
+        return await Packer.toBuffer(doc);
+    }
+
+    private createHeaderCell(text: string, Document: any, TableCell: any, Paragraph: any, TextRun: any, WidthType: any, AlignmentType: any, BorderStyle: any) {
+        return { text };
+    }
 }

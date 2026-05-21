@@ -1,8 +1,11 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { RiskEntryService } from './risk-entry.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
 
+@ApiTags('Risk Entries')
+@ApiBearerAuth('JWT-Auth')
 @Controller('risk-entries')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class RiskEntryController {

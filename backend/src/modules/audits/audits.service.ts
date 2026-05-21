@@ -7,7 +7,9 @@ export class AuditsService {
 
     // Audit Plans
     async findAllPlans(query: any) {
-        const { year, status, page = 1, limit = 20 } = query;
+        const { year, status } = query;
+        const page = parseInt(query.page, 10) || 1;
+        const limit = parseInt(query.limit, 10) || 20;
         const skip = (page - 1) * limit;
         const where: any = {};
         if (year) where.year = year;
@@ -63,9 +65,17 @@ export class AuditsService {
 
     // Findings - MUST be linked to risk and control
     async findAllFindings(query: any) {
-        const { riskId, controlId, severity, status, page = 1, limit = 20 } = query;
+        const { search, riskId, controlId, severity, status, sortBy, sortOrder } = query;
+        const page = parseInt(query.page, 10) || 1;
+        const limit = parseInt(query.limit, 10) || 20;
         const skip = (page - 1) * limit;
         const where: any = {};
+        if (search) {
+            where.OR = [
+                { description: { contains: search, mode: 'insensitive' } },
+                { findingId: { contains: search, mode: 'insensitive' } },
+            ];
+        }
         if (riskId) where.riskId = riskId;
         if (controlId) where.controlId = controlId;
         if (severity) where.severity = severity;
@@ -81,7 +91,7 @@ export class AuditsService {
                 },
                 skip,
                 take: limit,
-                orderBy: { createdAt: 'desc' },
+                orderBy: { [sortBy || 'createdAt']: sortOrder || 'desc' },
             }),
             this.prisma.finding.count({ where }),
         ]);
@@ -172,6 +182,58 @@ export class AuditsService {
         });
         if (!finding) throw new NotFoundException(`Finding with ID ${id} not found`);
         return finding;
+    }
+
+    async getFindingRelations(id: string) {
+        const finding = await this.prisma.finding.findUnique({
+            where: { id },
+            include: {
+                risk: { select: { id: true, riskId: true, name: true, status: true, residualRiskScore: true } },
+                control: { select: { id: true, controlId: true, name: true, effectivenessStatus: true, type: true } },
+            },
+        });
+        if (!finding) throw new NotFoundException(`Finding with ID ${id} not found`);
+
+        // Get risks: direct risk + risks via control
+        const risks: any[] = [];
+        if (finding.risk) {
+            risks.push(finding.risk);
+        }
+        if (finding.control) {
+            const controlRiskMappings = await this.prisma.controlRiskMapping.findMany({
+                where: { controlId: finding.control.id },
+                include: {
+                    risk: { select: { id: true, riskId: true, name: true, status: true, residualRiskScore: true } },
+                },
+            });
+            for (const m of controlRiskMappings) {
+                if (!risks.find(r => r.id === m.risk.id)) {
+                    risks.push(m.risk);
+                }
+            }
+        }
+
+        // Get controls (just the one linked, if any)
+        const controls = finding.control ? [finding.control] : [];
+
+        // Get actions linked to this finding
+        const actions = await this.prisma.action.findMany({
+            where: { findingId: id },
+            select: { id: true, actionId: true, description: true, status: true, dueDate: true },
+        });
+
+        return {
+            finding: {
+                id: finding.id,
+                findingId: finding.findingId,
+                description: finding.description,
+                status: finding.status,
+                severity: finding.severity,
+            },
+            risks,
+            controls,
+            actions,
+        };
     }
 
     async deleteFinding(id: string, userId: string) {

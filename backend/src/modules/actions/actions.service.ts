@@ -12,9 +12,17 @@ export class ActionsService {
     }
 
     async findAll(query: any) {
-        const { ownerId, status, source, riskId, findingId, page = 1, limit = 20 } = query;
+        const { search, ownerId, status, source, riskId, findingId, sortBy, sortOrder } = query;
+        const page = parseInt(query.page, 10) || 1;
+        const limit = parseInt(query.limit, 10) || 20;
         const skip = (page - 1) * limit;
         const where: any = {};
+        if (search) {
+            where.OR = [
+                { description: { contains: search, mode: 'insensitive' } },
+                { actionId: { contains: search, mode: 'insensitive' } },
+            ];
+        }
         if (ownerId) where.ownerId = ownerId;
         if (status) where.status = status;
         if (source) where.source = source;
@@ -32,7 +40,7 @@ export class ActionsService {
                 },
                 skip,
                 take: limit,
-                orderBy: { dueDate: 'asc' },
+                orderBy: { [sortBy || 'dueDate']: sortOrder || 'asc' },
             }),
             this.prisma.action.count({ where }),
         ]);
@@ -59,6 +67,63 @@ export class ActionsService {
         });
         if (!action) throw new NotFoundException(`Action with ID ${id} not found`);
         return action;
+    }
+
+    async getRelations(id: string) {
+        const action = await this.prisma.action.findUnique({
+            where: { id },
+            include: {
+                owner: { select: { id: true, firstName: true, lastName: true } },
+                risk: { select: { id: true, riskId: true, name: true, status: true, residualRiskScore: true } },
+                finding: {
+                    include: {
+                        control: { select: { id: true, controlId: true, name: true, effectivenessStatus: true, type: true } },
+                    },
+                },
+            },
+        });
+        if (!action) throw new NotFoundException(`Action with ID ${id} not found`);
+
+        // Build risks: direct risk + risks via finding's control
+        const risks: any[] = [];
+        if (action.risk) {
+            risks.push(action.risk);
+        }
+        if (action.finding?.control) {
+            const controlRiskMappings = await this.prisma.controlRiskMapping.findMany({
+                where: { controlId: action.finding.control.id },
+                include: {
+                    risk: { select: { id: true, riskId: true, name: true, status: true, residualRiskScore: true } },
+                },
+            });
+            for (const m of controlRiskMappings) {
+                if (!risks.find(r => r.id === m.risk.id)) {
+                    risks.push(m.risk);
+                }
+            }
+        }
+
+        // Controls: from finding's control
+        const controls = action.finding?.control ? [action.finding.control] : [];
+
+        // Findings: the finding linked to this action
+        const findings = action.finding
+            ? [{ id: action.finding.id, findingId: action.finding.findingId, description: action.finding.description, status: action.finding.status, severity: action.finding.severity }]
+            : [];
+
+        return {
+            action: {
+                id: action.id,
+                actionId: action.actionId,
+                description: action.description,
+                status: action.status,
+                dueDate: action.dueDate,
+                owner: action.owner,
+            },
+            risks,
+            controls,
+            findings,
+        };
     }
 
     async create(data: any, userId: string) {

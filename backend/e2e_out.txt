@@ -1,0 +1,129 @@
+
+> backend@0.0.1 test:e2e
+> jest --config ./test/jest-e2e.json
+
+[31m[Nest] 52626  - [39m03/19/2026, 12:39:57 PM [31m  ERROR[39m [38;5;3m[ExceptionsHandler] [39mTypeError: Cannot read properties of undefined (reading 'name')
+    at JwtStrategy.validate [90m(/Users/burak/rmic 24.02.2026/backend/[39msrc/modules/auth/strategies/jwt.strategy.ts:41:29[90m)[39m
+[90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m
+    at JwtStrategy.callback [as _verify] [90m(/Users/burak/rmic 24.02.2026/backend/[39mnode_modules/[4m@nestjs/passport[24m/dist/passport/passport.strategy.js:13:44[90m)[39m
+[31m[Nest] 52626  - [39m03/19/2026, 12:39:57 PM [31m  ERROR[39m [38;5;3m[ExceptionsHandler] [39mTypeError: Cannot read properties of undefined (reading 'name')
+    at JwtStrategy.validate [90m(/Users/burak/rmic 24.02.2026/backend/[39msrc/modules/auth/strategies/jwt.strategy.ts:41:29[90m)[39m
+[90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m
+    at JwtStrategy.callback [as _verify] [90m(/Users/burak/rmic 24.02.2026/backend/[39mnode_modules/[4m@nestjs/passport[24m/dist/passport/passport.strategy.js:13:44[90m)[39m
+  console.error
+    GET /risks Error: {"statusCode":500,"message":"Internal server error"}
+
+      127 |         .set('Authorization', `Bearer ${jwtToken}`);
+      128 |
+    > 129 |       if (response.status !== 200) console.error('GET /risks Error:', response.text);
+          |                                            ^
+      130 |       expect(response.status).toBe(200);
+      131 |
+      132 |       expect(response.body.data).toBeInstanceOf(Array);
+
+      at Object.<anonymous> (app.e2e-spec.ts:129:44)
+
+[31m[Nest] 52626  - [39m03/19/2026, 12:39:57 PM [31m  ERROR[39m [38;5;3m[ExceptionsHandler] [39mTypeError: Cannot read properties of undefined (reading 'name')
+    at JwtStrategy.validate [90m(/Users/burak/rmic 24.02.2026/backend/[39msrc/modules/auth/strategies/jwt.strategy.ts:41:29[90m)[39m
+[90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m
+    at JwtStrategy.callback [as _verify] [90m(/Users/burak/rmic 24.02.2026/backend/[39mnode_modules/[4m@nestjs/passport[24m/dist/passport/passport.strategy.js:13:44[90m)[39m
+[31m[Nest] 52626  - [39m03/19/2026, 12:39:57 PM [31m  ERROR[39m [38;5;3m[ExceptionsHandler] [39mTypeError: Cannot read properties of undefined (reading 'name')
+    at JwtStrategy.validate [90m(/Users/burak/rmic 24.02.2026/backend/[39msrc/modules/auth/strategies/jwt.strategy.ts:41:29[90m)[39m
+[90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m
+    at JwtStrategy.callback [as _verify] [90m(/Users/burak/rmic 24.02.2026/backend/[39mnode_modules/[4m@nestjs/passport[24m/dist/passport/passport.strategy.js:13:44[90m)[39m
+FAIL test/app.e2e-spec.ts
+  E2E (Auth Flow & Risks)
+    Auth Flow
+      ✓ 1. /auth/login (POST) - should login and get token (67 ms)
+      ✕ 2. /auth/me (GET) - should get profile with token (4 ms)
+      ✓ 3. /auth/me (GET) - should fail without token (1 ms)
+    Risks Endpoint
+      ✕ 1. /risks (GET) - should return empty list (9 ms)
+      ✕ 2. /risks (POST) - should create new risk (1 ms)
+      ✕ 3. /risks (POST) - should fail DTO validation (1 ms)
+
+  ● E2E (Auth Flow & Risks) › Auth Flow › 2. /auth/me (GET) - should get profile with token
+
+    expected 200 "OK", got 500 "Internal Server Error"
+
+      109 |         .get('/auth/me')
+      110 |         .set('Authorization', `Bearer ${jwtToken}`)
+    > 111 |         .expect(200);
+          |          ^
+      112 |
+      113 |       expect(response.body).toHaveProperty('email', 'admin@grc.com');
+      114 |     });
+
+      at Object.<anonymous> (app.e2e-spec.ts:111:10)
+      ----
+      at Test._assertStatus (../node_modules/supertest/lib/test.js:309:14)
+      at ../node_modules/supertest/lib/test.js:365:13
+      at Test._assertFunction (../node_modules/supertest/lib/test.js:342:13)
+      at Test.assert (../node_modules/supertest/lib/test.js:195:23)
+      at localAssert (../node_modules/supertest/lib/test.js:138:14)
+      at Server.<anonymous> (../node_modules/supertest/lib/test.js:152:11)
+
+  ● E2E (Auth Flow & Risks) › Risks Endpoint › 1. /risks (GET) - should return empty list
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 500
+
+      128 |
+      129 |       if (response.status !== 200) console.error('GET /risks Error:', response.text);
+    > 130 |       expect(response.status).toBe(200);
+          |                               ^
+      131 |
+      132 |       expect(response.body.data).toBeInstanceOf(Array);
+      133 |       expect(response.body.pagination.total).toBe(0);
+
+      at Object.<anonymous> (app.e2e-spec.ts:130:31)
+
+  ● E2E (Auth Flow & Risks) › Risks Endpoint › 2. /risks (POST) - should create new risk
+
+    expected 201 "Created", got 500 "Internal Server Error"
+
+      145 |           inherentImpact: 4
+      146 |         })
+    > 147 |         .expect(201);
+          |          ^
+      148 |
+      149 |       expect(response.body).toHaveProperty('id', 'test-risk');
+      150 |       expect(mockPrismaService.risk.create).toHaveBeenCalled();
+
+      at Object.<anonymous> (app.e2e-spec.ts:147:10)
+      ----
+      at Test._assertStatus (../node_modules/supertest/lib/test.js:309:14)
+      at ../node_modules/supertest/lib/test.js:365:13
+      at Test._assertFunction (../node_modules/supertest/lib/test.js:342:13)
+      at Test.assert (../node_modules/supertest/lib/test.js:195:23)
+      at localAssert (../node_modules/supertest/lib/test.js:138:14)
+      at Server.<anonymous> (../node_modules/supertest/lib/test.js:152:11)
+
+  ● E2E (Auth Flow & Risks) › Risks Endpoint › 3. /risks (POST) - should fail DTO validation
+
+    expected 400 "Bad Request", got 500 "Internal Server Error"
+
+      158 |           name: 'Short', // Missing required fields
+      159 |         })
+    > 160 |         .expect(400); // Bad Request (Validation failed)
+          |          ^
+      161 |     });
+      162 |   });
+      163 | });
+
+      at Object.<anonymous> (app.e2e-spec.ts:160:10)
+      ----
+      at Test._assertStatus (../node_modules/supertest/lib/test.js:309:14)
+      at ../node_modules/supertest/lib/test.js:365:13
+      at Test._assertFunction (../node_modules/supertest/lib/test.js:342:13)
+      at Test.assert (../node_modules/supertest/lib/test.js:195:23)
+      at localAssert (../node_modules/supertest/lib/test.js:138:14)
+      at Server.<anonymous> (../node_modules/supertest/lib/test.js:152:11)
+
+Test Suites: 1 failed, 1 total
+Tests:       4 failed, 2 passed, 6 total
+Snapshots:   0 total
+Time:        0.778 s, estimated 1 s
+Ran all test suites.

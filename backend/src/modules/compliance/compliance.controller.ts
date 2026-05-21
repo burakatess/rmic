@@ -8,10 +8,13 @@ import {
     Param,
     UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ComplianceService } from './compliance.service';
 import { Roles, CurrentUser } from '../../common/decorators';
 import { RolesGuard } from '../../common/guards';
 
+@ApiTags('Compliance')
+@ApiBearerAuth('JWT-Auth')
 @Controller()
 export class ComplianceController {
     constructor(private complianceService: ComplianceService) { }

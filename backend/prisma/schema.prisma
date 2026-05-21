@@ -29,6 +29,8 @@ model User {
   roleId        String
   ownedRisks    Risk[]   @relation("RiskOwner")
   ownedControls Control[] @relation("ControlOwner")
+  testPerformerControls Control[] @relation("ControlTestPerformer")
+  reviewerControls Control[] @relation("ControlReviewer")
   ownedActions  Action[] @relation("ActionOwner")
   auditLogs     AuditLog[]
   refreshTokens RefreshToken[]
@@ -237,6 +239,12 @@ model Control {
   owner   User   @relation("ControlOwner", fields: [ownerId], references: [id])
   ownerId String
 
+  // Test Roles
+  testPerformer   User?   @relation("ControlTestPerformer", fields: [testPerformerId], references: [id])
+  testPerformerId String?
+  reviewer        User?   @relation("ControlReviewer", fields: [reviewerId], references: [id])
+  reviewerId      String?
+
   // Effectiveness
   effectivenessStatus EffectivenessStatus @default(NOT_TESTED)
   lastTestDate        DateTime?
@@ -252,6 +260,8 @@ model Control {
   updatedAt DateTime @updatedAt
 
   @@index([ownerId])
+  @@index([testPerformerId])
+  @@index([reviewerId])
   @@index([effectivenessStatus])
 }
 
@@ -279,23 +289,29 @@ model ControlTest {
   evidenceUrls String[]
   findings     String?    @db.Text
   notes        String?    @db.Text
+  hasFinding   Boolean    @default(false)
 
-  // Approval
-  approvedBy String?
-  approvedAt DateTime?
+  // Approval Workflow
+  approvalStatus  ApprovalStatus @default(DRAFT)
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectionReason String?
 
   createdAt DateTime @default(now())
 
   @@index([controlId])
   @@index([testDate])
+  @@index([approvalStatus])
 }
 
 enum ControlType {
-  IT_GENERAL
-  IT_APPLICATION
-  OPERATIONAL
-  FINANCIAL
-  COMPLIANCE
+  IT_GENERAL      // Legacy - maps to BT
+  IT_APPLICATION  // Legacy - maps to BT
+  OPERATIONAL     // Legacy - maps to BT_DISI
+  FINANCIAL       // Legacy - maps to BT_DISI
+  COMPLIANCE      // Legacy - maps to BT_DISI
+  BT              // New: IT Controls
+  BT_DISI         // New: Non-IT Controls
 }
 
 enum ControlNature {
@@ -330,6 +346,13 @@ enum TestResult {
   EFFECTIVE
   INEFFECTIVE
   PARTIALLY_EFFECTIVE
+}
+
+enum ApprovalStatus {
+  DRAFT            // Taslak
+  PENDING_APPROVAL // Onay bekliyor
+  APPROVED         // Onaylandı  
+  REJECTED         // Reddedildi
 }
 
 // ==========================================
@@ -762,10 +785,84 @@ model RiskEntry {
   syncedRisk              Risk?    @relation(fields: [syncedRiskId], references: [id])
   syncedRiskId            String?
   
+  // Relation to Risk Management Controls (RYK)
+  riskManagementControls  RiskEntryRMControl[]
+  
   @@index([riskStatus])
   @@index([dogalRiskSeviyesi])
   @@index([kalintiRiskSeviyesi])
   @@index([surec])
   @@index([olusturmaTarihi])
+}
+
+// ==========================================
+// RISK MANAGEMENT CONTROLS (RYK)
+// Risk Yönetimi Ekibinin Kontrolleri
+// ==========================================
+
+// Risk Management Control (RYK) - Risk Yönetimi Ekibinin Kontrolleri
+model RiskManagementControl {
+  id          String   @id @default(cuid())
+  controlCode String   @unique // RYK-001, RYK-002...
+  name        String
+  description String   @db.Text
+  
+  // Kontrol Parametreleri (1-5 arası)
+  effectiveness    Int @default(3) // Etkinlik (%50)
+  frequency        Int @default(3) // Sıklık (%30)
+  automationLevel  Int @default(3) // Otomasyon (%20)
+  
+  // Hesaplanan Skorlar
+  controlScore     Float?  // Bireysel kontrol skoru
+  
+  // Owner
+  ownerId String?
+  
+  // Status
+  isActive Boolean @default(true)
+  
+  // Relations
+  riskMappings RiskEntryRMControl[]
+  tests        RMControlTest[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([controlCode])
+  @@index([isActive])
+}
+
+// Risk-RYK Kontrol Eşleştirmesi
+model RiskEntryRMControl {
+  id          String @id @default(cuid())
+  riskEntry   RiskEntry @relation(fields: [riskEntryId], references: [id], onDelete: Cascade)
+  riskEntryId String
+  control     RiskManagementControl @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  controlId   String
+  
+  // Bu kontrol için risk-spesifik etkinlik değerlendirmesi
+  applicabilityScore Int @default(3) // 1-5, bu risk için kontrol ne kadar geçerli
+  
+  createdAt DateTime @default(now())
+  
+  @@unique([riskEntryId, controlId])
+  @@index([riskEntryId])
+  @@index([controlId])
+}
+
+// RYK Test Geçmişi
+model RMControlTest {
+  id         String   @id @default(cuid())
+  control    RiskManagementControl @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  controlId  String
+  testDate   DateTime
+  tester     String
+  result     TestResult
+  notes      String?  @db.Text
+  
+  createdAt DateTime @default(now())
+  
+  @@index([controlId])
+  @@index([testDate])
 }
 

@@ -10,6 +10,7 @@ import {
     UseGuards,
     Request,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { RisksService } from './risks.service';
 import {
     CreateRiskDto,
@@ -21,6 +22,8 @@ import {
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
 
+@ApiTags('Risks')
+@ApiBearerAuth('JWT-Auth')
 @Controller('risks')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class RisksController {
@@ -29,6 +32,11 @@ export class RisksController {
     @Get()
     async findAll(@Query() query: RiskQueryDto) {
         return this.risksService.findAll(query);
+    }
+
+    @Get(':id/relations')
+    async getRelations(@Param('id') id: string) {
+        return this.risksService.getRelations(id);
     }
 
     @Get(':id')

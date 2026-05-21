@@ -11,6 +11,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { RiskEntryModule } from './modules/risk-entry/risk-entry.module';
+import { RiskManagementControlsModule } from './modules/risk-management-controls/risk-management-controls.module';
 import { JwtAuthGuard } from './common/guards';
 
 @Module({
@@ -29,6 +30,7 @@ import { JwtAuthGuard } from './common/guards';
     ComplianceModule,
     AdminModule,
     RiskEntryModule,
+    RiskManagementControlsModule,
   ],
   providers: [
     // Apply JWT auth guard globally

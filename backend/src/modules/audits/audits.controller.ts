@@ -1,8 +1,11 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AuditsService } from './audits.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
 
+@ApiTags('Findings')
+@ApiBearerAuth('JWT-Auth')
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AuditsController {
@@ -43,6 +46,11 @@ export class AuditsController {
     @Get('findings')
     async findAllFindings(@Query() query: any) {
         return this.auditsService.findAllFindings(query);
+    }
+
+    @Get('findings/:id/relations')
+    async getFindingRelations(@Param('id') id: string) {
+        return this.auditsService.getFindingRelations(id);
     }
 
     @Get('findings/:id')

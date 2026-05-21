@@ -1,8 +1,11 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ControlsService } from './controls.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
 
+@ApiTags('Controls')
+@ApiBearerAuth('JWT-Auth')
 @Controller('controls')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ControlsController {
@@ -11,6 +14,11 @@ export class ControlsController {
     @Get()
     async findAll(@Query() query: any) {
         return this.controlsService.findAll(query);
+    }
+
+    @Get(':id/relations')
+    async getRelations(@Param('id') id: string) {
+        return this.controlsService.getRelations(id);
     }
 
     @Get(':id')
@@ -51,6 +59,24 @@ export class ControlsController {
     @Get(':id/tests')
     async getTests(@Param('id') id: string) {
         return this.controlsService.getTests(id);
+    }
+
+    @Put('tests/:testId/submit')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    async submitForApproval(@Param('testId') testId: string, @CurrentUser('id') userId: string) {
+        return this.controlsService.submitForApproval(testId, userId);
+    }
+
+    @Put('tests/:testId/approve')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    async approveTest(@Param('testId') testId: string, @CurrentUser('id') userId: string) {
+        return this.controlsService.approveTest(testId, userId);
+    }
+
+    @Put('tests/:testId/reject')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    async rejectTest(@Param('testId') testId: string, @Body('reason') reason: string, @CurrentUser('id') userId: string) {
+        return this.controlsService.rejectTest(testId, userId, reason);
     }
 
     @Delete(':id')

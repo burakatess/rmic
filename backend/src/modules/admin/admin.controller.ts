@@ -9,10 +9,13 @@ import {
     Query,
     UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { Roles, CurrentUser } from '../../common/decorators';
 import { RolesGuard } from '../../common/guards';
 
+@ApiTags('Admin')
+@ApiBearerAuth('JWT-Auth')
 @Controller('admin')
 @UseGuards(RolesGuard)
 @Roles('SYSTEM_ADMIN')

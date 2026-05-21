@@ -261,7 +261,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Charts Row 1 - Trend & Heat Map */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
                 {/* Risk Trend Chart */}
                 <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
                     <h3 className="text-lg font-semibold text-gray-800 mb-4">Risk Trendi (Son 12 Ay)</h3>
@@ -368,7 +368,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Charts Row 2 - Pie Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
                 {/* Risk Distribution Pie */}
                 <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
                     <h3 className="text-lg font-semibold text-gray-800 mb-4">Risk Dağılımı</h3>
@@ -383,7 +383,7 @@ export default function DashboardPage() {
                                     outerRadius={90}
                                     paddingAngle={3}
                                     dataKey="value"
-                                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                    label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
                                 >
                                     {pieData.map((_, index) => (
                                         <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
@@ -409,7 +409,7 @@ export default function DashboardPage() {
                                     outerRadius={90}
                                     paddingAngle={3}
                                     dataKey="value"
-                                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                    label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
                                 >
                                     {controlData.map((_, index) => (
                                         <Cell key={`cell-${index}`} fill={CONTROL_COLORS[index % CONTROL_COLORS.length]} />

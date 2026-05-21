@@ -12,7 +12,9 @@ export class ControlsService {
     }
 
     async findAll(query: any) {
-        const { search, type, nature, ownerId, effectivenessStatus, page = 1, limit = 20 } = query;
+        const { search, type, nature, ownerId, effectivenessStatus, sortBy, sortOrder } = query;
+        const page = parseInt(query.page, 10) || 1;
+        const limit = parseInt(query.limit, 10) || 20;
         const skip = (page - 1) * limit;
 
         const where: any = {};
@@ -32,7 +34,7 @@ export class ControlsService {
             this.prisma.control.findMany({
                 where,
                 include: {
-                    owner: { select: { id: true, firstName: true, lastName: true, email: true } },
+                    owner: { select: { id: true, firstName: true, lastName: true, email: true, department: true } },
                     risks: {
                         include: {
                             risk: {
@@ -40,11 +42,20 @@ export class ControlsService {
                             }
                         }
                     },
+                    findings: {
+                        select: {
+                            id: true,
+                            findingId: true,
+                            actions: {
+                                select: { id: true, actionId: true }
+                            }
+                        }
+                    },
                     _count: { select: { risks: true, tests: true, findings: true } },
                 },
                 skip,
                 take: limit,
-                orderBy: { createdAt: 'desc' },
+                orderBy: { [sortBy || 'createdAt']: sortOrder || 'desc' },
             }),
             this.prisma.control.count({ where }),
         ]);
@@ -57,6 +68,8 @@ export class ControlsService {
             where: { id },
             include: {
                 owner: { select: { id: true, firstName: true, lastName: true, email: true } },
+                testPerformer: { select: { id: true, firstName: true, lastName: true, email: true } },
+                reviewer: { select: { id: true, firstName: true, lastName: true, email: true } },
                 risks: { include: { risk: true } },
                 tests: { orderBy: { testDate: 'desc' }, take: 10 },
                 findings: { orderBy: { createdAt: 'desc' }, take: 10 },
@@ -158,6 +171,120 @@ export class ControlsService {
             where: { controlId },
             orderBy: { testDate: 'desc' },
         });
+    }
+
+    // Approval Workflow Methods
+    async submitForApproval(testId: string, userId: string) {
+        const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
+        if (!test) throw new NotFoundException(`Test with ID ${testId} not found`);
+
+        const updatedTest = await this.prisma.controlTest.update({
+            where: { id: testId },
+            data: { approvalStatus: 'PENDING_APPROVAL' },
+        });
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'SUBMIT_FOR_APPROVAL', entityType: 'ControlTest', entityId: testId, newValue: updatedTest },
+        });
+
+        return updatedTest;
+    }
+
+    async approveTest(testId: string, userId: string) {
+        const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
+        if (!test) throw new NotFoundException(`Test with ID ${testId} not found`);
+
+        const updatedTest = await this.prisma.controlTest.update({
+            where: { id: testId },
+            data: {
+                approvalStatus: 'APPROVED',
+                approvedBy: userId,
+                approvedAt: new Date(),
+            },
+        });
+
+        // Update control's lastTestDate when approved
+        await this.prisma.control.update({
+            where: { id: test.controlId },
+            data: {
+                lastTestDate: test.testDate,
+                lastTestResult: test.result,
+                effectivenessStatus: test.result,
+            },
+        });
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'APPROVE', entityType: 'ControlTest', entityId: testId, newValue: updatedTest },
+        });
+
+        return updatedTest;
+    }
+
+    async rejectTest(testId: string, userId: string, reason: string) {
+        const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
+        if (!test) throw new NotFoundException(`Test with ID ${testId} not found`);
+
+        const updatedTest = await this.prisma.controlTest.update({
+            where: { id: testId },
+            data: {
+                approvalStatus: 'REJECTED',
+                rejectionReason: reason,
+            },
+        });
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'REJECT', entityType: 'ControlTest', entityId: testId, newValue: updatedTest },
+        });
+
+        return updatedTest;
+    }
+
+    async getRelations(id: string) {
+        const control = await this.prisma.control.findUnique({
+            where: { id },
+            include: {
+                owner: { select: { id: true, firstName: true, lastName: true } },
+            },
+        });
+        if (!control) throw new NotFoundException(`Control with ID ${id} not found`);
+
+        // Get linked risks via mapping
+        const riskMappings = await this.prisma.controlRiskMapping.findMany({
+            where: { controlId: id },
+            include: {
+                risk: {
+                    select: { id: true, riskId: true, name: true, status: true, residualRiskScore: true },
+                },
+            },
+        });
+        const risks = riskMappings.map(m => m.risk);
+
+        // Get findings linked to this control
+        const findings = await this.prisma.finding.findMany({
+            where: { controlId: id },
+            select: { id: true, findingId: true, description: true, status: true, severity: true },
+        });
+        const findingIds = findings.map(f => f.id);
+
+        // Get actions linked to these findings
+        const actions = await this.prisma.action.findMany({
+            where: { findingId: { in: findingIds } },
+            select: { id: true, actionId: true, description: true, status: true, dueDate: true },
+        });
+
+        return {
+            control: {
+                id: control.id,
+                controlId: control.controlId,
+                name: control.name,
+                effectivenessStatus: control.effectivenessStatus,
+                type: control.type,
+                owner: control.owner,
+            },
+            risks,
+            findings,
+            actions,
+        };
     }
 
     async delete(id: string, userId: string) {

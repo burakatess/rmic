@@ -35,56 +35,32 @@ export default function LoginPage() {
     };
 
     return (
-        <div style={{
-            minHeight: '100vh',
-            backgroundColor: '#0f172a',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '24px',
-            fontFamily: 'system-ui, -apple-system, sans-serif'
-        }}>
-            <div style={{ width: '100%', maxWidth: '400px' }}>
-                <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans">
+            <div className="w-full max-w-[400px]">
+                {/* Logo & Title */}
+                <div className="text-center mb-10">
                     <img
                         src="/ignis-icon.png"
                         alt="Burak GRC"
-                        style={{
-                            height: '64px',
-                            width: '64px',
-                            objectFit: 'contain',
-                            marginBottom: '20px'
-                        }}
+                        className="h-16 w-16 object-contain mx-auto mb-5"
                     />
-                    <h1 style={{ fontSize: '26px', fontWeight: 600, color: 'white', margin: 0 }}>Burak GRC</h1>
-                    <p style={{ fontSize: '15px', color: '#64748b', marginTop: '8px' }}>
+                    <h1 className="text-[26px] font-semibold text-white">Burak GRC</h1>
+                    <p className="text-[15px] text-slate-500 mt-2">
                         Risk Yönetimi ve İç Kontrol Platformu
                     </p>
                 </div>
 
-                <div style={{
-                    backgroundColor: '#1e293b',
-                    border: '1px solid #334155',
-                    borderRadius: '16px',
-                    padding: '32px'
-                }}>
+                {/* Login Card */}
+                <div className="bg-slate-800 border border-slate-700 rounded-2xl p-8">
                     <form onSubmit={handleSubmit}>
                         {error && (
-                            <div style={{
-                                backgroundColor: '#450a0a',
-                                border: '1px solid #7f1d1d',
-                                borderRadius: '12px',
-                                padding: '12px 16px',
-                                marginBottom: '20px',
-                                color: '#fca5a5',
-                                fontSize: '14px'
-                            }}>
+                            <div className="bg-red-950 border border-red-900 rounded-xl px-4 py-3 mb-5 text-red-300 text-sm">
                                 {error}
                             </div>
                         )}
 
-                        <div style={{ marginBottom: '20px' }}>
-                            <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: '#94a3b8', marginBottom: '8px' }}>
+                        <div className="mb-5">
+                            <label className="block text-[13px] font-medium text-slate-400 mb-2">
                                 E-posta Adresi
                             </label>
                             <input
@@ -93,22 +69,12 @@ export default function LoginPage() {
                                 onChange={(e) => setEmail(e.target.value)}
                                 placeholder="ornek@sirket.com"
                                 required
-                                style={{
-                                    width: '100%',
-                                    height: '48px',
-                                    padding: '0 16px',
-                                    backgroundColor: '#0f172a',
-                                    border: '1px solid #334155',
-                                    borderRadius: '12px',
-                                    color: 'white',
-                                    fontSize: '15px',
-                                    boxSizing: 'border-box'
-                                }}
+                                className="w-full h-12 px-4 bg-slate-900 border border-slate-700 rounded-xl text-white text-[15px] placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors"
                             />
                         </div>
 
-                        <div style={{ marginBottom: '20px' }}>
-                            <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: '#94a3b8', marginBottom: '8px' }}>
+                        <div className="mb-5">
+                            <label className="block text-[13px] font-medium text-slate-400 mb-2">
                                 Şifre
                             </label>
                             <input
@@ -117,82 +83,44 @@ export default function LoginPage() {
                                 onChange={(e) => setPassword(e.target.value)}
                                 placeholder="••••••••"
                                 required
-                                style={{
-                                    width: '100%',
-                                    height: '48px',
-                                    padding: '0 16px',
-                                    backgroundColor: '#0f172a',
-                                    border: '1px solid #334155',
-                                    borderRadius: '12px',
-                                    color: 'white',
-                                    fontSize: '15px',
-                                    boxSizing: 'border-box'
-                                }}
+                                className="w-full h-12 px-4 bg-slate-900 border border-slate-700 rounded-xl text-white text-[15px] placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors"
                             />
                         </div>
 
                         <button
                             type="submit"
                             disabled={isLoading}
-                            style={{
-                                width: '100%',
-                                height: '48px',
-                                backgroundColor: '#2563eb',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '12px',
-                                fontSize: '15px',
-                                fontWeight: 600,
-                                cursor: isLoading ? 'not-allowed' : 'pointer',
-                                opacity: isLoading ? 0.7 : 1
-                            }}
+                            className="w-full h-12 bg-blue-600 text-white border-none rounded-xl text-[15px] font-semibold cursor-pointer hover:bg-blue-700 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
                         >
                             {isLoading ? 'Giriş yapılıyor...' : 'Giriş Yap'}
                         </button>
                     </form>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', margin: '28px 0' }}>
-                        <div style={{ flex: 1, height: '1px', backgroundColor: '#334155' }} />
-                        <span style={{ fontSize: '12px', color: '#475569' }}>DEMO</span>
-                        <div style={{ flex: 1, height: '1px', backgroundColor: '#334155' }} />
+                    {/* Divider */}
+                    <div className="flex items-center gap-4 my-7">
+                        <div className="flex-1 h-px bg-slate-700" />
+                        <span className="text-xs text-slate-600">DEMO</span>
+                        <div className="flex-1 h-px bg-slate-700" />
                     </div>
 
-                    <div style={{
-                        backgroundColor: '#0f172a',
-                        border: '1px solid #1e293b',
-                        borderRadius: '12px',
-                        padding: '16px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between'
-                    }}>
+                    {/* Demo Login */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
                         <div>
-                            <p style={{ fontSize: '14px', fontWeight: 500, color: 'white', margin: 0 }}>admin@grc.com</p>
-                            <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0 0' }}>Şifre: password123</p>
+                            <p className="text-sm font-medium text-white">admin@grc.com</p>
+                            <p className="text-[13px] text-slate-500 mt-1">Şifre: password123</p>
                         </div>
                         <button
                             type="button"
                             onClick={handleDemoLogin}
                             disabled={isLoading}
-                            style={{
-                                height: '36px',
-                                padding: '0 20px',
-                                backgroundColor: '#2563eb',
-                                border: 'none',
-                                borderRadius: '8px',
-                                color: 'white',
-                                fontSize: '13px',
-                                fontWeight: 500,
-                                cursor: isLoading ? 'not-allowed' : 'pointer',
-                                opacity: isLoading ? 0.7 : 1
-                            }}
+                            className="h-9 px-5 bg-blue-600 border-none rounded-lg text-white text-[13px] font-medium cursor-pointer hover:bg-blue-700 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
                         >
                             Hızlı Giriş
                         </button>
                     </div>
                 </div>
 
-                <p style={{ textAlign: 'center', fontSize: '12px', color: '#475569', marginTop: '32px' }}>
+                <p className="text-center text-xs text-slate-600 mt-8">
                     © 2026 Burak GRC. Tüm hakları saklıdır.
                 </p>
             </div>

@@ -1,8 +1,11 @@
 import { Controller, Get, Post, Put, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ActionsService } from './actions.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
 
+@ApiTags('Actions')
+@ApiBearerAuth('JWT-Auth')
 @Controller('actions')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ActionsController {
@@ -11,6 +14,11 @@ export class ActionsController {
     @Get()
     async findAll(@Query() query: any) {
         return this.actionsService.findAll(query);
+    }
+
+    @Get(':id/relations')
+    async getRelations(@Param('id') id: string) {
+        return this.actionsService.getRelations(id);
     }
 
     @Get(':id')

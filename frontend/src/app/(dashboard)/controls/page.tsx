@@ -19,6 +19,8 @@ interface Control {
     lastTestResult: string;
     effectivenessStatus: string;
     linkedRisks: { id: string; riskId: string }[];
+    linkedFindings: { id: string; findingId: string }[];
+    linkedActions: { id: string; actionId: string }[];
     linkedHighRisks: number;
     openActions: number;
     hasEvidence: boolean;
@@ -29,11 +31,13 @@ interface Control {
 }
 
 const typeConfig: Record<string, { label: string; color: string }> = {
-    IT_GENERAL: { label: 'IT Genel', color: 'bg-blue-100 text-blue-700' },
-    IT_APPLICATION: { label: 'IT Uygulama', color: 'bg-indigo-100 text-indigo-700' },
-    OPERATIONAL: { label: 'Operasyonel', color: 'bg-gray-100 text-gray-700' },
-    COMPLIANCE: { label: 'Uyum', color: 'bg-purple-100 text-purple-700' },
-    FINANCIAL: { label: 'Finansal', color: 'bg-emerald-100 text-emerald-700' },
+    IT_GENERAL: { label: 'BT', color: 'bg-blue-100 text-blue-700' },
+    IT_APPLICATION: { label: 'BT', color: 'bg-blue-100 text-blue-700' },
+    OPERATIONAL: { label: 'BT Dışı', color: 'bg-purple-100 text-purple-700' },
+    COMPLIANCE: { label: 'BT Dışı', color: 'bg-purple-100 text-purple-700' },
+    FINANCIAL: { label: 'BT Dışı', color: 'bg-purple-100 text-purple-700' },
+    BT: { label: 'BT', color: 'bg-blue-100 text-blue-700' },
+    BT_DISI: { label: 'BT Dışı', color: 'bg-purple-100 text-purple-700' },
 };
 
 const natureConfig: Record<string, { label: string; color: string }> = {
@@ -110,6 +114,10 @@ export default function ControlInventoryPage() {
                     effectivenessStatus: String(c.effectivenessStatus || 'NOT_TESTED'),
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     linkedRisks: (c.risks || c.riskMappings || []).map((r: any) => ({ id: r.risk?.id, riskId: r.risk?.riskId })).filter((r: any) => r.id && r.riskId),
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    linkedFindings: (c.findings || []).map((f: any) => ({ id: f.id, findingId: f.findingId })).filter((f: any) => f.id && f.findingId),
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    linkedActions: (c.findings || []).flatMap((f: any) => (f.actions || []).map((a: any) => ({ id: a.id, actionId: a.actionId }))).filter((a: any) => a.id && a.actionId),
                     linkedHighRisks: 0,
                     openActions: 0,
                     hasEvidence: false,
@@ -143,6 +151,7 @@ export default function ControlInventoryPage() {
         testResult: 80,
         effectiveness: 80,
         risks: 50,
+        findings: 60,
         actions: 60,
         evidence: 50,
         regulations: 100,
@@ -195,16 +204,24 @@ export default function ControlInventoryPage() {
     const overdueTests = controls.filter(c => c.hasOverdueTest).length;
     const missingEvidence = controls.filter(c => !c.hasEvidence).length;
 
-    // Filter
+    // Helper function to check if type matches filter
+    const matchesTypeFilter = (type: string, filter: string): boolean => {
+        if (!filter) return true;
+        if (filter === 'BT') return ['IT_GENERAL', 'IT_APPLICATION', 'BT'].includes(type);
+        if (filter === 'BT_DISI') return ['OPERATIONAL', 'FINANCIAL', 'COMPLIANCE', 'BT_DISI'].includes(type);
+        return type === filter;
+    };
+
+    // Filter and sort by Control ID (default)
     const filteredControls = controls.filter(c => {
         if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !c.controlId.toLowerCase().includes(search.toLowerCase())) return false;
-        if (typeFilter && c.type !== typeFilter) return false;
+        if (typeFilter && !matchesTypeFilter(c.type, typeFilter)) return false;
         if (natureFilter && c.nature !== natureFilter) return false;
         if (automationFilter && c.automation !== automationFilter) return false;
         if (effectivenessFilter && c.effectivenessStatus !== effectivenessFilter) return false;
         if (unitFilter && c.owner.department !== unitFilter) return false;
         return true;
-    });
+    }).sort((a, b) => a.controlId.localeCompare(b.controlId));
 
     const toggleSelect = (id: string) => {
         setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
@@ -312,10 +329,8 @@ export default function ControlInventoryPage() {
 
                         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
                             <option value="">Tüm Tipler</option>
-                            <option value="IT_GENERAL">IT Genel</option>
-                            <option value="IT_APPLICATION">IT Uygulama</option>
-                            <option value="OPERATIONAL">Operasyonel</option>
-                            <option value="COMPLIANCE">Uyum</option>
+                            <option value="BT">BT</option>
+                            <option value="BT_DISI">BT Dışı</option>
                         </select>
 
                         <select value={natureFilter} onChange={(e) => setNatureFilter(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
@@ -470,6 +485,13 @@ export default function ControlInventoryPage() {
                                             onMouseDown={(e) => handleMouseDown(e, 'risks')}
                                         />
                                     </th>
+                                    <th style={{ width: columnWidths.findings }} className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase whitespace-nowrap relative group">
+                                        BULGU
+                                        <div
+                                            className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-gray-300"
+                                            onMouseDown={(e) => handleMouseDown(e, 'findings')}
+                                        />
+                                    </th>
                                     <th style={{ width: columnWidths.actions }} className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase whitespace-nowrap relative group">
                                         AKSİYON
                                         <div
@@ -583,10 +605,55 @@ export default function ControlInventoryPage() {
                                                 )}
                                             </td>
                                             <td className="px-3 py-2.5 text-center">
-                                                {control.openActions > 0 ? (
-                                                    <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium ${control.hasOverdueActions ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
-                                                        {control.openActions}
-                                                    </span>
+                                                {control.linkedFindings.length > 0 ? (
+                                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                                        <div className="flex flex-wrap justify-center gap-1">
+                                                            {control.linkedFindings.slice(0, 2).map((finding, idx) => (
+                                                                <Link
+                                                                    key={finding.id}
+                                                                    href={`/findings/${finding.id}`}
+                                                                    className="text-xs text-purple-600 hover:text-purple-800 hover:underline font-medium"
+                                                                >
+                                                                    {finding.findingId}{idx < Math.min(control.linkedFindings.length, 2) - 1 ? ',' : ''}
+                                                                </Link>
+                                                            ))}
+                                                        </div>
+                                                        {control.linkedFindings.length > 2 && (
+                                                            <span
+                                                                className="text-[10px] text-gray-500 cursor-help"
+                                                                title={control.linkedFindings.slice(2).map(f => f.findingId).join(', ')}
+                                                            >
+                                                                (+{control.linkedFindings.length - 2} daha)
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-gray-300">—</span>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-2.5 text-center">
+                                                {control.linkedActions.length > 0 ? (
+                                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                                        <div className="flex flex-wrap justify-center gap-1">
+                                                            {control.linkedActions.slice(0, 2).map((action, idx) => (
+                                                                <Link
+                                                                    key={action.id}
+                                                                    href={`/actions/${action.id}`}
+                                                                    className="text-xs text-orange-600 hover:text-orange-800 hover:underline font-medium"
+                                                                >
+                                                                    {action.actionId}{idx < Math.min(control.linkedActions.length, 2) - 1 ? ',' : ''}
+                                                                </Link>
+                                                            ))}
+                                                        </div>
+                                                        {control.linkedActions.length > 2 && (
+                                                            <span
+                                                                className="text-[10px] text-gray-500 cursor-help"
+                                                                title={control.linkedActions.slice(2).map(a => a.actionId).join(', ')}
+                                                            >
+                                                                (+{control.linkedActions.length - 2} daha)
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 ) : (
                                                     <span className="text-gray-300">—</span>
                                                 )}

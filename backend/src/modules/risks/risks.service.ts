@@ -208,12 +208,13 @@ export class RisksService {
                     },
                 },
                 riskEntries: {
-                    select: {
-                        mutabakatTarihi: true,
-                        olusturmaTarihi: true,
-                        guncellemeTarihi: true,
+                    include: {
+                        riskManagementControls: {
+                            include: {
+                                control: true,
+                            },
+                        },
                     },
-                    take: 1,
                     orderBy: { olusturmaTarihi: 'desc' },
                 },
             },
@@ -567,6 +568,68 @@ export class RisksService {
             },
             orderBy: { createdAt: 'desc' },
         });
+    }
+
+    async getRelations(id: string) {
+        const risk = await this.prisma.risk.findUnique({
+            where: { id },
+            include: {
+                category: true,
+                owner: { select: { id: true, firstName: true, lastName: true } },
+            },
+        });
+        if (!risk) throw new NotFoundException(`Risk with ID ${id} not found`);
+
+        // Get linked controls via mapping
+        const controlMappings = await this.prisma.controlRiskMapping.findMany({
+            where: { riskId: id },
+            include: {
+                control: {
+                    select: { id: true, controlId: true, name: true, effectivenessStatus: true, type: true },
+                },
+            },
+        });
+        const controls = controlMappings.map(m => m.control);
+        const controlIds = controls.map(c => c.id);
+
+        // Get findings linked to these controls or directly to the risk
+        const findings = await this.prisma.finding.findMany({
+            where: {
+                OR: [
+                    { controlId: { in: controlIds } },
+                    { riskId: id },
+                ],
+            },
+            select: { id: true, findingId: true, description: true, status: true, severity: true },
+        });
+        const findingIds = findings.map(f => f.id);
+
+        // Get actions linked to these findings or directly to the risk
+        const actions = await this.prisma.action.findMany({
+            where: {
+                OR: [
+                    { findingId: { in: findingIds } },
+                    { riskId: id },
+                ],
+            },
+            select: { id: true, actionId: true, description: true, status: true, dueDate: true },
+        });
+
+        return {
+            risk: {
+                id: risk.id,
+                riskId: risk.riskId,
+                name: risk.name,
+                status: risk.status,
+                inherentRiskScore: risk.inherentRiskScore,
+                residualRiskScore: risk.residualRiskScore,
+                category: risk.category,
+                owner: risk.owner,
+            },
+            controls,
+            findings,
+            actions,
+        };
     }
 
     async delete(id: string, userId: string) {

@@ -10,7 +10,7 @@ export default function DashboardLayout({
             <Sidebar />
             <Header />
             <main className="ml-64 pt-16 min-h-screen">
-                <div className="p-6">
+                <div className="p-6 xl:p-8 2xl:p-10 w-full max-w-full">
                     {children}
                 </div>
             </main>

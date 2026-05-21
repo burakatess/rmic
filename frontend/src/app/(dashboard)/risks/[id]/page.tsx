@@ -60,6 +60,18 @@ interface Action {
     findingDescription?: string;
 }
 
+interface RYKControl {
+    id: string;
+    controlCode: string;
+    name: string;
+    description: string;
+    effectiveness: number;
+    frequency: number;
+    automationLevel: number;
+    controlScore: number;
+    applicabilityScore?: number;
+}
+
 const AUDIT_LOG = [
     { date: '2024-12-15 14:30', user: 'Ahmet Yılmaz', action: 'Risk değerlendirmesi güncellendi' },
     { date: '2024-12-10 09:15', user: 'Ayşe Kaya', action: 'Kontrol C-2024-0006 eklendi' },
@@ -104,9 +116,10 @@ const getScoreColor = (score: number) => {
 
 export default function RiskDetailPage() {
     const params = useParams();
-    const [activeTab, setActiveTab] = useState<'summary' | 'controls' | 'actions' | 'findings' | 'history'>('summary');
+    const [activeTab, setActiveTab] = useState<'summary' | 'rykControls' | 'controls' | 'actions' | 'findings' | 'history'>('summary');
     const [risk, setRisk] = useState<Risk | null>(null);
     const [controls, setControls] = useState<Control[]>([]);
+    const [rykControls, setRykControls] = useState<RYKControl[]>([]);
     const [findings, setFindings] = useState<Finding[]>([]);
     const [actions, setActions] = useState<Action[]>([]);
     const [loading, setLoading] = useState(true);
@@ -224,6 +237,32 @@ export default function RiskDetailPage() {
                             findingDescription: String(a.finding?.description || '').substring(0, 50),
                         })));
                     }
+
+                    // Extract RYK controls from riskEntries
+                    if (data.riskEntries?.length) {
+                        const allRykControls: RYKControl[] = [];
+                        data.riskEntries.forEach((entry: any) => {
+                            if (entry.riskManagementControls?.length) {
+                                entry.riskManagementControls.forEach((mapping: any) => {
+                                    const ctrl = mapping.control;
+                                    if (ctrl) {
+                                        allRykControls.push({
+                                            id: String(ctrl.id || ''),
+                                            controlCode: String(ctrl.controlCode || ''),
+                                            name: String(ctrl.name || ''),
+                                            description: String(ctrl.description || ''),
+                                            effectiveness: Number(ctrl.effectiveness || 1),
+                                            frequency: Number(ctrl.frequency || 1),
+                                            automationLevel: Number(ctrl.automationLevel || 1),
+                                            controlScore: Number(ctrl.controlScore || 0),
+                                            applicabilityScore: mapping.applicabilityScore,
+                                        });
+                                    }
+                                });
+                            }
+                        });
+                        setRykControls(allRykControls);
+                    }
                 }
             } catch (err) {
                 console.error('Failed to fetch risk:', err);
@@ -239,7 +278,8 @@ export default function RiskDetailPage() {
 
     const tabs = [
         { id: 'summary', label: 'Özet', icon: '📋' },
-        { id: 'controls', label: 'Kontroller', icon: '🛡️', count: controls.length },
+        { id: 'rykControls', label: 'Risk Yönetimi Kontrolleri', icon: '🎯', count: rykControls.length },
+        { id: 'controls', label: 'İç Kontrol Çalışmaları', icon: '🛡️', count: controls.length },
         { id: 'actions', label: 'Aksiyonlar', icon: '📌', count: actions.filter(a => a.status !== 'COMPLETED').length },
         { id: 'findings', label: 'Bulgular', icon: '🔍', count: findings.length },
         { id: 'history', label: 'Geçmiş', icon: '📜' },
@@ -433,6 +473,79 @@ export default function RiskDetailPage() {
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'rykControls' && (
+                            <div>
+                                <div className="flex items-center justify-between mb-4">
+                                    <div>
+                                        <p className="text-sm text-gray-500">
+                                            {rykControls.length} Risk Yönetimi Kontrolu bu riskle ilişkilendirilmiş
+                                        </p>
+                                        <p className="text-xs text-gray-400 mt-1">
+                                            Bu kontroller risk skorunun hesaplanmasına etki eder
+                                        </p>
+                                    </div>
+                                    <Link href="/risks/controls" className="text-sm text-blue-600 hover:underline">
+                                        RYK Kontrolleri Yönet →
+                                    </Link>
+                                </div>
+
+                                {rykControls.length === 0 ? (
+                                    <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                                        <span className="text-4xl mb-3 block">🎯</span>
+                                        <p className="text-gray-600 font-medium">Henüz Risk Yönetimi Kontrolü eklenmemiş</p>
+                                        <p className="text-xs text-gray-400 mt-2">RYK kontrolleri ekleyerek risk skorunu etkileyebilirsiniz</p>
+                                        <Link
+                                            href="/risks/controls"
+                                            className="inline-block mt-4 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+                                        >
+                                            Kontrol Ekle
+                                        </Link>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {rykControls.map(control => (
+                                            <div key={control.id} className="flex items-center justify-between p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl border border-purple-100">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center text-purple-600">
+                                                        🎯
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-mono text-sm text-purple-600">{control.controlCode}</p>
+                                                        <p className="font-medium text-gray-900">{control.name}</p>
+                                                        <p className="text-xs text-gray-500 mt-1 max-w-md truncate">{control.description}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-6">
+                                                    <div className="text-center">
+                                                        <p className="text-xs text-gray-400">Kontrol Skoru</p>
+                                                        <p className="text-lg font-bold text-purple-600">{control.controlScore?.toFixed(2) || '-'}</p>
+                                                    </div>
+                                                    <div className="text-center">
+                                                        <p className="text-xs text-gray-400">Uygulanabilirlik</p>
+                                                        <p className="text-lg font-bold text-indigo-600">{control.applicabilityScore || 3}</p>
+                                                    </div>
+                                                    <div className="grid grid-cols-3 gap-2 text-xs">
+                                                        <div className="text-center px-2 py-1 bg-white rounded">
+                                                            <p className="text-gray-400">Etkinlik</p>
+                                                            <p className="font-medium">{control.effectiveness}</p>
+                                                        </div>
+                                                        <div className="text-center px-2 py-1 bg-white rounded">
+                                                            <p className="text-gray-400">Sıklık</p>
+                                                            <p className="font-medium">{control.frequency}</p>
+                                                        </div>
+                                                        <div className="text-center px-2 py-1 bg-white rounded">
+                                                            <p className="text-gray-400">Otomasyon</p>
+                                                            <p className="font-medium">{control.automationLevel}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
 
