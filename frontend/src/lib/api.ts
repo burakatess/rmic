@@ -137,7 +137,8 @@ class ApiClient {
             email: string;
             firstName: string;
             lastName: string;
-            role: { name: string; permissions: string[] };
+            department?: string;
+            role: { id?: string; name: string; permissions: string[] };
         }>('/auth/me');
     }
 

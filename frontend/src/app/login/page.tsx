@@ -1,128 +1,153 @@
 'use client';
 
 import { useState } from 'react';
-import api from '@/lib/api';
+import { useAuth } from '@/components/auth';
+import { useToast } from '@/components/ui/Toast';
+import { Button, Input } from '@/components/ui';
 
 export default function LoginPage() {
+    const { login } = useAuth();
+    const { error: toastError, success: toastSuccess } = useToast();
+    
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState('');
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setError('');
         setIsLoading(true);
 
         try {
-            await api.login(email, password);
-            window.location.href = '/dashboard';
+            await login(email, password);
+            toastSuccess('Giriş başarılı', 'Dashboard\'a yönlendiriliyorsunuz...');
+            // Redirect is handled by AuthProvider
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Giriş başarısız');
+            toastError('Giriş başarısız', err instanceof Error ? err.message : 'Lütfen bilgilerinizi kontrol edin.');
             setIsLoading(false);
         }
     };
 
-    const handleDemoLogin = async () => {
+    const handleDemoLogin = async (demoEmail: string) => {
         setIsLoading(true);
         try {
-            await api.login('admin@grc.com', 'password123');
-            window.location.href = '/dashboard';
+            await login(demoEmail, 'password123');
+            toastSuccess('Giriş başarılı', 'Dashboard\'a yönlendiriliyorsunuz...');
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Demo giriş başarısız');
+            toastError('Demo giriş başarısız', err instanceof Error ? err.message : 'Bağlantı hatası.');
             setIsLoading(false);
         }
     };
 
     return (
         <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans">
-            <div className="w-full max-w-[400px]">
+            <div className="w-full max-w-md animate-fadeInDown">
                 {/* Logo & Title */}
                 <div className="text-center mb-10">
-                    <img
-                        src="/ignis-icon.png"
-                        alt="Burak GRC"
-                        className="h-16 w-16 object-contain mx-auto mb-5"
-                    />
-                    <h1 className="text-[26px] font-semibold text-white">Burak GRC</h1>
-                    <p className="text-[15px] text-slate-500 mt-2">
-                        Risk Yönetimi ve İç Kontrol Platformu
+                    <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-800 rounded-2xl mb-6 shadow-xl border border-blue-700/50">
+                        <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                        </svg>
+                    </div>
+                    <h1 className="text-3xl font-semibold text-white tracking-tight">Burak GRC</h1>
+                    <p className="text-base text-slate-400 mt-2">
+                        Kurumsal Risk ve Uyum Platformu
                     </p>
                 </div>
 
                 {/* Login Card */}
-                <div className="bg-slate-800 border border-slate-700 rounded-2xl p-8">
-                    <form onSubmit={handleSubmit}>
-                        {error && (
-                            <div className="bg-red-950 border border-red-900 rounded-xl px-4 py-3 mb-5 text-red-300 text-sm">
-                                {error}
-                            </div>
-                        )}
+                <div className="bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-2xl">
+                    <form onSubmit={handleSubmit} className="space-y-5">
+                        <Input
+                            label="E-posta Adresi"
+                            type="email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="ornek@sirket.com"
+                            required
+                            className="bg-slate-900 border-slate-700 text-white placeholder-slate-500 focus:border-blue-500"
+                        />
 
-                        <div className="mb-5">
-                            <label className="block text-[13px] font-medium text-slate-400 mb-2">
-                                E-posta Adresi
-                            </label>
-                            <input
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                placeholder="ornek@sirket.com"
-                                required
-                                className="w-full h-12 px-4 bg-slate-900 border border-slate-700 rounded-xl text-white text-[15px] placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors"
-                            />
-                        </div>
+                        <Input
+                            label="Şifre"
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="••••••••"
+                            required
+                            className="bg-slate-900 border-slate-700 text-white placeholder-slate-500 focus:border-blue-500"
+                        />
 
-                        <div className="mb-5">
-                            <label className="block text-[13px] font-medium text-slate-400 mb-2">
-                                Şifre
-                            </label>
-                            <input
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                placeholder="••••••••"
-                                required
-                                className="w-full h-12 px-4 bg-slate-900 border border-slate-700 rounded-xl text-white text-[15px] placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors"
-                            />
-                        </div>
-
-                        <button
+                        <Button
                             type="submit"
-                            disabled={isLoading}
-                            className="w-full h-12 bg-blue-600 text-white border-none rounded-xl text-[15px] font-semibold cursor-pointer hover:bg-blue-700 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+                            loading={isLoading}
+                            fullWidth
+                            className="h-12 text-[15px] mt-2"
                         >
-                            {isLoading ? 'Giriş yapılıyor...' : 'Giriş Yap'}
-                        </button>
+                            Giriş Yap
+                        </Button>
                     </form>
 
                     {/* Divider */}
-                    <div className="flex items-center gap-4 my-7">
+                    <div className="flex items-center gap-4 my-8">
                         <div className="flex-1 h-px bg-slate-700" />
-                        <span className="text-xs text-slate-600">DEMO</span>
+                        <span className="text-xs font-medium text-slate-500 tracking-wider">HIZLI DEMO ERİŞİMİ</span>
                         <div className="flex-1 h-px bg-slate-700" />
                     </div>
 
-                    {/* Demo Login */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
-                        <div>
-                            <p className="text-sm font-medium text-white">admin@grc.com</p>
-                            <p className="text-[13px] text-slate-500 mt-1">Şifre: password123</p>
-                        </div>
+                    {/* Demo Logins */}
+                    <div className="space-y-3">
                         <button
                             type="button"
-                            onClick={handleDemoLogin}
+                            onClick={() => handleDemoLogin('admin@grc.com')}
                             disabled={isLoading}
-                            className="h-9 px-5 bg-blue-600 border-none rounded-lg text-white text-[13px] font-medium cursor-pointer hover:bg-blue-700 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+                            className="w-full flex items-center justify-between p-3 bg-slate-900/50 hover:bg-slate-900 border border-slate-700/50 rounded-xl transition-colors text-left group disabled:opacity-50"
                         >
-                            Hızlı Giriş
+                            <div>
+                                <p className="text-sm font-medium text-slate-200 group-hover:text-white">Sistem Yöneticisi</p>
+                                <p className="text-xs text-slate-500">Tüm yetkiler (admin@grc.com)</p>
+                            </div>
+                            <svg className="w-5 h-5 text-slate-600 group-hover:text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                        </button>
+                        
+                        <button
+                            type="button"
+                            onClick={() => handleDemoLogin('risk.manager@grc.com')}
+                            disabled={isLoading}
+                            className="w-full flex items-center justify-between p-3 bg-slate-900/50 hover:bg-slate-900 border border-slate-700/50 rounded-xl transition-colors text-left group disabled:opacity-50"
+                        >
+                            <div>
+                                <p className="text-sm font-medium text-slate-200 group-hover:text-white">Risk Yöneticisi</p>
+                                <p className="text-xs text-slate-500">Süreç yönetimi (risk.manager@grc.com)</p>
+                            </div>
+                            <svg className="w-5 h-5 text-slate-600 group-hover:text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => handleDemoLogin('auditor@grc.com')}
+                            disabled={isLoading}
+                            className="w-full flex items-center justify-between p-3 bg-slate-900/50 hover:bg-slate-900 border border-slate-700/50 rounded-xl transition-colors text-left group disabled:opacity-50"
+                        >
+                            <div>
+                                <p className="text-sm font-medium text-slate-200 group-hover:text-white">Denetçi</p>
+                                <p className="text-xs text-slate-500">Denetim ve bulgular (auditor@grc.com)</p>
+                            </div>
+                            <svg className="w-5 h-5 text-slate-600 group-hover:text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
                         </button>
                     </div>
                 </div>
 
-                <p className="text-center text-xs text-slate-600 mt-8">
-                    © 2026 Burak GRC. Tüm hakları saklıdır.
-                </p>
+                <div className="text-center mt-8">
+                    <p className="text-xs text-slate-500">
+                        Güvenli GRC Portalı • IP: 192.168.1.101 • v2.0
+                    </p>
+                </div>
             </div>
         </div>
     );

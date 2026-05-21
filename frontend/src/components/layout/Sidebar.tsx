@@ -3,11 +3,14 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { useAuth, PermissionGate } from '../auth';
+
 interface NavItem {
     label: string;
     href?: string;
     icon: React.ReactNode;
-    children?: { label: string; href: string }[];
+    children?: { label: string; href: string; permission?: string }[];
+    permission?: string;
 }
 
 // Glassmorphism style icons with gradient strokes
@@ -15,12 +18,13 @@ const navigation: NavItem[] = [
     {
         label: 'Dashboard',
         href: '/dashboard',
+        permission: 'dashboard:view',
         icon: (
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
                 <defs>
                     <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#60a5fa" />
-                        <stop offset="100%" stopColor="#a78bfa" />
+                        <stop offset="0%" stopColor="#3b82f6" />
+                        <stop offset="100%" stopColor="#8b5cf6" />
                     </linearGradient>
                 </defs>
                 <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="url(#grad1)" strokeWidth="1.5" />
@@ -30,15 +34,15 @@ const navigation: NavItem[] = [
             </svg>
         ),
     },
-
     {
         label: 'Risk Yönetimi',
+        permission: 'risk:view',
         icon: (
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
                 <defs>
                     <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#60a5fa" />
-                        <stop offset="100%" stopColor="#a78bfa" />
+                        <stop offset="0%" stopColor="#3b82f6" />
+                        <stop offset="100%" stopColor="#8b5cf6" />
                     </linearGradient>
                 </defs>
                 <path d="M12 3L20 7.5V12C20 16.4 16.6 20.2 12 21C7.4 20.2 4 16.4 4 12V7.5L12 3Z" stroke="url(#grad2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -47,21 +51,22 @@ const navigation: NavItem[] = [
             </svg>
         ),
         children: [
-            { label: 'Risk Girişi ve Hesaplama', href: '/risks/entry' },
+            { label: 'Risk Girişi ve Hesaplama', href: '/risks/entry', permission: 'risk:create' },
             { label: 'RYK Kontrolleri', href: '/risks/controls' },
             { label: 'Risk Envanteri', href: '/risks' },
-            { label: 'Risk Değerlendirme', href: '/risks/assessment' },
-            { label: 'Risk Tedavi', href: '/risks/treatment' },
+            { label: 'Risk Değerlendirme', href: '/risks/assessment', permission: 'risk:assess' },
+            { label: 'Risk Tedavi', href: '/risks/treatment', permission: 'risk:treat' },
         ],
     },
     {
         label: 'Kontrol Yönetimi',
+        permission: 'control:view',
         icon: (
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
                 <defs>
                     <linearGradient id="grad3" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#60a5fa" />
-                        <stop offset="100%" stopColor="#a78bfa" />
+                        <stop offset="0%" stopColor="#3b82f6" />
+                        <stop offset="100%" stopColor="#8b5cf6" />
                     </linearGradient>
                 </defs>
                 <rect x="4" y="4" width="16" height="16" rx="2" stroke="url(#grad3)" strokeWidth="1.5" />
@@ -72,17 +77,18 @@ const navigation: NavItem[] = [
             { label: 'Kontrol Envanteri', href: '/controls' },
             { label: 'Kontrol Takip Ajandası', href: '/controls/agenda' },
             { label: 'Kontrol-Risk Eşleştirme', href: '/controls/mapping' },
-            { label: 'Kontrol Testi', href: '/controls/testing' },
+            { label: 'Kontrol Testi', href: '/controls/testing', permission: 'control:test' },
         ],
     },
     {
         label: 'Denetim & İnceleme',
+        permission: 'audit:view',
         icon: (
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
                 <defs>
                     <linearGradient id="grad4" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#60a5fa" />
-                        <stop offset="100%" stopColor="#a78bfa" />
+                        <stop offset="0%" stopColor="#3b82f6" />
+                        <stop offset="100%" stopColor="#8b5cf6" />
                     </linearGradient>
                 </defs>
                 <rect x="4" y="3" width="12" height="16" rx="2" stroke="url(#grad4)" strokeWidth="1.5" />
@@ -94,17 +100,18 @@ const navigation: NavItem[] = [
         ),
         children: [
             { label: 'Denetim Planı', href: '/audits/plans' },
-            { label: 'Denetim Uygulama', href: '/audits/executions' },
+            { label: 'Denetim Uygulama', href: '/audits/executions', permission: 'audit:execute' },
         ],
     },
     {
         label: 'Bulgu & Aksiyon Yönetimi',
+        permission: 'finding:view',
         icon: (
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
                 <defs>
                     <linearGradient id="grad5" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#60a5fa" />
-                        <stop offset="100%" stopColor="#a78bfa" />
+                        <stop offset="0%" stopColor="#3b82f6" />
+                        <stop offset="100%" stopColor="#8b5cf6" />
                     </linearGradient>
                 </defs>
                 <circle cx="6" cy="12" r="2" stroke="url(#grad5)" strokeWidth="1.5" />
@@ -116,18 +123,19 @@ const navigation: NavItem[] = [
         ),
         children: [
             { label: 'Bulgular', href: '/findings' },
-            { label: 'Aksiyon Listesi', href: '/actions' },
-            { label: 'Etkinlik Değerlendirmesi', href: '/actions/effectiveness' },
+            { label: 'Aksiyon Listesi', href: '/actions', permission: 'action:view' },
+            { label: 'Etkinlik Değerlendirmesi', href: '/actions/effectiveness', permission: 'action:effectiveness' },
         ],
     },
     {
         label: 'Uyum & Regülasyon',
+        permission: 'compliance:view',
         icon: (
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
                 <defs>
                     <linearGradient id="grad6" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#60a5fa" />
-                        <stop offset="100%" stopColor="#a78bfa" />
+                        <stop offset="0%" stopColor="#3b82f6" />
+                        <stop offset="100%" stopColor="#8b5cf6" />
                     </linearGradient>
                 </defs>
                 <rect x="4" y="4" width="16" height="18" rx="2" stroke="url(#grad6)" strokeWidth="1.5" />
@@ -140,18 +148,19 @@ const navigation: NavItem[] = [
         ),
         children: [
             { label: 'Regülasyon Kütüphanesi', href: '/compliance/regulations' },
-            { label: 'Eşleştirme', href: '/compliance/mapping' },
+            { label: 'Eşleştirme', href: '/compliance/mapping', permission: 'compliance:map' },
         ],
     },
     {
         label: 'Raporlama & Analitik',
         href: '/reports',
+        permission: 'report:view',
         icon: (
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
                 <defs>
                     <linearGradient id="grad7" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#60a5fa" />
-                        <stop offset="100%" stopColor="#a78bfa" />
+                        <stop offset="0%" stopColor="#3b82f6" />
+                        <stop offset="100%" stopColor="#8b5cf6" />
                     </linearGradient>
                 </defs>
                 <rect x="4" y="14" width="4" height="6" rx="1" stroke="url(#grad7)" strokeWidth="1.5" />
@@ -162,13 +171,14 @@ const navigation: NavItem[] = [
         ),
     },
     {
-        label: 'Yönetim',
+        label: 'Sistem Yönetimi',
+        permission: 'user:view',
         icon: (
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
                 <defs>
                     <linearGradient id="grad8" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#60a5fa" />
-                        <stop offset="100%" stopColor="#a78bfa" />
+                        <stop offset="0%" stopColor="#3b82f6" />
+                        <stop offset="100%" stopColor="#8b5cf6" />
                     </linearGradient>
                 </defs>
                 <circle cx="12" cy="12" r="3" stroke="url(#grad8)" strokeWidth="1.5" />
@@ -176,10 +186,10 @@ const navigation: NavItem[] = [
             </svg>
         ),
         children: [
-            { label: 'Kullanıcılar & Roller', href: '/admin/users' },
-            { label: 'Rol Yetkileri', href: '/admin/roles' },
-            { label: 'Parametreler', href: '/admin/parameters' },
-            { label: 'Entegrasyonlar', href: '/admin/integrations' },
+            { label: 'Kullanıcılar', href: '/admin/users' },
+            { label: 'Roller & Yetkiler', href: '/admin/roles', permission: 'role:manage' },
+            { label: 'Sistem Parametreleri', href: '/admin/parameters', permission: 'parameter:view' },
+            { label: 'Denetim İzleri', href: '/admin/audit-logs', permission: 'audit_log:view' },
         ],
     },
 ];
@@ -188,32 +198,37 @@ export default function Sidebar() {
     const pathname = usePathname();
 
     return (
-        <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-[#0b0f19] text-white shadow-2xl">
+        <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-[#0b0f19] text-white shadow-2xl flex flex-col">
             {/* Glass overlay */}
-            <div className="absolute inset-0 bg-gradient-to-b from-slate-800/20 to-transparent pointer-events-none" />
+            <div className="absolute inset-0 bg-gradient-to-b from-blue-900/10 to-transparent pointer-events-none" />
 
             {/* Logo */}
-            <div className="relative flex h-20 items-center justify-center border-b border-slate-700/50">
+            <div className="relative flex h-16 items-center justify-center border-b border-slate-800/80 bg-[#0b0f19]">
                 <div className="flex items-center gap-3">
-                    <img
-                        src="/ignis-icon.png"
-                        alt="Burak GRC"
-                        className="h-10 w-10 object-contain"
-                    />
-                    <span className="text-xl font-bold bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500 bg-clip-text text-transparent">
+                    <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                        <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                        </svg>
+                    </div>
+                    <span className="text-[17px] font-semibold tracking-tight text-white">
                         Burak GRC
                     </span>
                 </div>
             </div>
 
             {/* Navigation */}
-            <nav className="relative mt-4 px-3 h-[calc(100vh-5rem)] overflow-y-auto pb-4">
-                <ul className="space-y-1">
-                    {navigation.map((item) => (
-                        <NavItemComponent key={item.label} item={item} pathname={pathname} />
-                    ))}
-                </ul>
+            <nav className="relative flex-1 overflow-y-auto px-3 py-4 space-y-1 scrollbar-thin scrollbar-thumb-slate-700">
+                {navigation.map((item) => (
+                    <PermissionGate key={item.label} permission={item.permission}>
+                        <NavItemComponent item={item} pathname={pathname} />
+                    </PermissionGate>
+                ))}
             </nav>
+            
+            {/* Footer info */}
+            <div className="relative p-4 border-t border-slate-800/80 text-xs text-slate-500 text-center bg-[#0b0f19]">
+                v2.0 Enterprise
+            </div>
         </aside>
     );
 }
@@ -225,41 +240,41 @@ function NavItemComponent({ item, pathname }: { item: NavItem; pathname: string 
 
     if (item.children) {
         return (
-            <li>
+            <div>
                 <details className="group" open={isActive}>
-                    <summary className={`flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 hover:bg-gradient-to-r hover:from-amber-600/20 hover:to-yellow-600/20 ${isActive ? 'bg-gradient-to-r from-amber-600/30 to-yellow-600/30 text-white shadow-lg shadow-amber-500/10' : 'text-slate-400 hover:text-white'}`}>
-                        <span className="flex-shrink-0">{item.icon}</span>
+                    <summary className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] font-medium transition-all duration-200 hover:bg-slate-800 ${isActive ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}>
+                        <span className="flex-shrink-0 text-slate-400 group-hover:text-blue-400 transition-colors">{item.icon}</span>
                         <span className="flex-1">{item.label}</span>
                         <svg className="w-4 h-4 transition-transform group-open:rotate-180 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
                     </summary>
-                    <ul className="mt-1 space-y-1 pl-10">
+                    <ul className="mt-1 space-y-1 pl-11 pr-2 pb-2">
                         {item.children.map((child) => (
-                            <li key={child.href}>
-                                <Link
-                                    href={child.href}
-                                    className={`block rounded-lg px-3 py-2 text-sm transition-all duration-200 hover:bg-slate-700/50 ${pathname === child.href ? 'bg-gradient-to-r from-amber-600/20 to-yellow-600/20 text-amber-400 font-medium border-l-2 border-amber-400' : 'text-slate-500 hover:text-slate-300'}`}
-                                >
-                                    {child.label}
-                                </Link>
-                            </li>
+                            <PermissionGate key={child.href} permission={child.permission}>
+                                <li>
+                                    <Link
+                                        href={child.href}
+                                        className={`block rounded-md px-3 py-2 text-[13px] transition-all duration-200 hover:bg-slate-800 hover:text-white ${pathname === child.href ? 'text-blue-400 font-medium bg-slate-800/50' : 'text-slate-400'}`}
+                                    >
+                                        {child.label}
+                                    </Link>
+                                </li>
+                            </PermissionGate>
                         ))}
                     </ul>
                 </details>
-            </li>
+            </div>
         );
     }
 
     return (
-        <li>
-            <Link
-                href={item.href!}
-                className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 hover:bg-gradient-to-r hover:from-amber-600/20 hover:to-yellow-600/20 ${isActive ? 'bg-gradient-to-r from-amber-600/30 to-yellow-600/30 text-white shadow-lg shadow-amber-500/10' : 'text-slate-400 hover:text-white'}`}
-            >
-                <span className="flex-shrink-0">{item.icon}</span>
-                {item.label}
-            </Link>
-        </li>
+        <Link
+            href={item.href!}
+            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] font-medium transition-all duration-200 hover:bg-slate-800 group ${isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-900/20' : 'text-slate-400 hover:text-white'}`}
+        >
+            <span className={`flex-shrink-0 transition-colors ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-blue-400'}`}>{item.icon}</span>
+            {item.label}
+        </Link>
     );
 }

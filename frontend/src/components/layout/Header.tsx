@@ -62,9 +62,9 @@ export default function Header() {
             .catch(() => {
                 setUser({
                     id: 'demo',
-                    email: 'admin@company.com',
-                    firstName: 'System',
-                    lastName: 'Administrator',
+                    email: 'admin@grc.com',
+                    firstName: 'Burak',
+                    lastName: 'Yönetici',
                     role: { name: 'ADMIN' }
                 });
             });
@@ -105,10 +105,9 @@ export default function Header() {
     const getRoleLabel = (role: string) => {
         const labels: Record<string, string> = {
             ADMIN: 'Sistem Yöneticisi',
-            RISK_OWNER: 'Risk Sahibi',
-            CONTROL_OWNER: 'Kontrol Sahibi',
+            RISK_MANAGER: 'Risk Yöneticisi',
             AUDITOR: 'Denetçi',
-            ACTION_OWNER: 'Aksiyon Sorumlusu',
+            CONTROL_OWNER: 'Kontrol Sahibi',
             VIEWER: 'Görüntüleyici',
         };
         return labels[role] || role;

@@ -14,162 +14,205 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
     console.log('🌱 Starting database seed...');
 
-    // Create Roles - 4 Ana Rol
+    // Create Roles - 5 Ana Rol (RBAC: Her kullanıcı yalnızca BİR role atanır)
     const roles = await Promise.all([
         prisma.role.upsert({
-            where: { name: 'SYSTEM_ADMIN' },
+            where: { name: 'ADMIN' },
             update: {
-                description: 'Sistem Yöneticisi - Kullanıcı ve sistem yönetimi',
+                description: 'Sistem Yöneticisi - Tüm yetkilere sahip',
                 permissions: [
-                    'admin:*',
-                    'user:*',
-                    'role:*',
-                    'risk:read',
-                    'control:read',
-                    'report:*',
-                    'system:*'
+                    'dashboard:view',
+                    'risk:view', 'risk:create', 'risk:update', 'risk:delete', 'risk:assess', 'risk:treat', 'risk:export',
+                    'control:view', 'control:create', 'control:update', 'control:delete', 'control:test', 'control:approve', 'control:export',
+                    'audit:view', 'audit:create', 'audit:update', 'audit:delete', 'audit:execute',
+                    'finding:view', 'finding:create', 'finding:update', 'finding:delete', 'finding:export',
+                    'action:view', 'action:create', 'action:update', 'action:delete', 'action:effectiveness',
+                    'compliance:view', 'compliance:create', 'compliance:update', 'compliance:delete', 'compliance:map',
+                    'report:view', 'report:create', 'report:export',
+                    'user:view', 'user:create', 'user:update', 'user:delete', 'role:manage',
+                    'parameter:view', 'parameter:manage', 'audit_log:view', 'integration:manage',
                 ],
             },
             create: {
-                name: 'SYSTEM_ADMIN',
-                description: 'Sistem Yöneticisi - Kullanıcı ve sistem yönetimi',
+                name: 'ADMIN',
+                description: 'Sistem Yöneticisi - Tüm yetkilere sahip',
                 permissions: [
-                    'admin:*',
-                    'user:*',
-                    'role:*',
-                    'risk:read',
-                    'control:read',
-                    'report:*',
-                    'system:*'
+                    'dashboard:view',
+                    'risk:view', 'risk:create', 'risk:update', 'risk:delete', 'risk:assess', 'risk:treat', 'risk:export',
+                    'control:view', 'control:create', 'control:update', 'control:delete', 'control:test', 'control:approve', 'control:export',
+                    'audit:view', 'audit:create', 'audit:update', 'audit:delete', 'audit:execute',
+                    'finding:view', 'finding:create', 'finding:update', 'finding:delete', 'finding:export',
+                    'action:view', 'action:create', 'action:update', 'action:delete', 'action:effectiveness',
+                    'compliance:view', 'compliance:create', 'compliance:update', 'compliance:delete', 'compliance:map',
+                    'report:view', 'report:create', 'report:export',
+                    'user:view', 'user:create', 'user:update', 'user:delete', 'role:manage',
+                    'parameter:view', 'parameter:manage', 'audit_log:view', 'integration:manage',
                 ],
             },
         }),
         prisma.role.upsert({
-            where: { name: 'RISK_CONTROL_MANAGER' },
+            where: { name: 'RISK_MANAGER' },
             update: {
-                description: 'Risk ve İç Kontrol Yöneticisi - Risk ve kontrol yönetimi',
+                description: 'Risk Yöneticisi - Risk ve kontrol süreçlerini yönetir',
                 permissions: [
-                    'dashboard:read',
-                    'risk:*',
-                    'control:*',
-                    'finding:read',
-                    'action:read',
-                    'compliance:*',
-                    'report:*'
+                    'dashboard:view',
+                    'risk:view', 'risk:create', 'risk:update', 'risk:assess', 'risk:treat', 'risk:export',
+                    'control:view', 'control:create', 'control:update', 'control:test', 'control:export',
+                    'finding:view', 'finding:create', 'finding:update', 'finding:export',
+                    'action:view', 'action:create', 'action:update', 'action:effectiveness',
+                    'compliance:view', 'compliance:map',
+                    'report:view', 'report:create', 'report:export',
+                    'user:view', 'parameter:view',
                 ],
             },
             create: {
-                name: 'RISK_CONTROL_MANAGER',
-                description: 'Risk ve İç Kontrol Yöneticisi - Risk ve kontrol yönetimi',
+                name: 'RISK_MANAGER',
+                description: 'Risk Yöneticisi - Risk ve kontrol süreçlerini yönetir',
                 permissions: [
-                    'dashboard:read',
-                    'risk:*',
-                    'control:*',
-                    'finding:read',
-                    'action:read',
-                    'compliance:*',
-                    'report:*'
+                    'dashboard:view',
+                    'risk:view', 'risk:create', 'risk:update', 'risk:assess', 'risk:treat', 'risk:export',
+                    'control:view', 'control:create', 'control:update', 'control:test', 'control:export',
+                    'finding:view', 'finding:create', 'finding:update', 'finding:export',
+                    'action:view', 'action:create', 'action:update', 'action:effectiveness',
+                    'compliance:view', 'compliance:map',
+                    'report:view', 'report:create', 'report:export',
+                    'user:view', 'parameter:view',
                 ],
             },
         }),
         prisma.role.upsert({
             where: { name: 'AUDITOR' },
             update: {
-                description: 'Denetçi - Denetim ve bulgu yönetimi',
+                description: 'Denetçi - Denetim planları oluşturur ve yürütür',
                 permissions: [
-                    'dashboard:read',
-                    'risk:read',
-                    'control:read',
-                    'audit:*',
-                    'finding:*',
-                    'action:*',
-                    'report:read'
+                    'dashboard:view',
+                    'risk:view', 'risk:export',
+                    'control:view', 'control:test', 'control:approve', 'control:export',
+                    'audit:view', 'audit:create', 'audit:update', 'audit:execute',
+                    'finding:view', 'finding:create', 'finding:update', 'finding:export',
+                    'action:view', 'action:create',
+                    'compliance:view',
+                    'report:view', 'report:create', 'report:export',
+                    'user:view',
                 ],
             },
             create: {
                 name: 'AUDITOR',
-                description: 'Denetçi - Denetim ve bulgu yönetimi',
+                description: 'Denetçi - Denetim planları oluşturur ve yürütür',
                 permissions: [
-                    'dashboard:read',
-                    'risk:read',
-                    'control:read',
-                    'audit:*',
-                    'finding:*',
-                    'action:*',
-                    'report:read'
+                    'dashboard:view',
+                    'risk:view', 'risk:export',
+                    'control:view', 'control:test', 'control:approve', 'control:export',
+                    'audit:view', 'audit:create', 'audit:update', 'audit:execute',
+                    'finding:view', 'finding:create', 'finding:update', 'finding:export',
+                    'action:view', 'action:create',
+                    'compliance:view',
+                    'report:view', 'report:create', 'report:export',
+                    'user:view',
                 ],
             },
         }),
         prisma.role.upsert({
-            where: { name: 'AUDITEE' },
+            where: { name: 'CONTROL_OWNER' },
             update: {
-                description: 'Denetlenen - Sadece atanan bulgu ve aksiyonları görür',
+                description: 'Kontrol Sahibi - Atanmış kontrollerin testlerini yapar',
                 permissions: [
-                    'dashboard:read:own',
-                    'finding:read:own',
-                    'action:read:own',
-                    'action:update:own',
-                    'action:upload:own'
+                    'dashboard:view',
+                    'risk:view',
+                    'control:view', 'control:update', 'control:test',
+                    'finding:view',
+                    'action:view', 'action:update',
+                    'report:view',
                 ],
             },
             create: {
-                name: 'AUDITEE',
-                description: 'Denetlenen - Sadece atanan bulgu ve aksiyonları görür',
+                name: 'CONTROL_OWNER',
+                description: 'Kontrol Sahibi - Atanmış kontrollerin testlerini yapar',
                 permissions: [
-                    'dashboard:read:own',
-                    'finding:read:own',
-                    'action:read:own',
-                    'action:update:own',
-                    'action:upload:own'
+                    'dashboard:view',
+                    'risk:view',
+                    'control:view', 'control:update', 'control:test',
+                    'finding:view',
+                    'action:view', 'action:update',
+                    'report:view',
+                ],
+            },
+        }),
+        prisma.role.upsert({
+            where: { name: 'VIEWER' },
+            update: {
+                description: 'Görüntüleyici - Sadece görüntüleme yetkisi',
+                permissions: [
+                    'dashboard:view',
+                    'risk:view',
+                    'control:view',
+                    'finding:view',
+                    'action:view',
+                    'compliance:view',
+                    'report:view',
+                ],
+            },
+            create: {
+                name: 'VIEWER',
+                description: 'Görüntüleyici - Sadece görüntüleme yetkisi',
+                permissions: [
+                    'dashboard:view',
+                    'risk:view',
+                    'control:view',
+                    'finding:view',
+                    'action:view',
+                    'compliance:view',
+                    'report:view',
                 ],
             },
         }),
     ]);
 
-    console.log('✅ Roles created');
+    console.log('✅ Roles created (5 rol: Admin, Risk Yöneticisi, Denetçi, Kontrol Sahibi, Görüntüleyici)');
 
     // Create Users
     const passwordHash = await bcrypt.hash('password123', 10);
-    const systemAdminRole = roles.find((r) => r.name === 'SYSTEM_ADMIN')!;
-    const riskControlManagerRole = roles.find((r) => r.name === 'RISK_CONTROL_MANAGER')!;
+    const adminRole = roles.find((r) => r.name === 'ADMIN')!;
+    const riskManagerRole = roles.find((r) => r.name === 'RISK_MANAGER')!;
     const auditorRole = roles.find((r) => r.name === 'AUDITOR')!;
-    const auditeeRole = roles.find((r) => r.name === 'AUDITEE')!;
+    const controlOwnerRole = roles.find((r) => r.name === 'CONTROL_OWNER')!;
+    const viewerRole = roles.find((r) => r.name === 'VIEWER')!;
 
     const users = await Promise.all([
         prisma.user.upsert({
             where: { email: 'admin@grc.com' },
-            update: { roleId: systemAdminRole.id },
+            update: { roleId: adminRole.id },
             create: {
                 email: 'admin@grc.com',
                 passwordHash,
-                firstName: 'System',
-                lastName: 'Administrator',
+                firstName: 'Burak',
+                lastName: 'Yönetici',
                 department: 'IT',
-                roleId: systemAdminRole.id,
+                roleId: adminRole.id,
             },
         }),
         prisma.user.upsert({
             where: { email: 'risk.manager@grc.com' },
-            update: { roleId: riskControlManagerRole.id },
+            update: { roleId: riskManagerRole.id },
             create: {
                 email: 'risk.manager@grc.com',
                 passwordHash,
                 firstName: 'Ahmet',
                 lastName: 'Yılmaz',
                 department: 'Risk Yönetimi',
-                roleId: riskControlManagerRole.id,
+                roleId: riskManagerRole.id,
             },
         }),
         prisma.user.upsert({
             where: { email: 'control.owner@grc.com' },
-            update: { roleId: riskControlManagerRole.id },
+            update: { roleId: controlOwnerRole.id },
             create: {
                 email: 'control.owner@grc.com',
                 passwordHash,
                 firstName: 'Ayşe',
                 lastName: 'Kaya',
                 department: 'İç Kontrol',
-                roleId: riskControlManagerRole.id,
+                roleId: controlOwnerRole.id,
             },
         }),
         prisma.user.upsert({
@@ -185,15 +228,15 @@ async function main() {
             },
         }),
         prisma.user.upsert({
-            where: { email: 'action.owner@grc.com' },
-            update: { roleId: auditeeRole.id },
+            where: { email: 'viewer@grc.com' },
+            update: { roleId: viewerRole.id },
             create: {
-                email: 'action.owner@grc.com',
+                email: 'viewer@grc.com',
                 passwordHash,
                 firstName: 'Zeynep',
                 lastName: 'Çelik',
                 department: 'Operasyonlar',
-                roleId: auditeeRole.id,
+                roleId: viewerRole.id,
             },
         }),
     ]);
@@ -553,7 +596,7 @@ async function main() {
     console.log('✅ Demo finding created');
 
     // Create Demo Action
-    const actionOwner = users.find((u) => u.email === 'action.owner@grc.com')!;
+    const actionOwner = users.find((u) => u.email === 'viewer@grc.com')!;
 
     await prisma.action.upsert({
         where: { actionId: 'A-2024-0001' },
@@ -604,10 +647,10 @@ async function main() {
     console.log('');
     console.log('Demo kullanıcılar (şifre: password123):');
     console.log('  - admin@grc.com (Sistem Yöneticisi)');
-    console.log('  - risk.manager@grc.com (Risk ve İK Yöneticisi)');
-    console.log('  - control.owner@grc.com (Risk ve İK Yöneticisi)');
+    console.log('  - risk.manager@grc.com (Risk Yöneticisi)');
+    console.log('  - control.owner@grc.com (Kontrol Sahibi)');
     console.log('  - auditor@grc.com (Denetçi)');
-    console.log('  - action.owner@grc.com (Denetlenen)');
+    console.log('  - viewer@grc.com (Görüntüleyici)');
 }
 
 main()
