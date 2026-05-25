@@ -53,6 +53,7 @@ export class RisksService {
                             firstName: true,
                             lastName: true,
                             email: true,
+                            department: true,
                         },
                     },
                     // Include linked controls with details
@@ -124,6 +125,7 @@ export class RisksService {
                         firstName: true,
                         lastName: true,
                         email: true,
+                        department: true,
                     },
                 },
                 controls: {
@@ -280,6 +282,7 @@ export class RisksService {
                         firstName: true,
                         lastName: true,
                         email: true,
+                        department: true,
                     },
                 },
             },
@@ -313,10 +316,44 @@ export class RisksService {
     async update(id: string, updateRiskDto: UpdateRiskDto, userId: string) {
         const existingRisk = await this.findOne(id);
 
+        let categoryId = updateRiskDto.categoryId;
+        if (categoryId) {
+            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(categoryId);
+            if (!isUUID) {
+                const category = await this.prisma.riskCategory.findFirst({
+                    where: { name: { contains: categoryId, mode: 'insensitive' } }
+                });
+                if (category) {
+                    categoryId = category.id;
+                } else {
+                    const newCategory = await this.prisma.riskCategory.create({
+                        data: { name: categoryId, description: '', color: '#3b82f6' }
+                    });
+                    categoryId = newCategory.id;
+                }
+            }
+            updateRiskDto.categoryId = categoryId;
+        }
+
+        // Calculate new scores if probability/impact changed
+        let inherentRiskScore = existingRisk.inherentRiskScore;
+        let isAboveAppetite = existingRisk.isAboveAppetite;
+
+        if (updateRiskDto.inherentProbability || updateRiskDto.inherentImpact || updateRiskDto.riskAppetite !== undefined) {
+            const prob = updateRiskDto.inherentProbability || existingRisk.inherentProbability;
+            const impact = updateRiskDto.inherentImpact || existingRisk.inherentImpact;
+            inherentRiskScore = this.calculateRiskScore(prob, impact);
+
+            const appetite = updateRiskDto.riskAppetite !== undefined ? updateRiskDto.riskAppetite : existingRisk.riskAppetite;
+            isAboveAppetite = appetite ? inherentRiskScore > appetite : false;
+        }
+
         const risk = await this.prisma.risk.update({
             where: { id },
             data: {
                 ...updateRiskDto,
+                inherentRiskScore,
+                isAboveAppetite,
                 version: { increment: 1 },
             },
             include: {
@@ -327,6 +364,7 @@ export class RisksService {
                         firstName: true,
                         lastName: true,
                         email: true,
+                        department: true,
                     },
                 },
             },
@@ -421,6 +459,7 @@ export class RisksService {
                         firstName: true,
                         lastName: true,
                         email: true,
+                        department: true,
                     },
                 },
             },
@@ -473,6 +512,7 @@ export class RisksService {
                         firstName: true,
                         lastName: true,
                         email: true,
+                        department: true,
                     },
                 },
             },

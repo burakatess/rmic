@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { PageHeader, Button, StatusBadge, Modal, Input, Textarea } from '@/components/ui';
 
 // Types
 interface Action {
@@ -166,7 +167,12 @@ export default function RiskTreatmentPage() {
     };
 
     return (
-        <div className="flex h-[calc(100vh-120px)] gap-6">
+        <div className="flex flex-col h-full">
+            <PageHeader
+                title="Risk Tedavi Kararları"
+                description="Risk azaltma, devretme, kabul veya kaçınma kararlarını verin ve aksiyonları planlayın."
+            />
+            <div className="flex h-[calc(100vh-180px)] gap-6">
             {/* LEFT PANEL - Risk List */}
             <div className="w-[380px] flex-shrink-0 flex flex-col bg-white rounded-lg border border-gray-200 overflow-hidden">
                 {/* Header */}
@@ -176,26 +182,26 @@ export default function RiskTreatmentPage() {
                 </div>
 
                 {/* Filters */}
-                <div className="px-3 py-2 border-b border-gray-100 flex flex-wrap gap-1.5">
+                <div className="px-3 py-2 border-b border-gray-100 flex flex-wrap gap-1.5 bg-white">
                     {[
                         { key: 'all', label: 'Tümü' },
                         { key: 'pending', label: 'Karar Bekleyen', count: pendingCount },
                         { key: 'mitigate', label: 'Azaltma' },
                         { key: 'above', label: 'Risk İştahı Üstü', count: aboveAppetiteCount },
                     ].map(f => (
-                        <button
+                        <Button
                             key={f.key}
+                            variant={filter === f.key ? 'primary' : 'outline'}
+                            size="xs"
                             onClick={() => setFilter(f.key as typeof filter)}
-                            className={`px-2 py-1 text-xs rounded transition-colors ${filter === f.key
-                                ? 'bg-slate-700 text-white'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                }`}
                         >
                             {f.label}
                             {f.count !== undefined && f.count > 0 && (
-                                <span className="ml-1 px-1 text-[10px] bg-amber-200 text-amber-800 rounded">{f.count}</span>
+                                <span className={`ml-1 px-1 text-[10px] rounded ${filter === f.key ? 'bg-white/20 text-white' : 'bg-amber-200 text-amber-800'}`}>
+                                    {f.count}
+                                </span>
                             )}
-                        </button>
+                        </Button>
                     ))}
                 </div>
 
@@ -213,9 +219,7 @@ export default function RiskTreatmentPage() {
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs font-medium text-blue-700">{risk.riskId}</span>
                                         {risk.residualScore > risk.riskAppetite && (
-                                            <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-red-100 text-red-700 border border-red-200">
-                                                İştah Üstü
-                                            </span>
+                                            <StatusBadge variant="critical">İştah Üstü</StatusBadge>
                                         )}
                                     </div>
                                     <p className="text-sm font-medium text-gray-900 mt-0.5 truncate">{risk.name}</p>
@@ -264,9 +268,7 @@ export default function RiskTreatmentPage() {
                                             {selectedRisk.riskId}
                                         </Link>
                                         {selectedRisk.treatmentApproval && (
-                                            <span className="px-2 py-0.5 text-xs font-medium rounded bg-green-100 text-green-700 border border-green-200">
-                                                ✓ Onaylandı
-                                            </span>
+                                            <StatusBadge variant="success">✓ Onaylandı</StatusBadge>
                                         )}
                                     </div>
                                     <h2 className="text-lg font-semibold text-gray-900 mt-1">{selectedRisk.name}</h2>
@@ -332,12 +334,13 @@ export default function RiskTreatmentPage() {
                                         )}
                                     </div>
                                     {!selectedRisk.treatmentApproval && (
-                                        <button
+                                        <Button
+                                            variant="success"
+                                            size="sm"
                                             onClick={handleApproval}
-                                            className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700"
                                         >
                                             Onayla
-                                        </button>
+                                        </Button>
                                     )}
                                 </div>
                             </div>
@@ -348,15 +351,18 @@ export default function RiskTreatmentPage() {
                             <div className="px-6 py-5 border-b border-gray-200">
                                 <div className="flex items-center justify-between mb-4">
                                     <h3 className="text-sm font-semibold text-gray-900">Azaltma Aksiyonları</h3>
-                                    <button
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
                                         onClick={() => setShowActionModal(true)}
-                                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100"
+                                        icon={
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                            </svg>
+                                        }
                                     >
-                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                        </svg>
                                         Aksiyon Ekle
-                                    </button>
+                                    </Button>
                                 </div>
 
                                 {selectedRisk.actions.length > 0 ? (
@@ -432,60 +438,40 @@ export default function RiskTreatmentPage() {
             </div>
 
             {/* Add Action Modal */}
-            {showActionModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-                    <div className="bg-white rounded-xl w-full max-w-md mx-4 shadow-2xl">
-                        <div className="px-6 py-4 border-b border-gray-200">
-                            <h2 className="text-lg font-semibold text-gray-900">Yeni Aksiyon Ekle</h2>
-                        </div>
-                        <div className="p-6 space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Aksiyon Açıklaması *</label>
-                                <textarea
-                                    value={newAction.description}
-                                    onChange={(e) => setNewAction({ ...newAction, description: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none"
-                                    rows={3}
-                                    placeholder="Yapılacak işlemi açıklayın..."
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Sorumlu</label>
-                                <input
-                                    type="text"
-                                    value={newAction.owner}
-                                    onChange={(e) => setNewAction({ ...newAction, owner: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
-                                    placeholder="Ad Soyad"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Hedef Tarih</label>
-                                <input
-                                    type="date"
-                                    value={newAction.dueDate}
-                                    onChange={(e) => setNewAction({ ...newAction, dueDate: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
-                                />
-                            </div>
-                        </div>
-                        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
-                            <button
-                                onClick={() => setShowActionModal(false)}
-                                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800"
-                            >
-                                İptal
-                            </button>
-                            <button
-                                onClick={handleAddAction}
-                                className="px-4 py-2 text-sm font-medium text-white bg-slate-700 rounded-lg hover:bg-slate-800"
-                            >
-                                Aksiyon Ekle
-                            </button>
-                        </div>
+            <Modal
+                open={showActionModal}
+                onClose={() => setShowActionModal(false)}
+                title="Yeni Aksiyon Ekle"
+                footer={
+                    <div className="flex justify-end gap-3 w-full">
+                        <Button variant="ghost" onClick={() => setShowActionModal(false)}>İptal</Button>
+                        <Button variant="primary" onClick={handleAddAction}>Aksiyon Ekle</Button>
                     </div>
+                }
+            >
+                <div className="space-y-4">
+                    <Textarea
+                        label="Aksiyon Açıklaması *"
+                        value={newAction.description}
+                        onChange={(e) => setNewAction({ ...newAction, description: e.target.value })}
+                        placeholder="Yapılacak işlemi açıklayın..."
+                        rows={3}
+                    />
+                    <Input
+                        label="Sorumlu"
+                        value={newAction.owner}
+                        onChange={(e) => setNewAction({ ...newAction, owner: e.target.value })}
+                        placeholder="Ad Soyad"
+                    />
+                    <Input
+                        type="date"
+                        label="Hedef Tarih"
+                        value={newAction.dueDate}
+                        onChange={(e) => setNewAction({ ...newAction, dueDate: e.target.value })}
+                    />
                 </div>
-            )}
+            </Modal>
+        </div>
         </div>
     );
 }

@@ -76,6 +76,20 @@ export class UpdateRiskDto {
 
     @IsInt()
     @Min(1)
+    @Max(5)
+    @IsOptional()
+    @Type(() => Number)
+    inherentProbability?: number;
+
+    @IsInt()
+    @Min(1)
+    @Max(5)
+    @IsOptional()
+    @Type(() => Number)
+    inherentImpact?: number;
+
+    @IsInt()
+    @Min(1)
     @Max(25)
     @IsOptional()
     @Type(() => Number)

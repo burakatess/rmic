@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
+import { PageHeader, Button, StatusBadge, getSeverityVariant, getStatusVariant } from '@/components/ui';
+import { useToast } from '@/components/ui/Toast';
 
 // Types
 interface Control {
@@ -48,13 +50,8 @@ const EFFECTIVENESS_LABELS: Record<string, { label: string; color: string }> = {
     NOT_TESTED: { label: 'Test Edilmedi', color: 'text-gray-600 bg-gray-100' },
 };
 
-const LEVEL_COLORS: Record<string, string> = {
-    HIGH: 'bg-red-100 text-red-800 border-red-200',
-    MEDIUM: 'bg-amber-100 text-amber-800 border-amber-200',
-    LOW: 'bg-green-100 text-green-800 border-green-200',
-};
-
 export default function RiskAssessmentPage() {
+    const { success, error: showError } = useToast();
     const [risks, setRisks] = useState<Risk[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedRiskId, setSelectedRiskId] = useState<string | null>(null);
@@ -191,10 +188,10 @@ export default function RiskAssessmentPage() {
                 return r;
             }));
 
-            alert('Değerlendirme başarıyla kaydedildi.');
+            success('Başarılı', 'Değerlendirme başarıyla kaydedildi.');
         } catch (error) {
             console.error('Failed to save assessment:', error);
-            alert('Değerlendirme kaydedilirken hata oluştu.');
+            showError('Hata', 'Değerlendirme kaydedilirken hata oluştu.');
         } finally {
             setSaving(false);
         }
@@ -207,7 +204,12 @@ export default function RiskAssessmentPage() {
     const recommendation = getRecommendation(residualLevel);
 
     return (
-        <div className="flex h-[calc(100vh-120px)] gap-6">
+        <div className="flex flex-col h-full">
+            <PageHeader
+                title="Risk Değerlendirme"
+                description="Kurumsal risklerin doğal ve artık değerlendirmelerini yapın"
+            />
+            <div className="flex h-[calc(100vh-180px)] gap-6">
             {/* LEFT PANEL - Risk List */}
             <div className="w-[380px] flex-shrink-0 flex flex-col bg-white rounded-lg border border-gray-200 overflow-hidden">
                 {/* Header */}
@@ -217,23 +219,21 @@ export default function RiskAssessmentPage() {
                 </div>
 
                 {/* Filters */}
-                <div className="px-3 py-2 border-b border-gray-100 flex flex-wrap gap-1.5">
+                <div className="px-3 py-2 border-b border-gray-100 flex flex-wrap gap-1.5 bg-white">
                     {[
                         { key: 'all', label: 'Tümü' },
                         { key: 'high', label: 'Yüksek Risk' },
                         { key: 'it', label: 'BT Riskleri' },
                         { key: 'mine', label: 'Bana Atanan' },
                     ].map(f => (
-                        <button
+                        <Button
                             key={f.key}
+                            variant={filter === f.key ? 'primary' : 'outline'}
+                            size="xs"
                             onClick={() => setFilter(f.key as typeof filter)}
-                            className={`px-2 py-1 text-xs rounded transition-colors ${filter === f.key
-                                ? 'bg-slate-700 text-white'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                }`}
                         >
                             {f.label}
-                        </button>
+                        </Button>
                     ))}
                 </div>
 
@@ -257,9 +257,7 @@ export default function RiskAssessmentPage() {
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs font-medium text-blue-700">{risk.riskId}</span>
                                         {risk.preLevel && (
-                                            <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded border ${LEVEL_COLORS[risk.preLevel]}`}>
-                                                {risk.preLevel}
-                                            </span>
+                                            <StatusBadge variant={getSeverityVariant(risk.preLevel)}>{risk.preLevel}</StatusBadge>
                                         )}
                                     </div>
                                     <p className="text-sm font-medium text-gray-900 mt-0.5 truncate">{risk.name}</p>
@@ -315,9 +313,9 @@ export default function RiskAssessmentPage() {
                                         <Link href={`/risks/${selectedRisk.id}`} className="text-sm font-semibold text-blue-700 hover:underline">
                                             {selectedRisk.riskId}
                                         </Link>
-                                        <span className={`px-2 py-0.5 text-xs font-medium rounded border ${LEVEL_COLORS[selectedRisk.preLevel || 'MEDIUM']}`}>
+                                        <StatusBadge variant={getSeverityVariant(selectedRisk.preLevel || 'MEDIUM')}>
                                             {selectedRisk.preLevel || 'N/A'}
-                                        </span>
+                                        </StatusBadge>
                                     </div>
                                     <h2 className="text-lg font-semibold text-gray-900 mt-1">{selectedRisk.name}</h2>
                                     <p className="text-sm text-gray-600 mt-1">{selectedRisk.description}</p>
@@ -392,9 +390,9 @@ export default function RiskAssessmentPage() {
                                 </div>
                                 <div>
                                     <span className="text-xs text-gray-500">Risk Seviyesi:</span>
-                                    <span className={`ml-2 px-2 py-0.5 text-xs font-medium rounded border ${LEVEL_COLORS[inherentLevel]}`}>
+                                    <StatusBadge variant={getSeverityVariant(inherentLevel)}>
                                         {inherentLevel === 'HIGH' ? 'Yüksek' : inherentLevel === 'MEDIUM' ? 'Orta' : 'Düşük'}
-                                    </span>
+                                    </StatusBadge>
                                 </div>
                             </div>
                         </div>
@@ -415,9 +413,9 @@ export default function RiskAssessmentPage() {
                                                 </div>
                                                 <p className="text-sm text-gray-700 mt-0.5">{control.name}</p>
                                             </div>
-                                            <span className={`px-2 py-1 text-xs font-medium rounded ${EFFECTIVENESS_LABELS[control.effectiveness].color}`}>
+                                            <StatusBadge variant={getStatusVariant(control.effectiveness)}>
                                                 {EFFECTIVENESS_LABELS[control.effectiveness].label}
-                                            </span>
+                                            </StatusBadge>
                                         </div>
                                     ))}
                                 </div>
@@ -480,9 +478,9 @@ export default function RiskAssessmentPage() {
                                     </div>
                                     <div>
                                         <span className="text-xs text-gray-500">Artık Risk Seviyesi:</span>
-                                        <span className={`ml-2 px-2 py-0.5 text-xs font-medium rounded border ${LEVEL_COLORS[residualLevel]}`}>
-                                            {residualLevel === 'HIGH' ? 'Yüksek' : residualLevel === 'MEDIUM' ? 'Orta' : 'Düşük'}
-                                        </span>
+                                    <StatusBadge variant={getSeverityVariant(residualLevel)}>
+                                        {residualLevel === 'HIGH' ? 'Yüksek' : residualLevel === 'MEDIUM' ? 'Orta' : 'Düşük'}
+                                    </StatusBadge>
                                     </div>
                                 </div>
                                 <div>
@@ -524,23 +522,23 @@ export default function RiskAssessmentPage() {
 
                         {/* Action Buttons */}
                         <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-end gap-3">
-                            <button
+                            <Button
+                                variant="ghost"
                                 onClick={() => setSelectedRiskId(null)}
-                                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800"
                             >
                                 İptal
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                                variant="primary"
                                 onClick={handleSaveAssessment}
-                                disabled={saving}
-                                className="px-4 py-2 text-sm font-medium text-white bg-slate-700 rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                loading={saving}
                             >
-                                {saving && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>}
-                                {saving ? 'Kaydediliyor...' : 'Değerlendirmeyi Kaydet'}
-                            </button>
+                                Değerlendirmeyi Kaydet
+                            </Button>
                         </div>
                     </div>
                 )}
+            </div>
             </div>
         </div>
     );
