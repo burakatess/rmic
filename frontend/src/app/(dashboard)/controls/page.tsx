@@ -3,16 +3,17 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
+import { useAuth } from '@/components/auth/AuthProvider';
 import {
     PageHeader,
     DataTable,
-    FilterBar,
     StatusBadge,
     Button,
     ConfirmDialog,
 } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
+import ImportControlModal from '@/components/modals/ImportControlModal';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -25,7 +26,7 @@ interface Control {
     nature: string;
     automation: string;
     frequency: string;
-    owner: { name: string; department: string };
+    owner: { id: string; name: string; department: string };
     lastTestDate: string;
     lastTestResult: string;
     effectivenessStatus: string;
@@ -59,13 +60,17 @@ const automationLabel: Record<string, { label: string; variant: BadgeVariant }> 
 };
 const frequencyLabel: Record<string, string> = {
     DAILY: 'Günlük', WEEKLY: 'Haftalık', MONTHLY: 'Aylık',
-    QUARTERLY: '3 Aylık', ANNUAL: 'Yıllık', AD_HOC: 'Arızi',
+    QUARTERLY: '3 Aylık', SEMI_ANNUAL: '6 Aylık', ANNUAL: 'Yıllık', AD_HOC: 'Arızi',
 };
 const effectivenessLabel: Record<string, { label: string; variant: BadgeVariant }> = {
     EFFECTIVE: { label: 'Etkin', variant: 'success' },
     PARTIALLY_EFFECTIVE: { label: 'Kısmen', variant: 'warning' },
     INEFFECTIVE: { label: 'Etkin Değil', variant: 'critical' },
     NOT_TESTED: { label: 'Test Edilmedi', variant: 'neutral' },
+};
+const statusLabel: Record<string, { label: string; variant: BadgeVariant }> = {
+    ACTIVE: { label: 'Aktif', variant: 'success' },
+    PASSIVE: { label: 'Pasif', variant: 'neutral' },
 };
 
 const formatDate = (d: string | null | undefined) => {
@@ -75,22 +80,38 @@ const formatDate = (d: string | null | undefined) => {
     return `${String(dt.getDate()).padStart(2, '0')}.${String(dt.getMonth() + 1).padStart(2, '0')}.${dt.getFullYear()}`;
 };
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
-
 export default function ControlInventoryPage() {
     const { success, error: showError } = useToast();
+    const { user: currentUser } = useAuth();
 
     const [controls, setControls] = useState<Control[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
     const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [importModalOpen, setImportModalOpen] = useState(false);
 
-    // Filters
+    // Advanced Filtering States
     const [searchQuery, setSearchQuery] = useState('');
-    const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
     const [page, setPage] = useState(1);
     const pageSize = 20;
+
+    const [colFilters, setColFilters] = useState<Record<string, string>>({
+        controlId: '',
+        name: '',
+        type: '',
+        nature: '',
+        automation: '',
+        frequency: '',
+        status: '',
+        effectiveness: '',
+        hasFinding: '',
+    });
+
+    const [sortConfig, setSortConfig] = useState<{ key: keyof Control | 'owner.name' | ''; direction: 'asc' | 'desc' }>({ key: '', direction: 'asc' });
+
+    // Active Preset Name for styling indicator
+    const [activePreset, setActivePreset] = useState<string>('');
 
     // ── Fetch ─────────────────────────────────────────────────────────────────
 
@@ -111,6 +132,7 @@ export default function ControlInventoryPage() {
                 automation: String(c.automation || 'MANUAL'),
                 frequency: String(c.frequency || 'MONTHLY'),
                 owner: {
+                    id: String(c.owner?.id || ''),
                     name: `${c.owner?.firstName || ''} ${c.owner?.lastName || ''}`.trim() || 'Bilinmiyor',
                     department: String(c.owner?.department || ''),
                 },
@@ -122,7 +144,7 @@ export default function ControlInventoryPage() {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 linkedFindings: (c.findings || []).map((f: any) => ({ id: f.id, findingId: f.findingId })).filter((f: any) => f.id && f.findingId),
                 linkedActions: [],
-                status: 'ACTIVE' as const,
+                status: (c.status || 'ACTIVE') as 'ACTIVE' | 'PASSIVE',
             }));
             setControls(transformed);
         } catch (err) {
@@ -135,37 +157,134 @@ export default function ControlInventoryPage() {
 
     useEffect(() => { fetchControls(); }, [fetchControls]);
 
+    // ── Presets ───────────────────────────────────────────────────────────────
+
+    const applyPreset = (presetName: string) => {
+        setActivePreset(presetName);
+        setPage(1);
+
+        // Reset first
+        const newFilters = {
+            controlId: '', name: '', type: '', nature: '', automation: '', frequency: '', status: '', effectiveness: '', hasFinding: ''
+        };
+
+        if (presetName === 'my_controls') {
+            setColFilters({ ...newFilters });
+            // Will filter in useMemo using currentUser id
+        } else if (presetName === 'open_findings') {
+            setColFilters({ ...newFilters, hasFinding: 'true' });
+        } else if (presetName === 'this_month') {
+            setColFilters({ ...newFilters, status: 'ACTIVE' });
+            // Will also filter by calendar month in useMemo
+        } else {
+            setActivePreset('');
+            setColFilters({ ...newFilters });
+        }
+    };
+
+    const clearAllFilters = () => {
+        setSearchQuery('');
+        setActivePreset('');
+        setColFilters({
+            controlId: '', name: '', type: '', nature: '', automation: '', frequency: '', status: '', effectiveness: '', hasFinding: ''
+        });
+        setSortConfig({ key: '', direction: 'asc' });
+        setPage(1);
+    };
+
     // ── Derived ───────────────────────────────────────────────────────────────
 
-    const uniqueDepartments = useMemo(() => [...new Set(controls.map(c => c.owner.department))].filter(Boolean).sort(), [controls]);
-
     const filteredControls = useMemo(() => {
-        return controls.filter(c => {
-            if (searchQuery) {
-                const q = searchQuery.toLowerCase();
-                if (!c.name.toLowerCase().includes(q) && !c.controlId.toLowerCase().includes(q)) return false;
-            }
-            const typeF = activeFilters['type'];
-            if (typeF && typeF !== 'all') {
+        let result = [...controls];
+
+        // Global Search
+        if (searchQuery) {
+            const q = searchQuery.toLowerCase();
+            result = result.filter(c =>
+                c.name.toLowerCase().includes(q) ||
+                c.controlId.toLowerCase().includes(q) ||
+                c.description.toLowerCase().includes(q) ||
+                c.owner.name.toLowerCase().includes(q)
+            );
+        }
+
+        // Apply Preset Specials
+        if (activePreset === 'my_controls' && currentUser) {
+            result = result.filter(c => c.owner.id === currentUser.id);
+        }
+
+        if (activePreset === 'this_month') {
+            const currentMonthName = new Intl.DateTimeFormat('tr-TR', { month: 'long' }).format(new Date()); // e.g. "Mayıs"
+            result = result.filter(c => c.frequency === 'MONTHLY' || c.frequency === 'DAILY' || c.frequency === 'WEEKLY');
+        }
+
+        // Column Specific Filters
+        if (colFilters.controlId) {
+            const q = colFilters.controlId.toLowerCase();
+            result = result.filter(c => c.controlId.toLowerCase().includes(q));
+        }
+
+        if (colFilters.name) {
+            const q = colFilters.name.toLowerCase();
+            result = result.filter(c => c.name.toLowerCase().includes(q));
+        }
+
+        if (colFilters.type) {
+            result = result.filter(c => {
                 const isBT = ['IT_GENERAL', 'IT_APPLICATION', 'BT'].includes(c.type);
-                if (typeF === 'BT' && !isBT) return false;
-                if (typeF === 'BT_DISI' && isBT) return false;
-            }
-            const natureF = activeFilters['nature'];
-            if (natureF && natureF !== 'all' && c.nature !== natureF) return false;
+                return colFilters.type === 'BT' ? isBT : !isBT;
+            });
+        }
 
-            const automF = activeFilters['automation'];
-            if (automF && automF !== 'all' && c.automation !== automF) return false;
+        if (colFilters.nature) {
+            result = result.filter(c => c.nature === colFilters.nature);
+        }
 
-            const effF = activeFilters['effectiveness'];
-            if (effF && effF !== 'all' && c.effectivenessStatus !== effF) return false;
+        if (colFilters.automation) {
+            result = result.filter(c => c.automation === colFilters.automation);
+        }
 
-            const deptF = activeFilters['department'];
-            if (deptF && deptF !== 'all' && c.owner.department !== deptF) return false;
+        if (colFilters.frequency) {
+            result = result.filter(c => c.frequency === colFilters.frequency);
+        }
 
-            return true;
-        }).sort((a, b) => a.controlId.localeCompare(b.controlId));
-    }, [controls, searchQuery, activeFilters]);
+        if (colFilters.status) {
+            result = result.filter(c => c.status === colFilters.status);
+        }
+
+        if (colFilters.effectiveness) {
+            result = result.filter(c => c.effectivenessStatus === colFilters.effectiveness);
+        }
+
+        if (colFilters.hasFinding) {
+            result = result.filter(c => c.linkedFindings.length > 0);
+        }
+
+        // Sorting
+        if (sortConfig.key) {
+            result.sort((a, b) => {
+                let valA = '';
+                let valB = '';
+
+                if (sortConfig.key === 'owner.name') {
+                    valA = a.owner.name;
+                    valB = b.owner.name;
+                } else {
+                    valA = String(a[sortConfig.key as keyof Control] || '');
+                    valB = String(b[sortConfig.key as keyof Control] || '');
+                }
+
+                return sortConfig.direction === 'asc'
+                    ? valA.localeCompare(valB)
+                    : valB.localeCompare(valA);
+            });
+        } else {
+            // Default sort
+            result.sort((a, b) => a.controlId.localeCompare(b.controlId));
+        }
+
+        return result;
+    }, [controls, searchQuery, colFilters, sortConfig, activePreset, currentUser]);
 
     const paginatedControls = useMemo(() => {
         const start = (page - 1) * pageSize;
@@ -173,6 +292,8 @@ export default function ControlInventoryPage() {
     }, [filteredControls, page, pageSize]);
 
     // ── KPIs ──────────────────────────────────────────────────────────────────
+    const activeCount = controls.filter(c => c.status === 'ACTIVE').length;
+    const passiveCount = controls.filter(c => c.status === 'PASSIVE').length;
     const effectiveCount = controls.filter(c => c.effectivenessStatus === 'EFFECTIVE').length;
     const ineffectiveCount = controls.filter(c => c.effectivenessStatus === 'INEFFECTIVE').length;
     const notTestedCount = controls.filter(c => c.effectivenessStatus === 'NOT_TESTED').length;
@@ -199,39 +320,14 @@ export default function ControlInventoryPage() {
         }
     };
 
-    // ── Filter Configs ────────────────────────────────────────────────────────
-    const filterConfigs = useMemo(() => [
-        {
-            key: 'type', label: 'Tip',
-            value: activeFilters['type'] || '',
-            onChange: (v: string) => { setActiveFilters(p => ({ ...p, type: v })); setPage(1); },
-            options: [{ value: 'BT', label: 'BT' }, { value: 'BT_DISI', label: 'BT Dışı' }],
-        },
-        {
-            key: 'nature', label: 'Nitelik',
-            value: activeFilters['nature'] || '',
-            onChange: (v: string) => { setActiveFilters(p => ({ ...p, nature: v })); setPage(1); },
-            options: [{ value: 'PREVENTIVE', label: 'Önleyici' }, { value: 'DETECTIVE', label: 'Tespit Edici' }, { value: 'CORRECTIVE', label: 'Düzeltici' }],
-        },
-        {
-            key: 'automation', label: 'Otomasyon',
-            value: activeFilters['automation'] || '',
-            onChange: (v: string) => { setActiveFilters(p => ({ ...p, automation: v })); setPage(1); },
-            options: [{ value: 'AUTOMATED', label: 'Otomatik' }, { value: 'SEMI_AUTOMATED', label: 'Yarı Oto.' }, { value: 'MANUAL', label: 'Manuel' }],
-        },
-        {
-            key: 'effectiveness', label: 'Etkinlik',
-            value: activeFilters['effectiveness'] || '',
-            onChange: (v: string) => { setActiveFilters(p => ({ ...p, effectiveness: v })); setPage(1); },
-            options: [{ value: 'EFFECTIVE', label: 'Etkin' }, { value: 'PARTIALLY_EFFECTIVE', label: 'Kısmen' }, { value: 'INEFFECTIVE', label: 'Etkin Değil' }, { value: 'NOT_TESTED', label: 'Test Edilmedi' }],
-        },
-        {
-            key: 'department', label: 'Birim',
-            value: activeFilters['department'] || '',
-            onChange: (v: string) => { setActiveFilters(p => ({ ...p, department: v })); setPage(1); },
-            options: uniqueDepartments.map(d => ({ value: d, label: d })),
-        },
-    ], [activeFilters, uniqueDepartments]);
+    const handleSort = (key: keyof Control | 'owner.name') => {
+        setSortConfig(prev => {
+            if (prev.key === key) {
+                return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+            }
+            return { key, direction: 'asc' };
+        });
+    };
 
     // ── Columns ───────────────────────────────────────────────────────────────
     const columns: ColumnDef<Control>[] = useMemo(() => [
@@ -269,14 +365,14 @@ export default function ControlInventoryPage() {
             key: 'owner', header: 'Sahip', defaultWidth: 150,
             render: (c) => (
                 <div>
-                    <p className="text-sm font-medium text-slate-800">{c.owner.name}</p>
-                    {c.owner.department && <p className="text-xs text-slate-500">{c.owner.department}</p>}
+                    <p className="text-sm font-semibold text-slate-800">{c.owner.name}</p>
+                    {c.owner.department && <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{c.owner.department}</p>}
                 </div>
             ),
         },
         {
             key: 'frequency', header: 'Sıklık', defaultWidth: 90,
-            render: (c) => <span className="text-sm text-slate-600">{frequencyLabel[c.frequency] || c.frequency}</span>,
+            render: (c) => <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">{frequencyLabel[c.frequency] || c.frequency}</span>,
         },
         {
             key: 'lastTestDate', header: 'Son Test', sortable: true, defaultWidth: 110,
@@ -301,9 +397,9 @@ export default function ControlInventoryPage() {
             render: (c) => c.linkedRisks.length > 0 ? (
                 <div className="flex flex-wrap gap-1">
                     {c.linkedRisks.slice(0, 2).map(r => (
-                        <Link key={r.id} href={`/risks/${r.id}`} className="text-xs text-blue-600 hover:underline font-medium">{r.riskId}</Link>
+                        <Link key={r.id} href={`/risks/${r.id}`} className="text-xs text-blue-600 hover:underline font-bold bg-blue-50 px-1.5 py-0.5 rounded">{r.riskId}</Link>
                     ))}
-                    {c.linkedRisks.length > 2 && <span className="text-xs text-slate-400">+{c.linkedRisks.length - 2}</span>}
+                    {c.linkedRisks.length > 2 && <span className="text-xs text-slate-400 font-bold">+{c.linkedRisks.length - 2}</span>}
                 </div>
             ) : <span className="text-slate-300">—</span>,
         },
@@ -312,11 +408,18 @@ export default function ControlInventoryPage() {
             render: (c) => c.linkedFindings.length > 0 ? (
                 <div className="flex flex-wrap gap-1">
                     {c.linkedFindings.slice(0, 2).map(f => (
-                        <Link key={f.id} href={`/findings/${f.id}`} className="text-xs text-violet-600 hover:underline font-medium">{f.findingId}</Link>
+                        <Link key={f.id} href={`/findings/${f.id}`} className="text-xs text-rose-600 hover:underline font-bold bg-rose-50 px-1.5 py-0.5 rounded">{f.findingId}</Link>
                     ))}
-                    {c.linkedFindings.length > 2 && <span className="text-xs text-slate-400">+{c.linkedFindings.length - 2}</span>}
+                    {c.linkedFindings.length > 2 && <span className="text-xs text-slate-400 font-bold">+{c.linkedFindings.length - 2}</span>}
                 </div>
             ) : <span className="text-slate-300">—</span>,
+        },
+        {
+            key: 'status', header: 'Durum', defaultWidth: 90,
+            render: (c) => {
+                const cfg = statusLabel[c.status];
+                return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-gray-400">—</span>;
+            },
         },
         {
             key: 'actions', header: 'İşlemler', defaultWidth: 110,
@@ -328,15 +431,11 @@ export default function ControlInventoryPage() {
                     <Link href={`/controls/${c.id}/edit`} className="p-1.5 rounded text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors" title="Düzenle">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                     </Link>
-                    <Link href="/controls/testing" className="p-1.5 rounded text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors" title="Test Et">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
-                    </Link>
                 </div>
             ),
         },
     ], []);
 
-    // ─────────────────────────────────────────────────────────────────────────
     return (
         <div className="flex flex-col h-full bg-slate-50/50">
             <div className="px-8 pt-8">
@@ -352,6 +451,9 @@ export default function ControlInventoryPage() {
                                     {selectedRows.size} Seçiliyi Sil
                                 </Button>
                             )}
+                            <Button variant="outline" onClick={() => setImportModalOpen(true)} icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>}>
+                                Dışarıdan Yükle
+                            </Button>
                             <Link href="/controls/new">
                                 <Button variant="primary" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}>
                                     Yeni Kontrol
@@ -364,35 +466,136 @@ export default function ControlInventoryPage() {
                 {/* KPI Cards */}
                 <div className="grid grid-cols-5 gap-4 mb-6">
                     {[
-                        { label: 'Toplam Kontrol', value: controls.length, color: 'slate', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
-                        { label: 'Etkin', value: effectiveCount, color: 'green', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
+                        { label: 'Toplam', value: controls.length, color: 'slate', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
+                        { label: 'Aktif', value: activeCount, color: 'green', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
+                        { label: 'Pasif', value: passiveCount, color: 'amber', icon: 'M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636' },
                         { label: 'Etkin Değil', value: ineffectiveCount, color: 'red', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z' },
-                        { label: 'Test Edilmedi', value: notTestedCount, color: 'amber', icon: 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
-                        { label: 'Tüm Riskler', value: controls.reduce((s, c) => s + c.linkedRisks.length, 0), color: 'blue', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
+                        { label: 'Test Edilmedi', value: notTestedCount, color: 'blue', icon: 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
                     ].map(kpi => (
-                        <div key={kpi.label} className={`bg-white rounded-xl border border-${kpi.color}-100 shadow-sm p-5 flex items-center gap-4`}>
-                            <div className={`p-3 bg-${kpi.color}-50 rounded-xl`}>
-                                <svg className={`w-5 h-5 text-${kpi.color}-600`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div key={kpi.label} className={`bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-4`}>
+                            <div className={`p-3 rounded-xl ${kpi.color === 'slate' ? 'bg-slate-50 text-slate-600' : kpi.color === 'green' ? 'bg-emerald-50 text-emerald-600' : kpi.color === 'amber' ? 'bg-amber-50 text-amber-600' : kpi.color === 'red' ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'}`}>
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={kpi.icon} />
                                 </svg>
                             </div>
                             <div>
-                                <p className={`text-xs font-medium text-${kpi.color}-600 uppercase tracking-wide`}>{kpi.label}</p>
-                                <p className={`text-2xl font-bold text-${kpi.color}-700 mt-0.5`}>{kpi.value}</p>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{kpi.label}</p>
+                                <p className="text-xl font-extrabold text-slate-800 mt-0.5">{kpi.value}</p>
                             </div>
                         </div>
                     ))}
                 </div>
 
-                {/* Filter Bar */}
-                <div className="mb-4 bg-white border border-slate-200 rounded-xl shadow-sm p-3">
-                    <FilterBar
-                        searchValue={searchQuery}
-                        onSearchChange={(v) => { setSearchQuery(v); setPage(1); }}
-                        searchPlaceholder="Kontrol ID veya adı ara..."
-                        filters={filterConfigs}
-                        onClearAll={() => { setSearchQuery(''); setActiveFilters({}); setPage(1); }}
-                    />
+                {/* Filter and Presets Panel */}
+                <div className="mb-5 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 space-y-4">
+                    
+                    {/* Saved Filter Presets */}
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">🎯 Hızlı Filtreler:</span>
+                            <button
+                                type="button"
+                                onClick={() => applyPreset(activePreset === 'my_controls' ? '' : 'my_controls')}
+                                className={`px-4 py-1.5 text-xs font-bold rounded-xl border transition-all ${activePreset === 'my_controls' ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/10' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+                            >
+                                Benim Kontrollerim
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => applyPreset(activePreset === 'open_findings' ? '' : 'open_findings')}
+                                className={`px-4 py-1.5 text-xs font-bold rounded-xl border transition-all ${activePreset === 'open_findings' ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/10' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+                            >
+                                Açık Bulgulu Kontroller
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => applyPreset(activePreset === 'this_month' ? '' : 'this_month')}
+                                className={`px-4 py-1.5 text-xs font-bold rounded-xl border transition-all ${activePreset === 'this_month' ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/10' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+                            >
+                                Bu Ay Yapılacaklar
+                            </button>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={clearAllFilters}
+                            className="text-xs font-bold text-slate-400 hover:text-slate-600 uppercase tracking-wider transition-colors"
+                        >
+                            Filtreleri Temizle
+                        </button>
+                    </div>
+
+                    {/* Column Filtering Controls */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                        <div className="col-span-1 sm:col-span-2">
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Küresel Arama (Her Şeyde Ara)</label>
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="ID, ad, sahip, açıklama..."
+                                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-800 font-semibold"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Kontrol Tipi</label>
+                            <select
+                                value={colFilters.type}
+                                onChange={(e) => setColFilters(p => ({ ...p, type: e.target.value }))}
+                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 outline-none font-bold text-slate-600"
+                            >
+                                <option value="">Tümü</option>
+                                <option value="BT">BT</option>
+                                <option value="BT_DISI">BT Dışı</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Nitelik</label>
+                            <select
+                                value={colFilters.nature}
+                                onChange={(e) => setColFilters(p => ({ ...p, nature: e.target.value }))}
+                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 outline-none font-bold text-slate-600"
+                            >
+                                <option value="">Tümü</option>
+                                <option value="PREVENTIVE">Önleyici</option>
+                                <option value="DETECTIVE">Tespit Edici</option>
+                                <option value="CORRECTIVE">Düzeltici</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Otomasyon</label>
+                            <select
+                                value={colFilters.automation}
+                                onChange={(e) => setColFilters(p => ({ ...p, automation: e.target.value }))}
+                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 outline-none font-bold text-slate-600"
+                            >
+                                <option value="">Tümü</option>
+                                <option value="AUTOMATED">Otomatik</option>
+                                <option value="SEMI_AUTOMATED">Yarı Otomatik</option>
+                                <option value="MANUAL">Manuel</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Periyodik Sıklık</label>
+                            <select
+                                value={colFilters.frequency}
+                                onChange={(e) => setColFilters(p => ({ ...p, frequency: e.target.value }))}
+                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 outline-none font-bold text-slate-600"
+                            >
+                                <option value="">Tümü</option>
+                                <option value="DAILY">Günlük</option>
+                                <option value="WEEKLY">Haftalık</option>
+                                <option value="MONTHLY">Aylık</option>
+                                <option value="QUARTERLY">3 Aylık</option>
+                                <option value="SEMI_ANNUAL">6 Aylık</option>
+                                <option value="ANNUAL">Yıllık</option>
+                                <option value="AD_HOC">Arızi</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -428,6 +631,15 @@ export default function ControlInventoryPage() {
                 confirmLabel="Evet, Sil"
                 loading={deleting}
                 variant="danger"
+            />
+            
+            <ImportControlModal
+                isOpen={importModalOpen}
+                onClose={() => setImportModalOpen(false)}
+                onImportSuccess={() => {
+                    success('Başarılı', 'Kontroller başarıyla içeri aktarıldı.');
+                    fetchControls();
+                }}
             />
         </div>
     );

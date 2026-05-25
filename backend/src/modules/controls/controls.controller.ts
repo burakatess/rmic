@@ -27,25 +27,25 @@ export class ControlsController {
     }
 
     @Post()
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async create(@Body() data: any, @CurrentUser('id') userId: string) {
         return this.controlsService.create(data, userId);
     }
 
     @Put(':id')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async update(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
         return this.controlsService.update(id, data, userId);
     }
 
     @Post(':id/map-risk')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async mapRisk(@Param('id') id: string, @Body() body: { riskId: string; mappingType?: string }) {
         return this.controlsService.mapRisk(id, body.riskId, body.mappingType);
     }
 
     @Delete(':id/unmap-risk/:riskId')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async unmapRisk(@Param('id') id: string, @Param('riskId') riskId: string) {
         return this.controlsService.unmapRisk(id, riskId);
     }
@@ -68,19 +68,19 @@ export class ControlsController {
     }
 
     @Put('tests/:testId/approve')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async approveTest(@Param('testId') testId: string, @CurrentUser('id') userId: string) {
         return this.controlsService.approveTest(testId, userId);
     }
 
     @Put('tests/:testId/reject')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async rejectTest(@Param('testId') testId: string, @Body('reason') reason: string, @CurrentUser('id') userId: string) {
         return this.controlsService.rejectTest(testId, userId, reason);
     }
 
     @Delete(':id')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async delete(@Param('id') id: string, @CurrentUser('id') userId: string) {
         return this.controlsService.delete(id, userId);
     }

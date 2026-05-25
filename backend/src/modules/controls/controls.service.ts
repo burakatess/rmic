@@ -72,7 +72,18 @@ export class ControlsService {
                 reviewer: { select: { id: true, firstName: true, lastName: true, email: true } },
                 risks: { include: { risk: true } },
                 tests: { orderBy: { testDate: 'desc' }, take: 10 },
-                findings: { orderBy: { createdAt: 'desc' }, take: 10 },
+                testRecords: { orderBy: { dueDate: 'desc' }, take: 10 },
+                findings: {
+                    orderBy: { createdAt: 'desc' },
+                    take: 10,
+                    include: {
+                        actions: {
+                            include: {
+                                owner: { select: { firstName: true, lastName: true } }
+                            }
+                        }
+                    }
+                },
                 regulations: { include: { article: { include: { regulation: true } } } },
             },
         });
@@ -81,8 +92,25 @@ export class ControlsService {
     }
 
     async create(data: any, userId: string) {
+        const { months, status, isActive, ...rest } = data;
+        let controlStatus: 'ACTIVE' | 'PASSIVE' = 'ACTIVE';
+        if (isActive === false || status === 'PASSIVE' || status === 'INACTIVE' || status === 'DRAFT') {
+            controlStatus = 'PASSIVE';
+        }
+
         const control = await this.prisma.control.create({
-            data: { ...data, controlId: this.generateControlId() },
+            data: {
+                ...rest,
+                controlId: data.controlId || this.generateControlId(),
+                name: data.name || data.controlId || 'Yeni Kontrol',
+                description: data.description || '',
+                type: data.type || 'IT_GENERAL',
+                nature: data.nature || 'PREVENTIVE',
+                automation: data.automation || 'MANUAL',
+                selectedMonths: months || [],
+                status: controlStatus,
+                ownerId: data.ownerId || userId,
+            },
             include: { owner: { select: { id: true, firstName: true, lastName: true, email: true } } },
         });
 
@@ -90,21 +118,45 @@ export class ControlsService {
             data: { userId, action: 'CREATE', entityType: 'Control', entityId: control.id, newValue: control },
         });
 
+        // Trigger automatic planned test records generation
+        if (control.status === 'ACTIVE') {
+            await this.generateTestRecordsForControl(control.id);
+        }
+
         return control;
     }
 
     async update(id: string, data: any, userId: string) {
         console.log('Updating control:', id, data);
         const existing = await this.findOne(id);
+        const { months, status, isActive, ...rest } = data;
+
+        let controlStatus: 'ACTIVE' | 'PASSIVE' | undefined = undefined;
+        if (isActive !== undefined) {
+            controlStatus = isActive ? 'ACTIVE' : 'PASSIVE';
+        } else if (status !== undefined) {
+            controlStatus = (status === 'ACTIVE') ? 'ACTIVE' : 'PASSIVE';
+        }
+
         const control = await this.prisma.control.update({
             where: { id },
-            data,
+            data: {
+                ...rest,
+                name: data.name || data.controlId || existing.name,
+                selectedMonths: months !== undefined ? months : existing.selectedMonths,
+                status: controlStatus !== undefined ? controlStatus : existing.status,
+            },
             include: { owner: { select: { id: true, firstName: true, lastName: true, email: true } } },
         });
 
         await this.prisma.auditLog.create({
             data: { userId, action: 'UPDATE', entityType: 'Control', entityId: id, oldValue: existing, newValue: control },
         });
+
+        // Trigger automatic planned test records generation if status is ACTIVE
+        if (control.status === 'ACTIVE') {
+            await this.generateTestRecordsForControl(control.id);
+        }
 
         return control;
     }
@@ -320,5 +372,100 @@ export class ControlsService {
         });
 
         return { message: 'Control deleted successfully' };
+    }
+
+    async generateTestRecordsForControl(controlId: string) {
+        const control = await this.prisma.control.findUnique({
+            where: { id: controlId },
+        });
+
+        if (!control || control.status !== 'ACTIVE') return;
+
+        // Check if there are already pending or any test records for this control
+        const existingCount = await this.prisma.testRecord.count({
+            where: { controlId },
+        });
+
+        // If records already exist, we skip to avoid duplicate generation
+        if (existingCount > 0) return;
+
+        const testRecordsToCreate: Array<{
+            controlId: string;
+            dueDate: Date;
+            status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'OVERDUE';
+            assigneeId: string | null;
+        }> = [];
+        const currentYear = new Date().getFullYear();
+        const currentDate = new Date();
+
+        const turkishMonths: Record<string, number> = {
+            'Ocak': 0, 'Şubat': 1, 'Mart': 2, 'Nisan': 3, 'Mayıs': 4, 'Haziran': 5,
+            'Temmuz': 6, 'Ağustos': 7, 'Eylül': 8, 'Ekim': 9, 'Kasım': 10, 'Aralık': 11
+        };
+
+        if (control.frequency === 'DAILY') {
+            // Generate next 30 days
+            for (let i = 1; i <= 30; i++) {
+                const date = new Date();
+                date.setDate(currentDate.getDate() + i);
+                // Skip weekends (optional but good for banking systems)
+                if (date.getDay() !== 0 && date.getDay() !== 6) {
+                    testRecordsToCreate.push({
+                        controlId,
+                        dueDate: date,
+                        status: 'PENDING',
+                        assigneeId: control.ownerId,
+                    });
+                }
+            }
+        } else if (control.frequency === 'WEEKLY') {
+            // Generate next 12 weeks
+            for (let i = 1; i <= 12; i++) {
+                const date = new Date();
+                date.setDate(currentDate.getDate() + (i * 7));
+                testRecordsToCreate.push({
+                    controlId,
+                    dueDate: date,
+                    status: 'PENDING',
+                    assigneeId: control.ownerId,
+                });
+            }
+        } else if (control.frequency === 'MONTHLY') {
+            // Generate 12 monthly tasks
+            for (let i = 0; i < 12; i++) {
+                const date = new Date(currentYear, currentDate.getMonth() + i + 1, 0); // Last day of month
+                testRecordsToCreate.push({
+                    controlId,
+                    dueDate: date,
+                    status: 'PENDING',
+                    assigneeId: control.ownerId,
+                });
+            }
+        } else if (['QUARTERLY', 'SEMI_ANNUAL', 'ANNUAL', 'AD_HOC'].includes(control.frequency)) {
+            // Generate tasks for selected months
+            const months = control.selectedMonths || [];
+            for (const monthName of months) {
+                const monthIndex = turkishMonths[monthName];
+                if (monthIndex !== undefined) {
+                    let targetYear = currentYear;
+                    if (monthIndex < currentDate.getMonth()) {
+                        targetYear = currentYear + 1; // Schedule for next year if month already passed
+                    }
+                    const date = new Date(targetYear, monthIndex + 1, 0); // Last day of that month
+                    testRecordsToCreate.push({
+                        controlId,
+                        dueDate: date,
+                        status: 'PENDING',
+                        assigneeId: control.ownerId,
+                    });
+                }
+            }
+        }
+
+        if (testRecordsToCreate.length > 0) {
+            await this.prisma.testRecord.createMany({
+                data: testRecordsToCreate,
+            });
+        }
     }
 }

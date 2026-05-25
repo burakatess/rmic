@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import api from '@/lib/api';
+import { EmptyState } from '@/components/ui';
 
 // Types
 interface Risk {
@@ -493,16 +494,14 @@ export default function RiskDetailPage() {
                                 </div>
 
                                 {rykControls.length === 0 ? (
-                                    <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-200">
-                                        <span className="text-4xl mb-3 block">🎯</span>
-                                        <p className="text-gray-600 font-medium">Henüz Risk Yönetimi Kontrolü eklenmemiş</p>
-                                        <p className="text-xs text-gray-400 mt-2">RYK kontrolleri ekleyerek risk skorunu etkileyebilirsiniz</p>
-                                        <Link
-                                            href="/risks/controls"
-                                            className="inline-block mt-4 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
-                                        >
-                                            Kontrol Ekle
-                                        </Link>
+                                    <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden">
+                                        <EmptyState 
+                                            title="Henüz Risk Yönetimi Kontrolü eklenmemiş" 
+                                            description="RYK kontrolleri ekleyerek risk skorunu etkileyebilirsiniz" 
+                                            icon={<svg className="w-12 h-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
+                                            actionLabel="Kontrol Ekle"
+                                            onAction={() => window.location.href = "/risks/controls"}
+                                        />
                                     </div>
                                 ) : (
                                     <div className="space-y-3">
@@ -632,10 +631,12 @@ export default function RiskDetailPage() {
                             <div>
                                 <p className="text-sm text-gray-500 mb-4">Bu riske bağlı kontrollerin bulguları (Kontrol → Bulgu zinciri)</p>
                                 {findings.length === 0 ? (
-                                    <div className="text-center py-12 text-gray-500">
-                                        <span className="text-4xl mb-3 block">🔍</span>
-                                        <p>Bu riskle ilişkili bulgu bulunmamaktadır</p>
-                                        <p className="text-xs mt-2">Bulgular, kontroller üzerinden bu riske bağlanır</p>
+                                    <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden">
+                                        <EmptyState 
+                                            title="Bulgu Bulunmamaktadır" 
+                                            description="Bu riskle ilişkili bulgu bulunmamaktadır. Bulgular, kontroller üzerinden bu riske bağlanır." 
+                                            icon={<svg className="w-12 h-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>}
+                                        />
                                     </div>
                                 ) : (
                                     <div className="space-y-3">

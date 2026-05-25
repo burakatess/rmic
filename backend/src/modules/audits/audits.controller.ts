@@ -18,26 +18,26 @@ export class AuditsController {
     }
 
     @Post('audit-plans')
-    @Roles('AUDITOR')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async createPlan(@Body() data: any, @CurrentUser('id') userId: string) {
         return this.auditsService.createPlan(data, userId);
     }
 
     @Put('audit-plans/:id')
-    @Roles('AUDITOR')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async updatePlan(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
         return this.auditsService.updatePlan(id, data, userId);
     }
 
     // Audit Executions
     @Post('audit-executions')
-    @Roles('AUDITOR')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async createExecution(@Body() data: any, @CurrentUser('id') userId: string) {
         return this.auditsService.createExecution(data, userId);
     }
 
     @Put('audit-executions/:id')
-    @Roles('AUDITOR')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async updateExecution(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
         return this.auditsService.updateExecution(id, data, userId);
     }
@@ -59,19 +59,19 @@ export class AuditsController {
     }
 
     @Post('findings')
-    @Roles('AUDITOR')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async createFinding(@Body() data: any, @CurrentUser('id') userId: string) {
         return this.auditsService.createFinding(data, userId);
     }
 
     @Put('findings/:id')
-    @Roles('AUDITOR')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async updateFinding(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
         return this.auditsService.updateFinding(id, data, userId);
     }
 
     @Delete('findings/:id')
-    @Roles('AUDITOR')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async deleteFinding(@Param('id') id: string, @CurrentUser('id') userId: string) {
         return this.auditsService.deleteFinding(id, userId);
     }

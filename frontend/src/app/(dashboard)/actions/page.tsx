@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
+import { PageHeader, DataTable, FilterBar, StatusBadge, Button } from '@/components/ui';
+import type { ColumnDef } from '@/components/ui';
 
 interface Action {
     id: string;
@@ -27,6 +29,8 @@ interface Action {
     };
 }
 
+type BadgeVariant = 'neutral' | 'warning' | 'info' | 'success' | 'critical' | 'primary';
+
 const sourceLabels: Record<string, string> = {
     RISK: 'Risk',
     FINDING: 'Bulgu',
@@ -34,41 +38,33 @@ const sourceLabels: Record<string, string> = {
     CONTROL_TEST: 'Kontrol Testi',
 };
 
-const statusLabels: Record<string, { label: string; color: string; bg: string }> = {
-    OPEN: { label: 'Açık', color: 'text-blue-700', bg: 'bg-blue-100' },
-    IN_PROGRESS: { label: 'Devam Ediyor', color: 'text-yellow-700', bg: 'bg-yellow-100' },
-    COMPLETED: { label: 'Tamamlandı', color: 'text-green-700', bg: 'bg-green-100' },
-    CLOSED: { label: 'Kapatıldı', color: 'text-gray-600', bg: 'bg-gray-100' },
-    OVERDUE: { label: 'Gecikmiş', color: 'text-red-700', bg: 'bg-red-100' },
+const statusLabels: Record<string, { label: string; variant: BadgeVariant }> = {
+    OPEN: { label: 'Açık', variant: 'info' },
+    IN_PROGRESS: { label: 'Devam Ediyor', variant: 'warning' },
+    COMPLETED: { label: 'Tamamlandı', variant: 'success' },
+    CLOSED: { label: 'Kapatıldı', variant: 'neutral' },
+    OVERDUE: { label: 'Gecikmiş', variant: 'critical' },
 };
 
 const getDaysRemaining = (dueDate: string) => {
     const due = new Date(dueDate);
     const now = new Date();
-    const diff = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    return diff;
+    return Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 };
-
-
 
 export default function ActionsPage() {
     const [actions, setActions] = useState<Action[]>([]);
     const [loading, setLoading] = useState(true);
-    const [statusFilter, setStatusFilter] = useState('');
-    const [sourceFilter, setSourceFilter] = useState('');
 
-    useEffect(() => {
-        loadActions();
-    }, [statusFilter, sourceFilter]);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
+    const [page, setPage] = useState(1);
+    const pageSize = 15;
 
-    const loadActions = async () => {
+    const loadActions = useCallback(async () => {
         setLoading(true);
         try {
-            const params: Record<string, string> = {};
-            if (statusFilter) params.status = statusFilter;
-            if (sourceFilter) params.source = sourceFilter;
-
-            const result = await api.getActions(params) as { data: Action[] };
+            const result = await api.getActions({}) as { data: Action[] };
             setActions(result.data || []);
         } catch (error) {
             console.error('Failed to load actions:', error);
@@ -76,150 +72,189 @@ export default function ActionsPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
+
+    useEffect(() => { loadActions(); }, [loadActions]);
+
+    const filterConfigs = useMemo(() => [
+        {
+            key: 'status', label: 'Durum',
+            value: activeFilters['status'] || '',
+            onChange: (v: string) => { setActiveFilters(p => ({ ...p, status: v })); setPage(1); },
+            options: Object.entries(statusLabels).map(([k, v]) => ({ value: k, label: v.label })),
+        },
+        {
+            key: 'source', label: 'Kaynak',
+            value: activeFilters['source'] || '',
+            onChange: (v: string) => { setActiveFilters(p => ({ ...p, source: v })); setPage(1); },
+            options: Object.entries(sourceLabels).map(([k, v]) => ({ value: k, label: v })),
+        },
+    ], [activeFilters]);
+
+    const filteredActions = useMemo(() => {
+        return actions.filter(a => {
+            if (searchQuery) {
+                const q = searchQuery.toLowerCase();
+                if (!a.actionId.toLowerCase().includes(q) && !a.description.toLowerCase().includes(q)) return false;
+            }
+            if (activeFilters['status'] && activeFilters['status'] !== 'all' && a.status !== activeFilters['status']) return false;
+            if (activeFilters['source'] && activeFilters['source'] !== 'all' && a.source !== activeFilters['source']) return false;
+            return true;
+        });
+    }, [actions, searchQuery, activeFilters]);
+
+    const paginatedActions = useMemo(() => {
+        return filteredActions.slice((page - 1) * pageSize, page * pageSize);
+    }, [filteredActions, page, pageSize]);
+
+    // KPIs
+    const inProgress = actions.filter(a => a.status === 'IN_PROGRESS').length;
+    const completed = actions.filter(a => a.status === 'COMPLETED' || a.status === 'CLOSED').length;
+    const overdue = actions.filter(a => a.status === 'OVERDUE' || (getDaysRemaining(a.dueDate) < 0 && a.status !== 'COMPLETED' && a.status !== 'CLOSED')).length;
+
+    const columns: ColumnDef<Action>[] = useMemo(() => [
+        {
+            key: 'actionId', header: 'Aksiyon ID', sortable: true, defaultWidth: 120,
+            render: (a) => (
+                <Link href={`/actions/${a.id}`} className="font-mono font-semibold text-orange-600 hover:underline">
+                    {a.actionId}
+                </Link>
+            ),
+        },
+        {
+            key: 'description', header: 'Açıklama', defaultWidth: 250,
+            render: (a) => <span className="font-medium text-slate-800 truncate block max-w-[230px]" title={a.description}>{a.description}</span>,
+        },
+        {
+            key: 'source', header: 'Kaynak', defaultWidth: 110,
+            render: (a) => <span className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded-md">{sourceLabels[a.source] || a.source}</span>,
+        },
+        {
+            key: 'owner', header: 'Sorumlu', defaultWidth: 150,
+            render: (a) => <span className="text-sm text-slate-700">{a.owner?.firstName} {a.owner?.lastName}</span>,
+        },
+        {
+            key: 'dueDate', header: 'Hedef Tarih', sortable: true, defaultWidth: 120,
+            render: (a) => {
+                const isOverdue = getDaysRemaining(a.dueDate) < 0 && a.status !== 'COMPLETED' && a.status !== 'CLOSED';
+                return (
+                    <span className={`text-sm ${isOverdue ? 'text-red-600 font-medium' : 'text-slate-600'}`}>
+                        {new Date(a.dueDate).toLocaleDateString('tr-TR')}
+                    </span>
+                );
+            },
+        },
+        {
+            key: 'remainingDays', header: 'Kalan', defaultWidth: 110,
+            render: (a) => {
+                const d = getDaysRemaining(a.dueDate);
+                const isOverdue = d < 0 && a.status !== 'COMPLETED' && a.status !== 'CLOSED';
+                if (a.status === 'COMPLETED' || a.status === 'CLOSED') return <span className="text-xs text-slate-400">—</span>;
+                return (
+                    <span className={`text-xs ${isOverdue ? 'text-red-500' : d <= 7 ? 'text-amber-500' : 'text-slate-500'}`}>
+                        {isOverdue ? `${Math.abs(d)} gün gecikmiş` : `${d} gün kaldı`}
+                    </span>
+                );
+            },
+        },
+        {
+            key: 'status', header: 'Durum', defaultWidth: 130,
+            render: (a) => {
+                const c = statusLabels[a.status];
+                return c ? <StatusBadge variant={c.variant}>{c.label}</StatusBadge> : null;
+            },
+        },
+        {
+            key: 'relations', header: 'İlişkiler', defaultWidth: 140,
+            render: (a) => (
+                <div className="flex flex-col gap-1">
+                    {a.risk && (
+                        <Link href={`/risks/${a.risk.id}`} className="text-[11px] text-blue-600 hover:underline">
+                            Risk: {a.risk.riskId}
+                        </Link>
+                    )}
+                    {a.finding && (
+                        <Link href={`/findings/${a.finding.id}`} className="text-[11px] text-violet-600 hover:underline">
+                            Bulgu: {a.finding.findingId}
+                        </Link>
+                    )}
+                </div>
+            ),
+        },
+        {
+            key: 'actions', header: 'İşlemler', defaultWidth: 90,
+            render: (a) => (
+                <div className="flex items-center gap-1">
+                    <Link href={`/actions/${a.id}`} className="p-1.5 rounded text-slate-400 hover:text-orange-600 hover:bg-orange-50 transition-colors" title="Görüntüle">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                    </Link>
+                </div>
+            ),
+        },
+    ], []);
 
     return (
-        <div className="space-y-6">
-            {/* Page Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Aksiyon Yönetimi</h1>
-                    <p className="text-gray-500 mt-1">Tüm aksiyonları takip edin ve yönetin</p>
-                </div>
-                <Link
-                    href="/actions/new"
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white font-medium rounded-xl hover:from-orange-600 hover:to-orange-700 transition-all shadow-sm"
-                >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                    Yeni Aksiyon
-                </Link>
-            </div>
+        <div className="flex flex-col h-full bg-slate-50/50">
+            <div className="px-8 pt-8">
+                <PageHeader
+                    title="Aksiyon Yönetimi"
+                    description="Tüm aksiyonları takip edin ve yönetin"
+                    breadcrumbs={[{ label: 'Bulgu & Aksiyon' }, { label: 'Aksiyon Listesi' }]}
+                    actions={
+                        <Link href="/actions/new">
+                            <Button variant="primary" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>} className="bg-orange-600 hover:bg-orange-700 ring-orange-600">
+                                Yeni Aksiyon
+                            </Button>
+                        </Link>
+                    }
+                />
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-                    <p className="text-sm text-gray-500">Toplam Aksiyon</p>
-                    <p className="text-2xl font-bold text-gray-900">{actions.length}</p>
+                {/* KPIs */}
+                <div className="grid grid-cols-4 gap-4 mb-6">
+                    <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
+                        <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Toplam Aksiyon</p>
+                        <p className="text-2xl font-bold text-slate-800 mt-1">{actions.length}</p>
+                    </div>
+                    <div className="bg-white rounded-xl p-5 shadow-sm border border-amber-200">
+                        <p className="text-xs font-medium text-amber-600 uppercase tracking-wide">Devam Eden</p>
+                        <p className="text-2xl font-bold text-amber-700 mt-1">{inProgress}</p>
+                    </div>
+                    <div className="bg-white rounded-xl p-5 shadow-sm border border-emerald-200">
+                        <p className="text-xs font-medium text-emerald-600 uppercase tracking-wide">Tamamlanan</p>
+                        <p className="text-2xl font-bold text-emerald-700 mt-1">{completed}</p>
+                    </div>
+                    <div className="bg-white rounded-xl p-5 shadow-sm border border-red-200">
+                        <p className="text-xs font-medium text-red-600 uppercase tracking-wide">Gecikmiş</p>
+                        <p className="text-2xl font-bold text-red-700 mt-1">{overdue}</p>
+                    </div>
                 </div>
-                <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-                    <p className="text-sm text-gray-500">Devam Eden</p>
-                    <p className="text-2xl font-bold text-yellow-600">
-                        {actions.filter(a => a.status === 'IN_PROGRESS').length}
-                    </p>
-                </div>
-                <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-                    <p className="text-sm text-gray-500">Tamamlanan</p>
-                    <p className="text-2xl font-bold text-green-600">
-                        {actions.filter(a => a.status === 'COMPLETED' || a.status === 'CLOSED').length}
-                    </p>
-                </div>
-                <div className="bg-red-50 rounded-xl p-4 shadow-sm border border-red-100">
-                    <p className="text-sm text-red-600">Gecikmiş</p>
-                    <p className="text-2xl font-bold text-red-600">
-                        {actions.filter(a => a.status === 'OVERDUE' || (getDaysRemaining(a.dueDate) < 0 && a.status !== 'COMPLETED' && a.status !== 'CLOSED')).length}
-                    </p>
-                </div>
-            </div>
 
-            {/* Filters */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-                <div className="flex flex-col md:flex-row gap-4">
-                    <select
-                        value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
-                        className="px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent bg-white"
-                    >
-                        <option value="">Tüm Durumlar</option>
-                        <option value="OPEN">Açık</option>
-                        <option value="IN_PROGRESS">Devam Ediyor</option>
-                        <option value="COMPLETED">Tamamlandı</option>
-                        <option value="OVERDUE">Gecikmiş</option>
-                    </select>
-                    <select
-                        value={sourceFilter}
-                        onChange={(e) => setSourceFilter(e.target.value)}
-                        className="px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent bg-white"
-                    >
-                        <option value="">Tüm Kaynaklar</option>
-                        <option value="RISK">Risk</option>
-                        <option value="FINDING">Bulgu</option>
-                        <option value="AUDIT">Denetim</option>
-                        <option value="CONTROL_TEST">Kontrol Testi</option>
-                    </select>
+                {/* Filters */}
+                <div className="mb-4 bg-white border border-slate-200 rounded-xl shadow-sm p-3">
+                    <FilterBar
+                        searchValue={searchQuery}
+                        onSearchChange={(v) => { setSearchQuery(v); setPage(1); }}
+                        searchPlaceholder="Aksiyon ID veya açıklama ara..."
+                        filters={filterConfigs}
+                        onClearAll={() => { setSearchQuery(''); setActiveFilters({}); setPage(1); }}
+                    />
                 </div>
             </div>
 
-            {/* Actions List */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                {loading ? (
-                    <div className="flex items-center justify-center h-64">
-                        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-orange-600"></div>
-                    </div>
-                ) : actions.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-                        <svg className="w-16 h-16 mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" />
-                        </svg>
-                        <p className="text-lg font-medium">Aksiyon bulunamadı</p>
-                    </div>
-                ) : (
-                    <div className="divide-y divide-gray-100">
-                        {actions.map((action) => {
-                            const daysRemaining = getDaysRemaining(action.dueDate);
-                            const isOverdue = daysRemaining < 0 && action.status !== 'COMPLETED' && action.status !== 'CLOSED';
-
-                            return (
-                                <Link key={action.id} href={`/actions/${action.id}`}>
-                                    <div className="p-6 hover:bg-gray-50 transition-colors cursor-pointer">
-                                        <div className="flex items-start justify-between">
-                                            <div className="flex-1">
-                                                <div className="flex items-center gap-3 mb-2">
-                                                    <span className="text-sm font-mono text-orange-600">{action.actionId}</span>
-                                                    <span className={`text-xs font-medium px-2 py-0.5 rounded ${statusLabels[action.status]?.bg} ${statusLabels[action.status]?.color}`}>
-                                                        {statusLabels[action.status]?.label}
-                                                    </span>
-                                                    <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">
-                                                        {sourceLabels[action.source]}
-                                                    </span>
-                                                </div>
-                                                <p className="text-gray-900 font-medium mb-2">{action.description}</p>
-                                                <div className="flex items-center gap-4 text-sm text-gray-500">
-                                                    <span>Sorumlu: {action.owner?.firstName} {action.owner?.lastName}</span>
-                                                    {action.risk && (
-                                                        <span
-                                                            onClick={(e) => { e.stopPropagation(); e.preventDefault(); window.location.href = `/risks/${action.risk?.id}`; }}
-                                                            className="text-blue-600 hover:underline cursor-pointer"
-                                                        >
-                                                            Risk: {action.risk.riskId}
-                                                        </span>
-                                                    )}
-                                                    {action.finding && (
-                                                        <span
-                                                            onClick={(e) => { e.stopPropagation(); e.preventDefault(); window.location.href = `/findings/${action.finding?.id}`; }}
-                                                            className="text-purple-600 hover:underline cursor-pointer"
-                                                        >
-                                                            Bulgu: {action.finding.findingId}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            <div className="text-right">
-                                                <p className={`text-sm font-medium ${isOverdue ? 'text-red-600' : daysRemaining <= 7 ? 'text-yellow-600' : 'text-gray-600'}`}>
-                                                    {new Date(action.dueDate).toLocaleDateString('tr-TR')}
-                                                </p>
-                                                <p className={`text-xs ${isOverdue ? 'text-red-500' : daysRemaining <= 7 ? 'text-yellow-500' : 'text-gray-400'}`}>
-                                                    {isOverdue ? `${Math.abs(daysRemaining)} gün gecikmiş` : `${daysRemaining} gün kaldı`}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </Link>
-                            );
-                        })}
-                    </div>
-                )}
+            <div className="px-8 pb-8 flex-1">
+                <DataTable
+                    columns={columns}
+                    data={paginatedActions}
+                    rowKey={(a) => a.id}
+                    loading={loading}
+                    totalCount={filteredActions.length}
+                    page={page}
+                    pageSize={pageSize}
+                    onPageChange={setPage}
+                    storageKey="actions-table"
+                    emptyTitle="Aksiyon bulunamadı"
+                    emptyDescription="Filtrelerinizi değiştirin veya yeni bir aksiyon oluşturun."
+                />
             </div>
         </div>
     );

@@ -12,645 +12,299 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-    console.log('🌱 Starting database seed...');
+    console.log('🌱 Starting comprehensive database seed...');
 
-    // Create Roles - 5 Ana Rol (RBAC: Her kullanıcı yalnızca BİR role atanır)
+    // Clear existing data to guarantee clean state
+    console.log('🧹 Cleaning database...');
+    await prisma.action.deleteMany({});
+    await prisma.finding.deleteMany({});
+    await prisma.controlTest.deleteMany({});
+    await prisma.testRecord.deleteMany({});
+    await prisma.controlRiskMapping.deleteMany({});
+    await prisma.control.deleteMany({});
+    await prisma.risk.deleteMany({});
+    await prisma.user.deleteMany({});
+    await prisma.role.deleteMany({});
+
+    // Create Roles
+    console.log('👥 Creating roles...');
     const roles = await Promise.all([
-        prisma.role.upsert({
-            where: { name: 'ADMIN' },
-            update: {
-                description: 'Sistem Yöneticisi - Tüm yetkilere sahip',
-                permissions: [
-                    'dashboard:view',
-                    'risk:view', 'risk:create', 'risk:update', 'risk:delete', 'risk:assess', 'risk:treat', 'risk:export',
-                    'control:view', 'control:create', 'control:update', 'control:delete', 'control:test', 'control:approve', 'control:export',
-                    'audit:view', 'audit:create', 'audit:update', 'audit:delete', 'audit:execute',
-                    'finding:view', 'finding:create', 'finding:update', 'finding:delete', 'finding:export',
-                    'action:view', 'action:create', 'action:update', 'action:delete', 'action:effectiveness',
-                    'compliance:view', 'compliance:create', 'compliance:update', 'compliance:delete', 'compliance:map',
-                    'report:view', 'report:create', 'report:export',
-                    'user:view', 'user:create', 'user:update', 'user:delete', 'role:manage',
-                    'parameter:view', 'parameter:manage', 'audit_log:view', 'integration:manage',
-                ],
-            },
-            create: {
+        prisma.role.create({
+            data: {
                 name: 'ADMIN',
-                description: 'Sistem Yöneticisi - Tüm yetkilere sahip',
-                permissions: [
-                    'dashboard:view',
-                    'risk:view', 'risk:create', 'risk:update', 'risk:delete', 'risk:assess', 'risk:treat', 'risk:export',
-                    'control:view', 'control:create', 'control:update', 'control:delete', 'control:test', 'control:approve', 'control:export',
-                    'audit:view', 'audit:create', 'audit:update', 'audit:delete', 'audit:execute',
-                    'finding:view', 'finding:create', 'finding:update', 'finding:delete', 'finding:export',
-                    'action:view', 'action:create', 'action:update', 'action:delete', 'action:effectiveness',
-                    'compliance:view', 'compliance:create', 'compliance:update', 'compliance:delete', 'compliance:map',
-                    'report:view', 'report:create', 'report:export',
-                    'user:view', 'user:create', 'user:update', 'user:delete', 'role:manage',
-                    'parameter:view', 'parameter:manage', 'audit_log:view', 'integration:manage',
-                ],
-            },
+                description: 'Sistem Yöneticisi',
+                permissions: ['dashboard:view', 'control:view', 'control:create', 'control:update', 'control:delete', 'control:test', 'control:approve', 'finding:view', 'action:view'],
+            }
         }),
-        prisma.role.upsert({
-            where: { name: 'RISK_MANAGER' },
-            update: {
-                description: 'Risk Yöneticisi - Risk ve kontrol süreçlerini yönetir',
-                permissions: [
-                    'dashboard:view',
-                    'risk:view', 'risk:create', 'risk:update', 'risk:assess', 'risk:treat', 'risk:export',
-                    'control:view', 'control:create', 'control:update', 'control:test', 'control:export',
-                    'finding:view', 'finding:create', 'finding:update', 'finding:export',
-                    'action:view', 'action:create', 'action:update', 'action:effectiveness',
-                    'compliance:view', 'compliance:map',
-                    'report:view', 'report:create', 'report:export',
-                    'user:view', 'parameter:view',
-                ],
-            },
-            create: {
+        prisma.role.create({
+            data: {
                 name: 'RISK_MANAGER',
-                description: 'Risk Yöneticisi - Risk ve kontrol süreçlerini yönetir',
-                permissions: [
-                    'dashboard:view',
-                    'risk:view', 'risk:create', 'risk:update', 'risk:assess', 'risk:treat', 'risk:export',
-                    'control:view', 'control:create', 'control:update', 'control:test', 'control:export',
-                    'finding:view', 'finding:create', 'finding:update', 'finding:export',
-                    'action:view', 'action:create', 'action:update', 'action:effectiveness',
-                    'compliance:view', 'compliance:map',
-                    'report:view', 'report:create', 'report:export',
-                    'user:view', 'parameter:view',
-                ],
-            },
+                description: 'Risk Yöneticisi',
+                permissions: ['dashboard:view', 'control:view', 'control:create', 'control:update', 'finding:view', 'action:view'],
+            }
         }),
-        prisma.role.upsert({
-            where: { name: 'AUDITOR' },
-            update: {
-                description: 'Denetçi - Denetim planları oluşturur ve yürütür',
-                permissions: [
-                    'dashboard:view',
-                    'risk:view', 'risk:export',
-                    'control:view', 'control:test', 'control:approve', 'control:export',
-                    'audit:view', 'audit:create', 'audit:update', 'audit:execute',
-                    'finding:view', 'finding:create', 'finding:update', 'finding:export',
-                    'action:view', 'action:create',
-                    'compliance:view',
-                    'report:view', 'report:create', 'report:export',
-                    'user:view',
-                ],
-            },
-            create: {
+        prisma.role.create({
+            data: {
                 name: 'AUDITOR',
-                description: 'Denetçi - Denetim planları oluşturur ve yürütür',
-                permissions: [
-                    'dashboard:view',
-                    'risk:view', 'risk:export',
-                    'control:view', 'control:test', 'control:approve', 'control:export',
-                    'audit:view', 'audit:create', 'audit:update', 'audit:execute',
-                    'finding:view', 'finding:create', 'finding:update', 'finding:export',
-                    'action:view', 'action:create',
-                    'compliance:view',
-                    'report:view', 'report:create', 'report:export',
-                    'user:view',
-                ],
-            },
+                description: 'İç Denetçi',
+                permissions: ['dashboard:view', 'control:view', 'control:test', 'control:approve', 'finding:view', 'finding:create', 'action:view'],
+            }
         }),
-        prisma.role.upsert({
-            where: { name: 'CONTROL_OWNER' },
-            update: {
-                description: 'Kontrol Sahibi - Atanmış kontrollerin testlerini yapar',
-                permissions: [
-                    'dashboard:view',
-                    'risk:view',
-                    'control:view', 'control:update', 'control:test',
-                    'finding:view',
-                    'action:view', 'action:update',
-                    'report:view',
-                ],
-            },
-            create: {
+        prisma.role.create({
+            data: {
                 name: 'CONTROL_OWNER',
-                description: 'Kontrol Sahibi - Atanmış kontrollerin testlerini yapar',
-                permissions: [
-                    'dashboard:view',
-                    'risk:view',
-                    'control:view', 'control:update', 'control:test',
-                    'finding:view',
-                    'action:view', 'action:update',
-                    'report:view',
-                ],
-            },
+                description: 'Kontrol Sahibi',
+                permissions: ['dashboard:view', 'control:view', 'control:update', 'control:test'],
+            }
         }),
-        prisma.role.upsert({
-            where: { name: 'VIEWER' },
-            update: {
-                description: 'Görüntüleyici - Sadece görüntüleme yetkisi',
-                permissions: [
-                    'dashboard:view',
-                    'risk:view',
-                    'control:view',
-                    'finding:view',
-                    'action:view',
-                    'compliance:view',
-                    'report:view',
-                ],
-            },
-            create: {
+        prisma.role.create({
+            data: {
                 name: 'VIEWER',
-                description: 'Görüntüleyici - Sadece görüntüleme yetkisi',
-                permissions: [
-                    'dashboard:view',
-                    'risk:view',
-                    'control:view',
-                    'finding:view',
-                    'action:view',
-                    'compliance:view',
-                    'report:view',
-                ],
-            },
+                description: 'Görüntüleyici',
+                permissions: ['dashboard:view', 'control:view', 'finding:view', 'action:view'],
+            }
         }),
     ]);
 
-    console.log('✅ Roles created (5 rol: Admin, Risk Yöneticisi, Denetçi, Kontrol Sahibi, Görüntüleyici)');
+    const adminRole = roles.find(r => r.name === 'ADMIN')!;
+    const riskManagerRole = roles.find(r => r.name === 'RISK_MANAGER')!;
+    const auditorRole = roles.find(r => r.name === 'AUDITOR')!;
+    const controlOwnerRole = roles.find(r => r.name === 'CONTROL_OWNER')!;
+    const viewerRole = roles.find(r => r.name === 'VIEWER')!;
 
-    // Create Users
+    // Create Users (Minimum 10)
+    console.log('👤 Creating users...');
     const passwordHash = await bcrypt.hash('password123', 10);
-    const adminRole = roles.find((r) => r.name === 'ADMIN')!;
-    const riskManagerRole = roles.find((r) => r.name === 'RISK_MANAGER')!;
-    const auditorRole = roles.find((r) => r.name === 'AUDITOR')!;
-    const controlOwnerRole = roles.find((r) => r.name === 'CONTROL_OWNER')!;
-    const viewerRole = roles.find((r) => r.name === 'VIEWER')!;
-
     const users = await Promise.all([
-        prisma.user.upsert({
-            where: { email: 'admin@grc.com' },
-            update: { roleId: adminRole.id },
-            create: {
-                email: 'admin@grc.com',
-                passwordHash,
-                firstName: 'Burak',
-                lastName: 'Yönetici',
-                department: 'IT',
-                roleId: adminRole.id,
-            },
+        prisma.user.create({
+            data: { email: 'burak.admin@grc.com', passwordHash, firstName: 'Burak', lastName: 'Yılmaz', department: 'BT Ağ Yönetimi', roleId: adminRole.id }
         }),
-        prisma.user.upsert({
-            where: { email: 'risk.manager@grc.com' },
-            update: { roleId: riskManagerRole.id },
-            create: {
-                email: 'risk.manager@grc.com',
-                passwordHash,
-                firstName: 'Ahmet',
-                lastName: 'Yılmaz',
-                department: 'Risk Yönetimi',
-                roleId: riskManagerRole.id,
-            },
+        prisma.user.create({
+            data: { email: 'ahmet.risk@grc.com', passwordHash, firstName: 'Ahmet', lastName: 'Kaya', department: 'Bilgi Güvenliği', roleId: riskManagerRole.id }
         }),
-        prisma.user.upsert({
-            where: { email: 'control.owner@grc.com' },
-            update: { roleId: controlOwnerRole.id },
-            create: {
-                email: 'control.owner@grc.com',
-                passwordHash,
-                firstName: 'Ayşe',
-                lastName: 'Kaya',
-                department: 'İç Kontrol',
-                roleId: controlOwnerRole.id,
-            },
+        prisma.user.create({
+            data: { email: 'mehmet.auditor@grc.com', passwordHash, firstName: 'Mehmet', lastName: 'Demir', department: 'İç Denetim', roleId: auditorRole.id }
         }),
-        prisma.user.upsert({
-            where: { email: 'auditor@grc.com' },
-            update: { roleId: auditorRole.id },
-            create: {
-                email: 'auditor@grc.com',
-                passwordHash,
-                firstName: 'Mehmet',
-                lastName: 'Demir',
-                department: 'İç Denetim',
-                roleId: auditorRole.id,
-            },
+        prisma.user.create({
+            data: { email: 'ayse.control@grc.com', passwordHash, firstName: 'Ayşe', lastName: 'Çelik', department: 'Altyapı', roleId: controlOwnerRole.id }
         }),
-        prisma.user.upsert({
-            where: { email: 'viewer@grc.com' },
-            update: { roleId: viewerRole.id },
-            create: {
-                email: 'viewer@grc.com',
-                passwordHash,
-                firstName: 'Zeynep',
-                lastName: 'Çelik',
-                department: 'Operasyonlar',
-                roleId: viewerRole.id,
-            },
+        prisma.user.create({
+            data: { email: 'zeynep.viewer@grc.com', passwordHash, firstName: 'Zeynep', lastName: 'Yıldız', department: 'Operasyon', roleId: viewerRole.id }
+        }),
+        prisma.user.create({
+            data: { email: 'can.owner@grc.com', passwordHash, firstName: 'Can', lastName: 'Öztürk', department: 'Uygulama Geliştirme', roleId: controlOwnerRole.id }
+        }),
+        prisma.user.create({
+            data: { email: 'elif.risk@grc.com', passwordHash, firstName: 'Elif', lastName: 'Aydın', department: 'Bilgi Güvenliği', roleId: riskManagerRole.id }
+        }),
+        prisma.user.create({
+            data: { email: 'kemal.audit@grc.com', passwordHash, firstName: 'Kemal', lastName: 'Arslan', department: 'İç Denetim', roleId: auditorRole.id }
+        }),
+        prisma.user.create({
+            data: { email: 'deniz.owner@grc.com', passwordHash, firstName: 'Deniz', lastName: 'Koç', department: 'Operasyon', roleId: controlOwnerRole.id }
+        }),
+        prisma.user.create({
+            data: { email: 'selin.viewer@grc.com', passwordHash, firstName: 'Selin', lastName: 'Şahin', department: 'Uygulama Geliştirme', roleId: viewerRole.id }
         }),
     ]);
 
-    console.log('✅ Users created');
-
-    // Create Risk Categories
-    const categories = await Promise.all([
-        prisma.riskCategory.upsert({
-            where: { name: 'Operasyonel Risk' },
-            update: {},
-            create: { name: 'Operasyonel Risk', description: 'Operasyonel süreçlerden kaynaklanan riskler', color: '#ef4444' },
-        }),
-        prisma.riskCategory.upsert({
-            where: { name: 'Finansal Risk' },
-            update: {},
-            create: { name: 'Finansal Risk', description: 'Finansal kayıp ve likidite riskleri', color: '#f59e0b' },
-        }),
-        prisma.riskCategory.upsert({
-            where: { name: 'Uyum Riski' },
-            update: {},
-            create: { name: 'Uyum Riski', description: 'Regülasyon ve mevzuat uyum riskleri', color: '#8b5cf6' },
-        }),
-        prisma.riskCategory.upsert({
-            where: { name: 'BT Riski' },
-            update: {},
-            create: { name: 'BT Riski', description: 'Bilgi teknolojileri ve siber güvenlik riskleri', color: '#3b82f6' },
-        }),
-        prisma.riskCategory.upsert({
-            where: { name: 'Stratejik Risk' },
-            update: {},
-            create: { name: 'Stratejik Risk', description: 'Stratejik kararlar ve piyasa riskleri', color: '#10b981' },
-        }),
-        prisma.riskCategory.upsert({
-            where: { name: 'İtibar Riski' },
-            update: {},
-            create: { name: 'İtibar Riski', description: 'Kurumsal itibar ve marka riskleri', color: '#ec4899' },
-        }),
-    ]);
-
-    console.log('✅ Risk categories created');
-
-    // Create Regulations
-    await Promise.all([
-        prisma.regulation.upsert({
-            where: { code: 'BDDK' },
-            update: {},
-            create: {
-                code: 'BDDK',
-                name: 'Bankacılık Düzenleme ve Denetleme Kurumu Mevzuatı',
-                description: 'Türk bankacılık sektörünü düzenleyen kurum',
-            },
-        }),
-        prisma.regulation.upsert({
-            where: { code: 'ISO27001' },
-            update: {},
-            create: {
-                code: 'ISO27001',
-                name: 'ISO 27001 Bilgi Güvenliği Yönetim Sistemi',
-                description: 'Uluslararası bilgi güvenliği standardı',
-            },
-        }),
-        prisma.regulation.upsert({
-            where: { code: 'KVKK' },
-            update: {},
-            create: {
-                code: 'KVKK',
-                name: 'Kişisel Verilerin Korunması Kanunu',
-                description: 'Türkiye kişisel veri koruma mevzuatı',
-            },
-        }),
-        prisma.regulation.upsert({
-            where: { code: 'DORA' },
-            update: {},
-            create: {
-                code: 'DORA',
-                name: 'Digital Operational Resilience Act',
-                description: 'AB dijital operasyonel dayanıklılık mevzuatı',
-            },
-        }),
-        prisma.regulation.upsert({
-            where: { code: 'COBIT' },
-            update: {},
-            create: {
-                code: 'COBIT',
-                name: 'COBIT Framework',
-                description: 'BT yönetişimi ve yönetimi çerçevesi',
-            },
-        }),
-    ]);
-
-    console.log('✅ Regulations created');
-
-    // Create Demo Risks
-    const riskOwner = users.find((u) => u.email === 'risk.manager@grc.com')!;
-    const operationalCategory = categories.find((c) => c.name === 'Operasyonel Risk')!;
-    const itCategory = categories.find((c) => c.name === 'BT Riski')!;
-    const complianceCategory = categories.find((c) => c.name === 'Uyum Riski')!;
-
-    const risks = await Promise.all([
-        prisma.risk.upsert({
-            where: { riskId: 'R-2024-0001' },
-            update: {},
-            create: {
-                riskId: 'R-2024-0001',
-                name: 'Siber Saldırı Riski',
-                description: 'Kurum sistemlerine yönelik siber saldırılar sonucu veri kaybı veya sistem kesintisi yaşanması riski',
-                categoryId: itCategory.id,
-                ownerId: riskOwner.id,
-                status: 'ASSESSED',
-                inherentProbability: 4,
-                inherentImpact: 5,
-                inherentRiskScore: 20,
-                residualProbability: 2,
-                residualImpact: 4,
-                residualRiskScore: 8,
-                riskAppetite: 10,
-                isAboveAppetite: false,
-                treatmentDecision: 'MITIGATE',
-            },
-        }),
-        prisma.risk.upsert({
-            where: { riskId: 'R-2024-0002' },
-            update: {},
-            create: {
-                riskId: 'R-2024-0002',
-                name: 'Regülasyon Uyumsuzluk Riski',
-                description: 'BDDK ve KVKK regülasyonlarına uyumsuzluk nedeniyle yaptırım uygulanması riski',
-                categoryId: complianceCategory.id,
-                ownerId: riskOwner.id,
-                status: 'ASSESSED',
-                inherentProbability: 3,
-                inherentImpact: 5,
-                inherentRiskScore: 15,
-                residualProbability: 2,
-                residualImpact: 4,
-                residualRiskScore: 8,
-                riskAppetite: 8,
-                isAboveAppetite: false,
-                treatmentDecision: 'MITIGATE',
-            },
-        }),
-        prisma.risk.upsert({
-            where: { riskId: 'R-2024-0003' },
-            update: {},
-            create: {
-                riskId: 'R-2024-0003',
-                name: 'Operasyonel Hata Riski',
-                description: 'Manuel süreçlerde insan hatası nedeniyle müşteri mağduriyeti veya finansal kayıp oluşması riski',
-                categoryId: operationalCategory.id,
-                ownerId: riskOwner.id,
-                status: 'IDENTIFIED',
-                inherentProbability: 4,
-                inherentImpact: 3,
-                inherentRiskScore: 12,
-                riskAppetite: 8,
-                isAboveAppetite: true,
-            },
-        }),
-        prisma.risk.upsert({
-            where: { riskId: 'R-2024-0004' },
-            update: {},
-            create: {
-                riskId: 'R-2024-0004',
-                name: 'Veri Sızıntısı Riski',
-                description: 'Müşteri verilerinin izinsiz olarak üçüncü taraflarla paylaşılması veya sızdırılması riski',
-                categoryId: itCategory.id,
-                ownerId: riskOwner.id,
-                status: 'TREATED',
-                inherentProbability: 3,
-                inherentImpact: 5,
-                inherentRiskScore: 15,
-                residualProbability: 1,
-                residualImpact: 4,
-                residualRiskScore: 4,
-                riskAppetite: 6,
-                isAboveAppetite: false,
-                treatmentDecision: 'MITIGATE',
-                treatmentApproval: true,
-            },
-        }),
-        prisma.risk.upsert({
-            where: { riskId: 'R-2024-0005' },
-            update: {},
-            create: {
-                riskId: 'R-2024-0005',
-                name: 'Kritik Sistem Kesintisi Riski',
-                description: 'Kritik bankacılık sistemlerinde yaşanacak kesintiler nedeniyle hizmet aksaması riski',
-                categoryId: itCategory.id,
-                ownerId: riskOwner.id,
-                status: 'ASSESSED',
-                inherentProbability: 2,
-                inherentImpact: 5,
-                inherentRiskScore: 10,
-                residualProbability: 1,
-                residualImpact: 4,
-                residualRiskScore: 4,
-                riskAppetite: 5,
-                isAboveAppetite: false,
-                treatmentDecision: 'MITIGATE',
-            },
-        }),
-    ]);
-
-    console.log('✅ Demo risks created');
-
-    // Create Demo Controls
-    const controlOwner = users.find((u) => u.email === 'control.owner@grc.com')!;
-
-    const controls = await Promise.all([
-        prisma.control.upsert({
-            where: { controlId: 'C-2024-0001' },
-            update: {},
-            create: {
-                controlId: 'C-2024-0001',
-                name: 'Güvenlik Duvarı Yönetimi',
-                description: 'Kurumsal ağ trafiğinin güvenlik duvarları ile izlenmesi ve kontrolü',
-                type: 'IT_GENERAL',
-                nature: 'PREVENTIVE',
-                automation: 'AUTOMATED',
-                frequency: 'DAILY',
-                ownerId: controlOwner.id,
-                effectivenessStatus: 'EFFECTIVE',
-            },
-        }),
-        prisma.control.upsert({
-            where: { controlId: 'C-2024-0002' },
-            update: {},
-            create: {
-                controlId: 'C-2024-0002',
-                name: 'Erişim Yetkilendirme Kontrolü',
-                description: 'Kullanıcı erişim yetkilerinin periyodik olarak gözden geçirilmesi',
-                type: 'IT_GENERAL',
-                nature: 'PREVENTIVE',
-                automation: 'MANUAL',
-                frequency: 'QUARTERLY',
-                ownerId: controlOwner.id,
-                effectivenessStatus: 'EFFECTIVE',
-            },
-        }),
-        prisma.control.upsert({
-            where: { controlId: 'C-2024-0003' },
-            update: {},
-            create: {
-                controlId: 'C-2024-0003',
-                name: 'Veri Şifreleme Kontrolü',
-                description: 'Hassas verilerin şifrelenerek saklanması ve iletilmesi',
-                type: 'IT_APPLICATION',
-                nature: 'PREVENTIVE',
-                automation: 'AUTOMATED',
-                frequency: 'DAILY',
-                ownerId: controlOwner.id,
-                effectivenessStatus: 'EFFECTIVE',
-            },
-        }),
-        prisma.control.upsert({
-            where: { controlId: 'C-2024-0004' },
-            update: {},
-            create: {
-                controlId: 'C-2024-0004',
-                name: 'Uyum İzleme Kontrolü',
-                description: 'Regülasyon değişikliklerinin izlenmesi ve etki analizi yapılması',
-                type: 'COMPLIANCE',
-                nature: 'DETECTIVE',
-                automation: 'MANUAL',
-                frequency: 'MONTHLY',
-                ownerId: controlOwner.id,
-                effectivenessStatus: 'PARTIALLY_EFFECTIVE',
-            },
-        }),
-        prisma.control.upsert({
-            where: { controlId: 'C-2024-0005' },
-            update: {},
-            create: {
-                controlId: 'C-2024-0005',
-                name: 'İşlem Doğrulama Kontrolü',
-                description: 'Kritik işlemlerin maker-checker prensibi ile doğrulanması',
-                type: 'OPERATIONAL',
-                nature: 'PREVENTIVE',
-                automation: 'SEMI_AUTOMATED',
-                frequency: 'DAILY',
-                ownerId: controlOwner.id,
-                effectivenessStatus: 'EFFECTIVE',
-            },
-        }),
-        prisma.control.upsert({
-            where: { controlId: 'C-2024-0006' },
-            update: {},
-            create: {
-                controlId: 'C-2024-0006',
-                name: 'Yedekleme ve Kurtarma Kontrolü',
-                description: 'Kritik sistemlerin düzenli yedeklenmesi ve felaket kurtarma testleri',
-                type: 'IT_GENERAL',
-                nature: 'DETECTIVE',
-                automation: 'AUTOMATED',
-                frequency: 'DAILY',
-                ownerId: controlOwner.id,
-                effectivenessStatus: 'EFFECTIVE',
-            },
-        }),
-    ]);
-
-    console.log('✅ Demo controls created');
-
-    // Create Control-Risk Mappings
-    await Promise.all([
-        prisma.controlRiskMapping.upsert({
-            where: { controlId_riskId: { controlId: controls[0].id, riskId: risks[0].id } },
-            update: {},
-            create: { controlId: controls[0].id, riskId: risks[0].id, mappingType: 'PRIMARY' },
-        }),
-        prisma.controlRiskMapping.upsert({
-            where: { controlId_riskId: { controlId: controls[1].id, riskId: risks[0].id } },
-            update: {},
-            create: { controlId: controls[1].id, riskId: risks[0].id, mappingType: 'SECONDARY' },
-        }),
-        prisma.controlRiskMapping.upsert({
-            where: { controlId_riskId: { controlId: controls[2].id, riskId: risks[3].id } },
-            update: {},
-            create: { controlId: controls[2].id, riskId: risks[3].id, mappingType: 'PRIMARY' },
-        }),
-        prisma.controlRiskMapping.upsert({
-            where: { controlId_riskId: { controlId: controls[3].id, riskId: risks[1].id } },
-            update: {},
-            create: { controlId: controls[3].id, riskId: risks[1].id, mappingType: 'PRIMARY' },
-        }),
-        prisma.controlRiskMapping.upsert({
-            where: { controlId_riskId: { controlId: controls[4].id, riskId: risks[2].id } },
-            update: {},
-            create: { controlId: controls[4].id, riskId: risks[2].id, mappingType: 'PRIMARY' },
-        }),
-        prisma.controlRiskMapping.upsert({
-            where: { controlId_riskId: { controlId: controls[5].id, riskId: risks[4].id } },
-            update: {},
-            create: { controlId: controls[5].id, riskId: risks[4].id, mappingType: 'PRIMARY' },
-        }),
-    ]);
-
-    console.log('✅ Control-Risk mappings created');
-
-    // Create Demo Finding
-    const finding = await prisma.finding.upsert({
-        where: { findingId: 'F-2024-0001' },
+    // Create Categories
+    const btdisiCat = await prisma.riskCategory.upsert({
+        where: { name: 'BT Dışı Riskler' },
         update: {},
-        create: {
-            findingId: 'F-2024-0001',
-            description: 'Erişim yetkilendirme kontrolünde eksiklik tespit edildi. Ayrılan personelin sistem erişimleri zamanında kapatılmamaktadır.',
-            impact: 'Yetkisiz erişim riski ve potansiyel veri sızıntısı',
-            severity: 'HIGH',
-            isRecurrent: false,
-            status: 'OPEN',
-            riskId: risks[0].id,
-            controlId: controls[1].id,
-        },
+        create: { name: 'BT Dışı Riskler', description: 'BT dışı operasyonel riskler', color: '#10b981' }
     });
 
-    console.log('✅ Demo finding created');
-
-    // Create Demo Action
-    const actionOwner = users.find((u) => u.email === 'viewer@grc.com')!;
-
-    await prisma.action.upsert({
-        where: { actionId: 'A-2024-0001' },
+    const btCat = await prisma.riskCategory.upsert({
+        where: { name: 'BT Riskleri' },
         update: {},
-        create: {
-            actionId: 'A-2024-0001',
-            description: 'Otomatik erişim yetki iptali sürecinin İK sistemine entegre edilmesi',
-            source: 'FINDING',
-            status: 'IN_PROGRESS',
-            ownerId: actionOwner.id,
-            findingId: finding.id,
-            riskId: risks[0].id,
-            dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
-            slaInDays: 30,
-        },
+        create: { name: 'BT Riskleri', description: 'Bilgi teknolojileri riskleri', color: '#3b82f6' }
     });
 
-    console.log('✅ Demo action created');
+    // Create Base Risks
+    console.log('⚠️ Creating risks...');
+    const riskData = [
+        { riskId: 'R-2026-0001', name: 'Yetkisiz Veri Erişimi', description: 'Kritik müşteri verilerine yetkisiz erişim sağlanması', categoryId: btCat.id },
+        { riskId: 'R-2026-0002', name: 'Sistem Kesintisi', description: 'Ana bankacılık sisteminde plan dışı kesinti yaşanması', categoryId: btCat.id },
+        { riskId: 'R-2026-0003', name: 'Mevzuata Uyumsuzluk', description: 'BDDK veya KVKK kurallarına uyum sağlanamaması', categoryId: btdisiCat.id },
+        { riskId: 'R-2026-0004', name: 'İç Suistimal', description: 'Çalışanların yetkilerini kötüye kullanarak suiistimal yapması', categoryId: btdisiCat.id },
+        { riskId: 'R-2026-0005', name: 'Tedarikçi Riski', description: 'Üçüncü taraf hizmet sağlayıcıların taahhütlerini yerine getirememesi', categoryId: btCat.id }
+    ];
 
-    // Create Parameters
-    await Promise.all([
-        prisma.parameter.upsert({
-            where: { key: 'RISK_SCORE_LEVELS' },
-            update: {},
-            create: {
-                category: 'RISK_SCORING',
-                key: 'RISK_SCORE_LEVELS',
-                value: { low: { min: 1, max: 7 }, medium: { min: 8, max: 14 }, high: { min: 15, max: 25 } },
-                description: 'Risk skor seviye aralıkları',
-            },
-        }),
-        prisma.parameter.upsert({
-            where: { key: 'DEFAULT_ACTION_SLA' },
-            update: {},
-            create: {
-                category: 'SLA',
-                key: 'DEFAULT_ACTION_SLA',
-                value: { critical: 7, high: 14, medium: 30, low: 60 },
-                description: 'Bulgu ciddiyetine göre varsayılan aksiyon SLA süreleri (gün)',
-            },
-        }),
-    ]);
+    const risks = await Promise.all(
+        riskData.map(r => prisma.risk.create({
+            data: {
+                riskId: r.riskId,
+                name: r.name,
+                description: r.description,
+                categoryId: r.categoryId,
+                ownerId: users[1].id,
+                status: 'ASSESSED'
+            }
+        }))
+    );
 
-    console.log('✅ Parameters created');
+    // Create 50 Controls
+    console.log('🛡️ Creating 50 controls...');
+    const directorates = ['BT Ağ Yönetimi', 'Bilgi Güvenliği', 'Altyapı', 'Uygulama Geliştirme', 'Operasyon'];
+    const frequencies = ['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'SEMI_ANNUAL', 'ANNUAL', 'AD_HOC'];
+    const controlTypes = ['BT', 'BT_DISI'];
+    const natures = ['PREVENTIVE', 'DETECTIVE'];
+    const automations = ['MANUAL', 'AUTOMATED', 'SEMI_AUTOMATED'];
 
-    console.log('');
-    console.log('🎉 Database seed completed successfully!');
-    console.log('');
-    console.log('Demo kullanıcılar (şifre: password123):');
-    console.log('  - admin@grc.com (Sistem Yöneticisi)');
-    console.log('  - risk.manager@grc.com (Risk Yöneticisi)');
-    console.log('  - control.owner@grc.com (Kontrol Sahibi)');
-    console.log('  - auditor@grc.com (Denetçi)');
-    console.log('  - viewer@grc.com (Görüntüleyici)');
+    const controls = [];
+    for (let i = 1; i <= 50; i++) {
+        const idStr = `C-${2026}-${String(i).padStart(4, '0')}`;
+        const dir = directorates[(i - 1) % directorates.length];
+        const freq = frequencies[(i - 1) % frequencies.length] as any;
+        const type = controlTypes[(i - 1) % controlTypes.length] as any;
+        const nature = natures[(i - 1) % natures.length] as any;
+        const aut = automations[(i - 1) % automations.length] as any;
+        const owner = users[3 + (i % 3)]; // distribute owners
+        const status = i % 10 === 0 ? 'PASSIVE' : 'ACTIVE';
+        const effectiveness = i % 7 === 0 ? 'INEFFECTIVE' : (i % 5 === 0 ? 'PARTIALLY_EFFECTIVE' : 'EFFECTIVE');
+
+        const control = await prisma.control.create({
+            data: {
+                controlId: idStr,
+                name: `${dir} ${freq} Kontrolü - ${i}`,
+                description: `${dir} kapsamında ${freq.toLowerCase()} olarak yürütülen ${nature.toLowerCase()} kontrol faaliyeti.`,
+                type,
+                nature,
+                automation: aut,
+                frequency: freq,
+                status: status as any,
+                directorate: dir,
+                gmy: 'Teknoloji Genel Müdür Yardımcılığı',
+                mehaz: 'BDDK Bilgi Sistemleri Yönetmeliği',
+                testSteps: '1. Logları incele.\n2. Yetki listesini kontrol et.\n3. Kanıtı yükle.',
+                ownerId: owner.id,
+                testPerformerId: users[5].id,
+                reviewerId: users[2].id,
+                effectivenessStatus: effectiveness as any,
+            }
+        });
+        controls.push(control);
+
+        // Map to a risk
+        await prisma.controlRiskMapping.create({
+            data: {
+                controlId: control.id,
+                riskId: risks[i % risks.length].id,
+                mappingType: 'PRIMARY'
+            }
+        });
+    }
+
+    // Create 150 TestRecords & ControlTests (Control -> Tests)
+    console.log('🧪 Creating 150 test records...');
+    let testCount = 0;
+    const testRecords = [];
+
+    // Past Completed Tests using ControlTest (en az 100 adet)
+    for (let i = 0; i < 100; i++) {
+        const ctrl = controls[i % controls.length];
+        const tester = users[3 + (i % 3)];
+        const result = i % 12 === 0 ? 'INEFFECTIVE' : (i % 9 === 0 ? 'PARTIALLY_EFFECTIVE' : 'EFFECTIVE');
+        
+        await prisma.controlTest.create({
+            data: {
+                controlId: ctrl.id,
+                testDate: new Date(Date.now() - (i + 1) * 2 * 24 * 60 * 60 * 1000), // in the past
+                tester: `${tester.firstName} ${tester.lastName}`,
+                result,
+                evidenceUrls: ['/evidences/test-log.pdf'],
+                findings: result !== 'EFFECTIVE' ? 'Kontrol testinde hedeflenen eşik değerin altında kalındığı tespit edilmiştir.' : null,
+                notes: 'Rutine uygun yapılmıştır.',
+                approvalStatus: 'APPROVED',
+                approvedBy: 'Mehmet Demir',
+                approvedAt: new Date(),
+                hasFinding: result !== 'EFFECTIVE'
+            }
+        });
+        testCount++;
+    }
+
+    // Active/Pending/In Progress TestRecords (en az 50 adet)
+    for (let i = 0; i < 55; i++) {
+        const ctrl = controls[i % controls.length];
+        const status = i % 4 === 0 ? 'OVERDUE' : (i % 3 === 0 ? 'IN_PROGRESS' : (i % 2 === 0 ? 'COMPLETED' : 'PENDING'));
+        const result = status === 'COMPLETED' ? (i % 5 === 0 ? 'INEFFECTIVE' : 'EFFECTIVE') : null;
+        
+        const record = await prisma.testRecord.create({
+            data: {
+                controlId: ctrl.id,
+                dueDate: new Date(Date.now() + (i - 10) * 24 * 60 * 60 * 1000), // some overdue, some future
+                status: status as any,
+                assigneeId: ctrl.ownerId,
+                completedAt: status === 'COMPLETED' ? new Date() : null,
+                testResult: result as any,
+                hasFinding: result === 'INEFFECTIVE',
+                notes: status === 'COMPLETED' ? 'İşlem tamamlandı, kanıtlar doğrulandı.' : null
+            }
+        });
+        testRecords.push(record);
+        testCount++;
+    }
+    console.log(`Total tests created: ${testCount}`);
+
+    // Create 30 Findings (Tests -> Findings)
+    console.log('🔍 Creating 30 findings...');
+    const findings = [];
+    const severities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+    const findingStatuses = ['OPEN', 'IN_PROGRESS', 'CLOSED', 'VERIFIED'];
+
+    for (let i = 1; i <= 30; i++) {
+        const sev = severities[(i - 1) % severities.length];
+        const fStatus = findingStatuses[(i - 1) % findingStatuses.length];
+        const ctrl = controls[i % controls.length];
+        
+        const finding = await prisma.finding.create({
+            data: {
+                findingId: `F-2026-${String(i).padStart(4, '0')}`,
+                description: `${ctrl.directorate} biriminde yapılan kontrolde yetki aşımı/süreç sapması tespit edilmiştir.`,
+                impact: 'Bankacılık operasyonlarında uyumsuzluk ve süreç aksaması riski.',
+                severity: sev as any,
+                status: fStatus as any,
+                isRecurrent: i % 7 === 0,
+                riskId: risks[i % risks.length].id,
+                controlId: ctrl.id,
+                source: 'CONTROL_TEST',
+                affectedSystem: 'Core Banking, LDAP',
+                recommendation: 'Yetki tanımlama süreçlerinin gözden geçirilerek maker-checker kontrolünün sıkılaştırılması.',
+                managementResponse: 'Bulgu kabul edilmiş olup aksiyon planı başlatılmıştır.',
+                targetResolutionDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                relatedDepartment: ctrl.directorate,
+                responsiblePerson: 'Ayşe Çelik'
+            }
+        });
+        findings.push(finding);
+    }
+
+    // Create 20 Actions (Findings -> Actions)
+    console.log('🚀 Creating 20 actions...');
+    const actionStatuses = ['OPEN', 'IN_PROGRESS', 'COMPLETED'];
+    for (let i = 1; i <= 20; i++) {
+        const finding = findings[i % findings.length];
+        const actStatus = actionStatuses[(i - 1) % actionStatuses.length];
+        const isOverdue = i % 4 === 0;
+        
+        await prisma.action.create({
+            data: {
+                actionId: `A-2026-${String(i).padStart(4, '0')}`,
+                description: `Bulguya yönelik otomatik log kontrol entegrasyonunun yazılması ve devreye alınması.`,
+                source: 'FINDING',
+                status: actStatus as any,
+                ownerId: users[5].id, // assigned to Can Owner
+                findingId: finding.id,
+                riskId: finding.riskId,
+                dueDate: isOverdue ? new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) : new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
+                slaInDays: 30,
+            }
+        });
+    }
+
+    console.log('✅ Database seeding finished successfully!');
 }
 
 main()

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
 
@@ -19,12 +19,11 @@ interface Control {
     id: string;
     controlId: string;
     name: string;
-    type: 'IT_GENERAL' | 'IT_APPLICATION' | 'FINANCIAL' | 'OPERATIONAL' | 'COMPLIANCE';
+    type: 'IT_GENERAL' | 'IT_APPLICATION' | 'FINANCIAL' | 'OPERATIONAL' | 'COMPLIANCE' | 'BT' | 'BT_DISI';
     scope: string;
     frequency: string;
     ownerUnit: string;
-    linkedRisks: Risk[]; // Using Risk type directly for simplicity in frontend mapping
-    // Backend returns risks via riskMappings usually, so we'll transform in fetch
+    linkedRisks: Risk[];
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -33,13 +32,15 @@ const TYPE_LABELS: Record<string, string> = {
     FINANCIAL: 'Finansal',
     OPERATIONAL: 'Operasyonel',
     COMPLIANCE: 'Uyum',
+    BT: 'BT Kontrolü',
+    BT_DISI: 'BT Dışı Kontrol',
 };
 
 const SEVERITY_COLORS: Record<string, string> = {
-    CRITICAL: 'bg-red-100 text-red-800 border-red-200',
-    HIGH: 'bg-orange-100 text-orange-800 border-orange-200',
-    MEDIUM: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    LOW: 'bg-green-100 text-green-800 border-green-200',
+    CRITICAL: 'bg-rose-50 text-rose-700 border-rose-100',
+    HIGH: 'bg-orange-50 text-orange-700 border-orange-100',
+    MEDIUM: 'bg-amber-50 text-amber-700 border-amber-100',
+    LOW: 'bg-emerald-50 text-emerald-700 border-emerald-100',
 };
 
 export default function ControlRiskMappingPage() {
@@ -72,25 +73,23 @@ export default function ControlRiskMappingPage() {
                 id: r.id,
                 riskId: r.riskId,
                 name: r.name,
-                severity: r.inherentRiskScore >= 20 ? 'CRITICAL' : r.inherentRiskScore >= 12 ? 'HIGH' : r.inherentRiskScore >= 5 ? 'MEDIUM' : 'LOW', // Approximate mapping if severity field is different
+                severity: r.inherentRiskScore >= 20 ? 'CRITICAL' : r.inherentRiskScore >= 12 ? 'HIGH' : r.inherentRiskScore >= 5 ? 'MEDIUM' : 'LOW',
                 probability: r.probability || 1,
                 impact: r.impact || 1,
                 category: r.category?.name || 'Genel Risk'
             })));
 
             setControls(cData.map((c: any) => {
-                // Handle both 'risks' (new backend) and 'riskMappings' (legacy) field names
                 const riskMappings = c.risks || c.riskMappings || [];
                 return {
                     id: c.id,
                     controlId: c.controlId,
                     name: c.name,
                     type: c.type,
-                    scope: 'Genel',
-                    frequency: c.frequency || 'Günlük',
-                    ownerUnit: c.owner?.department || c.owner?.firstName || 'Bilinmiyor',
+                    scope: c.gmy || 'Genel',
+                    frequency: c.frequency || 'Aylık',
+                    ownerUnit: c.directorate || c.owner?.department || 'Bilinmiyor',
                     linkedRisks: riskMappings.map((rm: any) => {
-                        // rm could be {risk: {...}} or just the risk object
                         const risk = rm.risk || rm;
                         return {
                             id: risk.id,
@@ -121,7 +120,7 @@ export default function ControlRiskMappingPage() {
     // Filter controls
     const filteredControls = controls.filter(control => {
         if (filter === 'unmapped') return control.linkedRisks.length === 0;
-        if (filter === 'it') return control.type === 'IT_GENERAL' || control.type === 'IT_APPLICATION';
+        if (filter === 'it') return control.type === 'IT_GENERAL' || control.type === 'IT_APPLICATION' || control.type === 'BT';
         if (filter === 'financial') return control.type === 'FINANCIAL';
         return true;
     });
@@ -137,7 +136,6 @@ export default function ControlRiskMappingPage() {
     const handleRiskSelect = async (risk: Risk) => {
         if (!selectedControl) return;
 
-        // Optimistic UI update
         const originalControls = [...controls];
         setControls(prev => prev.map(c => {
             if (c.id === selectedControl.id) {
@@ -154,16 +152,14 @@ export default function ControlRiskMappingPage() {
         } catch (error) {
             console.error('Failed to map risk:', error);
             alert('Risk eşleştirilirken bir hata oluştu.');
-            // Revert changes
             setControls(originalControls);
         }
     };
 
     const handleUnmapRisk = async (controlId: string, riskId: string, event: React.MouseEvent) => {
-        event.stopPropagation(); // Prevent bubbling if clicked inside a clickable row
+        event.stopPropagation();
         if (!confirm('Bu riskin eşleşmesini kaldırmak istediğinize emin misiniz?')) return;
 
-        // Optimistic UI update
         const originalControls = [...controls];
         setControls(prev => prev.map(c => {
             if (c.id === controlId) {
@@ -182,7 +178,6 @@ export default function ControlRiskMappingPage() {
     };
 
     const handleRiskHover = (risk: Risk, event: React.MouseEvent) => {
-        // Need to find full risk details from our fetching risks list to display correct tooltip info
         const fullRisk = risks.find(r => r.id === risk.id);
         if (fullRisk) {
             setHoveredRisk(fullRisk);
@@ -195,67 +190,80 @@ export default function ControlRiskMappingPage() {
         : [];
 
     if (loading) {
-        return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
+        return (
+            <div className="flex justify-center items-center h-64">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+            </div>
+        );
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 max-w-7xl mx-auto py-8 px-4">
             {/* Page Header */}
-            <div className="border-b border-gray-200 pb-4">
-                <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
-                    <Link href="/controls" className="hover:text-gray-700">Kontroller</Link>
-                    <span>/</span>
-                    <span className="text-gray-900">Kontrol–Risk Eşleştirme</span>
+            <div className="flex items-start justify-between border-b border-slate-200 pb-5">
+                <div>
+                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">
+                        <Link href="/controls" className="hover:text-slate-600">Kontrol Envanteri</Link>
+                        <span>/</span>
+                        <span className="text-slate-600">Risk Eşleştirme</span>
+                    </div>
+                    <h1 className="text-2xl font-black text-slate-800 tracking-tight">Kontrol–Risk Eşleştirme Matrisi</h1>
+                    <p className="text-sm text-slate-500 mt-1">Hangi kontrol faaliyetinin hangi risklere teminat sağladığını ve risk kapsama performansını yönetin.</p>
                 </div>
-                <h1 className="text-2xl font-bold text-gray-900">Kontrol–Risk Eşleştirme</h1>
-                <p className="text-gray-500 mt-1">Kontrollerin ilgili risklerle ilişkilendirilmesini ve risk kapsam durumunu gösterir.</p>
             </div>
 
-            {/* KPI Indicators */}
-            <div className="flex items-center gap-6 py-3 px-4 bg-gray-50 rounded-lg border border-gray-200">
-                <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-500">Toplam Kontrol:</span>
-                    <span className="text-sm font-semibold text-gray-900">{totalControls}</span>
+            {/* Premium KPI Indicators */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+                <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80 flex items-center justify-between">
+                    <div>
+                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Toplam Kontrol</p>
+                        <p className="text-3xl font-extrabold text-slate-800 mt-1">{totalControls}</p>
+                    </div>
+                    <span className="text-xl p-3 bg-slate-50 rounded-xl">🛡️</span>
                 </div>
-                <div className="w-px h-4 bg-gray-300"></div>
-                <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-500">Eşleştirilmiş:</span>
-                    <span className="text-sm font-semibold text-green-700">{mappedControls}</span>
+                <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80 flex items-center justify-between">
+                    <div>
+                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">İlişkilendirilmiş</p>
+                        <p className="text-3xl font-extrabold text-emerald-600 mt-1">{mappedControls}</p>
+                    </div>
+                    <span className="text-xl p-3 bg-emerald-50 text-emerald-600 rounded-xl">🔗</span>
                 </div>
-                <div className="w-px h-4 bg-gray-300"></div>
-                <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-500">Eşleme Bekleyen:</span>
-                    <span className={`text-sm font-semibold ${unmappedControls > 0 ? 'text-amber-600' : 'text-gray-900'}`}>{unmappedControls}</span>
+                <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80 flex items-center justify-between">
+                    <div>
+                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Eşleme Bekleyen</p>
+                        <p className="text-3xl font-extrabold text-amber-600 mt-1">{unmappedControls}</p>
+                    </div>
+                    <span className="text-xl p-3 bg-amber-50 text-amber-600 rounded-xl">⚠️</span>
                 </div>
-                <div className="w-px h-4 bg-gray-300"></div>
-                <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-500">Eşleştirme Oranı:</span>
-                    <span className={`text-sm font-semibold ${mappingRate === 100 ? 'text-green-700' : mappingRate >= 50 ? 'text-amber-600' : 'text-red-600'}`}>
-                        {mappingRate}% ({mappedControls} / {totalControls})
-                    </span>
+                <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80 flex items-center justify-between">
+                    <div>
+                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Kapsama Oranı</p>
+                        <p className="text-3xl font-extrabold text-blue-600 mt-1">{mappingRate}%</p>
+                    </div>
+                    <span className="text-xl p-3 bg-blue-50 text-blue-600 rounded-xl">📊</span>
                 </div>
             </div>
 
             {/* Quick Filters */}
-            <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-500 mr-2">Filtre:</span>
+            <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex-wrap">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mr-2">Filtrele:</span>
                 {[
-                    { key: 'all', label: 'Tümü' },
-                    { key: 'unmapped', label: 'Risk Atanmamış' },
-                    { key: 'it', label: 'IT Kontrolleri' },
+                    { key: 'all', label: 'Tüm Kontroller' },
+                    { key: 'unmapped', label: 'Risk Atanmamış Kontroller' },
+                    { key: 'it', label: 'IT & BT Kontrolleri' },
                     { key: 'financial', label: 'Finansal Kontroller' },
                 ].map(f => (
                     <button
                         key={f.key}
                         onClick={() => setFilter(f.key as typeof filter)}
-                        className={`px-3 py-1.5 text-sm rounded-md transition-colors ${filter === f.key
-                            ? 'bg-slate-700 text-white'
-                            : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${filter === f.key
+                            ? 'bg-blue-600 text-white shadow-sm'
+                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
                             }`}
                     >
                         {f.label}
                         {f.key === 'unmapped' && unmappedControls > 0 && (
-                            <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-amber-100 text-amber-700 rounded">
+                            <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-amber-100 text-amber-800 font-extrabold rounded-full">
                                 {unmappedControls}
                             </span>
                         )}
@@ -264,139 +272,123 @@ export default function ControlRiskMappingPage() {
             </div>
 
             {/* Main Table */}
-            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                <table className="w-full">
-                    <thead>
-                        <tr className="bg-gray-50 border-b border-gray-200">
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider w-[35%]">Kontrol</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider w-[12%]">Tip</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider w-[33%]">Eşleşen Riskler</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider w-[10%]">Durum</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider w-[10%]">İşlem</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                        {filteredControls.map(control => (
-                            <tr key={control.id} className="hover:bg-gray-50">
-                                {/* Kontrol */}
-                                <td className="px-4 py-3">
-                                    <div>
-                                        <Link href={`/controls/${control.id}`} className="text-sm font-medium text-blue-700 hover:text-blue-900">
-                                            {control.controlId}
-                                        </Link>
-                                        <p className="text-sm text-gray-900 mt-0.5">{control.name}</p>
-                                        <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
-                                            <span>{control.scope}</span>
-                                            <span>•</span>
-                                            <span>{control.frequency}</span>
-                                            <span>•</span>
-                                            <span>{control.ownerUnit}</span>
-                                        </div>
-                                    </div>
-                                </td>
-
-                                {/* Tip */}
-                                <td className="px-4 py-3">
-                                    <span className="text-sm text-gray-700">{TYPE_LABELS[control.type] || control.type}</span>
-                                </td>
-
-                                {/* Eşleşen Riskler */}
-                                <td className="px-4 py-3">
-                                    {control.linkedRisks.length > 0 ? (
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {control.linkedRisks.map(risk => {
-                                                // Find real risk to get correct severity if needed, or rely on what matches
-                                                const realRisk = risks.find(r => r.id === risk.id) || risk;
-                                                return (
-                                                    <span
-                                                        key={risk.id}
-                                                        className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded border cursor-help ${SEVERITY_COLORS[realRisk.severity] || 'bg-gray-100'}`}
-                                                        onMouseEnter={(e) => handleRiskHover(risk, e)}
-                                                        onMouseLeave={() => setHoveredRisk(null)}
-                                                    >
-                                                        {risk.riskId}
-                                                        <button
-                                                            onClick={(e) => handleUnmapRisk(control.id, risk.id, e)}
-                                                            className="ml-0.5 text-gray-500 hover:text-red-500 rounded-full hover:bg-white/50"
-                                                        >
-                                                            &times;
-                                                        </button>
-                                                    </span>
-                                                );
-                                            })}
-                                        </div>
-                                    ) : (
-                                        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-amber-700 bg-amber-50 rounded border border-amber-200">
-                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                            </svg>
-                                            Risk Atanmamış
-                                        </span>
-                                    )}
-                                </td>
-
-                                {/* Durum */}
-                                <td className="px-4 py-3">
-                                    {control.linkedRisks.length > 0 ? (
-                                        <div className="flex items-center gap-1.5">
-                                            <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                                            <span className="text-xs text-green-700">Eşleştirilmiş</span>
-                                        </div>
-                                    ) : (
-                                        <div className="flex items-center gap-1.5">
-                                            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                                            <span className="text-xs text-amber-700">Bekliyor</span>
-                                        </div>
-                                    )}
-                                </td>
-
-                                {/* İşlem */}
-                                <td className="px-4 py-3">
-                                    <button
-                                        onClick={() => handleAddRisk(control.id)}
-                                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100 transition-colors"
-                                    >
-                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                        </svg>
-                                        {control.linkedRisks.length > 0 ? 'Ek Risk' : 'Risk Ekle'}
-                                    </button>
-                                </td>
+            <div className="bg-white rounded-2xl border border-slate-200/80 overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                        <thead>
+                            <tr className="bg-slate-50 border-b border-slate-200">
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-[40%]">Kontrol Detayları</th>
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-[15%]">Kontrol Tipi</th>
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-[30%]">Eşleşen Riskler</th>
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-[15%]">İşlemler</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {filteredControls.map(control => (
+                                <tr key={control.id} className="hover:bg-slate-50/50 transition-colors">
+                                    {/* Kontrol */}
+                                    <td className="px-6 py-4">
+                                        <div className="space-y-1">
+                                            <Link href={`/controls/${control.id}`} className="font-mono text-xs font-bold text-blue-600 hover:underline bg-blue-50 px-2 py-0.5 rounded border border-blue-100 inline-block">
+                                                {control.controlId}
+                                            </Link>
+                                            <p className="text-sm font-semibold text-slate-800">{control.name}</p>
+                                            <div className="flex items-center gap-2.5 text-xs text-slate-400">
+                                                <span>🏢 {control.ownerUnit}</span>
+                                                <span>•</span>
+                                                <span>⏱️ {control.frequency}</span>
+                                                <span>•</span>
+                                                <span>GMY: {control.scope}</span>
+                                            </div>
+                                        </div>
+                                    </td>
+
+                                    {/* Tip */}
+                                    <td className="px-6 py-4">
+                                        <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-lg">
+                                            {TYPE_LABELS[control.type] || control.type}
+                                        </span>
+                                    </td>
+
+                                    {/* Eşleşen Riskler */}
+                                    <td className="px-6 py-4">
+                                        {control.linkedRisks.length > 0 ? (
+                                            <div className="flex flex-wrap gap-2">
+                                                {control.linkedRisks.map(risk => {
+                                                    const realRisk = risks.find(r => r.id === risk.id) || risk;
+                                                    return (
+                                                        <span
+                                                            key={risk.id}
+                                                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-bold rounded-lg border cursor-help shadow-sm transition-all hover:scale-105 ${SEVERITY_COLORS[realRisk.severity] || 'bg-slate-50'}`}
+                                                            onMouseEnter={(e) => handleRiskHover(risk, e)}
+                                                            onMouseLeave={() => setHoveredRisk(null)}
+                                                        >
+                                                            {risk.riskId}
+                                                            <button
+                                                                onClick={(e) => handleUnmapRisk(control.id, risk.id, e)}
+                                                                className="ml-1 text-slate-400 hover:text-rose-600 rounded-full hover:bg-slate-200/50 p-0.5 font-black text-xs"
+                                                            >
+                                                                &times;
+                                                            </button>
+                                                        </span>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-amber-700 bg-amber-50 rounded-xl border border-amber-100">
+                                                ⚠️ Risk Atanmamış
+                                            </span>
+                                        )}
+                                    </td>
+
+                                    {/* İşlem */}
+                                    <td className="px-6 py-4">
+                                        <button
+                                            onClick={() => handleAddRisk(control.id)}
+                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors rounded-xl border border-blue-100"
+                                        >
+                                            ➕ {control.linkedRisks.length > 0 ? 'Risk Ekle' : 'İlişkilendir'}
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
 
                 {filteredControls.length === 0 && (
-                    <div className="text-center py-12 text-gray-500">
-                        <p className="text-sm">Bu kriterlere uygun kontrol bulunamadı.</p>
+                    <div className="text-center py-12 text-slate-400">
+                        <p className="text-sm">Seçili kriterlere uygun kontrol bulunamadı.</p>
                     </div>
                 )}
             </div>
 
-            {/* Risk Tooltip */}
+            {/* Enhanced Risk Tooltip */}
             {hoveredRisk && (
                 <div
-                    className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-3 pointer-events-none"
-                    style={{ left: tooltipPosition.x + 10, top: tooltipPosition.y + 10 }}
+                    className="fixed z-50 bg-white border border-slate-200/80 rounded-2xl shadow-xl p-4 pointer-events-none w-72 backdrop-blur-md animate-in fade-in duration-150"
+                    style={{ left: tooltipPosition.x + 15, top: tooltipPosition.y + 15 }}
                 >
-                    <p className="text-sm font-semibold text-gray-900 mb-2">{hoveredRisk.name}</p>
-                    <div className="space-y-1 text-xs text-gray-600">
-                        <div className="flex justify-between gap-6">
-                            <span className="text-gray-400">Kategori:</span>
-                            <span>{hoveredRisk.category}</span>
+                    <div className="border-b border-slate-100 pb-2 mb-2">
+                        <span className="font-mono text-xs font-bold text-blue-600">{hoveredRisk.riskId}</span>
+                        <p className="text-sm font-bold text-slate-800 mt-0.5">{hoveredRisk.name}</p>
+                    </div>
+                    <div className="space-y-1.5 text-xs">
+                        <div className="flex justify-between">
+                            <span className="text-slate-400">Kategori:</span>
+                            <span className="font-semibold text-slate-700">{hoveredRisk.category}</span>
                         </div>
-                        <div className="flex justify-between gap-6">
-                            <span className="text-gray-400">Etki Seviyesi:</span>
-                            <span>{hoveredRisk.impact}/5</span>
+                        <div className="flex justify-between">
+                            <span className="text-slate-400">Olasılık:</span>
+                            <span className="font-semibold text-slate-700">{hoveredRisk.probability}/5</span>
                         </div>
-                        <div className="flex justify-between gap-6">
-                            <span className="text-gray-400">Olasılık:</span>
-                            <span>{hoveredRisk.probability}/5</span>
+                        <div className="flex justify-between">
+                            <span className="text-slate-400">Etki:</span>
+                            <span className="font-semibold text-slate-700">{hoveredRisk.impact}/5</span>
                         </div>
-                        <div className="flex justify-between gap-6">
-                            <span className="text-gray-400">Ciddiyet:</span>
-                            <span className={`px-1.5 py-0.5 rounded text-xs ${SEVERITY_COLORS[hoveredRisk.severity]}`}>
+                        <div className="flex justify-between items-center pt-1">
+                            <span className="text-slate-400">Kritiklik:</span>
+                            <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${SEVERITY_COLORS[hoveredRisk.severity]}`}>
                                 {hoveredRisk.severity}
                             </span>
                         </div>
@@ -406,54 +398,56 @@ export default function ControlRiskMappingPage() {
 
             {/* Add Risk Modal */}
             {showModal && selectedControl && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-                    <div className="bg-white rounded-xl w-full max-w-lg mx-4 shadow-2xl">
-                        <div className="px-6 py-4 border-b border-gray-200">
-                            <h2 className="text-lg font-semibold text-gray-900">Risk Eşleştir</h2>
-                            <p className="text-sm text-gray-500 mt-1">
-                                <span className="font-medium text-gray-700">{selectedControl.controlId}</span> için risk seçin
-                            </p>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl w-full max-w-lg mx-4 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
+                        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                            <div>
+                                <h2 className="text-base font-extrabold text-slate-800">Risk İle İlişkilendir</h2>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                    <span className="font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{selectedControl.controlId}</span> kodlu kontrol için risk seçin.
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => { setShowModal(false); setSelectedControl(null); }}
+                                className="text-slate-400 hover:text-slate-600 font-bold text-xl"
+                            >
+                                &times;
+                            </button>
                         </div>
 
-                        <div className="p-6 max-h-96 overflow-y-auto">
+                        <div className="p-6 max-h-96 overflow-y-auto space-y-3">
                             {availableRisks.length > 0 ? (
-                                <div className="space-y-2">
-                                    {availableRisks.map(risk => (
-                                        <button
-                                            key={risk.id}
-                                            onClick={() => handleRiskSelect(risk)}
-                                            className="w-full flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors text-left"
-                                        >
-                                            <div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-sm font-medium text-gray-900">{risk.riskId}</span>
-                                                    <span className={`px-1.5 py-0.5 text-xs rounded ${SEVERITY_COLORS[risk.severity]}`}>
-                                                        {risk.severity}
-                                                    </span>
-                                                </div>
-                                                <p className="text-sm text-gray-600 mt-0.5">{risk.name}</p>
-                                                <p className="text-xs text-gray-400 mt-0.5">{risk.category}</p>
+                                availableRisks.map(risk => (
+                                    <button
+                                        key={risk.id}
+                                        onClick={() => handleRiskSelect(risk)}
+                                        className="w-full flex items-center justify-between p-3.5 rounded-2xl border border-slate-200/80 hover:border-blue-300 hover:bg-blue-50/50 transition-all text-left group"
+                                    >
+                                        <div className="space-y-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-mono text-xs font-bold text-slate-800">{risk.riskId}</span>
+                                                <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${SEVERITY_COLORS[risk.severity]}`}>
+                                                    {risk.severity}
+                                                </span>
                                             </div>
-                                            <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                            </svg>
-                                        </button>
-                                    ))}
-                                </div>
+                                            <p className="text-sm font-semibold text-slate-700 group-hover:text-blue-700 transition-colors">{risk.name}</p>
+                                            <p className="text-[11px] text-slate-400">{risk.category}</p>
+                                        </div>
+                                        <span className="text-lg opacity-0 group-hover:opacity-100 transition-opacity">🔗</span>
+                                    </button>
+                                ))
                             ) : (
-                                <div className="text-center py-8 text-gray-500">
-                                    <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                    <p className="text-sm">Tüm riskler bu kontrole zaten atanmış.</p>
+                                <div className="text-center py-8 text-slate-400">
+                                    <span className="text-3xl block mb-2">🎉</span>
+                                    <p className="text-sm font-semibold">Tüm riskler zaten atanmış.</p>
                                 </div>
                             )}
                         </div>
 
-                        <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
+                        <div className="px-6 py-4 border-t border-slate-100 flex justify-end bg-slate-50">
                             <button
                                 onClick={() => { setShowModal(false); setSelectedControl(null); }}
-                                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800"
+                                className="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs transition-colors"
                             >
                                 İptal
                             </button>

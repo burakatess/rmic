@@ -142,6 +142,10 @@ class ApiClient {
         }>('/auth/me');
     }
 
+    async getUsers() {
+        return this.request<any[]>('/admin/users');
+    }
+
     // Dashboard
     async getDashboard() {
         return this.request('/reports/dashboard');
@@ -213,6 +217,10 @@ class ApiClient {
     }
 
     // Control Tests
+    async generateTests() {
+        return this.request('/tests/generate', { method: 'POST' });
+    }
+
     async createControlTest(controlId: string, data: unknown) {
         return this.request(`/controls/${controlId}/test`, {
             method: 'POST',

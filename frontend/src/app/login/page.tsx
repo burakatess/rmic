@@ -98,13 +98,13 @@ export default function LoginPage() {
                     <div className="space-y-3">
                         <button
                             type="button"
-                            onClick={() => handleDemoLogin('admin@grc.com')}
+                            onClick={() => handleDemoLogin('burak.admin@grc.com')}
                             disabled={isLoading}
                             className="w-full flex items-center justify-between p-3 bg-slate-900/50 hover:bg-slate-900 border border-slate-700/50 rounded-xl transition-colors text-left group disabled:opacity-50"
                         >
                             <div>
                                 <p className="text-sm font-medium text-slate-200 group-hover:text-white">Sistem Yöneticisi</p>
-                                <p className="text-xs text-slate-500">Tüm yetkiler (admin@grc.com)</p>
+                                <p className="text-xs text-slate-500">Tüm yetkiler (burak.admin@grc.com)</p>
                             </div>
                             <svg className="w-5 h-5 text-slate-600 group-hover:text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -113,13 +113,13 @@ export default function LoginPage() {
                         
                         <button
                             type="button"
-                            onClick={() => handleDemoLogin('risk.manager@grc.com')}
+                            onClick={() => handleDemoLogin('ahmet.risk@grc.com')}
                             disabled={isLoading}
                             className="w-full flex items-center justify-between p-3 bg-slate-900/50 hover:bg-slate-900 border border-slate-700/50 rounded-xl transition-colors text-left group disabled:opacity-50"
                         >
                             <div>
                                 <p className="text-sm font-medium text-slate-200 group-hover:text-white">Risk Yöneticisi</p>
-                                <p className="text-xs text-slate-500">Süreç yönetimi (risk.manager@grc.com)</p>
+                                <p className="text-xs text-slate-500">Süreç yönetimi (ahmet.risk@grc.com)</p>
                             </div>
                             <svg className="w-5 h-5 text-slate-600 group-hover:text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -128,13 +128,13 @@ export default function LoginPage() {
 
                         <button
                             type="button"
-                            onClick={() => handleDemoLogin('auditor@grc.com')}
+                            onClick={() => handleDemoLogin('mehmet.auditor@grc.com')}
                             disabled={isLoading}
                             className="w-full flex items-center justify-between p-3 bg-slate-900/50 hover:bg-slate-900 border border-slate-700/50 rounded-xl transition-colors text-left group disabled:opacity-50"
                         >
                             <div>
                                 <p className="text-sm font-medium text-slate-200 group-hover:text-white">Denetçi</p>
-                                <p className="text-xs text-slate-500">Denetim ve bulgular (auditor@grc.com)</p>
+                                <p className="text-xs text-slate-500">Denetim ve bulgular (mehmet.auditor@grc.com)</p>
                             </div>
                             <svg className="w-5 h-5 text-slate-600 group-hover:text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />

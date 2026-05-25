@@ -75,7 +75,7 @@ const navigation: NavItem[] = [
         ),
         children: [
             { label: 'Kontrol Envanteri', href: '/controls' },
-            { label: 'Kontrol Takip Ajandası', href: '/controls/agenda' },
+            { label: 'Kontrol Takip Panosu', href: '/controls/agenda' },
             { label: 'Kontrol-Risk Eşleştirme', href: '/controls/mapping' },
             { label: 'Kontrol Testi', href: '/controls/testing', permission: 'control:test' },
         ],

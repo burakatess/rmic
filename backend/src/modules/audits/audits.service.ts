@@ -104,7 +104,7 @@ export class AuditsService {
 
         // Handle empty strings from frontend - convert to null for Prisma
         // Also strictly extract fields to avoid passing unwanted 'risk' or 'control' objects if they somehow exist in data
-        const { risk, control, riskId, controlId, source, affectedSystem, recommendation, managementResponse, targetResolutionDate, closedDate, relatedDepartment, responsiblePerson, ...rest } = data;
+        const { risk, control, riskId, controlId, testRecordId, source, affectedSystem, recommendation, managementResponse, targetResolutionDate, closedDate, relatedDepartment, responsiblePerson, ...rest } = data;
 
         const findingData = {
             ...rest,
@@ -118,6 +118,7 @@ export class AuditsService {
             responsiblePerson: responsiblePerson || null,
             riskId: riskId || null,
             controlId: controlId || null,
+            testRecordId: testRecordId || null,
         };
 
         const findingId = `F-${new Date().getFullYear()}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
@@ -126,6 +127,7 @@ export class AuditsService {
             include: {
                 risk: { select: { id: true, riskId: true, name: true } },
                 control: { select: { id: true, controlId: true, name: true } },
+                testRecord: { select: { id: true, status: true } },
             },
         });
 
@@ -138,7 +140,7 @@ export class AuditsService {
 
     async updateFinding(id: string, data: any, userId: string) {
         // Handle empty strings from frontend
-        const { risk, control, riskId, controlId, source, affectedSystem, recommendation, managementResponse, targetResolutionDate, closedDate, relatedDepartment, responsiblePerson, ...rest } = data;
+        const { risk, control, riskId, controlId, testRecordId, source, affectedSystem, recommendation, managementResponse, targetResolutionDate, closedDate, relatedDepartment, responsiblePerson, ...rest } = data;
 
         const findingData = {
             ...rest,
@@ -152,6 +154,7 @@ export class AuditsService {
             responsiblePerson: responsiblePerson || null,
             riskId: riskId || null,
             controlId: controlId || null,
+            testRecordId: testRecordId || null,
         };
 
         const finding = await this.prisma.finding.update({
@@ -160,6 +163,7 @@ export class AuditsService {
             include: {
                 risk: { select: { id: true, riskId: true, name: true } },
                 control: { select: { id: true, controlId: true, name: true } },
+                testRecord: { select: { id: true, status: true } },
             },
         });
 

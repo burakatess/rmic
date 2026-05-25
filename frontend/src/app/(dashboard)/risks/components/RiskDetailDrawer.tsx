@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { DetailDrawer, StatusBadge, getStatusVariant, Button, Tabs } from '@/components/ui';
+import Link from 'next/link';
+import { DetailDrawer, StatusBadge, getStatusVariant, Button, Tabs, EmptyState } from '@/components/ui';
 
 // Tip tanımlamaları (page.tsx'teki yapı ile uyumlu)
 interface Risk {
@@ -176,15 +177,21 @@ export function RiskDetailDrawer({
                         <p className="text-sm font-medium text-slate-900">{ctrl.id}</p>
                         <p className="text-xs text-slate-500 mt-0.5">{ctrl.name}</p>
                       </div>
-                      <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700">
-                        Detay
-                      </Button>
+                      <Link href={`/controls/${ctrl.id}`}>
+                        <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700">
+                          Detay
+                        </Button>
+                      </Link>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="p-8 text-center text-slate-500 border border-dashed border-slate-300 rounded-xl mt-4">
-                  Bu riske bağlı herhangi bir kontrol bulunmuyor.
+                <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden">
+                  <EmptyState 
+                    title="İlişkili Kontrol Yok" 
+                    description="Bu riske bağlı herhangi bir kontrol bulunmuyor." 
+                    icon={<svg className="w-12 h-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+                  />
                 </div>
               )
             )}
@@ -198,15 +205,21 @@ export function RiskDetailDrawer({
                         <p className="text-sm font-medium text-slate-900">{finding.id}</p>
                         <p className="text-xs text-slate-500 mt-0.5">{finding.title}</p>
                       </div>
-                      <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700">
-                        Detay
-                      </Button>
+                      <Link href={`/findings/${finding.id}`}>
+                        <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700">
+                          Detay
+                        </Button>
+                      </Link>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="p-8 text-center text-slate-500 border border-dashed border-slate-300 rounded-xl mt-4">
-                  Bu riske bağlı herhangi bir bulgu bulunmuyor.
+                <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden">
+                  <EmptyState 
+                    title="İlişkili Bulgu Yok" 
+                    description="Bu riske bağlı herhangi bir bulgu bulunmuyor." 
+                    icon={<svg className="w-12 h-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
+                  />
                 </div>
               )
             )}

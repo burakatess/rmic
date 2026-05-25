@@ -139,16 +139,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const hasPermission = useCallback((permission: string) => {
     if (!user) return false;
+    if (user.role.name === 'ADMIN') return true;
     return user.role.permissions.includes(permission);
   }, [user]);
 
   const hasAnyPermission = useCallback((permissions: string[]) => {
     if (!user) return false;
+    if (user.role.name === 'ADMIN') return true;
     return permissions.some(p => user.role.permissions.includes(p));
   }, [user]);
 
   const hasAllPermissions = useCallback((permissions: string[]) => {
     if (!user) return false;
+    if (user.role.name === 'ADMIN') return true;
     return permissions.every(p => user.role.permissions.includes(p));
   }, [user]);
 
