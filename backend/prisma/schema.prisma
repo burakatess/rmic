@@ -379,6 +379,7 @@ enum ApprovalStatus {
 // Otomatik üretilen test kayıtları
 model TestRecord {
   id            String           @id @default(cuid())
+  testId        String?          @unique
   control       Control          @relation(fields: [controlId], references: [id], onDelete: Cascade)
   controlId     String
   dueDate       DateTime
@@ -466,6 +467,9 @@ model Finding {
   severity    FindingSeverity
   isRecurrent Boolean         @default(false)
   status      FindingStatus   @default(OPEN)
+  findingType FindingType?
+  summary     String?
+  gmy         String?
 
   // Optional relations - Finding can be linked to risk, control, or neither (audit execution only)
   risk      Risk?    @relation(fields: [riskId], references: [id])
@@ -485,14 +489,19 @@ model Finding {
   auditExecutionId String?
 
   // New fields for extended detail
-  source              FindingSource   @default(INTERNAL_AUDIT)
-  affectedSystem      String?
-  recommendation      String?         @db.Text
-  managementResponse  String?         @db.Text
-  targetResolutionDate DateTime?
-  closedDate          DateTime?
-  relatedDepartment   String?
-  responsiblePerson   String?
+  source                     FindingSource   @default(INTERNAL_AUDIT)
+  affectedSystem             String?
+  recommendation             String?         @db.Text
+  managementResponse         String?         @db.Text
+  internalControlAssessment  String?         @db.Text
+  currentStatusDetail        String?         @db.Text
+  targetResolutionDate       DateTime?
+  closedDate                 DateTime?
+  testDate                   DateTime?
+  attachment                 String?
+  sendEmail                  Boolean         @default(false)
+  relatedDepartment          String?
+  responsiblePerson          String?
 
   // Actions
   actions Action[]
@@ -544,8 +553,18 @@ enum FindingSeverity {
 enum FindingStatus {
   OPEN
   IN_PROGRESS
+  PENDING_REVIEW
   CLOSED
   VERIFIED
+}
+
+enum FindingType {
+  CONTROL_DEFICIENCY
+  PROCESS_GAP
+  COMPLIANCE_ISSUE
+  DOCUMENTATION
+  IT_SECURITY
+  OPERATIONAL
 }
 
 // ==========================================
