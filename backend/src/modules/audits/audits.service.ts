@@ -5,7 +5,8 @@ import { PrismaService } from '../../prisma';
 export class AuditsService {
     constructor(private prisma: PrismaService) { }
 
-    // Audit Plans
+    // ─── Audit Plans ─────────────────────────────────────────────────────────
+
     async findAllPlans(query: any) {
         const { year, status } = query;
         const page = parseInt(query.page, 10) || 1;
@@ -46,7 +47,8 @@ export class AuditsService {
         return plan;
     }
 
-    // Audit Executions
+    // ─── Audit Executions ────────────────────────────────────────────────────
+
     async createExecution(data: any, userId: string) {
         const execution = await this.prisma.auditExecution.create({ data });
         await this.prisma.auditLog.create({
@@ -63,31 +65,37 @@ export class AuditsService {
         return execution;
     }
 
-    // Findings - MUST be linked to risk and control
+    // ─── Findings ────────────────────────────────────────────────────────────
+
     async findAllFindings(query: any) {
-        const { search, riskId, controlId, severity, status, sortBy, sortOrder } = query;
+        const { search, riskId, controlId, severity, status, findingType, sortBy, sortOrder } = query;
         const page = parseInt(query.page, 10) || 1;
-        const limit = parseInt(query.limit, 10) || 20;
+        const limit = parseInt(query.limit, 10) || 50;
         const skip = (page - 1) * limit;
         const where: any = {};
+
         if (search) {
             where.OR = [
                 { description: { contains: search, mode: 'insensitive' } },
                 { findingId: { contains: search, mode: 'insensitive' } },
+                { summary: { contains: search, mode: 'insensitive' } },
+                { relatedDepartment: { contains: search, mode: 'insensitive' } },
             ];
         }
         if (riskId) where.riskId = riskId;
         if (controlId) where.controlId = controlId;
         if (severity) where.severity = severity;
         if (status) where.status = status;
+        if (findingType) where.findingType = findingType;
 
         const [findings, total] = await Promise.all([
             this.prisma.finding.findMany({
                 where,
                 include: {
                     risk: { select: { id: true, riskId: true, name: true } },
-                    control: { select: { id: true, controlId: true, name: true } },
-                    _count: { select: { actions: true } },
+                    control: { select: { id: true, controlId: true, name: true, directorate: true, frequency: true, status: true } },
+                    linkedRisks: { select: { id: true, riskId: true, name: true, residualRiskScore: true, owner: { select: { id: true, firstName: true, lastName: true } } } },
+                    _count: { select: { actions: true, followUps: true } },
                 },
                 skip,
                 take: limit,
@@ -100,18 +108,23 @@ export class AuditsService {
     }
 
     async createFinding(data: any, userId: string) {
-        // Validation removed: Finding can be standalone or linked to just one entity
+        const {
+            risk, control, riskId, controlId, testRecordId,
+            source, affectedSystem, recommendation, managementResponse,
+            targetResolutionDate, closedDate, relatedDepartment, responsiblePerson,
+            findingType, summary, gmy, internalControlAssessment, currentStatusDetail,
+            testDate, attachment, sendEmail, birimCevabi, assigneeId, actions,
+            iletisimKisisi, workflowStatus, resolutionStatus,
+            ...rest
+        } = data;
 
-        // Handle empty strings from frontend - convert to null for Prisma
-        // Also strictly extract fields to avoid passing unwanted 'risk' or 'control' objects if they somehow exist in data
-        const { risk, control, riskId, controlId, testRecordId, source, affectedSystem, recommendation, managementResponse, targetResolutionDate, closedDate, relatedDepartment, responsiblePerson, ...rest } = data;
-
-        const findingData = {
+        const findingData: any = {
             ...rest,
             source: source || 'INTERNAL_AUDIT',
             affectedSystem: affectedSystem || null,
             recommendation: recommendation || null,
             managementResponse: managementResponse || null,
+            birimCevabi: birimCevabi || null,
             targetResolutionDate: targetResolutionDate ? new Date(targetResolutionDate) : null,
             closedDate: closedDate ? new Date(closedDate) : null,
             relatedDepartment: relatedDepartment || null,
@@ -119,17 +132,80 @@ export class AuditsService {
             riskId: riskId || null,
             controlId: controlId || null,
             testRecordId: testRecordId || null,
+            findingType: findingType || null,
+            summary: summary || null,
+            gmy: gmy || null,
+            internalControlAssessment: internalControlAssessment || null,
+            currentStatusDetail: currentStatusDetail || null,
+            testDate: testDate ? new Date(testDate) : null,
+            attachment: attachment || null,
+            sendEmail: sendEmail === true || sendEmail === 'true',
+            assigneeId: assigneeId || null,
+            iletisimKisisi: iletisimKisisi || null,
+            workflowStatus: workflowStatus || 'TASLAK',
+            resolutionStatus: resolutionStatus || 'DEVAM_EDIYOR',
         };
 
-        const findingId = `F-${new Date().getFullYear()}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+        // Auto-set closedDate when resolution is KAPATILDI
+        if (findingData.resolutionStatus === 'KAPATILDI' && !findingData.closedDate) {
+            findingData.closedDate = new Date();
+        }
+        // Legacy compat
+        if (findingData.status === 'CLOSED' && !findingData.closedDate) {
+            findingData.closedDate = new Date();
+        }
+
+        // Generate new-format findingId: YYYY.TÜR.NN
+        const year = new Date().getFullYear();
+        const typeCode = findingType === 'IB' ? 'İB' : 'BT';
+        const prefix = `${year}.${typeCode}.`;
+
+        const lastFinding = await this.prisma.finding.findFirst({
+            where: { findingId: { startsWith: prefix } },
+            orderBy: { findingId: 'desc' },
+        });
+
+        let nextNum = 1;
+        if (lastFinding) {
+            const parts = lastFinding.findingId.split('.');
+            const lastNum = parseInt(parts[parts.length - 1], 10);
+            if (!isNaN(lastNum)) nextNum = lastNum + 1;
+        }
+        const findingId = `${prefix}${nextNum.toString().padStart(2, '0')}`;
+
         const finding = await this.prisma.finding.create({
             data: { ...findingData, findingId },
             include: {
                 risk: { select: { id: true, riskId: true, name: true } },
                 control: { select: { id: true, controlId: true, name: true } },
+                linkedRisks: { select: { id: true, riskId: true, name: true } },
                 testRecord: { select: { id: true, status: true } },
+                _count: { select: { actions: true, followUps: true } },
             },
         });
+
+        // Create actions if passed
+        if (actions && Array.isArray(actions) && actions.length > 0) {
+            for (const act of actions) {
+                await this.prisma.action.create({
+                    data: {
+                        actionId: this.generateActionId(),
+                        findingId: finding.id,
+                        description: act.description,
+                        ownerId: act.ownerId,
+                        responsibleDepartment: act.responsibleDepartment || null,
+                        dueDate: new Date(act.dueDate),
+                        notes: act.notes || null,
+                        
+                        status: act.status || 'BEKLIYOR',
+                        controlId: finding.controlId,
+                        testRecordId: finding.testRecordId,
+                        riskId: finding.riskId,
+                    }
+                });
+            }
+            await this.recalculateFindingTargetDate(finding.id);
+        }
 
         await this.prisma.auditLog.create({
             data: { userId, action: 'CREATE', entityType: 'Finding', entityId: finding.id, newValue: finding },
@@ -139,23 +215,57 @@ export class AuditsService {
     }
 
     async updateFinding(id: string, data: any, userId: string) {
-        // Handle empty strings from frontend
-        const { risk, control, riskId, controlId, testRecordId, source, affectedSystem, recommendation, managementResponse, targetResolutionDate, closedDate, relatedDepartment, responsiblePerson, ...rest } = data;
+        const {
+            risk, control, riskId, controlId, testRecordId,
+            source, affectedSystem, recommendation, managementResponse,
+            targetResolutionDate, closedDate, relatedDepartment, responsiblePerson,
+            findingType, summary, gmy, internalControlAssessment, currentStatusDetail,
+            testDate, attachment, sendEmail, birimCevabi, assigneeId,
+            iletisimKisisi, workflowStatus, resolutionStatus,
+            ...rest
+        } = data;
 
-        const findingData = {
+        const findingData: any = {
             ...rest,
-            source: source || undefined, // undefined keeps existing value if not provided
-            affectedSystem: affectedSystem || null,
-            recommendation: recommendation || null,
-            managementResponse: managementResponse || null,
-            targetResolutionDate: targetResolutionDate ? new Date(targetResolutionDate) : null,
-            closedDate: closedDate ? new Date(closedDate) : null,
-            relatedDepartment: relatedDepartment || null,
-            responsiblePerson: responsiblePerson || null,
-            riskId: riskId || null,
-            controlId: controlId || null,
-            testRecordId: testRecordId || null,
+            source: source || undefined,
+            affectedSystem: affectedSystem !== undefined ? (affectedSystem || null) : undefined,
+            recommendation: recommendation !== undefined ? (recommendation || null) : undefined,
+            managementResponse: managementResponse !== undefined ? (managementResponse || null) : undefined,
+            birimCevabi: birimCevabi !== undefined ? (birimCevabi || null) : undefined,
+            targetResolutionDate: targetResolutionDate !== undefined ? (targetResolutionDate ? new Date(targetResolutionDate) : null) : undefined,
+            relatedDepartment: relatedDepartment !== undefined ? (relatedDepartment || null) : undefined,
+            responsiblePerson: responsiblePerson !== undefined ? (responsiblePerson || null) : undefined,
+            riskId: riskId !== undefined ? (riskId || null) : undefined,
+            controlId: controlId !== undefined ? (controlId || null) : undefined,
+            testRecordId: testRecordId !== undefined ? (testRecordId || null) : undefined,
+            findingType: findingType !== undefined ? (findingType || null) : undefined,
+            summary: summary !== undefined ? (summary || null) : undefined,
+            gmy: gmy !== undefined ? (gmy || null) : undefined,
+            internalControlAssessment: internalControlAssessment !== undefined ? (internalControlAssessment || null) : undefined,
+            currentStatusDetail: currentStatusDetail !== undefined ? (currentStatusDetail || null) : undefined,
+            testDate: testDate !== undefined ? (testDate ? new Date(testDate) : null) : undefined,
+            attachment: attachment !== undefined ? (attachment || null) : undefined,
+            sendEmail: sendEmail !== undefined ? (sendEmail === true || sendEmail === 'true') : undefined,
+            assigneeId: assigneeId !== undefined ? (assigneeId || null) : undefined,
+            iletisimKisisi: iletisimKisisi !== undefined ? (iletisimKisisi || null) : undefined,
+            workflowStatus: workflowStatus || undefined,
+            resolutionStatus: resolutionStatus || undefined,
         };
+
+        // Auto-set closedDate when resolution becomes KAPATILDI
+        if (findingData.resolutionStatus === 'KAPATILDI') {
+            const current = await this.prisma.finding.findUnique({ where: { id }, select: { closedDate: true } });
+            if (!current?.closedDate) findingData.closedDate = new Date();
+        }
+        // Legacy compat
+        if (findingData.status === 'CLOSED') {
+            const current = await this.prisma.finding.findUnique({ where: { id }, select: { closedDate: true } });
+            if (!current?.closedDate) {
+                findingData.closedDate = new Date();
+            }
+        } else if (closedDate !== undefined) {
+            findingData.closedDate = closedDate ? new Date(closedDate) : null;
+        }
 
         const finding = await this.prisma.finding.update({
             where: { id },
@@ -163,7 +273,9 @@ export class AuditsService {
             include: {
                 risk: { select: { id: true, riskId: true, name: true } },
                 control: { select: { id: true, controlId: true, name: true } },
+                linkedRisks: { select: { id: true, riskId: true, name: true } },
                 testRecord: { select: { id: true, status: true } },
+                _count: { select: { actions: true, followUps: true } },
             },
         });
 
@@ -180,8 +292,30 @@ export class AuditsService {
             include: {
                 risk: true,
                 control: true,
-                actions: { include: { owner: { select: { id: true, firstName: true, lastName: true } } } },
+                linkedRisks: {
+                    select: {
+                        id: true, riskId: true, name: true, status: true,
+                        residualRiskScore: true, inherentRiskScore: true,
+                        owner: { select: { id: true, firstName: true, lastName: true } },
+                    }
+                },
+                actions: {
+                    include: {
+                        owner: { select: { id: true, firstName: true, lastName: true } },
+                        attachments: { orderBy: { createdAt: 'desc' } },
+                    },
+                    orderBy: { createdAt: 'desc' },
+                },
+                followUps: {
+                    include: {
+                        attachments: { orderBy: { createdAt: 'desc' } },
+                    },
+                    orderBy: { createdAt: 'desc' },
+                },
+                attachments: { orderBy: { createdAt: 'desc' } },
+                statusLogs: { orderBy: { entryDate: 'desc' } },
                 auditExecution: true,
+                _count: { select: { actions: true, followUps: true, linkedRisks: true, attachments: true } },
             },
         });
         if (!finding) throw new NotFoundException(`Finding with ID ${id} not found`);
@@ -194,46 +328,24 @@ export class AuditsService {
             include: {
                 risk: { select: { id: true, riskId: true, name: true, status: true, residualRiskScore: true } },
                 control: { select: { id: true, controlId: true, name: true, effectivenessStatus: true, type: true } },
+                linkedRisks: { select: { id: true, riskId: true, name: true, status: true, residualRiskScore: true } },
             },
         });
         if (!finding) throw new NotFoundException(`Finding with ID ${id} not found`);
 
-        // Get risks: direct risk + risks via control
-        const risks: any[] = [];
-        if (finding.risk) {
+        const risks: any[] = [...(finding.linkedRisks || [])];
+        if (finding.risk && !risks.find(r => r.id === finding.risk!.id)) {
             risks.push(finding.risk);
         }
-        if (finding.control) {
-            const controlRiskMappings = await this.prisma.controlRiskMapping.findMany({
-                where: { controlId: finding.control.id },
-                include: {
-                    risk: { select: { id: true, riskId: true, name: true, status: true, residualRiskScore: true } },
-                },
-            });
-            for (const m of controlRiskMappings) {
-                if (!risks.find(r => r.id === m.risk.id)) {
-                    risks.push(m.risk);
-                }
-            }
-        }
 
-        // Get controls (just the one linked, if any)
         const controls = finding.control ? [finding.control] : [];
-
-        // Get actions linked to this finding
         const actions = await this.prisma.action.findMany({
             where: { findingId: id },
             select: { id: true, actionId: true, description: true, status: true, dueDate: true },
         });
 
         return {
-            finding: {
-                id: finding.id,
-                findingId: finding.findingId,
-                description: finding.description,
-                status: finding.status,
-                severity: finding.severity,
-            },
+            finding: { id: finding.id, findingId: finding.findingId, description: finding.description, status: finding.status, severity: finding.severity },
             risks,
             controls,
             actions,
@@ -242,28 +354,838 @@ export class AuditsService {
 
     async deleteFinding(id: string, userId: string) {
         const finding = await this.getFinding(id);
-
-        // Log the action before deletion
         await this.prisma.auditLog.create({
+            data: { userId, action: 'DELETE', entityType: 'Finding', entityId: id, oldValue: finding },
+        });
+        await this.prisma.action.deleteMany({ where: { findingId: id } });
+        await this.prisma.findingFollowUp.deleteMany({ where: { findingId: id } });
+        await this.prisma.finding.delete({ where: { id } });
+        return { message: 'Finding deleted successfully' };
+    }
+
+    // ─── Mutabakat Workflow Geçişleri ─────────────────────────────────────────
+
+    private async transitionWorkflow(
+        id: string,
+        newStatus: string,
+        userId: string,
+        note?: string,
+    ) {
+        const finding = await this.prisma.finding.findUnique({
+            where: { id },
+            select: { id: true, workflowStatus: true },
+        });
+        if (!finding) throw new NotFoundException(`Finding ${id} not found`);
+
+        const previousWorkflowStatus = finding.workflowStatus;
+
+        const updated = await this.prisma.finding.update({
+            where: { id },
+            data: { workflowStatus: newStatus as any },
+        });
+
+        await this.prisma.findingStatusHistory.create({
             data: {
-                userId,
-                action: 'DELETE',
-                entityType: 'Finding',
-                entityId: id,
-                oldValue: finding,
+                findingId: id,
+                evaluator: userId,
+                changeType: 'WORKFLOW_CHANGE',
+                workflowStatus: newStatus as any,
+                previousWorkflowStatus: previousWorkflowStatus as any,
+                explanation: note || `Statü: ${previousWorkflowStatus} → ${newStatus}`,
             },
         });
 
-        // Delete related actions first
-        await this.prisma.action.deleteMany({
-            where: { findingId: id },
+        await this.prisma.auditLog.create({
+            data: {
+                userId,
+                action: 'UPDATE',
+                entityType: 'Finding',
+                entityId: id,
+                newValue: { workflowStatus: newStatus, previousWorkflowStatus },
+            },
         });
 
-        // Hard delete the finding
-        await this.prisma.finding.delete({
+        return updated;
+    }
+
+    // TASLAK → MUTABAKATA_GONDERILDI
+    async mutabakataGonder(id: string, userId: string) {
+        const finding = await this.prisma.finding.findUnique({ where: { id }, select: { workflowStatus: true } });
+        if (!finding) throw new NotFoundException(`Finding ${id} not found`);
+        if (finding.workflowStatus !== 'TASLAK') {
+            throw new Error(`Bulgu TASLAK statüsünde değil: ${finding.workflowStatus}`);
+        }
+        return this.transitionWorkflow(id, 'MUTABAKATA_GONDERILDI', userId, 'Bulgu mutabakata gönderildi.');
+    }
+
+    // MUTABAKATA_GONDERILDI → IC_KONTROL_ONAYINA_GONDERILDI
+    async icKontrolOnayinaGonder(id: string, birimCevabi: string, targetDate: string | undefined, userId: string) {
+        const finding = await this.prisma.finding.findUnique({ where: { id }, select: { workflowStatus: true } });
+        if (!finding) throw new NotFoundException(`Finding ${id} not found`);
+        if (finding.workflowStatus !== 'MUTABAKATA_GONDERILDI') {
+            throw new Error(`Beklenen statü MUTABAKATA_GONDERILDI, mevcut: ${finding.workflowStatus}`);
+        }
+        // Birim cevabını kaydet
+        await this.prisma.finding.update({
             where: { id },
+            data: {
+                birimCevabi,
+                ...(targetDate ? { targetResolutionDate: new Date(targetDate) } : {}),
+            },
+        });
+        return this.transitionWorkflow(id, 'IC_KONTROL_ONAYINA_GONDERILDI', userId, 'Birim yanıtı alındı, İç Kontrol onayına gönderildi.');
+    }
+
+    // IC_KONTROL_ONAYINA_GONDERILDI → MUTABAKAT_YAPILDI
+    async mutabakatOnayla(id: string, data: { internalControlAssessment?: string; resolutionStatus?: string }, userId: string) {
+        const finding = await this.prisma.finding.findUnique({ where: { id }, select: { workflowStatus: true } });
+        if (!finding) throw new NotFoundException(`Finding ${id} not found`);
+        if (finding.workflowStatus !== 'IC_KONTROL_ONAYINA_GONDERILDI') {
+            throw new Error(`Beklenen statü IC_KONTROL_ONAYINA_GONDERILDI, mevcut: ${finding.workflowStatus}`);
+        }
+        const updateData: any = {};
+        if (data.internalControlAssessment) updateData.internalControlAssessment = data.internalControlAssessment;
+        if (data.resolutionStatus) {
+            updateData.resolutionStatus = data.resolutionStatus;
+            if (data.resolutionStatus === 'KAPATILDI') updateData.closedDate = new Date();
+        }
+        if (Object.keys(updateData).length > 0) {
+            await this.prisma.finding.update({ where: { id }, data: updateData });
+        }
+        return this.transitionWorkflow(id, 'MUTABAKAT_YAPILDI', userId, 'Mutabakat İKS tarafından onaylandı.');
+    }
+
+    // IC_KONTROL_ONAYINA_GONDERILDI → MUTABAKATA_GONDERILDI (geri gönder)
+    async mutabakatGeriGonder(id: string, reason: string, userId: string) {
+        const finding = await this.prisma.finding.findUnique({ where: { id }, select: { workflowStatus: true } });
+        if (!finding) throw new NotFoundException(`Finding ${id} not found`);
+        if (finding.workflowStatus !== 'IC_KONTROL_ONAYINA_GONDERILDI') {
+            throw new Error(`Beklenen statü IC_KONTROL_ONAYINA_GONDERILDI, mevcut: ${finding.workflowStatus}`);
+        }
+        return this.transitionWorkflow(id, 'MUTABAKATA_GONDERILDI', userId, `Yetersiz yanıt, birime geri gönderildi: ${reason}`);
+    }
+
+    // Herhangi → IPTAL (yalnızca Business Owner / Admin)
+    async iptalEt(id: string, reason: string, userId: string) {
+        const finding = await this.prisma.finding.findUnique({ where: { id }, select: { workflowStatus: true } });
+        if (!finding) throw new NotFoundException(`Finding ${id} not found`);
+        if (finding.workflowStatus === 'IPTAL') {
+            throw new Error('Bulgu zaten iptal edilmiş.');
+        }
+        return this.transitionWorkflow(id, 'IPTAL', userId, `İptal gerekçesi: ${reason}`);
+    }
+
+    // ─── Risk ↔ Finding Linking ───────────────────────────────────────────────
+
+    async linkRiskToFinding(findingId: string, riskId: string, userId: string) {
+        const finding = await this.prisma.finding.findUnique({ where: { id: findingId } });
+        if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
+        const risk = await this.prisma.risk.findUnique({ where: { id: riskId } });
+        if (!risk) throw new NotFoundException(`Risk ${riskId} not found`);
+
+        await this.prisma.finding.update({
+            where: { id: findingId },
+            data: { linkedRisks: { connect: { id: riskId } } },
         });
 
-        return { message: 'Finding deleted successfully' };
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'UPDATE', entityType: 'Finding', entityId: findingId, newValue: { linkedRiskId: riskId, action: 'link' } },
+        });
+
+        return { message: 'Risk linked to finding successfully' };
+    }
+
+    async unlinkRiskFromFinding(findingId: string, riskId: string, userId: string) {
+        await this.prisma.finding.update({
+            where: { id: findingId },
+            data: { linkedRisks: { disconnect: { id: riskId } } },
+        });
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'UPDATE', entityType: 'Finding', entityId: findingId, newValue: { linkedRiskId: riskId, action: 'unlink' } },
+        });
+
+        return { message: 'Risk unlinked from finding successfully' };
+    }
+
+    // ─── Finding Follow-Ups ───────────────────────────────────────────────────
+
+    async getFollowUps(findingId: string) {
+        const finding = await this.prisma.finding.findUnique({ where: { id: findingId }, select: { id: true } });
+        if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
+
+        return this.prisma.findingFollowUp.findMany({
+            where: { findingId },
+            orderBy: { createdAt: 'desc' },
+        });
+    }
+
+    async createFollowUp(findingId: string, data: any, userId: string) {
+        const finding = await this.prisma.finding.findUnique({
+            where: { id: findingId },
+            select: { id: true, findingId: true, findingType: true },
+        });
+        if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
+
+        // Generate followUpId: YYYY.MM.TÜR.BULGUNO
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const typeCode = finding.findingType === 'IB' ? 'İB' : 'BT';
+        // Extract finding number from findingId (last part)
+        const findingNum = finding.findingId.split('.').pop() || '01';
+        const followUpId = `${year}.${month}.${typeCode}.${findingNum}`;
+
+        const {
+            birimCevabi, currentStatusDetail, internalControlAssessment,
+            targetResolutionDate, testDate, attachment, secondControllerId, sprint, notes,
+        } = data;
+
+        const followUp = await this.prisma.findingFollowUp.create({
+            data: {
+                followUpId,
+                findingId,
+                status: data.status || 'BEKLIYOR',
+                birimCevabi: birimCevabi || null,
+                currentStatusDetail: currentStatusDetail || null,
+                internalControlAssessment: internalControlAssessment || null,
+                targetResolutionDate: targetResolutionDate ? new Date(targetResolutionDate) : null,
+                testDate: testDate ? new Date(testDate) : null,
+                secondControllerId: secondControllerId || null,
+                sprint: sprint || null,
+                notes: notes || null,
+            },
+        });
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'CREATE', entityType: 'FindingFollowUp', entityId: followUp.id, newValue: followUp },
+        });
+
+        return followUp;
+    }
+
+    async updateFollowUp(findingId: string, followUpId: string, data: any, userId: string) {
+        const followUp = await this.prisma.findingFollowUp.findFirst({
+            where: { id: followUpId, findingId },
+        });
+        if (!followUp) throw new NotFoundException(`FollowUp ${followUpId} not found`);
+
+        const {
+            birimCevabi, currentStatusDetail, internalControlAssessment,
+            targetResolutionDate, testDate, attachment, secondControllerId, sprint, notes, status,
+            actionId, evaluatorId, evaluatedAt, result, explanation, evidence, approvalStatus, approvedBy, approvedAt,
+            resolutionOutcome, newFollowUpDate,
+        } = data;
+
+        const updated = await this.prisma.findingFollowUp.update({
+            where: { id: followUpId },
+            data: {
+                status: status || undefined,
+                birimCevabi: birimCevabi !== undefined ? (birimCevabi || null) : undefined,
+                currentStatusDetail: currentStatusDetail !== undefined ? (currentStatusDetail || null) : undefined,
+                internalControlAssessment: internalControlAssessment !== undefined ? (internalControlAssessment || null) : undefined,
+                targetResolutionDate: targetResolutionDate !== undefined ? (targetResolutionDate ? new Date(targetResolutionDate) : null) : undefined,
+                testDate: testDate !== undefined ? (testDate ? new Date(testDate) : null) : undefined,
+                secondControllerId: secondControllerId !== undefined ? (secondControllerId || null) : undefined,
+                sprint: sprint !== undefined ? (sprint || null) : undefined,
+                notes: notes !== undefined ? (notes || null) : undefined,
+                actionId: actionId !== undefined ? (actionId || null) : undefined,
+                evaluatorId: evaluatorId !== undefined ? (evaluatorId || null) : undefined,
+                evaluatedAt: evaluatedAt ? new Date(evaluatedAt) : undefined,
+                result: result !== undefined ? (result || null) : undefined,
+                explanation: explanation !== undefined ? (explanation || null) : undefined,
+                approvalStatus: approvalStatus || undefined,
+                approvedBy: approvedBy !== undefined ? (approvedBy || null) : undefined,
+                approvedAt: approvedAt ? new Date(approvedAt) : undefined,
+                resolutionOutcome: resolutionOutcome !== undefined ? (resolutionOutcome || null) : undefined,
+                newFollowUpDate: newFollowUpDate !== undefined ? (newFollowUpDate ? new Date(newFollowUpDate) : null) : undefined,
+                newActionRequired: result === 'YENI_AKSIYON_GEREKLI' || resolutionOutcome === 'YENI_AKSIYON_GEREKLI',
+            },
+        });
+
+        // ─── Bulgu durumunu takip sonucuna göre güncelle ──────────────────────
+        const effectiveResolution = resolutionOutcome || (result === 'YETERLI' ? 'KAPATILDI' : undefined);
+
+        if (effectiveResolution) {
+            const findingUpdate: any = { resolutionStatus: effectiveResolution };
+
+            if (effectiveResolution === 'KAPATILDI') {
+                findingUpdate.closedDate = new Date();
+                findingUpdate.testDate = null;
+                findingUpdate.status = 'CLOSED';
+            } else if (effectiveResolution === 'ERTELENDI' && newFollowUpDate) {
+                findingUpdate.testDate = new Date(newFollowUpDate);
+            } else if (effectiveResolution === 'KISMEN_KAPATILDI') {
+                findingUpdate.status = 'PARTIALLY_CLOSED';
+            } else if (effectiveResolution === 'YENI_AKSIYON_GEREKLI') {
+                findingUpdate.status = 'IN_PROGRESS';
+            }
+
+            await this.prisma.finding.update({ where: { id: findingId }, data: findingUpdate });
+
+            // StatusLog'a güncel durumu append et (üzerine yazmadan)
+            if (currentStatusDetail) {
+                const now = new Date().toLocaleDateString('tr-TR');
+                const logText = `${now} — ${currentStatusDetail}`;
+                await this.appendStatusLog(findingId, logText, userId, undefined, updated.id);
+            }
+
+            // Audit trail
+            await this.recordAuditTrail({
+                findingId, followUpId: updated.id,
+                operation: 'FOLLOWUP_COMPLETED',
+                userId,
+                explanation: `Takip tamamlandı: ${effectiveResolution}. ${currentStatusDetail || ''}`,
+                newValue: { resolutionStatus: effectiveResolution },
+            });
+        }
+
+        // Action status senkronizasyonu
+        if (updated.actionId && (status === 'ONAYLANDI' || approvalStatus === 'ONAYLANDI')) {
+            const resolvedResult = updated.result;
+
+            if (resolvedResult === 'YETERLI') {
+                await this.prisma.action.update({
+                    where: { id: updated.actionId },
+                    data: { status: 'KAPATILDI', completedAt: new Date() },
+                });
+                await this.recordAuditTrail({ findingId, actionId: updated.actionId, operation: 'ACTION_CLOSED', userId, explanation: 'Takip sonucu yeterli — aksiyon kapatıldı.' });
+                await this.checkAndCloseFindinIfAllActionsClosed(findingId, userId);
+            } else if (resolvedResult === 'YETERSIZ') {
+                await this.prisma.action.update({
+                    where: { id: updated.actionId },
+                    data: { status: 'YETERSIZ' },
+                });
+                await this.recordAuditTrail({ findingId, actionId: updated.actionId, operation: 'ACTION_UPDATED', userId, explanation: 'Takip sonucu yetersiz — aksiyon durumu güncellendi.' });
+            } else if (resolvedResult === 'YENI_AKSIYON_GEREKLI') {
+                // Yeni aksiyon oluşturulması gerekiyor — tetikleme kaydı
+                await this.recordAuditTrail({ findingId, followUpId: updated.id, operation: 'FOLLOWUP_COMPLETED', userId, explanation: 'Yeni düzeltici aksiyon gerekli olarak işaretlendi.' });
+            }
+        }
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'UPDATE', entityType: 'FindingFollowUp', entityId: followUpId, newValue: updated },
+        });
+
+        return updated;
+    }
+
+    // ─── Actions Finding-Scoped CRUD ──────────────────────────────────────────
+
+    generateActionId(): string {
+        const year = new Date().getFullYear();
+        const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+        return `A-${year}-${random}`;
+    }
+
+    async getActions(findingId: string) {
+        const finding = await this.prisma.finding.findUnique({ where: { id: findingId }, select: { id: true } });
+        if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
+
+        return this.prisma.action.findMany({
+            where: { findingId },
+            include: {
+                owner: { select: { id: true, firstName: true, lastName: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+    }
+
+    async createAction(findingId: string, data: any, userId: string) {
+        const finding = await this.prisma.finding.findUnique({ where: { id: findingId } });
+        if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
+
+        const dueDate = new Date(data.dueDate);
+
+        const action = await this.prisma.action.create({
+            data: {
+                actionId: this.generateActionId(),
+                findingId,
+                description: data.description,
+                ownerId: data.ownerId,
+                responsibleDepartment: data.responsibleDepartment || null,
+                dueDate,
+                notes: data.notes || null,
+                
+                status: data.status || 'BEKLIYOR',
+                controlId: finding.controlId,
+                testRecordId: finding.testRecordId,
+                riskId: finding.riskId,
+            },
+            include: {
+                owner: { select: { id: true, firstName: true, lastName: true } }
+            }
+        });
+
+        // Aksiyon tamamlanma tarihine göre takip çalışması otomatik oluştur
+        await this.autoCreateFollowUpForAction(action.id, findingId, dueDate, finding, userId);
+
+        await this.recalculateFindingTargetDate(findingId);
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'CREATE', entityType: 'Action', entityId: action.id, newValue: action },
+        });
+
+        return action;
+    }
+
+    // dueDate değiştiğinde takip çalışmasını yeniden üret
+    private async autoCreateFollowUpForAction(
+        actionId: string,
+        findingId: string,
+        dueDate: Date,
+        finding: any,
+        userId: string,
+    ) {
+        // Eğer bu aksiyon için zaten BEKLIYOR/DEVAM_EDIYOR durumunda bir takip var → güncelle
+        const existing = await this.prisma.findingFollowUp.findFirst({
+            where: { actionId, status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] } },
+        });
+
+        const year = dueDate.getFullYear();
+        const month = String(dueDate.getMonth() + 1).padStart(2, '0');
+        const typeCode = finding.findingType === 'IB' ? 'İB' : 'BT';
+        const findingNum = finding.findingId?.split('.').pop() || '01';
+        const actionSuffix = actionId.slice(-4);
+        const followUpId = `${year}.${month}.${typeCode}.${findingNum}.A${actionSuffix}`;
+
+        if (existing) {
+            await this.prisma.findingFollowUp.update({
+                where: { id: existing.id },
+                data: { plannedDate: dueDate, followUpId },
+            });
+        } else {
+            await this.prisma.findingFollowUp.create({
+                data: {
+                    followUpId,
+                    findingId,
+                    actionId,
+                    status: 'BEKLIYOR',
+                    plannedDate: dueDate,
+                },
+            });
+        }
+
+        await this.prisma.findingStatusHistory.create({
+            data: {
+                findingId,
+                evaluator: userId,
+                changeType: 'ACTION_CREATED',
+                explanation: `Aksiyon oluşturuldu. Takip tarihi: ${dueDate.toLocaleDateString('tr-TR')}`,
+            },
+        });
+    }
+
+    async updateAction(findingId: string, actionId: string, data: any, userId: string) {
+        const action = await this.prisma.action.findFirst({
+            where: { id: actionId, findingId },
+        });
+        if (!action) throw new NotFoundException(`Action ${actionId} not found under finding ${findingId}`);
+
+        const updated = await this.prisma.action.update({
+            where: { id: actionId },
+            data: {
+                description: data.description || undefined,
+                ownerId: data.ownerId || undefined,
+                responsibleDepartment: data.responsibleDepartment !== undefined ? (data.responsibleDepartment || null) : undefined,
+                dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
+                notes: data.notes !== undefined ? (data.notes || null) : undefined,
+                
+                status: data.status || undefined,
+            },
+            include: {
+                owner: { select: { id: true, firstName: true, lastName: true } }
+            }
+        });
+
+        // dueDate değiştiyse follow-up'ı güncelle
+        if (data.dueDate) {
+            const finding = await this.prisma.finding.findUnique({
+                where: { id: findingId },
+                select: { id: true, findingId: true, findingType: true },
+            });
+            if (finding) {
+                await this.autoCreateFollowUpForAction(actionId, findingId, new Date(data.dueDate), finding, userId);
+            }
+        }
+
+        await this.recalculateFindingTargetDate(findingId);
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'UPDATE', entityType: 'Action', entityId: actionId, newValue: updated },
+        });
+
+        return updated;
+    }
+
+    async deleteAction(findingId: string, actionId: string, userId: string) {
+        const action = await this.prisma.action.findFirst({
+            where: { id: actionId, findingId },
+        });
+        if (!action) throw new NotFoundException(`Action ${actionId} not found under finding ${findingId}`);
+
+        await this.prisma.action.delete({ where: { id: actionId } });
+
+        await this.recalculateFindingTargetDate(findingId);
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'DELETE', entityType: 'Action', entityId: actionId, oldValue: action },
+        });
+
+        return { message: 'Action deleted successfully' };
+    }
+
+    async recalculateFindingTargetDate(findingId: string) {
+        const actions = await this.prisma.action.findMany({
+            where: { findingId, status: { not: 'KAPATILDI' } },
+            select: { dueDate: true },
+        });
+
+        if (actions.length > 0) {
+            const maxDate = new Date(Math.max(...actions.map(a => new Date(a.dueDate).getTime())));
+            await this.prisma.finding.update({
+                where: { id: findingId },
+                data: { targetResolutionDate: maxDate },
+            });
+        } else {
+            const allActions = await this.prisma.action.findMany({
+                where: { findingId },
+                select: { dueDate: true },
+            });
+            if (allActions.length > 0) {
+                const maxDate = new Date(Math.max(...allActions.map(a => new Date(a.dueDate).getTime())));
+                await this.prisma.finding.update({
+                    where: { id: findingId },
+                    data: { targetResolutionDate: maxDate },
+                });
+            }
+        }
+    }
+
+    async checkAndCloseFindinIfAllActionsClosed(findingId: string, userId: string) {
+        const actions = await this.prisma.action.findMany({
+            where: { findingId },
+            select: { status: true },
+        });
+
+        if (actions.length > 0 && actions.every(a => a.status === 'KAPATILDI')) {
+            await this.prisma.finding.update({
+                where: { id: findingId },
+                data: { status: 'CLOSED', closedDate: new Date() },
+            });
+
+            await this.appendStatusHistory(findingId, {
+                explanation: 'Tüm düzeltici aksiyonlar başarıyla kapatıldığı için bulgu otomatik olarak kapatıldı.',
+                evaluator: 'Sistem',
+            }, userId);
+        }
+    }
+
+    // ─── Actions Scoped FollowUps ─────────────────────────────────────────────
+
+    async createFollowUpForAction(findingId: string, actionId: string, data: any, userId: string) {
+        const action = await this.prisma.action.findFirst({
+            where: { id: actionId, findingId },
+            include: { finding: true },
+        });
+        if (!action) throw new NotFoundException(`Action ${actionId} not found under finding ${findingId}`);
+
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const typeCode = action.finding.findingType === 'IB' ? 'İB' : 'BT';
+        const findingNum = action.finding.findingId.split('.').pop() || '01';
+        const actionNum = action.actionId.split('-').pop() || '001';
+        const followUpId = `${year}.${month}.${typeCode}.${findingNum}.A${actionNum}`;
+
+        const followUp = await this.prisma.findingFollowUp.create({
+            data: {
+                followUpId,
+                findingId,
+                actionId,
+                status: data.status || 'BEKLIYOR',
+                plannedDate: action.dueDate,
+                notes: data.notes || null,
+            }
+        });
+
+        // Move action status to DEVAM_EDIYOR
+        await this.prisma.action.update({
+            where: { id: actionId },
+            data: { status: 'DEVAM_EDIYOR' },
+        });
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'CREATE', entityType: 'FindingFollowUp', entityId: followUp.id, newValue: followUp },
+        });
+
+        return followUp;
+    }
+
+    async generateDueFollowUps() {
+        const now = new Date();
+        const actionsDue = await this.prisma.action.findMany({
+            where: {
+                dueDate: { lte: now },
+                status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR', 'YETERSIZ'] },
+                followUps: {
+                    none: {
+                        status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] }
+                    }
+                }
+            },
+            include: { finding: true },
+        });
+
+        let count = 0;
+        for (const action of actionsDue) {
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const typeCode = action.finding.findingType === 'IB' ? 'İB' : 'BT';
+            const findingNum = action.finding.findingId.split('.').pop() || '01';
+            const actionNum = action.actionId.split('-').pop() || '001';
+            const followUpId = `${year}.${month}.${typeCode}.${findingNum}.A${actionNum}`;
+
+            await this.prisma.findingFollowUp.create({
+                data: {
+                    followUpId,
+                    findingId: action.findingId,
+                    actionId: action.id,
+                    status: 'BEKLIYOR',
+                    plannedDate: action.dueDate,
+                }
+            });
+
+            await this.prisma.action.update({
+                where: { id: action.id },
+                data: { status: 'DEVAM_EDIYOR' }
+            });
+
+            count++;
+        }
+
+        return { generatedCount: count };
+    }
+
+    // ─── Finding Status History & Audit Trail ────────────────────────────────
+
+    async appendStatusHistory(findingId: string, data: any, userId: string) {
+        const finding = await this.prisma.finding.findUnique({ where: { id: findingId }, select: { id: true } });
+        if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
+
+        const history = await this.prisma.findingStatusHistory.create({
+            data: {
+                findingId,
+                followUpId: data.followUpId || null,
+                actionId: data.actionId || null,
+                evaluator: data.evaluator || userId || null,
+                result: data.result || null,
+                explanation: data.explanation || null,
+                evidenceLinks: data.evidenceLinks || null,
+                // Audit trail fields
+                operation: data.operation || data.changeType || null,
+                changeType: data.changeType || data.operation || null,
+                userId: userId || null,
+                fieldName: data.fieldName || null,
+                oldValue: data.oldValue || null,
+                newValue: data.newValue || null,
+                workflowStatus: data.workflowStatus || null,
+                previousWorkflowStatus: data.previousWorkflowStatus || null,
+                resolutionStatus: data.resolutionStatus || null,
+            }
+        });
+
+        return history;
+    }
+
+    // Zengin audit trail kaydı — her kritik işlem için
+    async recordAuditTrail(params: {
+        findingId: string;
+        operation: string;
+        userId: string;
+        explanation?: string;
+        fieldName?: string;
+        oldValue?: any;
+        newValue?: any;
+        followUpId?: string;
+        actionId?: string;
+    }) {
+        return this.prisma.findingStatusHistory.create({
+            data: {
+                findingId: params.findingId,
+                operation: params.operation,
+                changeType: params.operation,
+                userId: params.userId,
+                evaluator: params.userId,
+                explanation: params.explanation || null,
+                fieldName: params.fieldName || null,
+                oldValue: params.oldValue != null ? params.oldValue : null,
+                newValue: params.newValue != null ? params.newValue : null,
+                followUpId: params.followUpId || null,
+                actionId: params.actionId || null,
+            },
+        });
+    }
+
+    async getStatusHistory(findingId: string) {
+        const finding = await this.prisma.finding.findUnique({ where: { id: findingId }, select: { id: true } });
+        if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
+
+        return this.prisma.findingStatusHistory.findMany({
+            where: { findingId },
+            orderBy: { entryDate: 'desc' },
+        });
+    }
+
+    // ─── FindingStatusLog (Append-only Güncel Durum) ──────────────────────────
+
+    async appendStatusLog(findingId: string, text: string, authorId: string, authorName?: string, followUpId?: string) {
+        return this.prisma.findingStatusLog.create({
+            data: {
+                findingId,
+                text,
+                authorId,
+                authorName: authorName || authorId,
+                followUpId: followUpId || null,
+            },
+        });
+    }
+
+    async getStatusLogs(findingId: string) {
+        return this.prisma.findingStatusLog.findMany({
+            where: { findingId },
+            orderBy: { entryDate: 'desc' },
+        });
+    }
+
+    // ─── Attachment CRUD (metadata-only) ─────────────────────────────────────
+
+    async addFindingAttachment(findingId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }, userId: string) {
+        const finding = await this.prisma.finding.findUnique({ where: { id: findingId }, select: { id: true } });
+        if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
+
+        const att = await this.prisma.findingAttachment.create({
+            data: { findingId, ...meta, uploadedBy: userId, url: null },
+        });
+        await this.recordAuditTrail({ findingId, operation: 'FILE_UPLOADED', userId, explanation: `Dosya yüklendi: ${meta.originalName}`, newValue: { fileName: meta.originalName, mimeType: meta.mimeType } });
+        return att;
+    }
+
+    async removeFindingAttachment(findingId: string, attachmentId: string, userId: string) {
+        const att = await this.prisma.findingAttachment.findFirst({ where: { id: attachmentId, findingId } });
+        if (!att) throw new NotFoundException(`Attachment ${attachmentId} not found`);
+        await this.prisma.findingAttachment.delete({ where: { id: attachmentId } });
+        await this.recordAuditTrail({ findingId, operation: 'FILE_DELETED', userId, explanation: `Dosya silindi: ${att.originalName}`, oldValue: { fileName: att.originalName } });
+        return { message: 'Dosya silindi' };
+    }
+
+    async addActionAttachment(findingId: string, actionId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }, userId: string) {
+        const action = await this.prisma.action.findFirst({ where: { id: actionId, findingId } });
+        if (!action) throw new NotFoundException(`Action ${actionId} not found`);
+
+        const att = await this.prisma.actionAttachment.create({
+            data: { actionId, ...meta, uploadedBy: userId, url: null },
+        });
+        await this.recordAuditTrail({ findingId, actionId, operation: 'FILE_UPLOADED', userId, explanation: `Aksiyon dosyası yüklendi: ${meta.originalName}` });
+        return att;
+    }
+
+    async removeActionAttachment(findingId: string, actionId: string, attachmentId: string, userId: string) {
+        const att = await this.prisma.actionAttachment.findFirst({ where: { id: attachmentId, actionId } });
+        if (!att) throw new NotFoundException(`Attachment ${attachmentId} not found`);
+        await this.prisma.actionAttachment.delete({ where: { id: attachmentId } });
+        await this.recordAuditTrail({ findingId, actionId, operation: 'FILE_DELETED', userId, explanation: `Aksiyon dosyası silindi: ${att.originalName}` });
+        return { message: 'Dosya silindi' };
+    }
+
+    async addFollowUpAttachment(findingId: string, followUpId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }, userId: string) {
+        const fu = await this.prisma.findingFollowUp.findFirst({ where: { id: followUpId, findingId } });
+        if (!fu) throw new NotFoundException(`FollowUp ${followUpId} not found`);
+
+        const att = await this.prisma.followUpAttachment.create({
+            data: { followUpId, ...meta, uploadedBy: userId, url: null },
+        });
+        await this.recordAuditTrail({ findingId, followUpId, operation: 'FILE_UPLOADED', userId, explanation: `Takip dosyası yüklendi: ${meta.originalName}` });
+        return att;
+    }
+
+    async removeFollowUpAttachment(findingId: string, followUpId: string, attachmentId: string, userId: string) {
+        const att = await this.prisma.followUpAttachment.findFirst({ where: { id: attachmentId, followUpId } });
+        if (!att) throw new NotFoundException(`Attachment ${attachmentId} not found`);
+        await this.prisma.followUpAttachment.delete({ where: { id: attachmentId } });
+        await this.recordAuditTrail({ findingId, followUpId, operation: 'FILE_DELETED', userId, explanation: `Takip dosyası silindi: ${att.originalName}` });
+        return { message: 'Dosya silindi' };
+    }
+
+    // ─── Bağımsız Follow-Ups Listesi ─────────────────────────────────────────
+
+    async findAllFollowUps(query: any) {
+        const {
+            search, status, findingType, relatedDepartment,
+            ownerId, month, year, severity,
+        } = query;
+        const page = parseInt(query.page, 10) || 1;
+        const limit = parseInt(query.limit, 10) || 50;
+        const skip = (page - 1) * limit;
+
+        const where: any = {};
+
+        if (status && status !== 'all') where.status = status;
+
+        if (relatedDepartment) {
+            where.finding = { relatedDepartment: { contains: relatedDepartment, mode: 'insensitive' } };
+        }
+        if (severity) {
+            where.finding = { ...(where.finding || {}), severity };
+        }
+        if (findingType) {
+            where.finding = { ...(where.finding || {}), findingType };
+        }
+        if (ownerId) {
+            where.action = { ownerId };
+        }
+        if (month && year) {
+            const startDate = new Date(parseInt(year), parseInt(month) - 1, 1);
+            const endDate   = new Date(parseInt(year), parseInt(month), 1);
+            where.plannedDate = { gte: startDate, lt: endDate };
+        } else if (year) {
+            const startDate = new Date(parseInt(year), 0, 1);
+            const endDate   = new Date(parseInt(year) + 1, 0, 1);
+            where.plannedDate = { gte: startDate, lt: endDate };
+        }
+        if (search) {
+            where.OR = [
+                { followUpId: { contains: search, mode: 'insensitive' } },
+                { finding: { findingId: { contains: search, mode: 'insensitive' } } },
+                { finding: { summary: { contains: search, mode: 'insensitive' } } },
+            ];
+        }
+
+        const [followUps, total] = await Promise.all([
+            this.prisma.findingFollowUp.findMany({
+                where,
+                include: {
+                    finding: {
+                        select: {
+                            id: true, findingId: true, summary: true, description: true,
+                            severity: true, relatedDepartment: true, resolutionStatus: true,
+                        },
+                    },
+                    action: {
+                        select: {
+                            id: true, actionId: true, description: true, dueDate: true,
+                            owner: { select: { id: true, firstName: true, lastName: true, department: true } },
+                        },
+                    },
+                    attachments: { select: { id: true, originalName: true, mimeType: true, sizeBytes: true } },
+                },
+                skip,
+                take: limit,
+                orderBy: { createdAt: 'desc' },
+            }),
+            this.prisma.findingFollowUp.count({ where }),
+        ]);
+
+        return { data: followUps, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
     }
 }

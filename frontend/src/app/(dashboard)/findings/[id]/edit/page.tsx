@@ -4,39 +4,32 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import api from '@/lib/api';
+import { useToast } from '@/components/ui/Toast';
 
-const DEMO_FINDING = {
-    findingId: 'F-2024-001',
-    title: 'Güvenlik Duvarı Kurallarının Güncelliği',
-    description: 'Yapılan kontrol testinde, güvenlik duvarı kurallarının bir kısmının 6 aydan fazla süredir güncellenmediği ve bazı kuralların artık kullanılmayan IP adresleri içerdiği tespit edilmiştir.',
-    source: 'CONTROL_TEST',
-    severity: 'HIGH',
-    status: 'IN_PROGRESS',
-    riskId: 'R-2024-0001',
-    controlId: 'C-2024-0001',
-    owner: 'Mehmet Demir',
-    department: 'Bilgi Güvenliği',
-    identifiedDate: '2024-12-05',
-    targetDate: '2025-01-31',
-    recommendation: '1. Tüm güvenlik duvarı kurallarının envanteri çıkarılmalı. 2. Kullanılmayan kurallar devre dışı bırakılmalı. 3. Düzenli gözden geçirme prosedürü oluşturulmalı.',
-    managementResponse: 'Öneri kabul edilmiştir. IT Güvenlik ekibi kural revizyonu çalışmasını başlatmıştır.',
-    isRecurrent: false,
-};
+interface User {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    department?: string;
+}
 
-const sourceOptions = [
-    { value: 'CONTROL_TEST', label: 'Kontrol Testi' },
-    { value: 'INTERNAL_AUDIT', label: 'İç Denetim' },
-    { value: 'EXTERNAL_AUDIT', label: 'Dış Denetim' },
-    { value: 'INCIDENT', label: 'Olay' },
-    { value: 'SELF_ASSESSMENT', label: 'Öz Değerlendirme' },
-    { value: 'REGULATORY', label: 'Regülatör İncelemesi' },
-];
+interface Control {
+    id: string;
+    controlId: string;
+    name: string;
+    gmy?: string;
+    directorate?: string;
+    owner?: { id: string; firstName?: string; lastName?: string; department?: string };
+}
 
-const severityOptions = [
-    { value: 'CRITICAL', label: 'Kritik', color: 'bg-red-500' },
-    { value: 'HIGH', label: 'Yüksek', color: 'bg-orange-500' },
-    { value: 'MEDIUM', label: 'Orta', color: 'bg-yellow-500' },
-    { value: 'LOW', label: 'Düşük', color: 'bg-green-500' },
+const findingTypeOptions = [
+    { value: 'CONTROL_DEFICIENCY', label: 'Kontrol Eksikliği' },
+    { value: 'PROCESS_GAP', label: 'Süreç Açığı' },
+    { value: 'COMPLIANCE_ISSUE', label: 'Uyum Sorunu' },
+    { value: 'DOCUMENTATION', label: 'Dokümantasyon' },
+    { value: 'IT_SECURITY', label: 'BT Güvenliği' },
+    { value: 'OPERATIONAL', label: 'Operasyonel' },
 ];
 
 const statusOptions = [
@@ -44,362 +37,438 @@ const statusOptions = [
     { value: 'IN_PROGRESS', label: 'Devam Ediyor' },
     { value: 'PENDING_REVIEW', label: 'İnceleme Bekliyor' },
     { value: 'CLOSED', label: 'Kapatıldı' },
-];
-
-const departmentOptions = [
-    { value: 'IT', label: 'Bilgi Teknolojileri' },
-    { value: 'HR', label: 'İnsan Kaynakları' },
-    { value: 'FINANCE', label: 'Finans' },
-    { value: 'OPERATIONS', label: 'Operasyon' },
-    { value: 'LEGAL', label: 'Hukuk' },
-    { value: 'COMPLIANCE', label: 'Uyum' },
-];
-
-const personOptions = [
-    { value: 'Ahmet Yılmaz', label: 'Ahmet Yılmaz' },
-    { value: 'Mehmet Demir', label: 'Mehmet Demir' },
-    { value: 'Ayşe Kaya', label: 'Ayşe Kaya' },
-    { value: 'Fatma Çelik', label: 'Fatma Çelik' },
-    { value: 'Ali Öztürk', label: 'Ali Öztürk' },
+    { value: 'VERIFIED', label: 'Doğrulandı' },
 ];
 
 export default function FindingEditPage() {
     const params = useParams();
     const router = useRouter();
+    const { success: showToastSuccess, error: showToastError } = useToast();
+
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [controls, setControls] = useState<Control[]>([]);
+    const [users, setUsers] = useState<User[]>([]);
 
     const [formData, setFormData] = useState({
-        description: '',
-        title: '', // Title is derived from description usually, but sticking to form structure
-        source: 'INTERNAL_AUDIT',
-        severity: 'MEDIUM',
-        status: 'OPEN',
-        riskId: '',
+        findingType: 'CONTROL_DEFICIENCY',
         controlId: '',
-        owner: '',
-        department: '',
-        identifiedDate: '',
-        targetDate: '',
-        recommendation: '',
-        managementResponse: '',
-        isRecurrent: false,
-        affectedSystem: '',
-        impact: '',
+        description: '',
+        summary: '',
+        gmy: '',
         relatedDepartment: '',
         responsiblePerson: '',
+        status: 'OPEN',
+        severity: 'MEDIUM',
+        internalControlAssessment: '',
+        currentStatusDetail: '',
+        birimCevabi: '',
+        targetResolutionDate: '',
+        closedDate: '',
+        testDate: '',
+        attachment: '',
+        assigneeId: '',
+        sendEmail: true,
     });
 
     useEffect(() => {
-        const fetchFinding = async () => {
+        const loadData = async () => {
             try {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                // Fetch users
+                let userList: User[] = [];
+                try {
+                    userList = await api.getUsers() as User[];
+                } catch (e) {
+                    console.warn('LDAP Users Access Denied. Using fallback mock.', e);
+                    userList = [
+                        { id: 'usr-1', firstName: 'Ahmet', lastName: 'Yılmaz', email: 'ahmet.yilmaz@grc.com', department: 'Uyum' },
+                        { id: 'usr-2', firstName: 'Mehmet', lastName: 'Demir', email: 'mehmet.demir@grc.com', department: 'Risk Yönetimi' },
+                        { id: 'usr-3', firstName: 'Ayşe', lastName: 'Kaya', email: 'ayse.kaya@grc.com', department: 'İç Kontrol' },
+                        { id: 'usr-4', firstName: 'Fatma', lastName: 'Çelik', email: 'fatma.celik@grc.com', department: 'Bilgi Teknolojileri' }
+                    ];
+                }
+                setUsers(userList || []);
+
+                // Fetch controls
+                const resControls = await api.getControls() as any;
+                const listControls = Array.isArray(resControls) ? resControls : (resControls?.data || []);
+                setControls(listControls);
+
+                // Fetch finding
                 const data = await api.getFinding(params.id as string) as any;
                 if (data) {
                     setFormData({
-                        title: data.description ? data.description.substring(0, 50) + '...' : '',
+                        findingType: data.findingType || 'CONTROL_DEFICIENCY',
+                        controlId: data.controlId || (data.control?.id || ''),
                         description: data.description || '',
-                        source: data.source || 'INTERNAL_AUDIT',
-                        severity: data.severity || 'MEDIUM',
-                        status: data.status || 'OPEN',
-                        riskId: data.risk?.id || data.riskId || '',
-                        controlId: data.control?.id || data.controlId || '',
-                        owner: '', // Owner info logic complexity
-                        department: '',
-                        identifiedDate: data.createdAt ? new Date(data.createdAt).toISOString().split('T')[0] : '',
-                        targetDate: data.targetResolutionDate ? new Date(data.targetResolutionDate).toISOString().split('T')[0] : '',
-                        recommendation: data.recommendation || '',
-                        managementResponse: data.managementResponse || '',
-                        isRecurrent: data.isRecurrent || false,
-                        affectedSystem: data.affectedSystem || '',
-                        impact: data.impact || '',
+                        summary: data.summary || '',
+                        gmy: data.gmy || '',
                         relatedDepartment: data.relatedDepartment || '',
                         responsiblePerson: data.responsiblePerson || '',
+                        status: data.status || 'OPEN',
+                        severity: data.severity || 'MEDIUM',
+                        internalControlAssessment: data.internalControlAssessment || '',
+                        currentStatusDetail: data.currentStatusDetail || '',
+                        birimCevabi: data.birimCevabi || '',
+                        targetResolutionDate: data.targetResolutionDate ? new Date(data.targetResolutionDate).toISOString().split('T')[0] : '',
+                        closedDate: data.closedDate ? new Date(data.closedDate).toISOString().split('T')[0] : '',
+                        testDate: data.testDate ? new Date(data.testDate).toISOString().split('T')[0] : '',
+                        attachment: data.attachment || '',
+                        assigneeId: data.assigneeId || (data.assignee?.id || ''),
+                        sendEmail: data.sendEmail ?? false,
                     });
                 }
             } catch (error) {
-                console.error('Failed to load finding:', error);
+                console.error('Failed to load edit data:', error);
             } finally {
                 setLoading(false);
             }
         };
-        fetchFinding();
+        loadData();
     }, [params.id]);
 
+    const handleControlChange = (selectedId: string) => {
+        const selectedCtrl = controls.find(c => c.id === selectedId);
+        setFormData(prev => ({
+            ...prev,
+            controlId: selectedId,
+            gmy: selectedCtrl?.gmy || prev.gmy,
+            relatedDepartment: selectedCtrl?.directorate || prev.relatedDepartment,
+            responsiblePerson: selectedCtrl?.owner ? `${selectedCtrl.owner.firstName || ''} ${selectedCtrl.owner.lastName || ''}`.trim() : prev.responsiblePerson,
+            assigneeId: selectedCtrl?.owner?.id || prev.assigneeId,
+        }));
+    };
 
-    const handleSave = async () => {
+    const handleSave = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!formData.controlId) {
+            showToastError('Hata', 'İlişkili Kontrol seçimi zorunludur.');
+            return;
+        }
+        if (!formData.description) {
+            showToastError('Hata', 'Bulgu Metni girmek zorunludur.');
+            return;
+        }
+
         setSaving(true);
         try {
-            await api.updateFinding(params.id as string, {
-                description: formData.description,
-                source: formData.source,
-                severity: formData.severity,
-                status: formData.status,
-                riskId: formData.riskId, // Assuming ID is entered directly for now or we need a picker
-                controlId: formData.controlId,
-                targetResolutionDate: formData.targetDate ? new Date(formData.targetDate).toISOString() : null,
-                recommendation: formData.recommendation,
-                managementResponse: formData.managementResponse,
-                isRecurrent: formData.isRecurrent,
-                affectedSystem: formData.affectedSystem,
-                impact: formData.impact,
-                relatedDepartment: formData.relatedDepartment,
-                responsiblePerson: formData.responsiblePerson,
-            });
+            const payload = {
+                ...formData,
+                impact: 'Kontrol testi veya iç denetim sırasında sapma tespit edilmiştir.',
+            };
+
+            await api.updateFinding(params.id as string, payload);
+            showToastSuccess('Başarılı', 'Bulgu başarıyla güncellendi.');
             router.push(`/findings/${params.id}`);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to update finding:', error);
-            alert('Güncelleme sırasında bir hata oluştu.');
+            showToastError('Hata', error.message || 'Güncelleme sırasında bir hata oluştu.');
         } finally {
             setSaving(false);
         }
     };
 
     if (loading) {
-        return <div className="min-h-screen flex items-center justify-center">Yükleniyor...</div>;
+        return (
+            <div className="flex justify-center items-center h-64">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+            </div>
+        );
     }
 
     return (
-        <div className="min-h-screen bg-gray-50">
-            <div className="max-w-[1000px] mx-auto px-6 py-6">
-                {/* Breadcrumb */}
-                <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
-                    <Link href="/findings" className="hover:text-purple-600">Bulgular</Link>
-                    <span>/</span>
-                    <Link href={`/findings/${params.id}`} className="hover:text-purple-600 font-mono">{params.id}</Link>
-                    <span>/</span>
-                    <span className="text-gray-900">Düzenle</span>
+        <div className="min-h-screen bg-slate-50/50 max-w-5xl mx-auto py-8 px-4 space-y-6">
+            {/* Breadcrumb */}
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">
+                <Link href="/findings" className="hover:text-slate-600">Bulgular</Link>
+                <span>/</span>
+                <Link href={`/findings/${params.id}`} className="hover:text-slate-600 font-mono">{params.id}</Link>
+                <span>/</span>
+                <span className="text-slate-600">Düzenle</span>
+            </div>
+
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 pb-5">
+                <div>
+                    <h1 className="text-2xl font-black text-slate-800 tracking-tight">Bulguyu Düzenle</h1>
+                    <p className="text-sm text-slate-500 mt-1 font-mono">{params.id} numaralı kurumsal bulgu kaydı düzenleme ekranı.</p>
                 </div>
+            </div>
 
-                {/* Header */}
-                <div className="flex items-center justify-between mb-6">
-                    <div>
-                        <h1 className="text-2xl font-bold text-gray-900">Bulguyu Düzenle</h1>
-                        <p className="text-gray-500 mt-1 font-mono">{params.id}</p>
-                    </div>
-                </div>
-
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                    <div className="space-y-6">
-
-                        {/* Description */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Açıklama *</label>
-                            <textarea
-                                value={formData.description}
-                                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
-                                rows={4}
-                            />
-                        </div>
-
-                        {/* Impact */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Potansiyel Etki *</label>
-                            <textarea
-                                value={formData.impact}
-                                onChange={(e) => setFormData({ ...formData, impact: e.target.value })}
-                                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
-                                rows={2}
-                            />
-                        </div>
-
-                        {/* Source and Severity */}
-                        <div className="grid grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                <form onSubmit={handleSave} className="space-y-6 text-slate-800">
+                    {/* Section 1: Bağlantı ve Kimlik */}
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-150 space-y-4">
+                        <h4 className="text-xs font-black text-slate-500 uppercase tracking-wider">🔗 Kontrol Bağlantısı & Sorumluluk</h4>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Kaynak</label>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">İlişkili Kontrol *</label>
                                 <select
-                                    value={formData.source}
-                                    onChange={(e) => setFormData({ ...formData, source: e.target.value })}
-                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+                                    value={formData.controlId}
+                                    onChange={e => handleControlChange(e.target.value)}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-700 font-semibold"
                                 >
-                                    {sourceOptions.map(opt => (
+                                    <option value="">Seçiniz...</option>
+                                    {controls.map(c => (
+                                        <option key={c.id} value={c.id}>{c.controlId} - {c.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Atanan Sorumlu (Assignee)</label>
+                                <select
+                                    value={formData.assigneeId}
+                                    onChange={e => setFormData({ ...formData, assigneeId: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-700 font-semibold"
+                                >
+                                    <option value="">Seçiniz...</option>
+                                    {users.map(u => (
+                                        <option key={u.id} value={u.id}>{u.firstName} {u.lastName} ({u.department || 'Genel'})</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">İlgili GMY</label>
+                                <input
+                                    type="text"
+                                    value={formData.gmy}
+                                    onChange={e => setFormData({ ...formData, gmy: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none"
+                                    placeholder="Örn: BT GMY..."
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">İlgili Direktörlük</label>
+                                <input
+                                    type="text"
+                                    value={formData.relatedDepartment}
+                                    onChange={e => setFormData({ ...formData, relatedDepartment: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none"
+                                    placeholder="Örn: BT Güvenlik..."
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">İletişim Kişisi</label>
+                                <input
+                                    type="text"
+                                    value={formData.responsiblePerson}
+                                    onChange={e => setFormData({ ...formData, responsiblePerson: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none"
+                                    placeholder="İsim Soyisim..."
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Section 2: Bulgu Detayları */}
+                    <div className="bg-white p-4 rounded-xl border border-slate-150 space-y-4">
+                        <h4 className="text-xs font-black text-slate-500 uppercase tracking-wider">📝 Bulgu Özellikleri</h4>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Bulgu Türü</label>
+                                <select
+                                    value={formData.findingType}
+                                    onChange={e => setFormData({ ...formData, findingType: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none font-semibold"
+                                >
+                                    {findingTypeOptions.map(opt => (
                                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                                     ))}
                                 </select>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Ciddiyet *</label>
-                                <div className="flex gap-2">
-                                    {severityOptions.map(opt => (
-                                        <button
-                                            key={opt.value}
-                                            type="button"
-                                            onClick={() => setFormData({ ...formData, severity: opt.value })}
-                                            className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all ${formData.severity === opt.value
-                                                ? `${opt.color} text-white`
-                                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                                }`}
-                                        >
-                                            {opt.label}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
 
-                        {/* Status and Recurrent */}
-                        <div className="grid grid-cols-2 gap-6">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Durum</label>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Bulgunun Durumu</label>
                                 <select
                                     value={formData.status}
-                                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+                                    onChange={e => setFormData({ ...formData, status: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none font-semibold"
                                 >
                                     {statusOptions.map(opt => (
                                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                                     ))}
                                 </select>
                             </div>
-                            <div className="flex items-center">
-                                <label className="flex items-center cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={formData.isRecurrent}
-                                        onChange={(e) => setFormData({ ...formData, isRecurrent: e.target.checked })}
-                                        className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                                    />
-                                    <span className="ml-2 text-sm text-gray-700">Tekrarlayan Bulgu</span>
-                                </label>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Önem Derecesi (Severity)</label>
+                                <div className="flex gap-1.5">
+                                    {[
+                                        { value: 'LOW', label: 'Düşük', color: 'border-emerald-500 bg-emerald-50 text-emerald-700' },
+                                        { value: 'MEDIUM', label: 'Orta', color: 'border-amber-500 bg-amber-50 text-amber-700' },
+                                        { value: 'HIGH', label: 'Yüksek', color: 'border-orange-500 bg-orange-50 text-orange-700' },
+                                        { value: 'CRITICAL', label: 'Kritik', color: 'border-rose-500 bg-rose-50 text-rose-700' },
+                                    ].map(sev => (
+                                        <button
+                                            key={sev.value}
+                                            type="button"
+                                            onClick={() => setFormData({ ...formData, severity: sev.value })}
+                                            className={`flex-1 py-1.5 rounded-lg border text-xs font-bold transition-all ${
+                                                formData.severity === sev.value ? sev.color : 'border-slate-200 text-slate-500 bg-white hover:bg-slate-50'
+                                            }`}
+                                        >
+                                            {sev.label}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                         </div>
 
-                        {/* Affected System */}
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Bulgu Özeti *</label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={formData.summary}
+                                    onChange={e => setFormData({ ...formData, summary: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none"
+                                    placeholder="Tek cümlelik bulgu özeti..."
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Bulgu Metni (Açıklama) *</label>
+                                <textarea
+                                    required
+                                    value={formData.description}
+                                    onChange={e => setFormData({ ...formData, description: e.target.value })}
+                                    rows={3}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none resize-none"
+                                    placeholder="Gözlemlenen eksikliği ve test adımlarını detaylandırın..."
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Section 3: Değerlendirme ve İlerleme */}
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-150 space-y-4">
+                        <h4 className="text-xs font-black text-slate-500 uppercase tracking-wider">🔬 Değerlendirme ve Tarihler</h4>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">İç Kontrol Değerlendirmesi</label>
+                                <textarea
+                                    value={formData.internalControlAssessment}
+                                    onChange={e => setFormData({ ...formData, internalControlAssessment: e.target.value })}
+                                    rows={2}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none resize-none bg-white"
+                                    placeholder="İç kontrol biriminin risk ve etki değerlendirmesi..."
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Bulgunun Güncel Durumu</label>
+                                <textarea
+                                    value={formData.currentStatusDetail}
+                                    onChange={e => setFormData({ ...formData, currentStatusDetail: e.target.value })}
+                                    rows={2}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none resize-none bg-white"
+                                    placeholder="Bulgunun güncel takip ve kapatılma süreci..."
+                                />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Bulgu Test Tarihi</label>
+                                <input
+                                    type="date"
+                                    value={formData.testDate}
+                                    onChange={e => setFormData({ ...formData, testDate: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none bg-white"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Öngörülen Kapatma Tarihi (Hedef)</label>
+                                <input
+                                    type="date"
+                                    value={formData.targetResolutionDate}
+                                    onChange={e => setFormData({ ...formData, targetResolutionDate: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none bg-white"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Bulgu Fiili Kapatma Tarihi</label>
+                                <input
+                                    type="date"
+                                    value={formData.closedDate}
+                                    onChange={e => setFormData({ ...formData, closedDate: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none bg-white"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Section 4: Birim Cevabı, Ekler ve Bildirimler */}
+                    <div className="bg-white p-4 rounded-xl border border-slate-150 space-y-4">
+                        <h4 className="text-xs font-black text-slate-500 uppercase tracking-wider">💾 Birim Görüşü & İletişim</h4>
+
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Etkilenen Sistem</label>
-                            <input
-                                type="text"
-                                value={formData.affectedSystem}
-                                onChange={(e) => setFormData({ ...formData, affectedSystem: e.target.value })}
-                                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                placeholder="Örn: SAP, CRM..."
+                            <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Birim Cevabı / Yönetim Görüşü</label>
+                            <textarea
+                                value={formData.birimCevabi}
+                                onChange={e => setFormData({ ...formData, birimCevabi: e.target.value })}
+                                rows={2}
+                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none resize-none"
+                                placeholder="Bulguya maruz kalan iş biriminin aksiyon planı ve görüşü..."
                             />
                         </div>
 
-
-                        {/* Linked Risk and Control - Moved below for flow */}
-                        <div className="grid grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">İlişkili Risk ID</label>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Dosya Eki (Attachment)</label>
                                 <input
                                     type="text"
-                                    value={formData.riskId}
-                                    onChange={(e) => setFormData({ ...formData, riskId: e.target.value })}
-                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    placeholder="Risk ID giriniz"
+                                    value={formData.attachment}
+                                    onChange={e => setFormData({ ...formData, attachment: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none"
+                                    placeholder="Örn: kanit_dosyasi.xlsx, bulgu_kanit.pdf..."
                                 />
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">İlişkili Kontrol ID</label>
-                                <input
-                                    type="text"
-                                    value={formData.controlId}
-                                    onChange={(e) => setFormData({ ...formData, controlId: e.target.value })}
-                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    placeholder="Kontrol ID giriniz"
-                                />
-                            </div>
-                        </div>
 
-                        {/* Owner - Updated with Dropdowns */}
-                        <div className="pt-6 border-t border-gray-100">
-                            <h3 className="font-semibold text-gray-900 mb-4">Bulgu Sahibi</h3>
-                            <div className="grid grid-cols-2 gap-6">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Sorumlu Kişi</label>
-                                    <select
-                                        value={formData.responsiblePerson}
-                                        onChange={(e) => setFormData({ ...formData, responsiblePerson: e.target.value })}
-                                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
-                                    >
-                                        <option value="">Seçiniz</option>
-                                        {personOptions.map(opt => (
-                                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">İlgili Direktörlük</label>
-                                    <select
-                                        value={formData.relatedDepartment}
-                                        onChange={(e) => setFormData({ ...formData, relatedDepartment: e.target.value })}
-                                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
-                                    >
-                                        <option value="">Seçiniz</option>
-                                        {departmentOptions.map(opt => (
-                                            <option key={opt.value} value={opt.label}>{opt.label}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Dates */}
-                        <div className="pt-6 border-t border-gray-100">
-                            <h3 className="font-semibold text-gray-900 mb-4">Tarihler</h3>
-                            <div className="grid grid-cols-2 gap-6">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Tespit Tarihi</label>
+                            <div className="flex items-center mt-6">
+                                <label className="flex items-center gap-3 cursor-pointer select-none">
                                     <input
-                                        disabled
-                                        type="date"
-                                        value={formData.identifiedDate}
-                                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl bg-gray-50 text-gray-500"
+                                        type="checkbox"
+                                        checked={formData.sendEmail}
+                                        onChange={e => setFormData({ ...formData, sendEmail: e.target.checked })}
+                                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                     />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Hedef Kapanış Tarihi</label>
-                                    <input
-                                        type="date"
-                                        value={formData.targetDate}
-                                        onChange={(e) => setFormData({ ...formData, targetDate: e.target.value })}
-                                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    />
-                                </div>
+                                    <div>
+                                        <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">📧 Otomatik Mail Gönderilsin</span>
+                                        <p className="text-[10px] text-slate-400 font-medium">Bulgu güncellendiğinde sorumlu kişiye bildirim gönderir</p>
+                                    </div>
+                                </label>
                             </div>
-                        </div>
-
-                        {/* Recommendation and Response */}
-                        <div className="pt-6 border-t border-gray-100">
-                            <h3 className="font-semibold text-gray-900 mb-4">Öneri ve Yanıt</h3>
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Denetçi Önerisi</label>
-                                    <textarea
-                                        value={formData.recommendation}
-                                        onChange={(e) => setFormData({ ...formData, recommendation: e.target.value })}
-                                        className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
-                                        rows={3}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Yönetim Yanıtı</label>
-                                    <textarea
-                                        value={formData.managementResponse}
-                                        onChange={(e) => setFormData({ ...formData, managementResponse: e.target.value })}
-                                        className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
-                                        rows={3}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex items-center justify-end gap-4 pt-6 border-t border-gray-100">
-                            <Link href={`/findings/${params.id}`} className="px-6 py-2.5 text-gray-600 hover:text-gray-800">
-                                İptal
-                            </Link>
-                            <button
-                                onClick={handleSave}
-                                disabled={saving}
-                                className="px-8 py-2.5 bg-purple-600 text-white font-medium rounded-xl hover:bg-purple-700 transition-all disabled:opacity-50"
-                            >
-                                {saving ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
-                            </button>
                         </div>
                     </div>
-                </div>
+
+                    {/* Footer Actions */}
+                    <div className="flex justify-end gap-2.5 pt-4 border-t border-slate-200">
+                        <Link
+                            href={`/findings/${params.id}`}
+                            className="px-5 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs transition-colors uppercase tracking-wider"
+                        >
+                            İptal
+                        </Link>
+                        <button
+                            type="submit"
+                            disabled={saving}
+                            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-colors disabled:opacity-50 uppercase tracking-wider shadow-sm"
+                        >
+                            {saving ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     );

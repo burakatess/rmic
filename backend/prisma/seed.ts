@@ -283,7 +283,7 @@ async function main() {
 
     // Create 20 Actions (Findings -> Actions)
     console.log('🚀 Creating 20 actions...');
-    const actionStatuses = ['OPEN', 'IN_PROGRESS', 'COMPLETED'];
+    const actionStatuses = ['BEKLIYOR', 'DEVAM_EDIYOR', 'TAMAMLANDI'];
     for (let i = 1; i <= 20; i++) {
         const finding = findings[i % findings.length];
         const actStatus = actionStatuses[(i - 1) % actionStatuses.length];
@@ -293,13 +293,12 @@ async function main() {
             data: {
                 actionId: `A-2026-${String(i).padStart(4, '0')}`,
                 description: `Bulguya yönelik otomatik log kontrol entegrasyonunun yazılması ve devreye alınması.`,
-                source: 'FINDING',
                 status: actStatus as any,
                 ownerId: users[5].id, // assigned to Can Owner
                 findingId: finding.id,
                 riskId: finding.riskId,
                 dueDate: isOverdue ? new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) : new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
-                slaInDays: 30,
+                responsibleDepartment: finding.relatedDepartment || 'Bilgi Teknolojileri',
             }
         });
     }

@@ -5,10 +5,29 @@ import { PrismaService } from '../../prisma';
 export class ControlsService {
     constructor(private prisma: PrismaService) { }
 
-    private generateControlId(): string {
+    private async generateControlId(): Promise<string> {
         const year = new Date().getFullYear();
-        const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-        return `C-${year}-${random}`;
+        const prefix = `C-${year}-`;
+        const lastControl = await this.prisma.control.findFirst({
+            where: {
+                controlId: {
+                    startsWith: prefix,
+                },
+            },
+            orderBy: {
+                controlId: 'desc',
+            },
+        });
+
+        let nextNum = 1;
+        if (lastControl) {
+            const parts = lastControl.controlId.split('-');
+            const lastNum = parseInt(parts[2], 10);
+            if (!isNaN(lastNum)) {
+                nextNum = lastNum + 1;
+            }
+        }
+        return `${prefix}${nextNum.toString().padStart(4, '0')}`;
     }
 
     async findAll(query: any) {
@@ -98,11 +117,13 @@ export class ControlsService {
             controlStatus = 'PASSIVE';
         }
 
+        const controlId = data.controlId || await this.generateControlId();
+
         const control = await this.prisma.control.create({
             data: {
                 ...rest,
-                controlId: data.controlId || this.generateControlId(),
-                name: data.name || data.controlId || 'Yeni Kontrol',
+                controlId,
+                name: data.name || controlId || 'Yeni Kontrol',
                 description: data.description || '',
                 type: data.type || 'IT_GENERAL',
                 nature: data.nature || 'PREVENTIVE',
@@ -389,13 +410,35 @@ export class ControlsService {
         // If records already exist, we skip to avoid duplicate generation
         if (existingCount > 0) return;
 
+        const currentYear = new Date().getFullYear();
+        const prefix = `T-${currentYear}-`;
+        const lastRecord = await this.prisma.testRecord.findFirst({
+            where: {
+                testId: {
+                    startsWith: prefix,
+                },
+            },
+            orderBy: {
+                testId: 'desc',
+            },
+        });
+
+        let nextNum = 1;
+        if (lastRecord && lastRecord.testId) {
+            const parts = lastRecord.testId.split('-');
+            const lastNum = parseInt(parts[2], 10);
+            if (!isNaN(lastNum)) {
+                nextNum = lastNum + 1;
+            }
+        }
+
         const testRecordsToCreate: Array<{
             controlId: string;
             dueDate: Date;
             status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'OVERDUE';
             assigneeId: string | null;
+            testId: string;
         }> = [];
-        const currentYear = new Date().getFullYear();
         const currentDate = new Date();
 
         const turkishMonths: Record<string, number> = {
@@ -415,7 +458,9 @@ export class ControlsService {
                         dueDate: date,
                         status: 'PENDING',
                         assigneeId: control.ownerId,
+                        testId: `${prefix}${nextNum.toString().padStart(4, '0')}`,
                     });
+                    nextNum++;
                 }
             }
         } else if (control.frequency === 'WEEKLY') {
@@ -428,7 +473,9 @@ export class ControlsService {
                     dueDate: date,
                     status: 'PENDING',
                     assigneeId: control.ownerId,
+                    testId: `${prefix}${nextNum.toString().padStart(4, '0')}`,
                 });
+                nextNum++;
             }
         } else if (control.frequency === 'MONTHLY') {
             // Generate 12 monthly tasks
@@ -439,7 +486,9 @@ export class ControlsService {
                     dueDate: date,
                     status: 'PENDING',
                     assigneeId: control.ownerId,
+                    testId: `${prefix}${nextNum.toString().padStart(4, '0')}`,
                 });
+                nextNum++;
             }
         } else if (['QUARTERLY', 'SEMI_ANNUAL', 'ANNUAL', 'AD_HOC'].includes(control.frequency)) {
             // Generate tasks for selected months
@@ -457,7 +506,9 @@ export class ControlsService {
                         dueDate: date,
                         status: 'PENDING',
                         assigneeId: control.ownerId,
+                        testId: `${prefix}${nextNum.toString().padStart(4, '0')}`,
                     });
+                    nextNum++;
                 }
             }
         }

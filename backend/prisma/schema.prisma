@@ -270,6 +270,7 @@ model Control {
   tests       ControlTest[]
   findings    Finding[]
   testRecords TestRecord[]
+  actions     Action[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -392,6 +393,7 @@ model TestRecord {
   findingId     String?          // Bağlı bulgu
 
   findings      Finding[]
+  actions       Action[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -461,17 +463,20 @@ model AuditExecution {
 
 model Finding {
   id          String          @id @default(cuid())
-  findingId   String          @unique // F-2024-001
+  findingId   String          @unique // 2026.BT.01
   description String          @db.Text
   impact      String          @db.Text
   severity    FindingSeverity
   isRecurrent Boolean         @default(false)
-  status      FindingStatus   @default(OPEN)
+  status      FindingStatus   @default(IN_PROGRESS)
   findingType FindingType?
   summary     String?
   gmy         String?
 
-  // Optional relations - Finding can be linked to risk, control, or neither (audit execution only)
+  // Assignee
+  assigneeId  String?          // User id reference
+
+  // Optional relations - Finding can be linked to risk, control, or neither
   risk      Risk?    @relation(fields: [riskId], references: [id])
   riskId    String?
   control   Control? @relation(fields: [controlId], references: [id])
@@ -488,11 +493,19 @@ model Finding {
   auditExecution   AuditExecution? @relation(fields: [auditExecutionId], references: [id])
   auditExecutionId String?
 
-  // New fields for extended detail
+  // Mutabakat akışı (yeni alan — Jira BE projesi iş akışı)
+  workflowStatus   FindingWorkflowStatus  @default(TASLAK)
+  // Çözüm durumu (yeni alan — bulgunun gerçek kapatılma durumu)
+  resolutionStatus FindingResolutionStatus @default(DEVAM_EDIYOR)
+  // İletişim Kişisi (LDAP entegrasyonuna kadar serbest metin)
+  iletisimKisisi   String?
+
+  // Extended detail fields
   source                     FindingSource   @default(INTERNAL_AUDIT)
   affectedSystem             String?
   recommendation             String?         @db.Text
-  managementResponse         String?         @db.Text
+  managementResponse         String?         @db.Text   // alias: birimCevabi
+  birimCevabi                String?         @db.Text   // Birim Cevabı / Yönetim Görüşü
   internalControlAssessment  String?         @db.Text
   currentStatusDetail        String?         @db.Text
   targetResolutionDate       DateTime?
@@ -503,8 +516,12 @@ model Finding {
   relatedDepartment          String?
   responsiblePerson          String?
 
-  // Actions
-  actions Action[]
+  // Relations
+  actions       Action[]
+  followUps     FindingFollowUp[]
+  statusHistory FindingStatusHistory[]
+  attachments   FindingAttachment[]
+  statusLogs    FindingStatusLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -513,6 +530,9 @@ model Finding {
   @@index([controlId])
   @@index([status])
   @@index([severity])
+  @@index([assigneeId])
+  @@index([workflowStatus])
+  @@index([resolutionStatus])
 }
 
 enum FindingSource {
@@ -550,15 +570,37 @@ enum FindingSeverity {
   LOW
 }
 
+// Mutabakat iş akışı statüsü (Jira BE projesi akışı)
+enum FindingWorkflowStatus {
+  TASLAK                          // İKS oluşturdu, birim göremez
+  MUTABAKATA_GONDERILDI           // İKS → Birim: e-posta gönderildi
+  IC_KONTROL_ONAYINA_GONDERILDI   // Birim yanıtladı → İKS onayına gönderildi
+  MUTABAKAT_YAPILDI               // İKS onayladı
+  IPTAL                           // İKS Business Owner tarafından iptal
+}
+
+// Bulgunun gerçek çözüm durumu (resolution state)
+enum FindingResolutionStatus {
+  DEVAM_EDIYOR           // Aksiyon henüz tamamlanmadı
+  KISMEN_KAPATILDI       // Kısmen kapatıldı, izleme devam ediyor
+  KAPATILDI              // Tamamen kapatıldı
+  ERTELENDI              // Test tarihi ertelendi
+  YENI_AKSIYON_GEREKLI   // Yeni düzeltici aksiyon açılması gerekiyor
+}
+
 enum FindingStatus {
-  OPEN
-  IN_PROGRESS
-  PENDING_REVIEW
-  CLOSED
-  VERIFIED
+  OPEN             // Legacy
+  IN_PROGRESS      // Devam Ediyor
+  PARTIALLY_CLOSED // Kısmen Kapatıldı
+  PENDING_REVIEW   // Legacy
+  CLOSED           // Kapatıldı
+  VERIFIED         // Legacy
 }
 
 enum FindingType {
+  BT               // Bilgi Teknolojileri Birimleri Bulgusu
+  IB               // İş Birimleri Bulgusu
+  // Legacy values
   CONTROL_DEFICIENCY
   PROCESS_GAP
   COMPLIANCE_ISSUE
@@ -568,39 +610,189 @@ enum FindingType {
 }
 
 // ==========================================
+// FINDING FOLLOW-UP STUDIES (Bulgu Takip Çalışmaları)
+// ==========================================
+
+model FindingFollowUp {
+  id              String         @id @default(cuid())
+  followUpId      String         @unique // 2026.03.BT.01
+  finding         Finding        @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  findingId       String
+
+  // Linked corrective action (which action triggered this follow-up)
+  action          Action?        @relation(fields: [actionId], references: [id])
+  actionId        String?
+
+  status          FollowUpStatus @default(BEKLIYOR)
+  plannedDate     DateTime?      // = Action.dueDate when auto-generated
+  targetResolutionDate DateTime?
+  testDate        DateTime?
+
+  // Bu takip çalışmasında verilen bulgu durumu kararı
+  resolutionOutcome  FindingResolutionStatus?
+  // Erteleme durumunda yeni takip tarihi
+  newFollowUpDate    DateTime?
+
+  // Evaluation (filled during follow-up)
+  evaluatorId               String?              // Kim değerlendirdi
+  evaluatedAt               DateTime?            // Ne zaman değerlendirdi
+  result                    FollowUpResult?      // YETERLI / YETERSIZ / YENI_AKSIYON_GEREKLI
+  explanation               String?   @db.Text   // Değerlendirme açıklaması
+
+  // Approval
+  approvalStatus            FollowUpApprovalStatus?      @default(BEKLIYOR)
+  approvedBy                String?
+  approvedAt                DateTime?
+
+  // Content
+  birimCevabi               String?   @db.Text   // Birim Cevabı
+  currentStatusDetail       String?   @db.Text   // Bu takipte güncel durum notu
+  internalControlAssessment String?   @db.Text   // İç Kontrol Değerlendirmesi
+  notes                     String?   @db.Text
+  secondControllerId        String?              // İkinci kontrolcü
+  sprint                    String?              // Sprint bilgisi
+
+  // Yeni aksiyon tetiklendi mi?
+  newActionRequired         Boolean  @default(false)
+  newActionId               String?  // Tetiklenen yeni action ID
+
+  // Attachments
+  attachments               FollowUpAttachment[]
+
+  // StatusHistory entries generated from this follow-up
+  statusHistoryEntries      FindingStatusHistory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([findingId])
+  @@index([actionId])
+  @@index([status])
+  @@index([result])
+}
+
+enum FollowUpStatus {
+  BEKLIYOR
+  DEVAM_EDIYOR
+  TAMAMLANDI
+  ONAYLANDI
+}
+
+enum FollowUpResult {
+  YETERLI
+  YETERSIZ
+  YENI_AKSIYON_GEREKLI   // Yeni düzeltici aksiyon açılması gerekiyor
+}
+
+enum FollowUpApprovalStatus {
+  BEKLIYOR
+  ONAYLANDI
+  REDDEDILDI
+}
+
+// ==========================================
+// FINDING STATUS HISTORY (Append-only, cronolojik geçmiş)
+// ==========================================
+
+model FindingStatusHistory {
+  id         String   @id @default(cuid())
+
+  finding    Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  findingId  String
+
+  followUp   FindingFollowUp? @relation(fields: [followUpId], references: [id])
+  followUpId String?
+
+  action     Action?  @relation(fields: [actionId], references: [id])
+  actionId   String?
+
+  // Entry content
+  entryDate    DateTime @default(now())
+  evaluator    String?  // Kim yazdı / değerlendirdi
+  result       FollowUpResult?
+  explanation  String?  @db.Text
+  evidenceLinks String?
+
+  // Audit trail — işlem tipi ve değer değişiklikleri
+  operation               String?   // FINDING_CREATED | FINDING_UPDATED | STATUS_CHANGED |
+                                    // ACTION_ADDED | ACTION_UPDATED | ACTION_CLOSED |
+                                    // FOLLOWUP_OPENED | FOLLOWUP_COMPLETED |
+                                    // TEST_DATE_CHANGED | TARGET_DATE_CHANGED |
+                                    // FILE_UPLOADED | FILE_DELETED |
+                                    // FINDING_CLOSED | FINDING_REOPENED |
+                                    // WORKFLOW_CHANGE | RESOLUTION_CHANGED
+  userId                  String?   // İşlemi yapan kullanıcı
+  fieldName               String?   // Hangi alan değişti
+  oldValue                Json?     // Eski değer
+  newValue                Json?     // Yeni değer
+
+  // Mutabakat akışı geçiş kaydı (backward compat)
+  changeType              String?   // Eski alan, operation ile eşdeğer
+  workflowStatus          FindingWorkflowStatus?  // Yeni durum
+  previousWorkflowStatus  FindingWorkflowStatus?  // Önceki durum
+  resolutionStatus        FindingResolutionStatus? // Çözüm durumu değişikliği
+
+  createdAt  DateTime @default(now())
+
+  @@index([findingId])
+  @@index([followUpId])
+  @@index([entryDate])
+  @@index([operation])
+  @@index([userId])
+}
+
+// ==========================================
 // ACTION MANAGEMENT
 // ==========================================
 
 model Action {
   id          String       @id @default(cuid())
-  actionId    String       @unique // A-2024-001
+  actionId    String       @unique // A-2026-001
   description String       @db.Text
-  source      ActionSource
-  status      ActionStatus @default(OPEN)
 
-  // Owner
-  owner   User   @relation("ActionOwner", fields: [ownerId], references: [id])
-  ownerId String
+  // Action always belongs to a Finding (iş kuralı)
+  finding     Finding      @relation(fields: [findingId], references: [id])
+  findingId   String
 
-  // Source relations (at least one required by business logic)
-  risk      Risk?    @relation(fields: [riskId], references: [id])
-  riskId    String?
-  finding   Finding? @relation(fields: [findingId], references: [id])
-  findingId String?
+  // Optional: inherited context from Finding
+  control     Control?     @relation(fields: [controlId], references: [id])
+  controlId   String?
+  testRecord  TestRecord?  @relation(fields: [testRecordId], references: [id])
+  testRecordId String?
+  risk        Risk?        @relation(fields: [riskId], references: [id])
+  riskId      String?
 
-  // SLA and Dates
-  dueDate           DateTime
-  slaInDays         Int
-  extensionReason   String?  @db.Text // Mandatory if overdue
+  // Responsibility
+  owner                 User   @relation("ActionOwner", fields: [ownerId], references: [id])
+  ownerId               String
+  responsibleDepartment String?  // Sorumlu Direktörlük/Birim
+
+  // Status & Dates
+  status      ActionStatus @default(BEKLIYOR)
+  dueDate     DateTime     // Hedef Tamamlanma Tarihi
+  completedAt DateTime?
+
+  // Content
+  notes       String?      @db.Text
+
+  // Extension tracking
+  extensionReason   String?  @db.Text
   extensionApproved Boolean  @default(false)
-  completedAt       DateTime?
 
-  // Effectiveness Review
+  // Attachments
+  attachments       ActionAttachment[]
+
+  // Follow-ups generated for this action
+  followUps         FindingFollowUp[]
+  statusHistoryEntries FindingStatusHistory[]
+
+  // Legacy: kept for backward compat with EffectivenessReview
   effectivenessReview EffectivenessReview?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([findingId])
   @@index([ownerId])
   @@index([status])
   @@index([dueDate])
@@ -627,19 +819,82 @@ model EffectivenessReview {
   notes String? @db.Text
 }
 
-enum ActionSource {
-  RISK
-  FINDING
-  AUDIT
-  CONTROL_TEST
-}
-
 enum ActionStatus {
+  BEKLIYOR
+  DEVAM_EDIYOR
+  TAMAMLANDI
+  YETERSIZ
+  KAPATILDI
+  // Legacy (backward compat)
   OPEN
   IN_PROGRESS
   COMPLETED
   CLOSED
   OVERDUE
+}
+
+// ==========================================
+// ATTACHMENT MODELLERI (Metadata-only, dosya içeriği sonraki sprint)
+// ==========================================
+
+model FindingAttachment {
+  id           String   @id @default(cuid())
+  finding      Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  findingId    String
+  fileName     String           // storage dosya adı (uuid.pdf)
+  originalName String           // kullanıcının yüklediği orijinal isim
+  mimeType     String           // "application/pdf", "image/png" vb.
+  sizeBytes    Int              // dosya boyutu (byte)
+  url          String?          // gelecekte storage URL; şimdilik null
+  uploadedBy   String?          // userId
+  createdAt    DateTime @default(now())
+
+  @@index([findingId])
+}
+
+model ActionAttachment {
+  id           String   @id @default(cuid())
+  action       Action   @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  actionId     String
+  fileName     String
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  url          String?
+  uploadedBy   String?
+  createdAt    DateTime @default(now())
+
+  @@index([actionId])
+}
+
+model FollowUpAttachment {
+  id           String          @id @default(cuid())
+  followUp     FindingFollowUp @relation(fields: [followUpId], references: [id], onDelete: Cascade)
+  followUpId   String
+  fileName     String
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  url          String?
+  uploadedBy   String?
+  createdAt    DateTime @default(now())
+
+  @@index([followUpId])
+}
+
+// Bulgunun güncel durum log'u — append-only, üzerine yazılmaz
+model FindingStatusLog {
+  id         String   @id @default(cuid())
+  finding    Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  findingId  String
+  entryDate  DateTime @default(now())
+  text       String   @db.Text   // "Aksiyon tamamlandı ancak kanıt yetersiz bulundu."
+  authorId   String?             // userId — kim yazdı
+  authorName String?             // görüntüleme için isim
+  followUpId String?             // hangi takip çalışmasından geldi (opsiyonel)
+
+  @@index([findingId])
+  @@index([entryDate])
 }
 
 // ==========================================

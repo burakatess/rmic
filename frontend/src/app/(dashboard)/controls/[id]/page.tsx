@@ -1,14 +1,18 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { EmptyState, StatusBadge } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
+import { CreateFindingModal } from '@/components/modals/CreateFindingModal';
 
 interface User {
+    id?: string;
     name: string;
+    firstName?: string;
+    lastName?: string;
     department?: string;
     email?: string;
 }
@@ -111,55 +115,68 @@ export default function ControlDetailPage() {
     const [activeTab, setActiveTab] = useState<'summary' | 'risks' | 'findings' | 'tests'>('summary');
     const [control, setControl] = useState<Control | null>(null);
     const [loading, setLoading] = useState(true);
+    const [isCreateFindingOpen, setIsCreateFindingOpen] = useState(false);
+    const [isEditFindingOpen, setIsEditFindingOpen] = useState(false);
+    const [editFindingContext, setEditFindingContext] = useState<any | null>(null);
+
+    const fetchControlData = useCallback(async (silent = false) => {
+        if (!params.id) return;
+        if (!silent) setLoading(true);
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const data = await api.getControl(params.id as string) as any;
+            if (data) {
+                setControl({
+                    id: String(data.id),
+                    controlId: String(data.controlId || ''),
+                    name: String(data.name || ''),
+                    description: String(data.description || ''),
+                    mehaz: String(data.mehaz || ''),
+                    testSteps: String(data.testSteps || ''),
+                    gmy: String(data.gmy || ''),
+                    directorate: String(data.directorate || ''),
+                    frequency: String(data.frequency || 'MONTHLY'),
+                    notes: String(data.notes || ''),
+                    dueDate: String(data.dueDate || ''),
+                    owner: data.owner ? { 
+                        id: data.owner.id,
+                        firstName: data.owner.firstName,
+                        lastName: data.owner.lastName,
+                        name: `${data.owner.firstName} ${data.owner.lastName}`, 
+                        email: data.owner.email, 
+                        department: data.owner.department 
+                    } : null,
+                    testPerformer: data.testPerformer ? { name: `${data.testPerformer.firstName} ${data.testPerformer.lastName}`, email: data.testPerformer.email } : null,
+                    reviewer: data.reviewer ? { name: `${data.reviewer.firstName} ${data.reviewer.lastName}`, email: data.reviewer.email } : null,
+                    effectivenessStatus: String(data.effectivenessStatus || 'NOT_TESTED'),
+                    lastTestDate: data.lastTestDate || '',
+                    nextTestDate: data.nextTestDate || '',
+                    linkedRisks: (data.risks || data.riskMappings || []).map((rm: any) => {
+                        const risk = rm.risk || rm;
+                        return {
+                            id: String(risk.id),
+                            riskId: String(risk.riskId),
+                            name: String(risk.name),
+                            score: Number(risk.inherentRiskScore || 10),
+                            category: risk.category?.name || 'Genel Risk'
+                        };
+                    }),
+                    linkedFindings: data.findings || [],
+                    linkedTests: data.tests || [],
+                    linkedTestRecords: data.testRecords || []
+                });
+            }
+        } catch (err) {
+            console.error('Failed to fetch control:', err);
+            showError('Hata', 'Kontrol detayları yüklenemedi.');
+        } finally {
+            if (!silent) setLoading(false);
+        }
+    }, [params.id, showError]);
 
     useEffect(() => {
-        const fetchControlData = async () => {
-            try {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const data = await api.getControl(params.id as string) as any;
-                if (data) {
-                    setControl({
-                        id: String(data.id),
-                        controlId: String(data.controlId || ''),
-                        name: String(data.name || ''),
-                        description: String(data.description || ''),
-                        mehaz: String(data.mehaz || ''),
-                        testSteps: String(data.testSteps || ''),
-                        gmy: String(data.gmy || ''),
-                        directorate: String(data.directorate || ''),
-                        frequency: String(data.frequency || 'MONTHLY'),
-                        notes: String(data.notes || ''),
-                        dueDate: String(data.dueDate || ''),
-                        owner: data.owner ? { name: `${data.owner.firstName} ${data.owner.lastName}`, email: data.owner.email, department: data.owner.department } : null,
-                        testPerformer: data.testPerformer ? { name: `${data.testPerformer.firstName} ${data.testPerformer.lastName}`, email: data.testPerformer.email } : null,
-                        reviewer: data.reviewer ? { name: `${data.reviewer.firstName} ${data.reviewer.lastName}`, email: data.reviewer.email } : null,
-                        effectivenessStatus: String(data.effectivenessStatus || 'NOT_TESTED'),
-                        lastTestDate: data.lastTestDate || '',
-                        nextTestDate: data.nextTestDate || '',
-                        linkedRisks: (data.risks || data.riskMappings || []).map((rm: any) => {
-                            const risk = rm.risk || rm;
-                            return {
-                                id: String(risk.id),
-                                riskId: String(risk.riskId),
-                                name: String(risk.name),
-                                score: Number(risk.inherentRiskScore || 10),
-                                category: risk.category?.name || 'Genel Risk'
-                            };
-                        }),
-                        linkedFindings: data.findings || [],
-                        linkedTests: data.tests || [],
-                        linkedTestRecords: data.testRecords || []
-                    });
-                }
-            } catch (err) {
-                console.error('Failed to fetch control:', err);
-                showError('Hata', 'Kontrol detayları yüklenemedi.');
-            } finally {
-                setLoading(false);
-            }
-        };
-        if (params.id) fetchControlData();
-    }, [params.id]);
+        fetchControlData();
+    }, [fetchControlData]);
 
     const latestTest = useMemo(() => {
         if (!control || control.linkedTests.length === 0) return null;
@@ -192,7 +209,7 @@ export default function ControlDetailPage() {
         { id: 'summary', label: 'Özet ve Kapsam', icon: '📋' },
         { id: 'risks', label: 'Eşleşen Riskler', icon: '⚠️', count: control.linkedRisks.length },
         { id: 'findings', label: 'Bulgular & Aksiyonlar', icon: '🔍', count: control.linkedFindings.length },
-        { id: 'tests', label: 'Zaman Tüneli & Test Planı', icon: '🧪', count: control.linkedTestRecords.length },
+        { id: 'tests', label: 'Test Planı', icon: '🧪', count: control.linkedTestRecords.length },
     ];
 
     return (
@@ -404,7 +421,17 @@ export default function ControlDetailPage() {
 
                     {/* Tab 3: Bulgular */}
                     {activeTab === 'findings' && (
-                        <div>
+                        <div className="space-y-4">
+                            <div className="flex justify-between items-center pb-3 border-b border-slate-100">
+                                <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Bulgular ve Aksiyon Planları</h3>
+                                <button
+                                    onClick={() => setIsCreateFindingOpen(true)}
+                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-colors shadow-sm uppercase tracking-wider"
+                                >
+                                    + Bulgu Oluştur
+                                </button>
+                            </div>
+                            
                             {control.linkedFindings.length === 0 ? (
                                 <EmptyState
                                     title="Açık Bulgu Bulunmuyor"
@@ -428,7 +455,21 @@ export default function ControlDetailPage() {
                                                     <p className="text-sm font-bold text-slate-800 mt-2">{finding.description}</p>
                                                     <p className="text-[11px] text-slate-400 mt-0.5">SLA Çözüm Tarihi: {formatDate(finding.targetResolutionDate)}</p>
                                                 </div>
-                                                <StatusBadge variant="neutral">{finding.status}</StatusBadge>
+                                                <div className="flex items-center gap-2">
+                                                    <StatusBadge variant="neutral">{finding.status}</StatusBadge>
+                                                    <button
+                                                        onClick={() => {
+                                                            setEditFindingContext(finding);
+                                                            setIsEditFindingOpen(true);
+                                                        }}
+                                                        className="px-3 py-1.5 bg-slate-50 hover:bg-blue-50 text-slate-500 hover:text-blue-600 font-bold border border-slate-200 rounded-lg text-xs transition-colors uppercase tracking-wider flex items-center gap-1.5 shadow-sm"
+                                                    >
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                        </svg>
+                                                        Düzenle
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     ))}
@@ -532,6 +573,25 @@ export default function ControlDetailPage() {
                     )}
                 </div>
             </div>
+            
+            <CreateFindingModal
+                isOpen={isCreateFindingOpen}
+                onClose={() => setIsCreateFindingOpen(false)}
+                onSuccess={() => fetchControlData(true)}
+                controlContext={control as any}
+            />
+
+            {isEditFindingOpen && editFindingContext && (
+                <CreateFindingModal
+                    isOpen={isEditFindingOpen}
+                    onClose={() => {
+                        setIsEditFindingOpen(false);
+                        setEditFindingContext(null);
+                    }}
+                    onSuccess={() => fetchControlData(true)}
+                    editContext={editFindingContext}
+                />
+            )}
         </div>
     );
 }

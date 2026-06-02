@@ -1,0 +1,381 @@
+'use client';
+
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import Link from 'next/link';
+import api from '@/lib/api';
+import { PageHeader, DataTable, FilterBar, StatusBadge, Button } from '@/components/ui';
+import type { ColumnDef } from '@/components/ui';
+import { useToast } from '@/components/ui/Toast';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type BV = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'success' | 'warning' | 'neutral' | 'primary';
+
+interface FollowUp {
+    id: string;
+    followUpId: string;
+    status: string;
+    resolutionOutcome?: string | null;
+    result?: string | null;
+    plannedDate?: string | null;
+    newFollowUpDate?: string | null;
+    currentStatusDetail?: string | null;
+    newActionRequired?: boolean;
+    createdAt: string;
+    updatedAt?: string;
+    finding: {
+        id: string;
+        findingId: string;
+        summary?: string | null;
+        description: string;
+        severity: string;
+        relatedDepartment?: string | null;
+        resolutionStatus: string;
+    };
+    action?: {
+        id: string;
+        actionId: string;
+        description: string;
+        dueDate: string;
+        owner?: { id: string; firstName: string; lastName: string; department?: string };
+    } | null;
+    attachments?: { id: string; originalName: string }[];
+}
+
+// ─── Config Maps ──────────────────────────────────────────────────────────────
+
+const followUpStatusConfig: Record<string, { label: string; variant: BV }> = {
+    BEKLIYOR:     { label: 'Bekliyor',     variant: 'neutral' },
+    DEVAM_EDIYOR: { label: 'Devam Ediyor', variant: 'warning' },
+    TAMAMLANDI:   { label: 'Tamamlandı',   variant: 'info' },
+    ONAYLANDI:    { label: 'Onaylandı',    variant: 'success' },
+};
+
+const resolutionConfig: Record<string, { label: string; variant: BV }> = {
+    DEVAM_EDIYOR:         { label: 'Devam Ediyor',        variant: 'warning' },
+    KISMEN_KAPATILDI:     { label: 'Kısmen Kapatıldı',    variant: 'info' },
+    KAPATILDI:            { label: 'Kapatıldı',           variant: 'success' },
+    ERTELENDI:            { label: 'Ertelendi',           variant: 'neutral' },
+    YENI_AKSIYON_GEREKLI: { label: 'Yeni Aksiyon Gerekli', variant: 'high' },
+};
+
+const severityConfig: Record<string, { label: string; variant: BV }> = {
+    CRITICAL: { label: 'KZ', variant: 'critical' },
+    HIGH:     { label: 'KD', variant: 'high' },
+    MEDIUM:   { label: 'ÖK', variant: 'medium' },
+    LOW:      { label: 'Düşük', variant: 'low' },
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const fmt = (d?: string | null) => {
+    if (!d) return '—';
+    const date = new Date(d);
+    return isNaN(date.getTime()) ? '—' : date.toLocaleDateString('tr-TR');
+};
+
+const getDaysLeft = (d?: string | null) => {
+    if (!d) return null;
+    return Math.ceil((new Date(d).getTime() - Date.now()) / 86400000);
+};
+
+const MONTHS = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+const currentYear = new Date().getFullYear();
+const YEARS = [currentYear - 1, currentYear, currentYear + 1].map(y => String(y));
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function FollowUpsPage() {
+    const { error: showError } = useToast();
+    const [followUps, setFollowUps] = useState<FollowUp[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
+    const [page, setPage] = useState(1);
+    const pageSize = 25;
+
+    const load = useCallback(async () => {
+        setLoading(true);
+        try {
+            const res = await api.getAllFollowUps({ limit: 500 }) as { data: FollowUp[] };
+            setFollowUps(res?.data || []);
+        } catch {
+            showError('Hata', 'Takip çalışmaları yüklenemedi.');
+            setFollowUps([]);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    // ── KPIs ─────────────────────────────────────────────────────────────────
+
+    const kpis = useMemo(() => {
+        const total     = followUps.length;
+        const bekliyor  = followUps.filter(f => f.status === 'BEKLIYOR').length;
+        const devam     = followUps.filter(f => f.status === 'DEVAM_EDIYOR').length;
+        const tamamlandi= followUps.filter(f => f.status === 'TAMAMLANDI' || f.status === 'ONAYLANDI').length;
+        const overdue   = followUps.filter(f => f.status !== 'ONAYLANDI' && f.status !== 'TAMAMLANDI' && getDaysLeft(f.plannedDate) !== null && getDaysLeft(f.plannedDate)! < 0).length;
+        const yeniAksiyon = followUps.filter(f => f.newActionRequired).length;
+        return { total, bekliyor, devam, tamamlandi, overdue, yeniAksiyon };
+    }, [followUps]);
+
+    // ── Filter ────────────────────────────────────────────────────────────────
+
+    const filtered = useMemo(() => {
+        return followUps.filter(f => {
+            if (searchQuery) {
+                const q = searchQuery.toLowerCase();
+                const text = [f.followUpId, f.finding.findingId, f.finding.summary, f.finding.relatedDepartment, f.action?.actionId, f.action?.owner?.firstName, f.action?.owner?.lastName]
+                    .filter(Boolean).join(' ').toLowerCase();
+                if (!text.includes(q)) return false;
+            }
+            if (activeFilters.status && activeFilters.status !== 'all' && f.status !== activeFilters.status) return false;
+            if (activeFilters.resolutionOutcome && f.resolutionOutcome !== activeFilters.resolutionOutcome) return false;
+            if (activeFilters.severity && f.finding.severity !== activeFilters.severity) return false;
+            if (activeFilters.relatedDepartment) {
+                if (!f.finding.relatedDepartment?.toLowerCase().includes(activeFilters.relatedDepartment.toLowerCase())) return false;
+            }
+            if (activeFilters.month && f.plannedDate) {
+                if (new Date(f.plannedDate).getMonth() + 1 !== parseInt(activeFilters.month)) return false;
+            }
+            if (activeFilters.year && f.plannedDate) {
+                if (new Date(f.plannedDate).getFullYear() !== parseInt(activeFilters.year)) return false;
+            }
+            return true;
+        });
+    }, [followUps, searchQuery, activeFilters]);
+
+    const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page]);
+
+    // ── Filter configs ────────────────────────────────────────────────────────
+
+    const filterConfigs = useMemo(() => [
+        {
+            key: 'status', label: 'Takip Statüsü',
+            value: activeFilters['status'] || '',
+            onChange: (v: string) => { setActiveFilters(p => ({ ...p, status: v })); setPage(1); },
+            options: Object.entries(followUpStatusConfig).map(([k, v]) => ({ value: k, label: v.label })),
+        },
+        {
+            key: 'resolutionOutcome', label: 'Kapanış Kararı',
+            value: activeFilters['resolutionOutcome'] || '',
+            onChange: (v: string) => { setActiveFilters(p => ({ ...p, resolutionOutcome: v })); setPage(1); },
+            options: Object.entries(resolutionConfig).map(([k, v]) => ({ value: k, label: v.label })),
+        },
+        {
+            key: 'severity', label: 'Önem',
+            value: activeFilters['severity'] || '',
+            onChange: (v: string) => { setActiveFilters(p => ({ ...p, severity: v })); setPage(1); },
+            options: Object.entries(severityConfig).map(([k, v]) => ({ value: k, label: v.label })),
+        },
+        {
+            key: 'month', label: 'Ay',
+            value: activeFilters['month'] || '',
+            onChange: (v: string) => { setActiveFilters(p => ({ ...p, month: v })); setPage(1); },
+            options: MONTHS.map((m, i) => ({ value: String(i + 1), label: m })),
+        },
+        {
+            key: 'year', label: 'Yıl',
+            value: activeFilters['year'] || '',
+            onChange: (v: string) => { setActiveFilters(p => ({ ...p, year: v })); setPage(1); },
+            options: YEARS.map(y => ({ value: y, label: y })),
+        },
+    ], [activeFilters]);
+
+    // ── Columns ───────────────────────────────────────────────────────────────
+
+    const columns: ColumnDef<FollowUp>[] = useMemo(() => [
+        {
+            key: 'followUpId',
+            header: 'Takip No',
+            sortable: true,
+            defaultWidth: 160,
+            render: (f) => (
+                <span className="font-mono text-xs font-bold text-violet-700">{f.followUpId}</span>
+            ),
+        },
+        {
+            key: 'findingId',
+            header: 'Bulgu No',
+            sortable: true,
+            defaultWidth: 140,
+            render: (f) => (
+                <Link href={`/findings/${f.finding.id}`} className="font-mono text-xs font-bold text-violet-600 hover:text-violet-900 hover:underline">
+                    {f.finding.findingId}
+                </Link>
+            ),
+        },
+        {
+            key: 'summary',
+            header: 'Bulgu Özeti',
+            defaultWidth: 220,
+            render: (f) => (
+                <p className="text-xs text-slate-700 truncate max-w-[200px]" title={f.finding.summary || f.finding.description}>
+                    {f.finding.summary || f.finding.description}
+                </p>
+            ),
+        },
+        {
+            key: 'relatedDepartment',
+            header: 'İlgili Direktörlük',
+            sortable: true,
+            defaultWidth: 160,
+            render: (f) => (
+                <span className="text-xs text-slate-600 truncate block max-w-[150px]">{f.finding.relatedDepartment || '—'}</span>
+            ),
+        },
+        {
+            key: 'action',
+            header: 'İlgili Aksiyon',
+            defaultWidth: 130,
+            render: (f) => f.action
+                ? <span className="font-mono text-xs text-indigo-600 font-semibold">{f.action.actionId}</span>
+                : <span className="text-slate-300 text-xs">—</span>,
+        },
+        {
+            key: 'owner',
+            header: 'Aksiyon Sahibi',
+            defaultWidth: 150,
+            render: (f) => f.action?.owner
+                ? <span className="text-xs text-slate-600">{f.action.owner.firstName} {f.action.owner.lastName}</span>
+                : <span className="text-slate-300 text-xs">—</span>,
+        },
+        {
+            key: 'plannedDate',
+            header: 'Hedef Tarih',
+            sortable: true,
+            defaultWidth: 120,
+            render: (f) => {
+                const dl = getDaysLeft(f.plannedDate);
+                const isOD = f.status !== 'ONAYLANDI' && f.status !== 'TAMAMLANDI' && dl !== null && dl < 0;
+                return (
+                    <span className={`text-xs font-medium ${isOD ? 'text-red-600' : 'text-slate-700'}`}>
+                        {fmt(f.plannedDate)}{isOD && ' ⚠'}
+                    </span>
+                );
+            },
+        },
+        {
+            key: 'status',
+            header: 'Takip Statüsü',
+            sortable: true,
+            defaultWidth: 160,
+            render: (f) => {
+                const sc = followUpStatusConfig[f.status];
+                const rc = f.resolutionOutcome ? resolutionConfig[f.resolutionOutcome] : null;
+                return (
+                    <div className="flex flex-col gap-1">
+                        {sc && <StatusBadge variant={sc.variant}>{sc.label}</StatusBadge>}
+                        {rc && <StatusBadge variant={rc.variant} dot>{rc.label}</StatusBadge>}
+                    </div>
+                );
+            },
+        },
+        {
+            key: 'severity',
+            header: 'Öncelik',
+            sortable: true,
+            defaultWidth: 80,
+            render: (f) => {
+                const sv = severityConfig[f.finding.severity];
+                return sv ? <StatusBadge variant={sv.variant}>{sv.label}</StatusBadge> : <span className="text-slate-300 text-xs">—</span>;
+            },
+        },
+        {
+            key: 'updatedAt',
+            header: 'Son Güncelleme',
+            sortable: true,
+            defaultWidth: 130,
+            render: (f) => <span className="text-xs text-slate-500">{fmt(f.updatedAt || f.createdAt)}</span>,
+        },
+        {
+            key: 'actions',
+            header: 'İşlemler',
+            defaultWidth: 80,
+            render: (f) => (
+                <Link href={`/findings/${f.finding.id}?tab=takip`}
+                    className="p-1.5 rounded text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors inline-block"
+                    title="Bulguya Git">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                </Link>
+            ),
+        },
+    ], []);
+
+    // ─────────────────────────────────────────────────────────────────────────
+
+    return (
+        <div className="flex flex-col h-full bg-slate-50/50">
+            <div className="px-8 pt-8">
+                {/* Header */}
+                <PageHeader
+                    title="Bulgu Takip Çalışmaları"
+                    description="Aksiyonlara bağlı periyodik takip kayıtları — bulgunun kapanma sürecini yönetin"
+                    breadcrumbs={[{ label: 'Bulgu Takip Çalışmaları' }]}
+                    actions={
+                        <Button variant="secondary" size="sm" onClick={() => load()} icon={
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                        }>
+                            Yenile
+                        </Button>
+                    }
+                />
+
+                {/* KPI Cards */}
+                <div className="grid grid-cols-6 gap-3 mb-5">
+                    {[
+                        { label: 'Toplam', value: kpis.total, color: 'slate', icon: '📋', onClick: () => setActiveFilters({}) },
+                        { label: 'Bekliyor', value: kpis.bekliyor, color: 'slate', icon: '⏸', onClick: () => { setActiveFilters({ status: 'BEKLIYOR' }); setPage(1); } },
+                        { label: 'Devam Ediyor', value: kpis.devam, color: 'amber', icon: '🔄', onClick: () => { setActiveFilters({ status: 'DEVAM_EDIYOR' }); setPage(1); } },
+                        { label: 'Tamamlandı', value: kpis.tamamlandi, color: 'emerald', icon: '✅', onClick: () => { setActiveFilters({ status: 'TAMAMLANDI' }); setPage(1); } },
+                        { label: 'Gecikmiş', value: kpis.overdue, color: 'red', icon: '⚠️', onClick: () => {} },
+                        { label: 'Yeni Aksiyon', value: kpis.yeniAksiyon, color: 'orange', icon: '⚡', onClick: () => {} },
+                    ].map(kpi => (
+                        <button key={kpi.label} onClick={kpi.onClick}
+                            className={`bg-white rounded-xl border border-${kpi.color}-100 shadow-sm p-4 flex items-center gap-3 hover:border-${kpi.color}-300 hover:shadow-md transition-all text-left w-full`}>
+                            <span className="text-xl">{kpi.icon}</span>
+                            <div>
+                                <p className={`text-xs font-semibold text-${kpi.color}-600 uppercase tracking-wide`}>{kpi.label}</p>
+                                <p className={`text-2xl font-bold text-${kpi.color}-700 mt-0.5`}>{kpi.value}</p>
+                            </div>
+                        </button>
+                    ))}
+                </div>
+
+                {/* Filter bar */}
+                <div className="mb-4 bg-white border border-slate-200 rounded-xl shadow-sm p-3">
+                    <FilterBar
+                        searchValue={searchQuery}
+                        onSearchChange={(v) => { setSearchQuery(v); setPage(1); }}
+                        searchPlaceholder="Takip No, Bulgu No, Direktörlük, Aksiyon Sahibi ara…"
+                        filters={filterConfigs}
+                        onClearAll={() => { setSearchQuery(''); setActiveFilters({}); setPage(1); }}
+                    />
+                </div>
+            </div>
+
+            {/* Tablo */}
+            <div className="px-8 pb-8 flex-1">
+                <DataTable
+                    columns={columns}
+                    data={paginated}
+                    rowKey={(f) => f.id}
+                    loading={loading}
+                    totalCount={filtered.length}
+                    page={page}
+                    pageSize={pageSize}
+                    onPageChange={setPage}
+                    storageKey="follow-ups-list-v1"
+                    emptyTitle="Takip çalışması bulunamadı"
+                    emptyDescription="Bulgulara aksiyon eklendiğinde otomatik oluşturulur."
+                />
+            </div>
+        </div>
+    );
+}

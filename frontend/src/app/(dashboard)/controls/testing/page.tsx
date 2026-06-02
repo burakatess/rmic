@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
 import { PageHeader, StatusBadge } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
+import { CreateFindingModal } from '@/components/modals/CreateFindingModal';
 
 interface User {
     id: string;
@@ -78,23 +79,6 @@ export default function ControlTestingPage() {
 
     // Finding Modal State
     const [findingModalOpen, setFindingModalOpen] = useState(false);
-    const [findingForm, setFindingForm] = useState({
-        bulguTuru: 'BT_KONTROL_AKSAYISI',
-        bulguNo: '',
-        bulguMetni: '',
-        bulguOzeti: '',
-        gmy: '',
-        direktorluk: '',
-        iletisimKisi: '',
-        durum: 'OPEN',
-        onemDerecesi: 'MEDIUM',
-        icKontrolDegerlendirmesi: '',
-        bulguGuncelDurumu: '',
-        birimCevabi: '',
-        attachment: '',
-        assigneeId: '',
-        mailGonderilsin: true,
-    });
 
     const loadData = async () => {
         setLoading(true);
@@ -309,107 +293,7 @@ export default function ControlTestingPage() {
 
     // Trigger Finding Modal with Smart Autofill
     const handleOpenFindingModal = () => {
-        if (!activeRecord) return;
-
-        // Auto-generate random sequence Finding No
-        const randomSeq = Math.floor(100 + Math.random() * 900);
-        const autoNo = `B-2026-${randomSeq}`;
-
-        setFindingForm({
-            bulguTuru: 'BT_KONTROL_AKSAYISI',
-            bulguNo: autoNo,
-            bulguMetni: kontrolSonucu || `[${activeRecord.controlId}] testi sırasında sapma tespit edilmiştir.`,
-            bulguOzeti: `${activeRecord.name} Kontrol Aksaklığı`,
-            gmy: activeRecord.gmy,
-            direktorluk: activeRecord.directorate,
-            iletisimKisi: activeRecord.assignee,
-            durum: 'OPEN',
-            onemDerecesi: 'HIGH',
-            icKontrolDegerlendirmesi: 'Test adımları icrasında uyumsuzluk gözlendi.',
-            bulguGuncelDurumu: 'Aksiyon bekleniyor.',
-            birimCevabi: '',
-            attachment: uploadedFiles.join(', '),
-            assigneeId: users[0]?.id || '',
-            mailGonderilsin: true,
-        });
-
         setFindingModalOpen(true);
-    };
-
-    const handleSaveFinding = async () => {
-        if (!activeRecord) return;
-
-        const randomSeq = Math.floor(100 + Math.random() * 900);
-        const generatedId = `F-2026-${randomSeq}`;
-        const newFinding = {
-            id: `f-mock-${randomSeq}`,
-            findingId: findingForm.bulguNo || generatedId,
-            description: findingForm.bulguMetni || findingForm.bulguOzeti || 'Yetki Kontrol Eksikliği',
-            severity: findingForm.onemDerecesi,
-            status: 'OPEN',
-        };
-
-        try {
-            // Call backend API to persist Finding
-            const created = await api.createFinding({
-                findingId: newFinding.findingId,
-                description: newFinding.description,
-                impact: 'Test sırasında sapma tespit edilmiştir.',
-                severity: newFinding.severity,
-                status: 'OPEN',
-                controlId: activeRecord.controlUID || activeRecord.controlId,
-                testRecordId: activeRecord.id,
-                source: 'CONTROL_TEST',
-                responsiblePerson: findingForm.iletisimKisi,
-                relatedDepartment: findingForm.direktorluk,
-            }) as any;
-
-            const savedFinding = created && created.id ? created : newFinding;
-
-            setTestRecords(prev => prev.map(r => {
-                if (r.id === activeRecord.id) {
-                    const existingFindings = r.findings || [];
-                    const updatedFindings = [...existingFindings, savedFinding];
-                    const newRecord = {
-                        ...r,
-                        status: 'COMPLETED' as const,
-                        testResult: 'INEFFECTIVE' as const,
-                        hasFinding: true,
-                        findingsCount: updatedFindings.length,
-                        findings: updatedFindings,
-                    };
-                    setActiveRecord(newRecord);
-                    return newRecord;
-                }
-                return r;
-            }));
-
-            success('Bulgu Oluşturuldu', `${savedFinding.findingId} numaralı bulgu başarıyla açıldı.`);
-        } catch (err) {
-            console.error('Failed to save finding in backend. Fallback to local state.', err);
-            
-            setTestRecords(prev => prev.map(r => {
-                if (r.id === activeRecord.id) {
-                    const existingFindings = r.findings || [];
-                    const updatedFindings = [...existingFindings, newFinding];
-                    const newRecord = {
-                        ...r,
-                        status: 'COMPLETED' as const,
-                        testResult: 'INEFFECTIVE' as const,
-                        hasFinding: true,
-                        findingsCount: updatedFindings.length,
-                        findings: updatedFindings,
-                    };
-                    setActiveRecord(newRecord);
-                    return newRecord;
-                }
-                return r;
-            }));
-
-            success('Bulgu Oluşturuldu', `${newFinding.findingId} numaralı bulgu (Yerel) başarıyla açıldı.`);
-        }
-
-        setFindingModalOpen(false);
     };
 
     // Stats
@@ -793,191 +677,30 @@ export default function ControlTestingPage() {
 
             {/* PART 6: Finding Creation Modal */}
             {findingModalOpen && activeRecord && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm overflow-y-auto">
-                    <div className="bg-white rounded-3xl p-6 w-full max-w-3xl mx-4 my-8 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh]">
-                        <div className="flex items-center justify-between border-b border-slate-150 pb-3.5 mb-4">
-                            <div className="flex items-center gap-2">
-                                <span className="text-xl">🚨</span>
-                                <h3 className="text-base font-extrabold text-slate-900">Kurumsal Bulgu ve Düzeltici Aksiyon Girişi</h3>
-                            </div>
-                            <button
-                                onClick={() => setFindingModalOpen(false)}
-                                className="text-slate-400 hover:text-slate-600 text-xl font-bold"
-                            >
-                                &times;
-                            </button>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            
-                            {/* Bulgu Türü */}
-                            <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bulgu Türü</label>
-                                <select
-                                    value={findingForm.bulguTuru}
-                                    onChange={(e) => setFindingForm(p => ({ ...p, bulguTuru: e.target.value }))}
-                                    className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 outline-none font-bold text-slate-600"
-                                >
-                                    <option value="BT_KONTROL_AKSAYISI">BT Kontrol Aksaklığı</option>
-                                    <option value="DENETIM_BULGUSU">Denetim Bulgusu</option>
-                                    <option value="UYUM_DIŞI_GÖZLEM">Mevzuat/Uyum Bulgusu</option>
-                                </select>
-                            </div>
-
-                            {/* Bulgu No (Auto Generated) */}
-                            <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bulgu No (Otomatik)</label>
-                                <input
-                                    type="text"
-                                    value={findingForm.bulguNo}
-                                    disabled
-                                    className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-500 font-mono font-bold"
-                                />
-                            </div>
-
-                            {/* İlgili Kontrol ve Kontrol No */}
-                            <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">İlgili Kontrol</label>
-                                <input
-                                    type="text"
-                                    value={activeRecord.name}
-                                    disabled
-                                    className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-500 font-bold"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Kontrol No</label>
-                                <input
-                                    type="text"
-                                    value={activeRecord.controlId}
-                                    disabled
-                                    className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-500 font-mono font-bold"
-                                />
-                            </div>
-
-                            {/* Bulgu Özeti */}
-                            <div className="col-span-1 md:col-span-2">
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bulgu Özeti / Başlığı</label>
-                                <input
-                                    type="text"
-                                    value={findingForm.bulguOzeti}
-                                    onChange={(e) => setFindingForm(p => ({ ...p, bulguOzeti: e.target.value }))}
-                                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-800 font-bold"
-                                />
-                            </div>
-
-                            {/* Bulgu Metni */}
-                            <div className="col-span-1 md:col-span-2">
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bulgu Metni / Sapma Açıklaması</label>
-                                <textarea
-                                    value={findingForm.bulguMetni}
-                                    onChange={(e) => setFindingForm(p => ({ ...p, bulguMetni: e.target.value }))}
-                                    rows={3}
-                                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-800 font-semibold"
-                                />
-                            </div>
-
-                            {/* İlgili GMY ve Direktörlük */}
-                            <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">İlgili GMY</label>
-                                <input
-                                    type="text"
-                                    value={findingForm.gmy}
-                                    disabled
-                                    className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-500 font-bold"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">İlgili Direktörlük</label>
-                                <input
-                                    type="text"
-                                    value={findingForm.direktorluk}
-                                    disabled
-                                    className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-500 font-bold"
-                                />
-                            </div>
-
-                            {/* İletişim Kişisi */}
-                            <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">İletişim Kişisi (LDAP)</label>
-                                <input
-                                    type="text"
-                                    value={findingForm.iletisimKisi}
-                                    disabled
-                                    className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-500 font-bold"
-                                />
-                            </div>
-
-                            {/* Önem Derecesi */}
-                            <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Önem Derecesi</label>
-                                <select
-                                    value={findingForm.onemDerecesi}
-                                    onChange={(e) => setFindingForm(p => ({ ...p, onemDerecesi: e.target.value }))}
-                                    className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 outline-none font-bold text-slate-600"
-                                >
-                                    <option value="CRITICAL">Kritik</option>
-                                    <option value="HIGH">Yüksek</option>
-                                    <option value="MEDIUM">Orta</option>
-                                    <option value="LOW">Düşük</option>
-                                </select>
-                            </div>
-
-                            {/* İç Kontrol Değerlendirmesi */}
-                            <div className="col-span-1 md:col-span-2">
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">İç Kontrol Değerlendirmesi</label>
-                                <textarea
-                                    value={findingForm.icKontrolDegerlendirmesi}
-                                    onChange={(e) => setFindingForm(p => ({ ...p, icKontrolDegerlendirmesi: e.target.value }))}
-                                    rows={2}
-                                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-800 font-semibold"
-                                    placeholder="Uyum ve operasyonel risk etkisi değerlendirmesi..."
-                                />
-                            </div>
-
-                            {/* SLA Tamamlanma Tarihi */}
-                            <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Öngörülen Kapatma Tarihi (SLA SLA)</label>
-                                <input
-                                    type="date"
-                                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-800 font-semibold"
-                                />
-                            </div>
-
-                            {/* Mail Gönderilsin mi */}
-                            <div className="flex items-center gap-2 pt-5">
-                                <input
-                                    type="checkbox"
-                                    id="send-mail-toggle"
-                                    checked={findingForm.mailGonderilsin}
-                                    onChange={(e) => setFindingForm(p => ({ ...p, mailGonderilsin: e.target.checked }))}
-                                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
-                                />
-                                <label htmlFor="send-mail-toggle" className="text-xs font-bold text-slate-600 cursor-pointer">Süreç Sorumlusuna Bilgilendirme E-Postası Gönderilsin</label>
-                            </div>
-                        </div>
-
-                        {/* Action buttons */}
-                        <div className="flex justify-end gap-3.5 border-t border-slate-150 pt-4 mt-5">
-                            <button
-                                type="button"
-                                onClick={() => setFindingModalOpen(false)}
-                                className="px-5 py-2 text-slate-600 font-bold hover:text-slate-800 text-xs transition-colors uppercase tracking-wider"
-                            >
-                                İptal
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleSaveFinding}
-                                className="px-6 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-colors uppercase tracking-wider shadow-sm"
-                            >
-                                Bulgu & Takip Aksiyonu Başlat
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <CreateFindingModal
+                    isOpen={findingModalOpen}
+                    onClose={() => setFindingModalOpen(false)}
+                    onSuccess={(savedFinding) => {
+                        setTestRecords(prev => prev.map(r => {
+                            if (r.id === activeRecord.id) {
+                                const existingFindings = r.findings || [];
+                                const updatedFindings = [...existingFindings, savedFinding];
+                                const newRecord = {
+                                    ...r,
+                                    status: 'COMPLETED' as const,
+                                    testResult: 'INEFFECTIVE' as const,
+                                    hasFinding: true,
+                                    findingsCount: updatedFindings.length,
+                                    findings: updatedFindings,
+                                };
+                                setActiveRecord(newRecord);
+                                return newRecord;
+                            }
+                            return r;
+                        }));
+                    }}
+                    testContext={activeRecord}
+                />
             )}
         </div>
     );

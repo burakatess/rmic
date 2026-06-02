@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
-import { RiskStatus } from '@prisma/client';
+import { RiskStatus } from './dto';
 import { RisksService } from './risks.service';
 import { PrismaService } from '../../prisma';
 

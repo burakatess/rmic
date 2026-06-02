@@ -123,8 +123,9 @@ const navigation: NavItem[] = [
         ),
         children: [
             { label: 'Bulgular', href: '/findings' },
-            { label: 'Aksiyon Listesi', href: '/actions', permission: 'action:view' },
-            { label: 'Etkinlik Değerlendirmesi', href: '/actions/effectiveness', permission: 'action:effectiveness' },
+            { label: 'Bulgu Takip Çalışmaları', href: '/follow-ups', permission: 'finding:view' },
+            { label: 'Aksiyonlar', href: '/actions', permission: 'action:view' },
+            { label: 'Etkinlik Değerlendirmeleri', href: '/actions/effectiveness', permission: 'action:effectiveness' },
         ],
     },
     {

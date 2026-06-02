@@ -404,7 +404,172 @@ class ApiClient {
             body: data
         });
     }
+
+    async getRYKControlTest(controlId: string, testId: string) {
+        return this.request(`/risk-management-controls/${controlId}/tests/${testId}`);
+    }
+
+    // ── Finding Risk Linking ──────────────────────────────────────────────────
+
+    async linkRiskToFinding(findingId: string, riskId: string) {
+        return this.request(`/findings/${findingId}/link-risk`, {
+            method: 'POST',
+            body: { riskId }
+        });
+    }
+
+    async unlinkRiskFromFinding(findingId: string, riskId: string) {
+        return this.request(`/findings/${findingId}/unlink-risk/${riskId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    // ── Finding Follow-Ups ───────────────────────────────────────────────────
+
+    async getFollowUps(findingId: string) {
+        return this.request(`/findings/${findingId}/follow-ups`);
+    }
+
+    async createFollowUp(findingId: string, data: unknown) {
+        return this.request(`/findings/${findingId}/follow-ups`, {
+            method: 'POST',
+            body: data
+        });
+    }
+
+    async updateFollowUp(findingId: string, followUpId: string, data: unknown) {
+        return this.request(`/findings/${findingId}/follow-ups/${followUpId}`, {
+            method: 'PUT',
+            body: data
+        });
+    }
+
+    // Actions (Finding-Scoped)
+    async getFindingActions(findingId: string) {
+        return this.request(`/findings/${findingId}/actions`);
+    }
+
+    async createFindingAction(findingId: string, data: unknown) {
+        return this.request(`/findings/${findingId}/actions`, {
+            method: 'POST',
+            body: data
+        });
+    }
+
+    async updateFindingAction(findingId: string, actionId: string, data: unknown) {
+        return this.request(`/findings/${findingId}/actions/${actionId}`, {
+            method: 'PUT',
+            body: data
+        });
+    }
+
+    async deleteFindingAction(findingId: string, actionId: string) {
+        return this.request(`/findings/${findingId}/actions/${actionId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    // Action-Scoped Follow-Up
+    async createFollowUpForAction(findingId: string, actionId: string, data: unknown) {
+        return this.request(`/findings/${findingId}/actions/${actionId}/follow-ups`, {
+            method: 'POST',
+            body: data
+        });
+    }
+
+    // Finding Status History
+    async getFindingStatusHistory(findingId: string) {
+        return this.request(`/findings/${findingId}/status-history`);
+    }
+
+    async appendFindingStatusHistory(findingId: string, data: unknown) {
+        return this.request(`/findings/${findingId}/status-history`, {
+            method: 'POST',
+            body: data
+        });
+    }
+
+    // Scheduler manual trigger
+    async generateDueFollowUps() {
+        return this.request('/findings/generate-due-followups', {
+            method: 'POST'
+        });
+    }
+
+    // ── Status Logs (Append-only Güncel Durum) ───────────────────────────────
+
+    async getStatusLogs(findingId: string) {
+        return this.request(`/findings/${findingId}/status-logs`);
+    }
+
+    async appendStatusLog(findingId: string, data: { text: string; authorName?: string }) {
+        return this.request(`/findings/${findingId}/status-logs`, { method: 'POST', body: data });
+    }
+
+    // ── Finding Attachments ───────────────────────────────────────────────────
+
+    async addFindingAttachment(findingId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
+        return this.request(`/findings/${findingId}/attachments`, { method: 'POST', body: meta });
+    }
+
+    async removeFindingAttachment(findingId: string, attachmentId: string) {
+        return this.request(`/findings/${findingId}/attachments/${attachmentId}`, { method: 'DELETE' });
+    }
+
+    // ── Action Attachments ────────────────────────────────────────────────────
+
+    async addActionAttachment(findingId: string, actionId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
+        return this.request(`/findings/${findingId}/actions/${actionId}/attachments`, { method: 'POST', body: meta });
+    }
+
+    async removeActionAttachment(findingId: string, actionId: string, attachmentId: string) {
+        return this.request(`/findings/${findingId}/actions/${actionId}/attachments/${attachmentId}`, { method: 'DELETE' });
+    }
+
+    // ── FollowUp Attachments ──────────────────────────────────────────────────
+
+    async addFollowUpAttachment(findingId: string, followUpId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
+        return this.request(`/findings/${findingId}/follow-ups/${followUpId}/attachments`, { method: 'POST', body: meta });
+    }
+
+    async removeFollowUpAttachment(findingId: string, followUpId: string, attachmentId: string) {
+        return this.request(`/findings/${findingId}/follow-ups/${followUpId}/attachments/${attachmentId}`, { method: 'DELETE' });
+    }
+
+    // ── Bağımsız Follow-Ups Listesi ───────────────────────────────────────────
+
+    async getAllFollowUps(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as any).toString() : '';
+        return this.request(`/follow-ups${query}`);
+    }
+
+    // ── Mutabakat Workflow Geçişleri ─────────────────────────────────────────
+
+    async mutabakataGonder(findingId: string) {
+        return this.request(`/findings/${findingId}/workflow/mutabakata-gonder`, { method: 'POST' });
+    }
+
+    async icKontrolOnayinaGonder(findingId: string, data: { birimCevabi: string; targetResolutionDate?: string }) {
+        return this.request(`/findings/${findingId}/workflow/ic-kontrol-onayina-gonder`, { method: 'POST', body: data });
+    }
+
+    async mutabakatOnayla(findingId: string, data: { internalControlAssessment?: string; resolutionStatus?: string }) {
+        return this.request(`/findings/${findingId}/workflow/mutabakat-onayla`, { method: 'POST', body: data });
+    }
+
+    async mutabakatGeriGonder(findingId: string, reason: string) {
+        return this.request(`/findings/${findingId}/workflow/mutabakat-geri-gonder`, { method: 'POST', body: { reason } });
+    }
+
+    async iptalEt(findingId: string, reason: string) {
+        return this.request(`/findings/${findingId}/workflow/iptal-et`, { method: 'POST', body: { reason } });
+    }
+
+    // ── Risks (for selectors) — already defined as getRisks() above ──────────
 }
 
 export const api = new ApiClient(API_BASE_URL);
 export default api;
+
+
+

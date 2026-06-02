@@ -257,7 +257,11 @@ export default function ControlInventoryPage() {
         }
 
         if (colFilters.hasFinding) {
-            result = result.filter(c => c.linkedFindings.length > 0);
+            result = result.filter(c => 
+                colFilters.hasFinding === 'true' 
+                    ? c.linkedFindings.length > 0 
+                    : c.linkedFindings.length === 0
+            );
         }
 
         // Sorting
@@ -344,22 +348,27 @@ export default function ControlInventoryPage() {
             render: (c) => <span className="font-medium text-slate-800 truncate block max-w-[200px]" title={c.name}>{c.name}</span>,
         },
         {
-            key: 'type', header: 'Tip', defaultWidth: 90,
-            render: (c) => <StatusBadge variant={typeVariant[c.type] || 'neutral'}>{typeLabel[c.type] || c.type}</StatusBadge>,
-        },
-        {
-            key: 'nature', header: 'Nitelik', defaultWidth: 130,
+            key: 'findingStatus', header: 'Bulgu Durumu', defaultWidth: 120,
             render: (c) => {
-                const cfg = natureLabel[c.nature];
-                return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-gray-400">—</span>;
+                const hasFinding = c.linkedFindings.length > 0;
+                return (
+                    <StatusBadge variant={hasFinding ? 'critical' : 'neutral'}>
+                        {hasFinding ? 'Bulgulu' : 'Bulgusu Yok'}
+                    </StatusBadge>
+                );
             },
         },
         {
-            key: 'automation', header: 'Otomasyon', defaultWidth: 110,
-            render: (c) => {
-                const cfg = automationLabel[c.automation];
-                return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-gray-400">—</span>;
-            },
+            key: 'findingsCount', header: 'Bulgu Sayısı', defaultWidth: 100,
+            render: (c) => (
+                <span className={`px-2 py-0.5 rounded-full text-xs font-extrabold ${
+                    c.linkedFindings.length > 0 
+                        ? 'bg-rose-100 text-rose-700 border border-rose-200' 
+                        : 'bg-slate-100 text-slate-500 border border-slate-200'
+                }`}>
+                    {c.linkedFindings.length}
+                </span>
+            ),
         },
         {
             key: 'owner', header: 'Sahip', defaultWidth: 150,
@@ -379,20 +388,6 @@ export default function ControlInventoryPage() {
             render: (c) => <span className="text-sm text-slate-600">{formatDate(c.lastTestDate)}</span>,
         },
         {
-            key: 'lastTestResult', header: 'Test Sonucu', defaultWidth: 120,
-            render: (c) => {
-                const cfg = effectivenessLabel[c.lastTestResult];
-                return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-gray-400">—</span>;
-            },
-        },
-        {
-            key: 'effectivenessStatus', header: 'Etkinlik', defaultWidth: 120,
-            render: (c) => {
-                const cfg = effectivenessLabel[c.effectivenessStatus];
-                return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-gray-400">—</span>;
-            },
-        },
-        {
             key: 'linkedRisks', header: 'Risk', defaultWidth: 90,
             render: (c) => c.linkedRisks.length > 0 ? (
                 <div className="flex flex-wrap gap-1">
@@ -404,15 +399,11 @@ export default function ControlInventoryPage() {
             ) : <span className="text-slate-300">—</span>,
         },
         {
-            key: 'linkedFindings', header: 'Bulgu', defaultWidth: 90,
-            render: (c) => c.linkedFindings.length > 0 ? (
-                <div className="flex flex-wrap gap-1">
-                    {c.linkedFindings.slice(0, 2).map(f => (
-                        <Link key={f.id} href={`/findings/${f.id}`} className="text-xs text-rose-600 hover:underline font-bold bg-rose-50 px-1.5 py-0.5 rounded">{f.findingId}</Link>
-                    ))}
-                    {c.linkedFindings.length > 2 && <span className="text-xs text-slate-400 font-bold">+{c.linkedFindings.length - 2}</span>}
-                </div>
-            ) : <span className="text-slate-300">—</span>,
+            key: 'effectivenessStatus', header: 'Etkinlik', defaultWidth: 120,
+            render: (c) => {
+                const cfg = effectivenessLabel[c.effectivenessStatus];
+                return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-gray-400">—</span>;
+            },
         },
         {
             key: 'status', header: 'Durum', defaultWidth: 90,
@@ -538,43 +529,15 @@ export default function ControlInventoryPage() {
                         </div>
 
                         <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Kontrol Tipi</label>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bulgu Durumu</label>
                             <select
-                                value={colFilters.type}
-                                onChange={(e) => setColFilters(p => ({ ...p, type: e.target.value }))}
+                                value={colFilters.hasFinding}
+                                onChange={(e) => setColFilters(p => ({ ...p, hasFinding: e.target.value }))}
                                 className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 outline-none font-bold text-slate-600"
                             >
                                 <option value="">Tümü</option>
-                                <option value="BT">BT</option>
-                                <option value="BT_DISI">BT Dışı</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Nitelik</label>
-                            <select
-                                value={colFilters.nature}
-                                onChange={(e) => setColFilters(p => ({ ...p, nature: e.target.value }))}
-                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 outline-none font-bold text-slate-600"
-                            >
-                                <option value="">Tümü</option>
-                                <option value="PREVENTIVE">Önleyici</option>
-                                <option value="DETECTIVE">Tespit Edici</option>
-                                <option value="CORRECTIVE">Düzeltici</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Otomasyon</label>
-                            <select
-                                value={colFilters.automation}
-                                onChange={(e) => setColFilters(p => ({ ...p, automation: e.target.value }))}
-                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 outline-none font-bold text-slate-600"
-                            >
-                                <option value="">Tümü</option>
-                                <option value="AUTOMATED">Otomatik</option>
-                                <option value="SEMI_AUTOMATED">Yarı Otomatik</option>
-                                <option value="MANUAL">Manuel</option>
+                                <option value="true">Bulgulu</option>
+                                <option value="false">Bulgusu Yok</option>
                             </select>
                         </div>
 
