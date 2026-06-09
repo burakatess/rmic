@@ -1,566 +1,524 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
-import { PageHeader, DataTable, Button, Modal, Input, Textarea, Select, StatusBadge, FilterBar, getStatusVariant } from '@/components/ui';
+import { PageHeader, DataTable, FilterBar, StatusBadge, Button, Modal } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
+import { useToast } from '@/components/ui/Toast';
+import { useAuth } from '@/components/auth';
 
-interface RiskManagementControl {
+// ─── Types ─────────────────────────────────────────────────────────────────────
+interface RiskControl {
     id: string;
-    controlCode: string;
-    name: string;
-    description: string;
-    effectiveness: number;
-    frequency: number;
-    automationLevel: number;
-    controlScore: number | null;
-    isActive: boolean;
+    kontrolId: string;
+    kayitId?: string;
+    status: string;
+    ilgiliGmy?: string;
+    riskSahibi?: string;
+    surec?: string;
+    altSurec?: string;
+    riskTanimi?: string;
+    kontrolTanimi: string;
+    kontrolTuru?: string;
+    kontrolIslevi?: string;
+    kontrolIsletimeSekli?: string;
+    kontrolIsletimDenetimi?: string;
+    kontrolIsletimRaporlama?: string;
+    birSeviyeKontrolSikligi?: string;
+    kontrolPuani?: number;
+    kontrolSkoru?: string;
+    butunlesikKontrolPuani?: number;
+    butunlesikKontrolSkoru?: string;
+    butunlesikKontrolSeviyesi?: string;
+    riskSorumlusu?: string;
+    ozet?: string;
+    mutabakatTarihi?: string;
+    risks?: { risk: { id: string; riskId: string; name: string; dogalRiskSeviyesi?: string } }[];
+    actions?: { id: string; aksiyonId: string; status: string }[];
+    _count?: { risks: number; actions: number };
     createdAt: string;
     updatedAt: string;
-    _count?: {
-        riskMappings: number;
-        tests: number;
-    };
-    riskMappings?: Array<{
-        id: string;
-        applicabilityScore: number;
-        riskEntry: {
-            id: string;
-            riskId: string;
-            riskTanimi: string;
-        };
-    }>;
 }
 
-interface RiskEntry {
-    id: string;
-    riskId: string;
-    riskTanimi: string;
-    dogalRiskSeviyesi?: string;
-}
+type BV = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'success' | 'warning' | 'neutral' | 'primary';
 
-const SCORE_LABELS: Record<number, string> = {
-    1: 'Çok Düşük',
-    2: 'Düşük',
-    3: 'Orta',
-    4: 'Yüksek',
-    5: 'Çok Yüksek',
+const statusConfig: Record<string, { label: string; variant: BV }> = {
+    AKTIF:  { label: 'Aktif', variant: 'success' },
+    TASLAK: { label: 'Taslak', variant: 'warning' },
+    PASIF:  { label: 'Pasif', variant: 'neutral' },
 };
 
-export default function RiskManagementControlsPage() {
-    const [controls, setControls] = useState<RiskManagementControl[]>([]);
-    const [riskEntries, setRiskEntries] = useState<RiskEntry[]>([]);
-    const [loading, setLoading] = useState(true);
-    
-    // Modals
-    const [showAddModal, setShowAddModal] = useState(false);
-    const [showMappingModal, setShowMappingModal] = useState(false);
-    
-    // Selection
-    const [selectedControl, setSelectedControl] = useState<RiskManagementControl | null>(null);
-    const [editingControl, setEditingControl] = useState<Partial<RiskManagementControl> | null>(null);
+const seviyeConfig: Record<string, { label: string; bg: string }> = {
+    'YÜKSEK': { label: 'Yüksek', bg: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+    'ORTA':   { label: 'Orta',   bg: 'bg-amber-100 text-amber-800 border-amber-300' },
+    'DÜŞÜK':  { label: 'Düşük',  bg: 'bg-red-100 text-red-800 border-red-300' },
+};
 
-    // Form
-    const [formData, setFormData] = useState({
-        name: '',
-        description: '',
-        effectiveness: 3,
-        frequency: 3,
-        automationLevel: 3,
-    });
+const fmt = (d?: string) => d ? new Date(d).toLocaleDateString('tr-TR') : '—';
 
-    // Main Table State
-    const [searchQuery, setSearchQuery] = useState('');
-    const [page, setPage] = useState(1);
-    const pageSize = 15;
+function SeviyePill({ s }: { s?: string }) {
+    if (!s) return <span className="text-xs text-slate-300">—</span>;
+    const c = seviyeConfig[s];
+    return <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${c?.bg ?? 'bg-slate-100 text-slate-700 border-slate-300'}`}>{c?.label ?? s}</span>;
+}
 
-    // Mapping Modal State
-    const [mappingSearch, setMappingSearch] = useState('');
-    const [mappingPage, setMappingPage] = useState(1);
-    const mappingPageSize = 10;
+// ─── Form ──────────────────────────────────────────────────────────────────────
+const emptyForm = {
+    kontrolTanimi: '', kontrolTuru: '', kontrolIslevi: '',
+    kontrolIsletimeSekli: '', kontrolIsletimDenetimi: '', kontrolIsletimRaporlama: '',
+    birSeviyeKontrolSikligi: '',
+    ilgiliGmy: '', riskSahibi: '', surec: '', altSurec: '', riskTanimi: '',
+    riskSorumlusu: '', ozet: '', mutabakatTarihi: '',
+    kontrolPuani: '', butunlesikKontrolPuani: '',
+    butunlesikKontrolSeviyesi: '', kayitId: '',
+    riskIds: [] as string[],
+};
 
-    const fetchControls = useCallback(async () => {
-        try {
-            setLoading(true);
-            const response = await api.getRiskManagementControls() as { data: RiskManagementControl[] };
-            setControls(response.data || []);
-        } catch (error) {
-            console.error('Failed to fetch controls:', error);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    const fetchRiskEntries = useCallback(async () => {
-        try {
-            const response = await api.getRiskEntries() as { data: RiskEntry[] };
-            setRiskEntries(response.data || []);
-        } catch (error) {
-            console.error('Failed to fetch risk entries:', error);
-        }
-    }, []);
+function KontrolFormModal({ open, onClose, onSaved, editing, risks }: {
+    open: boolean; onClose: () => void; onSaved: () => void;
+    editing?: RiskControl | null; risks: any[];
+}) {
+    const { success, error: showError } = useToast();
+    const [saving, setSaving] = useState(false);
+    const [form, setForm] = useState(emptyForm);
 
     useEffect(() => {
-        fetchControls();
-        fetchRiskEntries();
-    }, [fetchControls, fetchRiskEntries]);
+        if (editing) {
+            setForm({
+                kontrolTanimi: editing.kontrolTanimi || '',
+                kontrolTuru: editing.kontrolTuru || '',
+                kontrolIslevi: editing.kontrolIslevi || '',
+                kontrolIsletimeSekli: editing.kontrolIsletimeSekli || '',
+                kontrolIsletimDenetimi: editing.kontrolIsletimDenetimi || '',
+                kontrolIsletimRaporlama: editing.kontrolIsletimRaporlama || '',
+                birSeviyeKontrolSikligi: editing.birSeviyeKontrolSikligi || '',
+                ilgiliGmy: editing.ilgiliGmy || '',
+                riskSahibi: editing.riskSahibi || '',
+                surec: editing.surec || '',
+                altSurec: editing.altSurec || '',
+                riskTanimi: editing.riskTanimi || '',
+                riskSorumlusu: editing.riskSorumlusu || '',
+                ozet: editing.ozet || '',
+                mutabakatTarihi: editing.mutabakatTarihi ? editing.mutabakatTarihi.split('T')[0] : '',
+                kontrolPuani: String(editing.kontrolPuani ?? ''),
+                butunlesikKontrolPuani: String(editing.butunlesikKontrolPuani ?? ''),
+                butunlesikKontrolSeviyesi: editing.butunlesikKontrolSeviyesi || '',
+                kayitId: editing.kayitId || '',
+                riskIds: (editing.risks || []).map((r: any) => r.risk.id),
+            });
+        } else {
+            setForm(emptyForm);
+        }
+    }, [editing, open]);
+
+    const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+        setForm(prev => ({ ...prev, [field]: e.target.value }));
+
+    const toggleRisk = (riskId: string) =>
+        setForm(prev => ({
+            ...prev,
+            riskIds: prev.riskIds.includes(riskId)
+                ? prev.riskIds.filter(id => id !== riskId)
+                : [...prev.riskIds, riskId],
+        }));
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!form.kontrolTanimi.trim()) { showError('Zorunlu', 'Kontrol tanımı gerekli'); return; }
+
+        setSaving(true);
         try {
-            if (editingControl?.id) {
-                await api.updateRiskManagementControl(editingControl.id, formData);
+            const payload = {
+                ...form,
+                kontrolPuani: form.kontrolPuani ? Number(form.kontrolPuani) : undefined,
+                butunlesikKontrolPuani: form.butunlesikKontrolPuani ? Number(form.butunlesikKontrolPuani) : undefined,
+                mutabakatTarihi: form.mutabakatTarihi || undefined,
+            };
+
+            if (editing) {
+                await api.updateRiskControl(editing.id, payload);
+                success('Güncellendi', 'Kontrol güncellendi.');
             } else {
-                await api.createRiskManagementControl(formData);
+                await api.createRiskControl(payload);
+                success('Oluşturuldu', 'Kontrol kaydı oluşturuldu.');
             }
-            setShowAddModal(false);
-            setEditingControl(null);
-            setFormData({ name: '', description: '', effectiveness: 3, frequency: 3, automationLevel: 3 });
-            fetchControls();
-        } catch (error) {
-            console.error('Failed to save control:', error);
-            alert('Kontrol kaydedilemedi.');
+            onSaved();
+            onClose();
+        } catch (err: any) {
+            showError('Hata', err?.message || 'İşlem gerçekleştirilemedi.');
+        } finally {
+            setSaving(false);
         }
     };
-
-    const handleDelete = async (id: string) => {
-        if (!confirm('Bu kontrolü silmek istediğinizden emin misiniz?')) return;
-        try {
-            await api.deleteRiskManagementControl(id);
-            fetchControls();
-        } catch (error) {
-            console.error('Failed to delete control:', error);
-            alert('Kontrol silinemedi.');
-        }
-    };
-
-    const handleMapRisk = async (controlId: string, riskEntryId: string, applicabilityScore: number = 3) => {
-        try {
-            await api.mapRYKControlToRiskEntry(controlId, riskEntryId, applicabilityScore);
-            fetchControls();
-            
-            // Update local state for immediate feedback
-            setSelectedControl(prev => {
-                if (!prev) return prev;
-                const risk = riskEntries.find(r => r.id === riskEntryId);
-                if (!risk) return prev;
-                return {
-                    ...prev,
-                    riskMappings: [
-                        ...(prev.riskMappings || []),
-                        {
-                            id: Date.now().toString(), // temp ID
-                            applicabilityScore,
-                            riskEntry: {
-                                id: risk.id,
-                                riskId: risk.riskId,
-                                riskTanimi: risk.riskTanimi
-                            }
-                        }
-                    ]
-                };
-            });
-        } catch (error) {
-            console.error('Failed to map control to risk:', error);
-            alert('Eşleştirme başarısız.');
-        }
-    };
-
-    const handleUnmapRisk = async (controlId: string, riskEntryId: string) => {
-        try {
-            await api.unmapRYKControlFromRiskEntry(controlId, riskEntryId);
-            fetchControls();
-            
-            // Update local state
-            setSelectedControl(prev => {
-                if (!prev) return prev;
-                return {
-                    ...prev,
-                    riskMappings: (prev.riskMappings || []).filter(m => m.riskEntry.id !== riskEntryId)
-                };
-            });
-        } catch (error) {
-            console.error('Failed to unmap control from risk:', error);
-        }
-    };
-
-    const openEditModal = (control: RiskManagementControl) => {
-        setEditingControl(control);
-        setFormData({
-            name: control.name,
-            description: control.description,
-            effectiveness: control.effectiveness,
-            frequency: control.frequency,
-            automationLevel: control.automationLevel,
-        });
-        setShowAddModal(true);
-    };
-
-    const openMappingModal = (control: RiskManagementControl) => {
-        setSelectedControl(control);
-        setMappingSearch('');
-        setMappingPage(1);
-        setShowMappingModal(true);
-    };
-
-    // Calculate aggregate stats
-    const totalControls = controls.length;
-    const avgScore = controls.length > 0
-        ? (controls.reduce((sum, c) => sum + (c.controlScore || 0), 0) / controls.length).toFixed(2)
-        : '0.00';
-    const mappedRisks = controls.reduce((sum, c) => sum + (c._count?.riskMappings || 0), 0);
-
-    // Filter controls list
-    const filteredControls = useMemo(() => {
-        let result = controls;
-        if (searchQuery) {
-            const query = searchQuery.toLowerCase();
-            result = result.filter(c => 
-                c.name.toLowerCase().includes(query) || 
-                c.controlCode.toLowerCase().includes(query)
-            );
-        }
-        return result;
-    }, [controls, searchQuery]);
-
-    const paginatedControls = useMemo(() => {
-        const start = (page - 1) * pageSize;
-        return filteredControls.slice(start, start + pageSize);
-    }, [filteredControls, page, pageSize]);
-
-    // Format badge based on score 1-5
-    const getBadgeVariantForScore = (score: number) => {
-        if (score >= 4) return 'success';
-        if (score === 3) return 'warning';
-        return 'critical';
-    };
-
-    const controlColumns: ColumnDef<RiskManagementControl>[] = useMemo(() => [
-        {
-            key: 'controlCode',
-            header: 'Kontrol Kodu',
-            render: (item) => <span className="font-medium text-blue-700">{item.controlCode}</span>,
-            sortable: true,
-        },
-        {
-            key: 'name',
-            header: 'Kontrol Adı',
-            render: (item) => <span className="font-medium text-gray-900">{item.name}</span>,
-            sortable: true,
-        },
-        {
-            key: 'effectiveness',
-            header: 'Etkinlik',
-            render: (item) => (
-                <StatusBadge variant={getBadgeVariantForScore(item.effectiveness)}>
-                    {item.effectiveness} - {SCORE_LABELS[item.effectiveness]}
-                </StatusBadge>
-            ),
-        },
-        {
-            key: 'frequency',
-            header: 'Sıklık',
-            render: (item) => (
-                <StatusBadge variant={getBadgeVariantForScore(item.frequency)}>
-                    {item.frequency} - {SCORE_LABELS[item.frequency]}
-                </StatusBadge>
-            ),
-        },
-        {
-            key: 'automationLevel',
-            header: 'Otomasyon',
-            render: (item) => (
-                <StatusBadge variant={getBadgeVariantForScore(item.automationLevel)}>
-                    {item.automationLevel} - {SCORE_LABELS[item.automationLevel]}
-                </StatusBadge>
-            ),
-        },
-        {
-            key: 'controlScore',
-            header: 'Kontrol Skoru',
-            render: (item) => <span className="font-mono text-sm font-semibold text-indigo-700">{item.controlScore?.toFixed(2) || '-'}</span>,
-        },
-        {
-            key: 'riskMappings',
-            header: 'Eşleşen Risk',
-            render: (item) => <span className="font-medium px-2 py-1 bg-gray-100 rounded text-xs">{item._count?.riskMappings || 0}</span>,
-        },
-        {
-            key: 'actions',
-            header: 'İşlemler',
-            render: (item) => (
-                <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="xs" onClick={() => openMappingModal(item)} title="Risk Eşle">
-                        <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                        </svg>
-                    </Button>
-                    <Button variant="ghost" size="xs" onClick={() => openEditModal(item)} title="Düzenle">
-                        <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                    </Button>
-                    <Button variant="ghost" size="xs" onClick={() => handleDelete(item.id)} title="Sil">
-                        <svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                    </Button>
-                </div>
-            )
-        }
-    ], []);
-
-    // Filter and sort risks for mapping modal (Mapped ones on top, then search query)
-    const processedRisksForMapping = useMemo(() => {
-        if (!selectedControl) return [];
-        
-        const mappedRiskIds = new Set((selectedControl.riskMappings || []).map(m => m.riskEntry.id));
-        
-        let filtered = riskEntries;
-        if (mappingSearch) {
-            const query = mappingSearch.toLowerCase();
-            filtered = filtered.filter(r => 
-                r.riskTanimi.toLowerCase().includes(query) || 
-                r.riskId.toLowerCase().includes(query)
-            );
-        }
-        
-        // Sort: Mapped ones first, then by risk ID
-        return filtered.sort((a, b) => {
-            const aMapped = mappedRiskIds.has(a.id);
-            const bMapped = mappedRiskIds.has(b.id);
-            if (aMapped && !bMapped) return -1;
-            if (!aMapped && bMapped) return 1;
-            return a.riskId.localeCompare(b.riskId);
-        });
-    }, [riskEntries, selectedControl, mappingSearch]);
-
-    const paginatedMappingRisks = useMemo(() => {
-        const start = (mappingPage - 1) * mappingPageSize;
-        return processedRisksForMapping.slice(start, start + mappingPageSize);
-    }, [processedRisksForMapping, mappingPage, mappingPageSize]);
-
-    const mappingColumns: ColumnDef<RiskEntry>[] = useMemo(() => [
-        {
-            key: 'riskId',
-            header: 'Risk Kodu',
-            render: (item) => <span className="font-medium text-slate-700">{item.riskId}</span>,
-        },
-        {
-            key: 'riskTanimi',
-            header: 'Risk Tanımı',
-            render: (item) => <span className="text-sm truncate max-w-[200px] block" title={item.riskTanimi}>{item.riskTanimi}</span>,
-        },
-        {
-            key: 'status',
-            header: 'Durum',
-            render: (item) => {
-                const isMapped = selectedControl?.riskMappings?.some(m => m.riskEntry.id === item.id);
-                return isMapped ? (
-                    <StatusBadge variant="success">Eşlendi</StatusBadge>
-                ) : (
-                    <StatusBadge variant="neutral">Eşlenmedi</StatusBadge>
-                );
-            }
-        },
-        {
-            key: 'action',
-            header: '',
-            render: (item) => {
-                const isMapped = selectedControl?.riskMappings?.some(m => m.riskEntry.id === item.id);
-                return isMapped ? (
-                    <Button variant="danger" size="xs" onClick={() => handleUnmapRisk(selectedControl!.id, item.id)}>
-                        Kaldır
-                    </Button>
-                ) : (
-                    <Button variant="primary" size="xs" onClick={() => handleMapRisk(selectedControl!.id, item.id)}>
-                        Eşle
-                    </Button>
-                );
-            }
-        }
-    ], [selectedControl]);
 
     return (
-        <div className="flex flex-col h-full bg-gray-50/50">
+        <Modal open={open} onClose={onClose} title={editing ? 'Kontrolü Düzenle' : 'Yeni Risk Kontrolü'} size="xl">
+            <form onSubmit={handleSubmit} className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+
+                <div className="bg-slate-50 rounded-xl p-4 space-y-3">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Kontrol Bilgileri</p>
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Kontrol Tanımı <span className="text-red-500">*</span></label>
+                        <textarea value={form.kontrolTanimi} onChange={set('kontrolTanimi')} rows={3} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 resize-none" placeholder="Kontrolün detaylı tanımı…" required />
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Kontrol Türü</label>
+                            <select value={form.kontrolTuru} onChange={set('kontrolTuru')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500">
+                                <option value="">—</option>
+                                <option>Önleyici</option>
+                                <option>Düzeltici</option>
+                                <option>Tespit Edici</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Kontrol İşlevi</label>
+                            <select value={form.kontrolIslevi} onChange={set('kontrolIslevi')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500">
+                                <option value="">—</option>
+                                <option>Manuel</option>
+                                <option>Otomatik</option>
+                                <option>Yarı Otomatik</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">1. Seviye Sıklığı</label>
+                            <select value={form.birSeviyeKontrolSikligi} onChange={set('birSeviyeKontrolSikligi')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500">
+                                <option value="">—</option>
+                                <option>Günlük</option>
+                                <option>Haftalık</option>
+                                <option>Aylık</option>
+                                <option>3 Aylık</option>
+                                <option>6 Aylık</option>
+                                <option>Yıllık</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">İşletim Şekli</label>
+                            <input value={form.kontrolIsletimeSekli} onChange={set('kontrolIsletimeSekli')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="İşletim şekli…" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Denetim</label>
+                            <input value={form.kontrolIsletimDenetimi} onChange={set('kontrolIsletimDenetimi')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="Denetim yöntemi…" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Raporlama</label>
+                            <input value={form.kontrolIsletimRaporlama} onChange={set('kontrolIsletimRaporlama')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="Raporlama yöntemi…" />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-slate-50 rounded-xl p-4 space-y-3">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Organizasyon</p>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">İlgili GMY</label>
+                            <input value={form.ilgiliGmy} onChange={set('ilgiliGmy')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Risk Sahibi</label>
+                            <input value={form.riskSahibi} onChange={set('riskSahibi')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Süreç</label>
+                            <input value={form.surec} onChange={set('surec')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Alt Süreç</label>
+                            <input value={form.altSurec} onChange={set('altSurec')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Risk Sorumlusu</label>
+                            <input value={form.riskSorumlusu} onChange={set('riskSorumlusu')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Mutabakat Tarihi</label>
+                            <input type="date" value={form.mutabakatTarihi} onChange={set('mutabakatTarihi')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-blue-50 rounded-xl p-4 space-y-3 border border-blue-100">
+                    <p className="text-xs font-bold text-blue-600 uppercase tracking-widest">Puanlama</p>
+                    <div className="grid grid-cols-3 gap-3">
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Kontrol Puanı</label>
+                            <input type="number" min="0" max="25" step="0.1" value={form.kontrolPuani} onChange={set('kontrolPuani')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="0-25" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Bütünleşik Puan</label>
+                            <input type="number" min="0" max="25" step="0.1" value={form.butunlesikKontrolPuani} onChange={set('butunlesikKontrolPuani')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="0-25" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Bütünleşik Seviye</label>
+                            <select value={form.butunlesikKontrolSeviyesi} onChange={set('butunlesikKontrolSeviyesi')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500">
+                                <option value="">—</option>
+                                <option>DÜŞÜK</option>
+                                <option>ORTA</option>
+                                <option>YÜKSEK</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                {risks.length > 0 && (
+                    <div className="bg-slate-50 rounded-xl p-4 space-y-2">
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">İlişkili Riskler</p>
+                        <div className="max-h-48 overflow-y-auto space-y-1">
+                            {risks.map((r: any) => (
+                                <label key={r.id} className="flex items-start gap-2 p-2 rounded-lg hover:bg-slate-100 cursor-pointer">
+                                    <input type="checkbox" checked={form.riskIds.includes(r.id)} onChange={() => toggleRisk(r.id)} className="mt-0.5 w-4 h-4 accent-blue-600" />
+                                    <div>
+                                        <span className="text-xs font-mono font-semibold text-blue-700">{r.riskId}</span>
+                                        <span className="text-xs text-slate-600 ml-2">{r.name}</span>
+                                    </div>
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex justify-end gap-3 pt-2">
+                    <Button variant="secondary" onClick={onClose} type="button">İptal</Button>
+                    <Button type="submit" variant="primary" loading={saving}>{editing ? 'Güncelle' : 'Oluştur'}</Button>
+                </div>
+            </form>
+        </Modal>
+    );
+}
+
+// ─── Main Page ─────────────────────────────────────────────────────────────────
+export default function KontrolAlaniPage() {
+    const { hasPermission } = useAuth();
+    const { success, error: showError } = useToast();
+    const searchParams = useSearchParams();
+    const preFilterRiskId = searchParams.get('riskId');
+
+    const [controls, setControls] = useState<RiskControl[]>([]);
+    const [allRisks, setAllRisks] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [search, setSearch] = useState('');
+    const [filters, setFilters] = useState<Record<string, string>>({});
+    const [page, setPage] = useState(1);
+    const pageSize = 20;
+
+    const [modalOpen, setModalOpen] = useState(false);
+    const [editing, setEditing] = useState<RiskControl | null>(null);
+
+    const load = useCallback(async () => {
+        setLoading(true);
+        try {
+            const [ctrlRes, riskRes] = await Promise.all([
+                api.getRiskControls(preFilterRiskId ? { riskId: preFilterRiskId } : {}) as Promise<any>,
+                api.getRisks() as Promise<any>,
+            ]);
+            const cList = Array.isArray(ctrlRes) ? ctrlRes : (ctrlRes.data || []);
+            const rList = Array.isArray(riskRes) ? riskRes : (riskRes.data || riskRes.risks || []);
+            setControls(cList);
+            setAllRisks(rList);
+        } catch { showError('Hata', 'Veriler yüklenemedi.'); }
+        finally { setLoading(false); }
+    }, [preFilterRiskId]);
+
+    useEffect(() => { load(); }, [load]);
+
+    const filtered = useMemo(() => controls.filter(c => {
+        if (search) {
+            const q = search.toLowerCase();
+            if (!c.kontrolId.toLowerCase().includes(q) && !c.kontrolTanimi.toLowerCase().includes(q) && !(c.ilgiliGmy || '').toLowerCase().includes(q)) return false;
+        }
+        if (filters.status && filters.status !== 'all' && c.status !== filters.status) return false;
+        if (filters.seviye && filters.seviye !== 'all' && c.butunlesikKontrolSeviyesi !== filters.seviye) return false;
+        return true;
+    }), [controls, search, filters]);
+
+    const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page]);
+
+    const aktif = controls.filter(c => c.status === 'AKTIF').length;
+    const yuksek = controls.filter(c => c.butunlesikKontrolSeviyesi === 'YÜKSEK').length;
+
+    const columns: ColumnDef<RiskControl>[] = useMemo(() => [
+        {
+            key: 'kontrolId', header: 'Kontrol ID', sortable: true, defaultWidth: 130,
+            render: (c) => <span className="font-mono text-xs font-bold text-blue-700">{c.kontrolId}</span>,
+        },
+        {
+            key: 'kayitId', header: 'Kayıt ID', defaultWidth: 90,
+            render: (c) => <span className="text-xs text-slate-400 font-mono">{c.kayitId || '—'}</span>,
+        },
+        {
+            key: 'status', header: 'Statü', defaultWidth: 90,
+            render: (c) => {
+                const cfg = statusConfig[c.status];
+                return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-xs">{c.status}</span>;
+            },
+        },
+        {
+            key: 'risks', header: 'Risk ID', defaultWidth: 120,
+            render: (c) => (
+                <div className="flex flex-col gap-0.5">
+                    {(c.risks || []).slice(0, 2).map(rm => (
+                        <Link key={rm.risk.id} href={`/risks/${rm.risk.id}`} className="text-xs font-mono text-blue-600 hover:underline">{rm.risk.riskId}</Link>
+                    ))}
+                    {(c.risks || []).length > 2 && <span className="text-[10px] text-slate-400">+{(c.risks || []).length - 2} daha</span>}
+                    {!(c.risks || []).length && <span className="text-xs text-slate-300">—</span>}
+                </div>
+            ),
+        },
+        {
+            key: 'ilgiliGmy', header: 'İlgili GMY', defaultWidth: 120,
+            render: (c) => <span className="text-xs text-slate-600">{c.ilgiliGmy || '—'}</span>,
+        },
+        {
+            key: 'riskSahibi', header: 'Risk Sahibi', defaultWidth: 120,
+            render: (c) => <span className="text-xs text-slate-600">{c.riskSahibi || '—'}</span>,
+        },
+        {
+            key: 'surec', header: 'Süreç', defaultWidth: 110,
+            render: (c) => <span className="text-xs text-slate-500">{c.surec || '—'}</span>,
+        },
+        {
+            key: 'kontrolTanimi', header: 'Kontrol Tanımı', defaultWidth: 220,
+            render: (c) => <span className="text-xs text-slate-800 font-medium truncate block max-w-[210px]" title={c.kontrolTanimi}>{c.kontrolTanimi}</span>,
+        },
+        {
+            key: 'kontrolTuru', header: 'Tür', defaultWidth: 100,
+            render: (c) => <span className="text-xs text-slate-500">{c.kontrolTuru || '—'}</span>,
+        },
+        {
+            key: 'kontrolIslevi', header: 'İşlev', defaultWidth: 100,
+            render: (c) => <span className="text-xs text-slate-500">{c.kontrolIslevi || '—'}</span>,
+        },
+        {
+            key: 'birSeviyeKontrolSikligi', header: '1. Sıklık', defaultWidth: 90,
+            render: (c) => <span className="text-xs text-slate-500">{c.birSeviyeKontrolSikligi || '—'}</span>,
+        },
+        {
+            key: 'kontrolPuani', header: 'Kontrol Puan', defaultWidth: 100,
+            render: (c) => <span className="text-xs text-center font-semibold text-slate-700">{c.kontrolPuani != null ? c.kontrolPuani.toFixed(1) : '—'}</span>,
+        },
+        {
+            key: 'butunlesik', header: 'Bütün. Kontrol', defaultWidth: 120,
+            render: (c) => (
+                <div className="text-center">
+                    {c.butunlesikKontrolPuani != null && <p className="text-xs font-bold text-slate-700">{c.butunlesikKontrolPuani.toFixed(1)}</p>}
+                    <SeviyePill s={c.butunlesikKontrolSeviyesi} />
+                </div>
+            ),
+        },
+        {
+            key: 'mutabakatTarihi', header: 'Mutabakat Tar.', defaultWidth: 110,
+            render: (c) => <span className="text-xs text-slate-500">{fmt(c.mutabakatTarihi)}</span>,
+        },
+        {
+            key: 'actions', header: 'Aksiyonlar', defaultWidth: 90,
+            render: (c) => (
+                <Link href={`/risks/actions?riskControlId=${c.id}`} className="text-xs text-indigo-600 hover:underline font-medium">
+                    {c._count?.actions ?? c.actions?.length ?? 0} aksiyon
+                </Link>
+            ),
+        },
+        {
+            key: 'ops', header: '', defaultWidth: 60,
+            render: (c) => (
+                <button onClick={() => { setEditing(c); setModalOpen(true); }}
+                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                </button>
+            ),
+        },
+    ], []);
+
+    const filterConfigs = useMemo(() => [
+        {
+            key: 'status', label: 'Statü',
+            value: filters.status || '',
+            onChange: (v: string) => { setFilters(p => ({ ...p, status: v })); setPage(1); },
+            options: Object.entries(statusConfig).map(([k, v]) => ({ value: k, label: v.label })),
+        },
+        {
+            key: 'seviye', label: 'Bütün. Seviye',
+            value: filters.seviye || '',
+            onChange: (v: string) => { setFilters(p => ({ ...p, seviye: v })); setPage(1); },
+            options: Object.keys(seviyeConfig).map(k => ({ value: k, label: seviyeConfig[k].label })),
+        },
+    ], [filters]);
+
+    return (
+        <div className="flex flex-col h-full bg-slate-50/50">
             <div className="px-8 pt-8">
                 <PageHeader
-                    title="Risk Yönetimi Kontrolleri (RYK)"
-                    description="Risk Yönetimi ekibinin kontrollerini tanımlayın ve risklerle eşleştirin."
-                    breadcrumbs={[
-                        { label: 'Risk Yönetimi', href: '/risks' },
-                        { label: 'RYK' }
-                    ]}
+                    title="Kontrol Alanı"
+                    description="Risk'e yönelik kontroller — kontrol tanımı, tür, işlev ve puanlama"
+                    breadcrumbs={[{ label: 'Risk Yönetimi' }, { label: 'Kontrol Alanı' }]}
                     actions={
-                        <Button
-                            variant="primary"
-                            onClick={() => {
-                                setEditingControl(null);
-                                setFormData({ name: '', description: '', effectiveness: 3, frequency: 3, automationLevel: 3 });
-                                setShowAddModal(true);
-                            }}
-                            icon={
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                </svg>
-                            }
-                        >
-                            Yeni RYK Ekle
-                        </Button>
+                        hasPermission('risk:create') ? (
+                            <Button variant="primary"
+                                onClick={() => { setEditing(null); setModalOpen(true); }}
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}
+                            >
+                                Yeni Kontrol
+                            </Button>
+                        ) : undefined
                     }
                 />
 
-                {/* KPIs */}
-                <div className="flex items-center gap-6 py-3 px-5 mb-6 bg-white border border-slate-200 rounded-lg shadow-sm">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                        </div>
-                        <div>
-                            <p className="text-xs text-slate-500 font-medium">Toplam Kontrol</p>
-                            <p className="text-lg font-bold text-slate-800">{totalControls}</p>
-                        </div>
+                <div className="grid grid-cols-4 gap-4 mb-6">
+                    <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
+                        <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Toplam Kontrol</p>
+                        <p className="text-2xl font-bold text-slate-800 mt-1">{controls.length}</p>
                     </div>
-                    <div className="w-px h-10 bg-slate-200" />
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
-                        </div>
-                        <div>
-                            <p className="text-xs text-slate-500 font-medium">Ortalama Skor</p>
-                            <p className="text-lg font-bold text-slate-800">{avgScore}</p>
-                        </div>
+                    <div className="bg-white rounded-xl p-4 shadow-sm border border-emerald-200">
+                        <p className="text-xs font-medium text-emerald-600 uppercase tracking-wide">Aktif</p>
+                        <p className="text-2xl font-bold text-emerald-700 mt-1">{aktif}</p>
                     </div>
-                    <div className="w-px h-10 bg-slate-200" />
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-green-50 text-green-600 rounded-lg">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
-                        </div>
-                        <div>
-                            <p className="text-xs text-slate-500 font-medium">Eşleşen Risk</p>
-                            <p className="text-lg font-bold text-slate-800">{mappedRisks}</p>
-                        </div>
+                    <div className="bg-white rounded-xl p-4 shadow-sm border border-emerald-200">
+                        <p className="text-xs font-medium text-emerald-600 uppercase tracking-wide">Yüksek Seviye</p>
+                        <p className="text-2xl font-bold text-emerald-700 mt-1">{yuksek}</p>
+                    </div>
+                    <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
+                        <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Ortalama Puan</p>
+                        <p className="text-2xl font-bold text-slate-700 mt-1">
+                            {controls.length ? (controls.reduce((s, c) => s + (c.butunlesikKontrolPuani || 0), 0) / controls.length).toFixed(1) : '—'}
+                        </p>
                     </div>
                 </div>
 
-                {/* Filters */}
-                <div className="mb-4 bg-white p-2 rounded-lg border border-slate-200 shadow-sm">
+                <div className="mb-4 bg-white border border-slate-200 rounded-xl shadow-sm p-3">
                     <FilterBar
-                        searchValue={searchQuery}
-                        onSearchChange={(val) => { setSearchQuery(val); setPage(1); }}
-                        searchPlaceholder="Kontrol kodu veya adı ile ara..."
+                        searchValue={search}
+                        onSearchChange={(v) => { setSearch(v); setPage(1); }}
+                        searchPlaceholder="Kontrol ID, tanım veya GMY ara..."
+                        filters={filterConfigs}
+                        onClearAll={() => { setSearch(''); setFilters({}); setPage(1); }}
                     />
                 </div>
             </div>
 
-            {/* Controls Table */}
-            <div className="px-8 pb-8 flex-1">
+            <div className="px-8 pb-8 flex-1 overflow-auto">
                 <DataTable
-                    columns={controlColumns}
-                    data={paginatedControls}
-                    rowKey={(r) => r.id}
+                    columns={columns}
+                    data={paginated}
+                    rowKey={(c) => c.id}
                     loading={loading}
-                    totalCount={filteredControls.length}
+                    totalCount={filtered.length}
                     page={page}
                     pageSize={pageSize}
                     onPageChange={setPage}
+                    storageKey="risk-controls-table"
+                    emptyTitle="Kontrol bulunamadı"
+                    emptyDescription="Henüz risk kontrolü eklenmemiş. Yeni Kontrol butonunu kullanın."
                 />
             </div>
 
-            {/* Add/Edit Modal */}
-            <Modal
-                open={showAddModal}
-                onClose={() => setShowAddModal(false)}
-                title={editingControl ? 'RYK Kontrol Düzenle' : 'Yeni RYK Kontrol'}
-                footer={
-                    <>
-                        <Button variant="ghost" onClick={() => setShowAddModal(false)}>İptal</Button>
-                        <Button variant="primary" onClick={handleSubmit}>{editingControl ? 'Güncelle' : 'Kaydet'}</Button>
-                    </>
-                }
-            >
-                <div className="space-y-4 py-2">
-                    <Input
-                        label="Kontrol Adı *"
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        required
-                    />
-                    <Textarea
-                        label="Açıklama"
-                        value={formData.description}
-                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                        rows={3}
-                    />
-                    <div className="grid grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Etkinlik (1-5)</label>
-                            <Select
-                                value={formData.effectiveness.toString()}
-                                onChange={(e) => setFormData({ ...formData, effectiveness: parseInt(e.target.value) })}
-                                options={[1, 2, 3, 4, 5].map(v => ({ value: v.toString(), label: `${v} - ${SCORE_LABELS[v]}` }))}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Sıklık (1-5)</label>
-                            <Select
-                                value={formData.frequency.toString()}
-                                onChange={(e) => setFormData({ ...formData, frequency: parseInt(e.target.value) })}
-                                options={[1, 2, 3, 4, 5].map(v => ({ value: v.toString(), label: `${v} - ${SCORE_LABELS[v]}` }))}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Otomasyon (1-5)</label>
-                            <Select
-                                value={formData.automationLevel.toString()}
-                                onChange={(e) => setFormData({ ...formData, automationLevel: parseInt(e.target.value) })}
-                                options={[1, 2, 3, 4, 5].map(v => ({ value: v.toString(), label: `${v} - ${SCORE_LABELS[v]}` }))}
-                            />
-                        </div>
-                    </div>
-                    <div className="bg-indigo-50/50 border border-indigo-100 p-3 rounded-lg mt-2">
-                        <p className="text-sm text-indigo-800">
-                            <strong>Hesaplanan Kontrol Skoru:</strong>{' '}
-                            <span className="font-mono bg-white px-2 py-0.5 rounded shadow-sm ml-1 text-indigo-700 font-semibold">
-                                {((formData.effectiveness * 0.5) + (formData.frequency * 0.3) + (formData.automationLevel * 0.2)).toFixed(2)}
-                            </span>
-                        </p>
-                        <p className="text-xs text-indigo-600/70 mt-1">
-                            Formül: (Etkinlik × 0.5) + (Sıklık × 0.3) + (Otomasyon × 0.2)
-                        </p>
-                    </div>
-                </div>
-            </Modal>
-
-            {/* Risk Mapping Modal */}
-            <Modal
-                open={showMappingModal}
-                onClose={() => setShowMappingModal(false)}
-                title="Risk Eşleştirme"
-                description={selectedControl ? `${selectedControl.controlCode} - ${selectedControl.name}` : ''}
-                size="lg"
-            >
-                <div className="flex flex-col gap-4 py-2 min-h-[400px]">
-                    <FilterBar
-                        searchValue={mappingSearch}
-                        onSearchChange={(val) => { setMappingSearch(val); setMappingPage(1); }}
-                        searchPlaceholder="Risk kodu veya tanımı ile ara..."
-                    />
-                    
-                    <div className="border border-slate-200 rounded-lg overflow-hidden flex-1">
-                        <DataTable
-                            columns={mappingColumns}
-                            data={paginatedMappingRisks}
-                            rowKey={(r) => r.id}
-                            totalCount={processedRisksForMapping.length}
-                            page={mappingPage}
-                            pageSize={mappingPageSize}
-                            onPageChange={setMappingPage}
-                        />
-                    </div>
-                </div>
-            </Modal>
+            <KontrolFormModal
+                open={modalOpen}
+                onClose={() => setModalOpen(false)}
+                onSaved={load}
+                editing={editing}
+                risks={allRisks}
+            />
         </div>
     );
 }

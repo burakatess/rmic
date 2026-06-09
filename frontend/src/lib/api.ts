@@ -146,6 +146,62 @@ class ApiClient {
         return this.request<any[]>('/admin/users');
     }
 
+    // Directorates
+    async getDirectorates(params?: { isActive?: string }) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request<any[]>(`/directorates${query}`);
+    }
+
+    async createDirectorate(data: { name: string; code?: string; gmy?: string }) {
+        return this.request('/directorates', { method: 'POST', body: data });
+    }
+
+    async updateDirectorate(id: string, data: Partial<{ name: string; code: string; gmy: string; isActive: boolean }>) {
+        return this.request(`/directorates/${id}`, { method: 'PUT', body: data });
+    }
+
+    // ControlTest endpoints
+    async getAllControlTests(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as any).toString() : '';
+        return this.request(`/controls/tests${query}`);
+    }
+
+    async getControlTests(controlId: string) {
+        return this.request(`/controls/${controlId}/tests`);
+    }
+
+    async createControlTest(controlId: string, data: unknown) {
+        return this.request(`/controls/${controlId}/tests`, { method: 'POST', body: data });
+    }
+
+    async startControlTest(testId: string) {
+        return this.request(`/controls/tests/${testId}/start`, { method: 'PATCH' });
+    }
+
+    async completeControlTest(testId: string, data: unknown) {
+        return this.request(`/controls/tests/${testId}/complete`, { method: 'PATCH', body: data });
+    }
+
+    async approveControlTest(testId: string) {
+        return this.request(`/controls/tests/${testId}/approve`, { method: 'PATCH' });
+    }
+
+    async returnControlTest(testId: string, reason: string) {
+        return this.request(`/controls/tests/${testId}/return`, { method: 'PATCH', body: { reason } });
+    }
+
+    async generateControlTests(controlId: string) {
+        return this.request(`/controls/${controlId}/generate-tests`, { method: 'POST' });
+    }
+
+    async activateControl(id: string) {
+        return this.request(`/controls/${id}/activate`, { method: 'PATCH' });
+    }
+
+    async passivateControl(id: string) {
+        return this.request(`/controls/${id}/passivate`, { method: 'PATCH' });
+    }
+
     // Dashboard
     async getDashboard() {
         return this.request('/reports/dashboard');
@@ -175,6 +231,10 @@ class ApiClient {
 
     async treatRisk(id: string, data: unknown) {
         return this.request(`/risks/${id}/treat`, { method: 'POST', body: data });
+    }
+
+    async getRiskCategories() {
+        return this.request('/risks/categories');
     }
 
     async deleteRisk(id: string) {
@@ -216,39 +276,9 @@ class ApiClient {
         });
     }
 
-    // Control Tests
+    // Legacy test generator (eski endpoint)
     async generateTests() {
         return this.request('/tests/generate', { method: 'POST' });
-    }
-
-    async createControlTest(controlId: string, data: unknown) {
-        return this.request(`/controls/${controlId}/test`, {
-            method: 'POST',
-            body: data
-        });
-    }
-
-    async getControlTests(controlId: string) {
-        return this.request(`/controls/${controlId}/tests`);
-    }
-
-    async submitTestForApproval(testId: string) {
-        return this.request(`/controls/tests/${testId}/submit`, {
-            method: 'PUT'
-        });
-    }
-
-    async approveTest(testId: string) {
-        return this.request(`/controls/tests/${testId}/approve`, {
-            method: 'PUT'
-        });
-    }
-
-    async rejectTest(testId: string, reason: string) {
-        return this.request(`/controls/tests/${testId}/reject`, {
-            method: 'PUT',
-            body: { reason }
-        });
     }
 
     // Findings
@@ -300,12 +330,56 @@ class ApiClient {
         return this.request(`/actions/${id}/relations`);
     }
 
-    async createAction(data: unknown) {
-        return this.request('/actions', { method: 'POST', body: data });
+    async createAction(findingId: string, data: unknown) {
+        return this.request(`/findings/${findingId}/actions`, { method: 'POST', body: data });
     }
 
     async completeAction(id: string) {
         return this.request(`/actions/${id}/complete`, { method: 'POST' });
+    }
+
+    // ── Risk Controls (RYK Kontrol Alanı) ───────────────────────────────────────
+    async getRiskControls(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request(`/risk-controls${query}`);
+    }
+
+    async getRiskControl(id: string) {
+        return this.request(`/risk-controls/${id}`);
+    }
+
+    async createRiskControl(data: unknown) {
+        return this.request('/risk-controls', { method: 'POST', body: data });
+    }
+
+    async updateRiskControl(id: string, data: unknown) {
+        return this.request(`/risk-controls/${id}`, { method: 'PUT', body: data });
+    }
+
+    async deleteRiskControl(id: string) {
+        return this.request(`/risk-controls/${id}`, { method: 'DELETE' });
+    }
+
+    // ── Risk Actions (RYK Aksiyon Tablosu) ──────────────────────────────────────
+    async getRiskActions(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request(`/risk-actions${query}`);
+    }
+
+    async getRiskAction(id: string) {
+        return this.request(`/risk-actions/${id}`);
+    }
+
+    async createRiskAction(data: unknown) {
+        return this.request('/risk-actions', { method: 'POST', body: data });
+    }
+
+    async updateRiskAction(id: string, data: unknown) {
+        return this.request(`/risk-actions/${id}`, { method: 'PUT', body: data });
+    }
+
+    async deleteRiskAction(id: string) {
+        return this.request(`/risk-actions/${id}`, { method: 'DELETE' });
     }
 
     // Reports

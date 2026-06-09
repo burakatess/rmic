@@ -197,7 +197,7 @@ export class ReportsService {
         const controls = await this.prisma.control.findMany({
             include: {
                 risks: { include: { risk: true } },
-                tests: { orderBy: { testDate: 'desc' }, take: 1 },
+                tests: { orderBy: { plannedDate: 'desc' }, take: 1 },
             },
         });
 
@@ -210,7 +210,7 @@ export class ReportsService {
             avgRiskScore: c.risks.length > 0
                 ? c.risks.reduce((sum, r) => sum + (r.risk.residualRiskScore || r.risk.inherentRiskScore), 0) / c.risks.length
                 : 0,
-            lastTestResult: c.tests[0]?.result || 'NOT_TESTED',
+            lastTestResult: c.tests[0]?.findingStatus || 'NOT_TESTED',
         }));
     }
 

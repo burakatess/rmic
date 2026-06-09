@@ -25,7 +25,7 @@ interface Control {
 interface CreateFindingModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onSuccess: (finding: any) => void;
+    onSuccess: (finding?: any) => void;
     controlContext?: Control | null;
     testContext?: {
         id: string;
@@ -38,6 +38,12 @@ interface CreateFindingModalProps {
         assigneeEmail?: string;
     } | null;
     editContext?: any;
+    // Yeni ControlTest sayfasından gelen ön-doldurma verisi
+    prefillData?: {
+        controlId?: string;
+        controlTestId?: string;
+        directorateId?: string;
+    } | null;
 }
 
 // Bulgu Türü: BT = Bilgi Teknolojileri, IB = İş Birimleri
@@ -71,6 +77,7 @@ export function CreateFindingModal({
     controlContext,
     testContext,
     editContext,
+    prefillData,
 }: CreateFindingModalProps) {
     const { success: showToastSuccess, error: showToastError } = useToast();
     const [loading, setLoading] = useState(false);
@@ -118,14 +125,7 @@ export function CreateFindingModal({
                 let userList: User[] = [];
                 try {
                     userList = await api.getUsers() as User[];
-                } catch {
-                    userList = [
-                        { id: 'usr-1', firstName: 'Ahmet', lastName: 'Yılmaz', email: 'ahmet.yilmaz@grc.com', department: 'Uyum' },
-                        { id: 'usr-2', firstName: 'Mehmet', lastName: 'Demir', email: 'mehmet.demir@grc.com', department: 'Risk Yönetimi' },
-                        { id: 'usr-3', firstName: 'Ayşe', lastName: 'Kaya', email: 'ayse.kaya@grc.com', department: 'İç Kontrol' },
-                        { id: 'usr-4', firstName: 'Fatma', lastName: 'Çelik', email: 'fatma.celik@grc.com', department: 'BT' },
-                    ];
-                }
+                } catch { /* yetki yoksa boş liste */ }
                 setUsers(userList || []);
 
                 const res = await api.getControls() as any;
@@ -171,6 +171,8 @@ export function CreateFindingModal({
                         `${u.firstName} ${u.lastName}`.trim() === testContext.assignee?.trim()
                     );
                     if (matchedUser) initialAssigneeId = matchedUser.id;
+                } else if (prefillData) {
+                    initialControlId = prefillData.controlId || '';
                 } else if (controlContext) {
                     initialControlId = controlContext.id || '';
                     initialGMY = controlContext.gmy || '';
@@ -222,9 +224,11 @@ export function CreateFindingModal({
     };
 
     const handleActionChange = (index: number, field: string, value: any) => {
-        const copy = [...actions];
-        copy[index] = { ...copy[index], [field]: value };
-        setActions(copy);
+        setActions(prev => {
+            const copy = [...prev];
+            copy[index] = { ...copy[index], [field]: value };
+            return copy;
+        });
     };
 
     const addAction = () => {

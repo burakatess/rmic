@@ -93,6 +93,33 @@ export class RisksService {
                             controls: true,
                             findings: true,
                             actions: true,
+                            riskControls: true,
+                            riskActions: true,
+                        },
+                    },
+                    riskControls: {
+                        include: {
+                            riskControl: {
+                                select: {
+                                    id: true,
+                                    kontrolId: true,
+                                    kontrolTanimi: true,
+                                    status: true,
+                                    butunlesikKontrolSeviyesi: true,
+                                },
+                            },
+                        },
+                    },
+                    riskActions: {
+                        include: {
+                            riskAction: {
+                                select: {
+                                    id: true,
+                                    aksiyonId: true,
+                                    status: true,
+                                    aksiyonTanimi: true,
+                                },
+                            },
                         },
                     },
                 },
@@ -733,5 +760,11 @@ export class RisksService {
         });
 
         return { message: 'Risk deleted successfully' };
+    }
+
+    async getCategories() {
+        return this.prisma.riskCategory.findMany({
+            orderBy: { name: 'asc' },
+        });
     }
 }

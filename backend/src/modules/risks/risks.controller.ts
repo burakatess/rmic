@@ -34,6 +34,11 @@ export class RisksController {
         return this.risksService.findAll(query);
     }
 
+    @Get('categories')
+    async getCategories() {
+        return this.risksService.getCategories();
+    }
+
     @Get(':id/relations')
     async getRelations(@Param('id') id: string) {
         return this.risksService.getRelations(id);

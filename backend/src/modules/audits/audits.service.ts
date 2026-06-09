@@ -131,7 +131,7 @@ export class AuditsService {
             responsiblePerson: responsiblePerson || null,
             riskId: riskId || null,
             controlId: controlId || null,
-            testRecordId: testRecordId || null,
+            
             findingType: findingType || null,
             summary: summary || null,
             gmy: gmy || null,
@@ -179,7 +179,7 @@ export class AuditsService {
                 risk: { select: { id: true, riskId: true, name: true } },
                 control: { select: { id: true, controlId: true, name: true } },
                 linkedRisks: { select: { id: true, riskId: true, name: true } },
-                testRecord: { select: { id: true, status: true } },
+                
                 _count: { select: { actions: true, followUps: true } },
             },
         });
@@ -199,7 +199,7 @@ export class AuditsService {
                         
                         status: act.status || 'BEKLIYOR',
                         controlId: finding.controlId,
-                        testRecordId: finding.testRecordId,
+                        
                         riskId: finding.riskId,
                     }
                 });
@@ -237,7 +237,7 @@ export class AuditsService {
             responsiblePerson: responsiblePerson !== undefined ? (responsiblePerson || null) : undefined,
             riskId: riskId !== undefined ? (riskId || null) : undefined,
             controlId: controlId !== undefined ? (controlId || null) : undefined,
-            testRecordId: testRecordId !== undefined ? (testRecordId || null) : undefined,
+            
             findingType: findingType !== undefined ? (findingType || null) : undefined,
             summary: summary !== undefined ? (summary || null) : undefined,
             gmy: gmy !== undefined ? (gmy || null) : undefined,
@@ -274,7 +274,7 @@ export class AuditsService {
                 risk: { select: { id: true, riskId: true, name: true } },
                 control: { select: { id: true, controlId: true, name: true } },
                 linkedRisks: { select: { id: true, riskId: true, name: true } },
-                testRecord: { select: { id: true, status: true } },
+                
                 _count: { select: { actions: true, followUps: true } },
             },
         });
@@ -709,7 +709,7 @@ export class AuditsService {
                 
                 status: data.status || 'BEKLIYOR',
                 controlId: finding.controlId,
-                testRecordId: finding.testRecordId,
+                
                 riskId: finding.riskId,
             },
             include: {

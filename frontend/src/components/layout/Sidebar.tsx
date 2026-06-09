@@ -51,11 +51,10 @@ const navigation: NavItem[] = [
             </svg>
         ),
         children: [
-            { label: 'Risk Girişi ve Hesaplama', href: '/risks/entry', permission: 'risk:create' },
-            { label: 'RYK Kontrolleri', href: '/risks/controls' },
             { label: 'Risk Envanteri', href: '/risks' },
-            { label: 'Risk Değerlendirme', href: '/risks/assessment', permission: 'risk:assess' },
-            { label: 'Risk Tedavi', href: '/risks/treatment', permission: 'risk:treat' },
+            { label: 'Kontrol Alanı', href: '/risks/controls' },
+            { label: 'Aksiyon Tablosu', href: '/risks/actions' },
+            { label: 'RCA Haritalama', href: '/risks/rca-mapping' },
         ],
     },
     {
@@ -123,8 +122,8 @@ const navigation: NavItem[] = [
         ),
         children: [
             { label: 'Bulgular', href: '/findings' },
-            { label: 'Bulgu Takip Çalışmaları', href: '/follow-ups', permission: 'finding:view' },
             { label: 'Aksiyonlar', href: '/actions', permission: 'action:view' },
+            { label: 'Bulgu Takip Çalışmaları', href: '/follow-ups', permission: 'finding:view' },
             { label: 'Etkinlik Değerlendirmeleri', href: '/actions/effectiveness', permission: 'action:effectiveness' },
         ],
     },
@@ -237,7 +236,7 @@ export default function Sidebar() {
 function NavItemComponent({ item, pathname }: { item: NavItem; pathname: string }) {
     const isActive = item.href
         ? pathname === item.href
-        : item.children?.some((child) => pathname.startsWith(child.href));
+        : item.children?.some((child) => pathname === child.href || (child.href !== '/risks' && pathname.startsWith(child.href)));
 
     if (item.children) {
         return (
@@ -256,7 +255,7 @@ function NavItemComponent({ item, pathname }: { item: NavItem; pathname: string 
                                 <li>
                                     <Link
                                         href={child.href}
-                                        className={`block rounded-md px-3 py-2 text-[13px] transition-all duration-200 hover:bg-slate-800 hover:text-white ${pathname === child.href ? 'text-blue-400 font-medium bg-slate-800/50' : 'text-slate-400'}`}
+                                        className={`block rounded-md px-3 py-2 text-[13px] transition-all duration-200 hover:bg-slate-800 hover:text-white ${pathname === child.href || (child.href !== '/risks' && pathname.startsWith(child.href)) ? 'text-blue-400 font-medium bg-slate-800/50' : 'text-slate-400'}`}
                                     >
                                         {child.label}
                                     </Link>

@@ -348,6 +348,7 @@ export default function FindingDetailPage() {
     const [activeTab, setActiveTab] = useState<Tab>('detay');
 
     const [addActionOpen, setAddActionOpen] = useState(false);
+    const [editAction, setEditAction] = useState<any | null>(null);
     const [followUpOpen, setFollowUpOpen] = useState(false);
     const [selectedFollowUp, setSelectedFollowUp] = useState<FollowUp | null>(null);
 
@@ -675,10 +676,23 @@ export default function FindingDetailPage() {
                                                     </svg>
                                                 </div>
                                                 <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                                        <span className="font-mono text-xs text-slate-500 font-semibold">{action.actionId}</span>
-                                                        <StatusBadge variant={sCfg.variant}>{sCfg.label}</StatusBadge>
-                                                        {aOverdue && <StatusBadge variant="critical" dot>Gecikmiş</StatusBadge>}
+                                                    <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <Link href={`/actions/${action.id}`} className="font-mono text-xs text-orange-600 font-semibold hover:underline">{action.actionId}</Link>
+                                                            <StatusBadge variant={sCfg.variant}>{sCfg.label}</StatusBadge>
+                                                            {aOverdue && <StatusBadge variant="critical" dot>Gecikmiş</StatusBadge>}
+                                                        </div>
+                                                        {action.status !== 'KAPATILDI' && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    setEditAction(action);
+                                                                    setAddActionOpen(true);
+                                                                }}
+                                                                className="text-xs text-indigo-600 hover:text-indigo-800 font-bold bg-indigo-50 hover:bg-indigo-100/80 px-2.5 py-1 rounded transition-colors flex items-center gap-1 shadow-sm border border-indigo-200/50"
+                                                            >
+                                                                ✏️ Düzenle
+                                                            </button>
+                                                        )}
                                                     </div>
                                                     <p className="text-sm text-slate-800 leading-relaxed mb-3">{action.description}</p>
                                                     <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">
@@ -761,13 +775,13 @@ export default function FindingDetailPage() {
                                             <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50 border-b border-slate-100">
                                                 <div>
                                                     <div className="flex items-center gap-2 flex-wrap">
-                                                        <span className="font-mono text-sm font-bold text-slate-700">{fu.followUpId}</span>
+                                                        <Link href={`/follow-ups/${fu.id}`} className="font-mono text-sm font-bold text-violet-700 hover:underline">{fu.followUpId}</Link>
                                                         <StatusBadge variant={fuCfg.variant}>{fuCfg.label}</StatusBadge>
                                                         {resOutCfg && <StatusBadge variant={resOutCfg.variant} dot>{resOutCfg.label}</StatusBadge>}
                                                         {fu.newActionRequired && <StatusBadge variant="high">⚡ Yeni Aksiyon Gerekli</StatusBadge>}
                                                     </div>
                                                     <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
-                                                        {linkedAction && <span className="text-indigo-600 font-medium">⚡ {linkedAction.actionId}</span>}
+                                                        {linkedAction && <Link href={`/actions/${linkedAction.id}`} className="text-orange-600 font-medium hover:underline">⚡ {linkedAction.actionId}</Link>}
                                                         {fu.plannedDate && <span>📅 Planlanan: {fmt(fu.plannedDate)}</span>}
                                                         {fu.newFollowUpDate && <span className="text-amber-600">↩ Yeni: {fmt(fu.newFollowUpDate)}</span>}
                                                         <span>{fmtDatetime(fu.createdAt)}</span>
@@ -996,9 +1010,17 @@ export default function FindingDetailPage() {
                 <AddActionModal
                     findingId={finding.id}
                     isOpen={addActionOpen}
-                    onClose={() => setAddActionOpen(false)}
+                    action={editAction}
+                    onClose={() => {
+                        setAddActionOpen(false);
+                        setEditAction(null);
+                    }}
                     onSubmit={async (data) => {
-                        await api.createFindingAction(finding.id, data);
+                        if (editAction) {
+                            await api.updateFindingAction(finding.id, editAction.id, data);
+                        } else {
+                            await api.createFindingAction(finding.id, data);
+                        }
                         load(); setActiveTab('aksiyonlar');
                     }}
                 />

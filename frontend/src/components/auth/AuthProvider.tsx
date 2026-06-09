@@ -137,23 +137,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.push('/login');
   }, [router]);
 
+  const isAdmin = useCallback(() => {
+    if (!user) return false;
+    return user.role.name === 'SYSTEM_ADMIN' ||
+           user.role.name === 'ADMIN' ||
+           user.role.permissions.includes('*');
+  }, [user]);
+
   const hasPermission = useCallback((permission: string) => {
     if (!user) return false;
-    if (user.role.name === 'ADMIN') return true;
+    if (isAdmin()) return true;
     return user.role.permissions.includes(permission);
-  }, [user]);
+  }, [user, isAdmin]);
 
   const hasAnyPermission = useCallback((permissions: string[]) => {
     if (!user) return false;
-    if (user.role.name === 'ADMIN') return true;
+    if (isAdmin()) return true;
     return permissions.some(p => user.role.permissions.includes(p));
-  }, [user]);
+  }, [user, isAdmin]);
 
   const hasAllPermissions = useCallback((permissions: string[]) => {
     if (!user) return false;
-    if (user.role.name === 'ADMIN') return true;
+    if (isAdmin()) return true;
     return permissions.every(p => user.role.permissions.includes(p));
-  }, [user]);
+  }, [user, isAdmin]);
 
   const value: AuthContextType = {
     user,

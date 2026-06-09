@@ -72,14 +72,8 @@ export default function NewControlPage() {
             if (Array.isArray(data)) {
                 setUsers(data);
             }
-        } catch (error) {
-            console.error('Failed to load users from API, falling back to mock users:', error);
-            setUsers([
-                { id: '1', firstName: 'Ayşe', lastName: 'Kaya', email: 'ayse.control@grc.com', department: 'Bilgi Güvenliği' },
-                { id: '2', firstName: 'Ahmet', lastName: 'Yılmaz', email: 'ahmet.risk@grc.com', department: 'BT Ağ Yönetimi' },
-                { id: '3', firstName: 'Mehmet', lastName: 'Öztürk', email: 'mehmet.auditor@grc.com', department: 'İç Kontrol' },
-                { id: '4', firstName: 'Can', lastName: 'Demir', email: 'can.owner@grc.com', department: 'Altyapı' },
-            ]);
+        } catch {
+            // Yetki yoksa boş liste — mock data kullanılmaz
         }
     };
 

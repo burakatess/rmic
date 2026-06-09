@@ -78,14 +78,8 @@ export default function FindingEditPage() {
                 let userList: User[] = [];
                 try {
                     userList = await api.getUsers() as User[];
-                } catch (e) {
-                    console.warn('LDAP Users Access Denied. Using fallback mock.', e);
-                    userList = [
-                        { id: 'usr-1', firstName: 'Ahmet', lastName: 'Yılmaz', email: 'ahmet.yilmaz@grc.com', department: 'Uyum' },
-                        { id: 'usr-2', firstName: 'Mehmet', lastName: 'Demir', email: 'mehmet.demir@grc.com', department: 'Risk Yönetimi' },
-                        { id: 'usr-3', firstName: 'Ayşe', lastName: 'Kaya', email: 'ayse.kaya@grc.com', department: 'İç Kontrol' },
-                        { id: 'usr-4', firstName: 'Fatma', lastName: 'Çelik', email: 'fatma.celik@grc.com', department: 'Bilgi Teknolojileri' }
-                    ];
+                } catch {
+                    // Yetki yoksa boş liste — mock data kullanılmaz
                 }
                 setUsers(userList || []);
 

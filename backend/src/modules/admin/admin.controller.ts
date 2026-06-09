@@ -24,6 +24,7 @@ export class AdminController {
 
     // Users
     @Get('users')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async findAllUsers(
         @Query('search') search?: string,
         @Query('roleId') roleId?: string,

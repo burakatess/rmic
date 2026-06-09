@@ -17,6 +17,7 @@ interface AddActionModalProps {
     onSubmit: (data: any) => Promise<void>;
     findingId: string;
     findingData?: any;
+    action?: any;
 }
 
 interface ActionFormData {
@@ -37,7 +38,7 @@ const STATUS_OPTIONS = [
     { value: 'KAPATILDI', label: 'Kapatıldı' },
 ];
 
-export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, findingData }: AddActionModalProps) {
+export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, findingData, action }: AddActionModalProps) {
     const [formData, setFormData] = useState<ActionFormData>({
         description: '',
         ownerId: '',
@@ -60,29 +61,44 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
             try {
                 const userList = await api.getUsers() as User[];
                 setUsers(userList || []);
-            } catch (err) {
-                console.error('Failed to load users, using fallback:', err);
-                setUsers([
-                    { id: 'usr-1', firstName: 'Ahmet', lastName: 'Yılmaz', email: 'ahmet.yilmaz@grc.com', department: 'Uyum' },
-                    { id: 'usr-2', firstName: 'Mehmet', lastName: 'Demir', email: 'mehmet.demir@grc.com', department: 'Risk Yönetimi' },
-                    { id: 'usr-3', firstName: 'Ayşe', lastName: 'Kaya', email: 'ayse.kaya@grc.com', department: 'İç Kontrol' },
-                    { id: 'usr-4', firstName: 'Fatma', lastName: 'Çelik', email: 'fatma.celik@grc.com', department: 'BT' },
-                ]);
-            } finally {
+            } catch { /* yetki yoksa boş liste */ } finally {
                 setLoadingUsers(false);
             }
         };
 
         fetchUsers();
 
-        // Inherit default department if available in findingData
-        if (findingData?.relatedDepartment) {
-            setFormData(prev => ({
-                ...prev,
-                responsibleDepartment: findingData.relatedDepartment
-            }));
+        if (action) {
+            const formatD = (d: any) => {
+                if (!d) return '';
+                try {
+                    return new Date(d).toISOString().split('T')[0];
+                } catch {
+                    return '';
+                }
+            };
+            setFormData({
+                description: action.description || '',
+                ownerId: action.owner?.id || action.ownerId || '',
+                responsibleDepartment: action.responsibleDepartment || '',
+                dueDate: formatD(action.dueDate),
+                status: action.status || 'BEKLIYOR',
+                evidence: action.evidence || '',
+                notes: action.notes || '',
+            });
+        } else {
+            setFormData({
+                description: '',
+                ownerId: '',
+                responsibleDepartment: findingData?.relatedDepartment || '',
+                dueDate: '',
+                status: 'BEKLIYOR',
+                evidence: '',
+                notes: '',
+            });
         }
-    }, [isOpen, findingData]);
+        setErrors({});
+    }, [isOpen, findingData, action]);
 
     const validateForm = useCallback(() => {
         const newErrors: Record<string, string> = {};
@@ -97,7 +113,7 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
 
         if (!formData.dueDate) {
             newErrors.dueDate = 'Hedeflenen tamamlanma tarihi girilmelidir.';
-        } else {
+        } else if (!action) {
             const selectedDate = new Date(formData.dueDate);
             const today = new Date();
             today.setHours(0, 0, 0, 0);
@@ -108,7 +124,7 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
 
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
-    }, [formData]);
+    }, [formData, action]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -157,9 +173,11 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
                     {/* Header */}
                     <div className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                         <div>
-                            <h2 className="text-lg font-bold text-slate-800">Yeni Düzeltici Aksiyon Ekle</h2>
+                            <h2 className="text-lg font-bold text-slate-800">
+                                {action ? 'Düzeltici Aksiyonu Düzenle' : 'Yeni Düzeltici Aksiyon Ekle'}
+                            </h2>
                             <p className="text-xs text-slate-500 mt-1">
-                                Bulguyu kapatmaya yönelik düzeltici aksiyon adımı tanımlayın.
+                                {action ? 'Düzeltici aksiyon detaylarını güncelleyin.' : 'Bulguyu kapatmaya yönelik düzeltici aksiyon adımı tanımlayın.'}
                             </p>
                         </div>
                         <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-slate-100 text-slate-600">
@@ -324,7 +342,7 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
                             {submitting && (
                                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                             )}
-                            {submitting ? 'Kaydediliyor...' : 'Aksiyonu Ekle'}
+                            {submitting ? 'Kaydediliyor...' : (action ? 'Değişiklikleri Kaydet' : 'Aksiyonu Ekle')}
                         </button>
                     </div>
 

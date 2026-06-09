@@ -55,25 +55,90 @@ model RefreshToken {
 }
 
 // ==========================================
+// DIRECTORATE (İlgili Direktörlük — FK tabanlı)
+// ==========================================
+
+model Directorate {
+  id       String  @id @default(cuid())
+  name     String  @unique  // "BT Ağ Yönetimi"
+  code     String? @unique  // "BT-AG"
+  gmy      String?          // Bağlı GMY bilgisi
+  isActive Boolean @default(true)
+
+  // Relations
+  controls      Control[]        @relation("ControlDirectorate")
+  findings      Finding[]        @relation("FindingDirectorate")
+  actions       Action[]         @relation("ActionDirectorate")
+  followUps     FindingFollowUp[] @relation("FollowUpDirectorate")
+  controlTests  ControlTest[]    @relation("ControlTestDirectorate")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+// ==========================================
 // RISK MANAGEMENT
 // ==========================================
 
 model Risk {
   id          String     @id @default(cuid())
   riskId      String     @unique // R-2024-001
+  kayitId     String?    // Jira kayıt ID (eski sistem referansı)
   name        String
   description String     @db.Text
   status      RiskStatus @default(IDENTIFIED)
+  ozet        String?    @db.Text  // Özet / summary
+
+  // Organizasyon
+  ilgiliGmy   String?   // İlgili Genel Müdür Yardımcılığı
+  surec       String?   // Süreç
+  altSurec    String?   // Alt Süreç
+  flagForIT   Boolean   @default(false)  // Flag 4 IT
 
   // Owner
   owner   User   @relation("RiskOwner", fields: [ownerId], references: [id])
   ownerId String
+  riskSorumlusu String?  // Risk Sorumlusu (serbest metin, LDAP gelince FK olacak)
 
   // Category
   category   RiskCategory @relation(fields: [categoryId], references: [id])
   categoryId String
 
-  // Inherent Risk Scoring
+  // Etki Boyutları (1-5, ağırlıklı)
+  finansalEtki          Int?  // Finansal Etki (%30)
+  itibarEtkisi          Int?  // İtibar Etkisi (%30)
+  regulasyonEtkisi      Int?  // Regülasyon Etkisi (%20)
+  musteriEtkisi         Int?  // Müşteri Etkisi (%20)
+  gizlilikEtkisi        Int?  // Gizlilik Etkisi (%35, BT)
+  butunlukEtkisi        Int?  // Bütünlük Etkisi (%30, BT)
+  erisilebilirlikEtkisi Int?  // Erişilebilirlik Etkisi (%35, BT)
+
+  // Hesaplanan Değerler
+  etki     Float?  // Ağırlıklı toplam etki
+  olasilik Int?    // Olasılık (1-5)
+
+  // Doğal Risk
+  dogalRiskPuani    Float?   // etki * olasilik
+  dogalRiskSkoru    Int?     // 1-25
+  dogalRiskSeviyesi String?  // DÜŞÜK / ORTA / YÜKSEK / KRİTİK
+
+  // Bütünleşik Kontrol
+  butunlesikKontrolPuani    Float?
+  butunlesikKontrolSkoru    Int?
+  butunlesikKontrolSeviyesi String?
+
+  // Kalıntı Risk
+  kalintiRiskPuani    Float?
+  kalintiRiskSkoru    Int?
+  kalintiRiskSeviyesi String?
+
+  // Risk İşleme
+  riskIsleme      String?   // KABUL / AZALT / TRANSFER / KAÇIN
+  mutabakatTarihi DateTime?
+
+  // Inherent Risk Scoring (geriye dönük uyumluluk)
   inherentProbability Int @default(1) // 1-5
   inherentImpact      Int @default(1) // 1-5
   inherentRiskScore   Int @default(1) // Auto-calculated: probability * impact
@@ -97,16 +162,18 @@ model Risk {
   version Int @default(1)
 
   // Relations
-  controls    ControlRiskMapping[]
-  findings    Finding[]
-  linkedFindings Finding[] @relation("FindingRisks")
-  actions     Action[]
-  regulations RiskRegulation[]
-  assessments RiskAssessment[]
-  history     RiskHistory[]
-  processes   ProcessRisk[]
-  systems     SystemRisk[]
-  riskEntries RiskEntry[]  // Synced from Risk Entry screen
+  controls        ControlRiskMapping[]
+  findings        Finding[]
+  linkedFindings  Finding[] @relation("FindingRisks")
+  actions         Action[]
+  regulations     RiskRegulation[]
+  assessments     RiskAssessment[]
+  history         RiskHistory[]
+  processes       ProcessRisk[]
+  systems         SystemRisk[]
+  riskEntries     RiskEntry[]
+  riskControls    RiskControlRisk[]   // Risk Yönetimi Kontrolleri
+  riskActions     RiskActionRisk[]    // Risk Yönetimi Aksiyonları
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -240,7 +307,8 @@ model Control {
   status         ControlStatus    @default(ACTIVE)
 
   // Extended operational fields
-  directorate    String?          // İlgili Direktörlük
+  directorate    String?          // Legacy: serbest metin (geriye dönük uyumluluk)
+  directorateId  String?          // FK: Directorate tablosu
   gmy            String?          // İlgili Genel Müdür Yardımcılığı
   mehaz          String?          // Mehaz / Dayanak
   testSteps      String?          @db.Text // Test adımları
@@ -265,12 +333,12 @@ model Control {
   lastTestResult      TestResult?
 
   // Relations
-  risks       ControlRiskMapping[]
-  regulations ControlRegulation[]
-  tests       ControlTest[]
-  findings    Finding[]
-  testRecords TestRecord[]
-  actions     Action[]
+  directorateRel  Directorate?       @relation("ControlDirectorate", fields: [directorateId], references: [id])
+  risks           ControlRiskMapping[]
+  regulations     ControlRegulation[]
+  tests           ControlTest[]
+  findings        Finding[]
+  actions         Action[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -280,6 +348,7 @@ model Control {
   @@index([reviewerId])
   @@index([effectivenessStatus])
   @@index([status])
+  @@index([directorateId])
 }
 
 model ControlRiskMapping {
@@ -296,29 +365,68 @@ model ControlRiskMapping {
   @@index([riskId])
 }
 
+// Birleştirilmiş test modeli (eski ControlTest + TestRecord → tek model)
 model ControlTest {
-  id           String     @id @default(cuid())
-  control      Control    @relation(fields: [controlId], references: [id], onDelete: Cascade)
-  controlId    String
-  testDate     DateTime
-  tester       String
-  result       TestResult
-  evidenceUrls String[]
-  findings     String?    @db.Text
-  notes        String?    @db.Text
-  hasFinding   Boolean    @default(false)
+  id        String  @id @default(cuid())
+  testNo    String  @unique   // T-YYYY-XXXX (otomatik)
+  control   Control @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  controlId String
+
+  // Planlama
+  plannedDate     DateTime          // Test yapılması planlanan tarih
+  isAutoGenerated Boolean @default(false) // Frekansa göre otomatik mi?
+  sprint          String?
+
+  // Atama
+  assigneeId         String?
+  secondControllerId String?
+
+  // Direktörlük (FK)
+  directorate   Directorate? @relation("ControlTestDirectorate", fields: [directorateId], references: [id])
+  directorateId String?
+
+  // İçerik
+  summary         String?
+  description     String?  @db.Text
+  resultText      String?  @db.Text  // Kontrol sonucu açıklaması
+  evidenceSummary String?  @db.Text  // Kanıt özeti
+  evidenceUrls    String[]           // Kanıt URL listesi
+
+  // Statü
+  status        ControlTestStatus  @default(BEKLIYOR)
+  findingStatus FindingTestStatus?  // Tamamlanınca dolar
 
   // Approval Workflow
-  approvalStatus  ApprovalStatus @default(DRAFT)
-  approvedBy      String?
   approvedAt      DateTime?
+  approvedById    String?
   rejectionReason String?
 
+  // Tarihler
+  completedAt DateTime?
+
+  // İlgili bulgular
+  findings Finding[]
+
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([controlId])
-  @@index([testDate])
-  @@index([approvalStatus])
+  @@index([status])
+  @@index([plannedDate])
+  @@index([directorateId])
+  @@index([assigneeId])
+}
+
+enum ControlTestStatus {
+  BEKLIYOR       // Henüz başlanmadı
+  DEVAM_EDIYOR   // Test yürütülüyor
+  TAMAMLANDI     // Test bitti, onay bekliyor
+  ONAYLANDI      // 2. kontrolcü onayladı
+}
+
+enum FindingTestStatus {
+  BULGUSU_YOK  // Kontrol etkin
+  BULGUSU_VAR  // Bulgu tespit edildi
 }
 
 enum ControlType {
@@ -377,39 +485,7 @@ enum ApprovalStatus {
   REJECTED         // Reddedildi
 }
 
-// Otomatik üretilen test kayıtları
-model TestRecord {
-  id            String           @id @default(cuid())
-  testId        String?          @unique
-  control       Control          @relation(fields: [controlId], references: [id], onDelete: Cascade)
-  controlId     String
-  dueDate       DateTime
-  status        TestRecordStatus @default(PENDING)
-  assigneeId    String?
-  completedAt   DateTime?
-  testResult    TestResult?
-  notes         String?          @db.Text
-  hasFinding    Boolean          @default(false)
-  findingId     String?          // Bağlı bulgu
-
-  findings      Finding[]
-  actions       Action[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([controlId])
-  @@index([status])
-  @@index([dueDate])
-  @@index([assigneeId])
-}
-
-enum TestRecordStatus {
-  PENDING
-  IN_PROGRESS
-  COMPLETED
-  OVERDUE
-}
+// TestRecord kaldırıldı — ControlTest'e absorbe edildi (Adım 12)
 
 // ==========================================
 // AUDIT & FINDINGS
@@ -476,45 +552,46 @@ model Finding {
   // Assignee
   assigneeId  String?          // User id reference
 
-  // Optional relations - Finding can be linked to risk, control, or neither
-  risk      Risk?    @relation(fields: [riskId], references: [id])
+  // Direktörlük (FK)
+  directorateRel Directorate? @relation("FindingDirectorate", fields: [directorateId], references: [id])
+  directorateId  String?
+
+  // Optional relations
+  risk      Risk?        @relation(fields: [riskId], references: [id])
   riskId    String?
-  control   Control? @relation(fields: [controlId], references: [id])
+  control   Control?     @relation(fields: [controlId], references: [id])
   controlId String?
 
-  // Many-to-many relationship with Risks
-  linkedRisks Risk[]   @relation("FindingRisks")
+  // ControlTest bağlantısı (TestRecord yerine)
+  controlTest   ControlTest? @relation(fields: [controlTestId], references: [id])
+  controlTestId String?
 
-  // TestRecord link
-  testRecord   TestRecord? @relation(fields: [testRecordId], references: [id], onDelete: Cascade)
-  testRecordId String?
+  // Many-to-many with Risks
+  linkedRisks Risk[] @relation("FindingRisks")
 
   // Optional audit execution link
   auditExecution   AuditExecution? @relation(fields: [auditExecutionId], references: [id])
   auditExecutionId String?
 
-  // Mutabakat akışı (yeni alan — Jira BE projesi iş akışı)
-  workflowStatus   FindingWorkflowStatus  @default(TASLAK)
-  // Çözüm durumu (yeni alan — bulgunun gerçek kapatılma durumu)
+  // Mutabakat akışı
+  workflowStatus   FindingWorkflowStatus   @default(TASLAK)
   resolutionStatus FindingResolutionStatus @default(DEVAM_EDIYOR)
-  // İletişim Kişisi (LDAP entegrasyonuna kadar serbest metin)
   iletisimKisisi   String?
 
   // Extended detail fields
-  source                     FindingSource   @default(INTERNAL_AUDIT)
-  affectedSystem             String?
-  recommendation             String?         @db.Text
-  managementResponse         String?         @db.Text   // alias: birimCevabi
-  birimCevabi                String?         @db.Text   // Birim Cevabı / Yönetim Görüşü
-  internalControlAssessment  String?         @db.Text
-  currentStatusDetail        String?         @db.Text
-  targetResolutionDate       DateTime?
-  closedDate                 DateTime?
-  testDate                   DateTime?
-  attachment                 String?
-  sendEmail                  Boolean         @default(false)
-  relatedDepartment          String?
-  responsiblePerson          String?
+  source                    FindingSource @default(INTERNAL_AUDIT)
+  affectedSystem            String?
+  recommendation            String?       @db.Text
+  managementResponse        String?       @db.Text  // alias: birimCevabi
+  birimCevabi               String?       @db.Text  // Birim Cevabı
+  internalControlAssessment String?       @db.Text
+  currentStatusDetail       String?       @db.Text
+  targetResolutionDate      DateTime?     // Hesaplamalı: MAX(open actions.dueDate)
+  closedDate                DateTime?
+  testDate                  DateTime?
+  sendEmail                 Boolean       @default(false)
+  relatedDepartment         String?       // Legacy: free-text direktörlük
+  responsiblePerson         String?
 
   // Relations
   actions       Action[]
@@ -528,6 +605,8 @@ model Finding {
 
   @@index([riskId])
   @@index([controlId])
+  @@index([controlTestId])
+  @@index([directorateId])
   @@index([status])
   @@index([severity])
   @@index([assigneeId])
@@ -644,29 +723,32 @@ model FindingFollowUp {
   approvedBy                String?
   approvedAt                DateTime?
 
-  // Content
-  birimCevabi               String?   @db.Text   // Birim Cevabı
-  currentStatusDetail       String?   @db.Text   // Bu takipte güncel durum notu
-  internalControlAssessment String?   @db.Text   // İç Kontrol Değerlendirmesi
-  notes                     String?   @db.Text
-  secondControllerId        String?              // İkinci kontrolcü
-  sprint                    String?              // Sprint bilgisi
+  // Direktörlük (FK)
+  directorate   Directorate? @relation("FollowUpDirectorate", fields: [directorateId], references: [id])
+  directorateId String?
 
-  // Yeni aksiyon tetiklendi mi?
-  newActionRequired         Boolean  @default(false)
-  newActionId               String?  // Tetiklenen yeni action ID
+  // Content
+  birimCevabi               String?  @db.Text
+  currentStatusDetail       String?  @db.Text
+  internalControlAssessment String?  @db.Text
+  notes                     String?  @db.Text
+  secondControllerId        String?
+  sprint                    String?
+
+  // Yeni aksiyon
+  newActionRequired Boolean @default(false)
+  newActionId       String?
 
   // Attachments
-  attachments               FollowUpAttachment[]
-
-  // StatusHistory entries generated from this follow-up
-  statusHistoryEntries      FindingStatusHistory[]
+  attachments          FollowUpAttachment[]
+  statusHistoryEntries FindingStatusHistory[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([findingId])
   @@index([actionId])
+  @@index([directorateId])
   @@index([status])
   @@index([result])
 }
@@ -755,17 +837,17 @@ model Action {
   findingId   String
 
   // Optional: inherited context from Finding
-  control     Control?     @relation(fields: [controlId], references: [id])
+  control     Control? @relation(fields: [controlId], references: [id])
   controlId   String?
-  testRecord  TestRecord?  @relation(fields: [testRecordId], references: [id])
-  testRecordId String?
-  risk        Risk?        @relation(fields: [riskId], references: [id])
+  risk        Risk?    @relation(fields: [riskId], references: [id])
   riskId      String?
 
   // Responsibility
-  owner                 User   @relation("ActionOwner", fields: [ownerId], references: [id])
+  owner                 User         @relation("ActionOwner", fields: [ownerId], references: [id])
   ownerId               String
-  responsibleDepartment String?  // Sorumlu Direktörlük/Birim
+  responsibleDepartment String?      // Legacy free-text
+  directorate           Directorate? @relation("ActionDirectorate", fields: [directorateId], references: [id])
+  directorateId         String?
 
   // Status & Dates
   status      ActionStatus @default(BEKLIYOR)
@@ -794,6 +876,7 @@ model Action {
 
   @@index([findingId])
   @@index([ownerId])
+  @@index([directorateId])
   @@index([status])
   @@index([dueDate])
 }
@@ -834,7 +917,36 @@ enum ActionStatus {
 }
 
 // ==========================================
-// ATTACHMENT MODELLERI (Metadata-only, dosya içeriği sonraki sprint)
+// UNIFIED ATTACHMENT MODEL (Polimorfik — tek tablo, tüm entity'ler)
+// ==========================================
+
+model Attachment {
+  id           String               @id @default(cuid())
+  fileName     String               // storage dosya adı
+  originalName String               // kullanıcının yüklediği orijinal isim
+  mimeType     String               // "application/pdf", "image/png" vb.
+  sizeBytes    Int                  // byte cinsinden boyut
+  filePath     String?              // storage path (sonraki sprint)
+  entityType   AttachmentEntityType
+  entityId     String               // ilgili kaydın ID'si
+  uploadedById String?              // userId
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([uploadedById])
+}
+
+enum AttachmentEntityType {
+  CONTROL
+  CONTROL_TEST
+  FINDING
+  CORRECTIVE_ACTION
+  FINDING_FOLLOW_UP
+}
+
+// ==========================================
+// LEGACY ATTACHMENT MODELLERI (Geriye dönük uyumluluk — yeni kod Attachment kullanmalı)
 // ==========================================
 
 model FindingAttachment {
@@ -1193,10 +1305,134 @@ model RMControlTest {
   tester     String
   result     TestResult
   notes      String?  @db.Text
-  
+
   createdAt DateTime @default(now())
-  
+
   @@index([controlId])
   @@index([testDate])
+}
+
+// ==========================================
+// RİSK YÖNETİMİ — KONTROL ALANI
+// Risk'e özgü kontroller (Kontrol Envanteri'ndeki IKS kontrollerinden farklı)
+// ==========================================
+
+enum RiskControlStatus {
+  TASLAK
+  AKTIF
+  PASIF
+}
+
+enum RiskActionStatus {
+  ACIK
+  DEVAM_EDIYOR
+  TAMAMLANDI
+  GECIKTI
+  IPTAL
+}
+
+model RiskControl {
+  id      String            @id @default(cuid())
+  kontrolId String          @unique  // RC-YYYY-XXXX
+  kayitId   String?         // Jira kayıt ID
+
+  status  RiskControlStatus @default(AKTIF)
+
+  // Risk bağlamı (denormalized — RCA mapping görünümü için)
+  ilgiliGmy   String?
+  riskSahibi  String?
+  surec       String?
+  altSurec    String?
+  riskTanimi  String?  @db.Text
+
+  // Kontrol içeriği
+  kontrolTanimi           String   @db.Text
+  kontrolTuru             String?   // Önleyici / Düzeltici / Tespit Edici
+  kontrolIslevi           String?   // Manuel / Otomatik / Yarı Otomatik
+  kontrolIsletimeSekli    String?
+  kontrolIsletimDenetimi  String?
+  kontrolIsletimRaporlama String?
+  birSeviyeKontrolSikligi String?   // Günlük / Haftalık / Aylık / vb.
+
+  // Puanlama
+  kontrolPuani              Float?
+  kontrolSkoru              String?   // 1-25
+  butunlesikKontrolPuani    Float?
+  butunlesikKontrolSkoru    String?
+  butunlesikKontrolSeviyesi String?   // DÜŞÜK / ORTA / YÜKSEK
+
+  // Org
+  riskSorumlusu  String?
+  ozet           String?  @db.Text
+  mutabakatTarihi DateTime?
+
+  // İlişkiler
+  risks    RiskControlRisk[]
+  actions  RiskAction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Risk ↔ RiskControl many-to-many
+model RiskControlRisk {
+  id            String      @id @default(cuid())
+  risk          Risk        @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  riskId        String
+  riskControl   RiskControl @relation(fields: [riskControlId], references: [id], onDelete: Cascade)
+  riskControlId String
+
+  @@unique([riskId, riskControlId])
+  @@index([riskId])
+  @@index([riskControlId])
+}
+
+// ==========================================
+// RİSK YÖNETİMİ — AKSİYON TABLOSU
+// Risk'e özgü aksiyonlar (IKS CorrectiveAction'larından farklı)
+// ==========================================
+
+model RiskAction {
+  id        String           @id @default(cuid())
+  aksiyonId String           @unique  // RA-YYYY-XXXX
+  kayitId   String?          // Jira kayıt ID
+
+  status    RiskActionStatus @default(ACIK)
+
+  aksiyonTanimi     String   @db.Text
+  aksiyonSahibi     String?
+  aksiyonSorumlusu  String?
+  atanan            String?
+  ilgiliGmy         String?
+  ozet              String?  @db.Text
+  potaNo            String?
+  bulgReferansNo    String?
+
+  mutabakatTarihi            DateTime?
+  hedeflenenTamamlanmaTarihi DateTime?
+  tamamlanmaTarihi           DateTime?
+
+  // Kontrol ile ilişki
+  riskControl   RiskControl? @relation(fields: [riskControlId], references: [id])
+  riskControlId String?
+
+  // Risk ↔ RiskAction many-to-many
+  risks RiskActionRisk[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Risk ↔ RiskAction many-to-many
+model RiskActionRisk {
+  id           String     @id @default(cuid())
+  risk         Risk       @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  riskId       String
+  riskAction   RiskAction @relation(fields: [riskActionId], references: [id], onDelete: Cascade)
+  riskActionId String
+
+  @@unique([riskId, riskActionId])
+  @@index([riskId])
+  @@index([riskActionId])
 }
 

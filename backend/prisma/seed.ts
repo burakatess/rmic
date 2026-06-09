@@ -4,314 +4,454 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import * as bcrypt from 'bcrypt';
 
-const pool = new pg.Pool({
-    connectionString: process.env.DATABASE_URL,
-});
-
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
-async function main() {
-    console.log('🌱 Starting comprehensive database seed...');
+function randOf<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+function randInt(min: number, max: number) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+function futureDate(days: number): Date { const d = new Date(); d.setDate(d.getDate() + days); return d; }
+function pastDate(days: number): Date { const d = new Date(); d.setDate(d.getDate() - days); return d; }
 
-    // Clear existing data to guarantee clean state
-    console.log('🧹 Cleaning database...');
+async function main() {
+    console.log('🌱 Kapsamlı seed başlıyor...');
+
+    // ── 1. Temizlik ──────────────────────────────────────────────────────────
+    console.log('🧹 Temizleniyor...');
+    await prisma.findingStatusHistory.deleteMany({});
+    await prisma.findingStatusLog.deleteMany({});
+    await prisma.followUpAttachment.deleteMany({});
+    await prisma.actionAttachment.deleteMany({});
+    await prisma.findingAttachment.deleteMany({});
+    await prisma.attachment.deleteMany({});
+    await prisma.findingFollowUp.deleteMany({});
     await prisma.action.deleteMany({});
     await prisma.finding.deleteMany({});
     await prisma.controlTest.deleteMany({});
-    await prisma.testRecord.deleteMany({});
     await prisma.controlRiskMapping.deleteMany({});
+    await prisma.controlRegulation.deleteMany({});
+    await prisma.riskRegulation.deleteMany({});
+    await prisma.regulationArticle.deleteMany({});
+    await prisma.regulation.deleteMany({});
+    await prisma.riskAssessment.deleteMany({});
+    await prisma.riskHistory.deleteMany({});
     await prisma.control.deleteMany({});
     await prisma.risk.deleteMany({});
+    await prisma.riskCategory.deleteMany({});
+    await prisma.riskEntryRMControl.deleteMany({});
+    await prisma.riskManagementControl.deleteMany({});
+    await prisma.riskEntry.deleteMany({});
+    await prisma.processRisk.deleteMany({});
+    await prisma.systemRisk.deleteMany({});
+    await prisma.process.deleteMany({});
+    await prisma.system.deleteMany({});
+    await prisma.auditLog.deleteMany({});
+    await prisma.refreshToken.deleteMany({});
     await prisma.user.deleteMany({});
     await prisma.role.deleteMany({});
+    await prisma.directorate.deleteMany({});
+    await prisma.systemOption.deleteMany({});
+    await prisma.parameter.deleteMany({});
+    await prisma.auditExecution.deleteMany({});
+    await prisma.auditPlan.deleteMany({});
+    console.log('✅ Temizlik tamamlandı');
 
-    // Create Roles
-    console.log('👥 Creating roles...');
-    const roles = await Promise.all([
-        prisma.role.create({
-            data: {
-                name: 'ADMIN',
-                description: 'Sistem Yöneticisi',
-                permissions: ['dashboard:view', 'control:view', 'control:create', 'control:update', 'control:delete', 'control:test', 'control:approve', 'finding:view', 'action:view'],
-            }
-        }),
-        prisma.role.create({
-            data: {
-                name: 'RISK_MANAGER',
-                description: 'Risk Yöneticisi',
-                permissions: ['dashboard:view', 'control:view', 'control:create', 'control:update', 'finding:view', 'action:view'],
-            }
-        }),
-        prisma.role.create({
-            data: {
-                name: 'AUDITOR',
-                description: 'İç Denetçi',
-                permissions: ['dashboard:view', 'control:view', 'control:test', 'control:approve', 'finding:view', 'finding:create', 'action:view'],
-            }
-        }),
-        prisma.role.create({
-            data: {
-                name: 'CONTROL_OWNER',
-                description: 'Kontrol Sahibi',
-                permissions: ['dashboard:view', 'control:view', 'control:update', 'control:test'],
-            }
-        }),
-        prisma.role.create({
-            data: {
-                name: 'VIEWER',
-                description: 'Görüntüleyici',
-                permissions: ['dashboard:view', 'control:view', 'finding:view', 'action:view'],
-            }
-        }),
+    // ── 2. Roller ────────────────────────────────────────────────────────────
+    const [adminRole, managerRole, auditorRole, analystRole, viewerRole] = await Promise.all([
+        prisma.role.create({ data: { name: 'SYSTEM_ADMIN',         permissions: ['*'] } }),
+        prisma.role.create({ data: { name: 'RISK_CONTROL_MANAGER', permissions: ['finding:view','finding:create','finding:update','action:*','control:*'] } }),
+        prisma.role.create({ data: { name: 'AUDITOR',              permissions: ['finding:view','finding:create','action:view','action:create','control:view','control:test'] } }),
+        prisma.role.create({ data: { name: 'RISK_ANALYST',         permissions: ['finding:view','control:view'] } }),
+        prisma.role.create({ data: { name: 'VIEWER',               permissions: ['finding:view','control:view','action:view'] } }),
+    ]);
+    console.log('✅ 5 rol');
+
+    // ── 3. Direktörlükler ────────────────────────────────────────────────────
+    const [dirBTAg, dirBG, dirUG, dirAO, dirISY] = await Promise.all([
+        prisma.directorate.create({ data: { name: 'BT Ağ Yönetimi',       code: 'BT-AG', gmy: 'GMY-1' } }),
+        prisma.directorate.create({ data: { name: 'Bilgi Güvenliği',       code: 'BG',    gmy: 'GMY-1' } }),
+        prisma.directorate.create({ data: { name: 'Uygulama Geliştirme',   code: 'UG',    gmy: 'GMY-2' } }),
+        prisma.directorate.create({ data: { name: 'Altyapı Operasyonları', code: 'AO',    gmy: 'GMY-2' } }),
+        prisma.directorate.create({ data: { name: 'İş Süreçleri Yönetimi', code: 'ISY',   gmy: 'GMY-3' } }),
+    ]);
+    const directorates = [dirBTAg, dirBG, dirUG, dirAO, dirISY];
+    console.log('✅ 5 direktörlük');
+
+    // ── 4. Kullanıcılar ──────────────────────────────────────────────────────
+    const pw = await bcrypt.hash('Test1234!', 10);
+    const [uAdmin, uBurak, uMgr1, uMgr2, uAud1, uAud2, uAud3, uAna1, uAna2, uBirim] = await Promise.all([
+        prisma.user.create({ data: { email: 'admin@rmic.com',   passwordHash: pw, firstName: 'Sistem', lastName: 'Admin',   department: 'Sistem Yönetimi', roleId: adminRole.id,   isActive: true } }),
+        prisma.user.create({ data: { email: 'burak@rmic.com',   passwordHash: pw, firstName: 'Burak',  lastName: 'Ateş',    department: 'İç Kontrol',      roleId: adminRole.id,   isActive: true } }),
+        prisma.user.create({ data: { email: 'mgr1@rmic.com',    passwordHash: pw, firstName: 'Ahmet',  lastName: 'Yılmaz',  department: 'İç Kontrol',      roleId: managerRole.id, isActive: true } }),
+        prisma.user.create({ data: { email: 'mgr2@rmic.com',    passwordHash: pw, firstName: 'Fatma',  lastName: 'Kaya',    department: 'İç Kontrol',      roleId: managerRole.id, isActive: true } }),
+        prisma.user.create({ data: { email: 'aud1@rmic.com',    passwordHash: pw, firstName: 'Mehmet', lastName: 'Demir',   department: 'İç Kontrol',      roleId: auditorRole.id, isActive: true } }),
+        prisma.user.create({ data: { email: 'aud2@rmic.com',    passwordHash: pw, firstName: 'Zeynep', lastName: 'Çelik',   department: 'İç Kontrol',      roleId: auditorRole.id, isActive: true } }),
+        prisma.user.create({ data: { email: 'aud3@rmic.com',    passwordHash: pw, firstName: 'Ali',    lastName: 'Öztürk',  department: 'İç Kontrol',      roleId: auditorRole.id, isActive: true } }),
+        prisma.user.create({ data: { email: 'ana1@rmic.com',    passwordHash: pw, firstName: 'Ayşe',   lastName: 'Şahin',   department: 'Risk Yönetimi',   roleId: analystRole.id, isActive: true } }),
+        prisma.user.create({ data: { email: 'ana2@rmic.com',    passwordHash: pw, firstName: 'Emre',   lastName: 'Arslan',  department: 'Risk Yönetimi',   roleId: analystRole.id, isActive: true } }),
+        prisma.user.create({ data: { email: 'birim@rmic.com',   passwordHash: pw, firstName: 'Selin',  lastName: 'Doğan',   department: 'BT Ağ Yönetimi', roleId: viewerRole.id,  isActive: true } }),
+    ]);
+    const auditors = [uAud1, uAud2, uAud3];
+    const managers = [uMgr1, uMgr2];
+    console.log('✅ 10 kullanıcı');
+
+    // ── 5. Riskler ───────────────────────────────────────────────────────────
+    const [catOps, catBT, catUyum, catGuv] = await Promise.all([
+        prisma.riskCategory.create({ data: { name: 'Operasyonel Risk', color: '#EF4444' } }),
+        prisma.riskCategory.create({ data: { name: 'BT Riski',         color: '#8B5CF6' } }),
+        prisma.riskCategory.create({ data: { name: 'Uyum Riski',       color: '#F59E0B' } }),
+        prisma.riskCategory.create({ data: { name: 'Güvenlik Riski',   color: '#EC4899' } }),
     ]);
 
-    const adminRole = roles.find(r => r.name === 'ADMIN')!;
-    const riskManagerRole = roles.find(r => r.name === 'RISK_MANAGER')!;
-    const auditorRole = roles.find(r => r.name === 'AUDITOR')!;
-    const controlOwnerRole = roles.find(r => r.name === 'CONTROL_OWNER')!;
-    const viewerRole = roles.find(r => r.name === 'VIEWER')!;
+    const riskDefs = [
+        { id: 'R-2026-0001', name: 'Yetkisiz Ağ Erişimi',       cat: catBT.id,   p: 3, i: 4, rp: 2, ri: 3 },
+        { id: 'R-2026-0002', name: 'Veri Sızıntısı',            cat: catGuv.id,  p: 4, i: 5, rp: 2, ri: 4 },
+        { id: 'R-2026-0003', name: 'Sistem Kesintisi',           cat: catOps.id,  p: 3, i: 4, rp: 1, ri: 4 },
+        { id: 'R-2026-0004', name: 'Uyumsuzluk Riski',          cat: catUyum.id, p: 2, i: 4, rp: 2, ri: 3 },
+        { id: 'R-2026-0005', name: 'İş Sürekliliği Riski',      cat: catOps.id,  p: 2, i: 5, rp: 2, ri: 4 },
+        { id: 'R-2026-0006', name: 'Yazılım Güvenlik Açığı',    cat: catBT.id,   p: 4, i: 3, rp: 2, ri: 3 },
+        { id: 'R-2026-0007', name: 'Tedarikçi Riski',           cat: catOps.id,  p: 2, i: 3, rp: 2, ri: 2 },
+        { id: 'R-2026-0008', name: 'İçeriden Tehdit',           cat: catGuv.id,  p: 3, i: 4, rp: 2, ri: 3 },
+        { id: 'R-2026-0009', name: 'Kimlik Avı Saldırısı',      cat: catGuv.id,  p: 4, i: 3, rp: 2, ri: 2 },
+        { id: 'R-2026-0010', name: 'Veri Bütünlüğü Riski',      cat: catBT.id,   p: 3, i: 4, rp: 2, ri: 3 },
+    ];
+    const risks: any[] = [];
+    for (const r of riskDefs) {
+        risks.push(await prisma.risk.create({ data: {
+            riskId: r.id, name: r.name, description: `${r.name} — kapsamlı risk açıklaması`,
+            status: 'ASSESSED', ownerId: randOf([uAna1, uAna2, uMgr1]).id, categoryId: r.cat,
+            inherentProbability: r.p, inherentImpact: r.i, inherentRiskScore: r.p * r.i,
+            residualProbability: r.rp, residualImpact: r.ri, residualRiskScore: r.rp * r.ri,
+        }}));
+    }
+    console.log('✅ 10 risk');
 
-    // Create Users (Minimum 10)
-    console.log('👤 Creating users...');
-    const passwordHash = await bcrypt.hash('password123', 10);
-    const users = await Promise.all([
-        prisma.user.create({
-            data: { email: 'burak.admin@grc.com', passwordHash, firstName: 'Burak', lastName: 'Yılmaz', department: 'BT Ağ Yönetimi', roleId: adminRole.id }
-        }),
-        prisma.user.create({
-            data: { email: 'ahmet.risk@grc.com', passwordHash, firstName: 'Ahmet', lastName: 'Kaya', department: 'Bilgi Güvenliği', roleId: riskManagerRole.id }
-        }),
-        prisma.user.create({
-            data: { email: 'mehmet.auditor@grc.com', passwordHash, firstName: 'Mehmet', lastName: 'Demir', department: 'İç Denetim', roleId: auditorRole.id }
-        }),
-        prisma.user.create({
-            data: { email: 'ayse.control@grc.com', passwordHash, firstName: 'Ayşe', lastName: 'Çelik', department: 'Altyapı', roleId: controlOwnerRole.id }
-        }),
-        prisma.user.create({
-            data: { email: 'zeynep.viewer@grc.com', passwordHash, firstName: 'Zeynep', lastName: 'Yıldız', department: 'Operasyon', roleId: viewerRole.id }
-        }),
-        prisma.user.create({
-            data: { email: 'can.owner@grc.com', passwordHash, firstName: 'Can', lastName: 'Öztürk', department: 'Uygulama Geliştirme', roleId: controlOwnerRole.id }
-        }),
-        prisma.user.create({
-            data: { email: 'elif.risk@grc.com', passwordHash, firstName: 'Elif', lastName: 'Aydın', department: 'Bilgi Güvenliği', roleId: riskManagerRole.id }
-        }),
-        prisma.user.create({
-            data: { email: 'kemal.audit@grc.com', passwordHash, firstName: 'Kemal', lastName: 'Arslan', department: 'İç Denetim', roleId: auditorRole.id }
-        }),
-        prisma.user.create({
-            data: { email: 'deniz.owner@grc.com', passwordHash, firstName: 'Deniz', lastName: 'Koç', department: 'Operasyon', roleId: controlOwnerRole.id }
-        }),
-        prisma.user.create({
-            data: { email: 'selin.viewer@grc.com', passwordHash, firstName: 'Selin', lastName: 'Şahin', department: 'Uygulama Geliştirme', roleId: viewerRole.id }
-        }),
-    ]);
-
-    // Create Categories
-    const btdisiCat = await prisma.riskCategory.upsert({
-        where: { name: 'BT Dışı Riskler' },
-        update: {},
-        create: { name: 'BT Dışı Riskler', description: 'BT dışı operasyonel riskler', color: '#10b981' }
-    });
-
-    const btCat = await prisma.riskCategory.upsert({
-        where: { name: 'BT Riskleri' },
-        update: {},
-        create: { name: 'BT Riskleri', description: 'Bilgi teknolojileri riskleri', color: '#3b82f6' }
-    });
-
-    // Create Base Risks
-    console.log('⚠️ Creating risks...');
-    const riskData = [
-        { riskId: 'R-2026-0001', name: 'Yetkisiz Veri Erişimi', description: 'Kritik müşteri verilerine yetkisiz erişim sağlanması', categoryId: btCat.id },
-        { riskId: 'R-2026-0002', name: 'Sistem Kesintisi', description: 'Ana bankacılık sisteminde plan dışı kesinti yaşanması', categoryId: btCat.id },
-        { riskId: 'R-2026-0003', name: 'Mevzuata Uyumsuzluk', description: 'BDDK veya KVKK kurallarına uyum sağlanamaması', categoryId: btdisiCat.id },
-        { riskId: 'R-2026-0004', name: 'İç Suistimal', description: 'Çalışanların yetkilerini kötüye kullanarak suiistimal yapması', categoryId: btdisiCat.id },
-        { riskId: 'R-2026-0005', name: 'Tedarikçi Riski', description: 'Üçüncü taraf hizmet sağlayıcıların taahhütlerini yerine getirememesi', categoryId: btCat.id }
+    // ── 6. Kontroller ────────────────────────────────────────────────────────
+    const cDefs = [
+        { name: 'Ağ Erişim Hakları Gözden Geçirmesi',       type: 'BT',     freq: 'MONTHLY',    dir: dirBTAg, mehaz: 'BDDK 7.1.3' },
+        { name: 'Güvenlik Duvarı Kural Denetimi',            type: 'BT',     freq: 'MONTHLY',    dir: dirBG,   mehaz: 'ISO 27001 A.13' },
+        { name: 'Uygulama Erişim Log Kontrolü',              type: 'BT',     freq: 'MONTHLY',    dir: dirUG,   mehaz: 'BDDK 7.2.1' },
+        { name: 'Sunucu Yama Uyum Kontrolü',                 type: 'BT',     freq: 'MONTHLY',    dir: dirAO,   mehaz: 'ISO 27001 A.12.6' },
+        { name: 'Yedekleme Doğrulama Testi',                 type: 'BT',     freq: 'MONTHLY',    dir: dirAO,   mehaz: 'BDDK 8.3.1' },
+        { name: 'Sızdırmazlık Testi (Penetrasyon)',          type: 'BT',     freq: 'QUARTERLY',  dir: dirBG,   mehaz: 'ISO 27001 A.14.2', months: ['Mart','Haziran','Eylül','Aralık'] },
+        { name: 'Veri Sınıflandırma Uyumluluk Kontrolü',    type: 'BT',     freq: 'QUARTERLY',  dir: dirBG,   mehaz: 'GDPR Art.5',       months: ['Mart','Haziran','Eylül','Aralık'] },
+        { name: 'Uygulama Güvenlik Kodu Gözden Geçirme',    type: 'BT',     freq: 'QUARTERLY',  dir: dirUG,   mehaz: 'OWASP Top 10',     months: ['Mart','Haziran','Eylül','Aralık'] },
+        { name: 'Ağ Bant Genişliği Kapasite Planlaması',    type: 'BT',     freq: 'QUARTERLY',  dir: dirBTAg, mehaz: 'BDDK 8.1',         months: ['Mart','Haziran','Eylül','Aralık'] },
+        { name: 'BCP Test Tatbikatı',                        type: 'BT',     freq: 'SEMI_ANNUAL',dir: dirAO,   mehaz: 'ISO 22301',        months: ['Mart','Eylül'] },
+        { name: 'Bordro Doğrulama Kontrolü',                 type: 'BT_DISI',freq: 'MONTHLY',    dir: dirISY,  mehaz: 'İK-03' },
+        { name: 'Tedarikçi Fatura Mutabakatı',               type: 'BT_DISI',freq: 'MONTHLY',    dir: dirISY,  mehaz: 'SAT-02' },
+        { name: 'Nakit Yönetim Limitleri Kontrolü',          type: 'BT_DISI',freq: 'MONTHLY',    dir: dirISY,  mehaz: 'BDDK 5.2' },
+        { name: 'Müşteri Şikayet Takip Kontrolü',            type: 'BT_DISI',freq: 'MONTHLY',    dir: dirISY,  mehaz: 'MÜŞ-01' },
+        { name: 'Operasyonel Risk Göstergesi Takibi',        type: 'BT_DISI',freq: 'MONTHLY',    dir: dirISY,  mehaz: 'BDDK 3.1' },
+        { name: 'Kredi Riski Portföy Değerlendirmesi',       type: 'BT_DISI',freq: 'QUARTERLY',  dir: dirISY,  mehaz: 'Basel III',        months: ['Mart','Haziran','Eylül','Aralık'] },
+        { name: 'Yasal Mevzuat Uyum Değerlendirmesi',        type: 'BT_DISI',freq: 'QUARTERLY',  dir: dirISY,  mehaz: 'SPK 5.1',          months: ['Mart','Haziran','Eylül','Aralık'] },
+        { name: 'Personel Yetki Matrisi Gözden Geçirme',    type: 'BT_DISI',freq: 'QUARTERLY',  dir: dirISY,  mehaz: 'YET-01',           months: ['Mart','Haziran','Eylül','Aralık'] },
+        { name: 'İş Sürekliliği Planı Güncelleme',           type: 'BT_DISI',freq: 'SEMI_ANNUAL',dir: dirISY,  mehaz: 'ISO 22301',        months: ['Haziran','Aralık'] },
+        { name: 'KVKK Uyumluluk Değerlendirmesi',            type: 'BT',     freq: 'SEMI_ANNUAL',dir: dirBG,   mehaz: 'KVKK Md.12',       months: ['Haziran','Aralık'] },
+        { name: 'ISO 27001 İç Denetim',                      type: 'BT',     freq: 'ANNUAL',     dir: dirBG,   mehaz: 'ISO 27001',        months: ['Mart'] },
+        { name: 'Yıllık Risk Değerlendirmesi',               type: 'BT_DISI',freq: 'ANNUAL',     dir: dirISY,  mehaz: 'BDDK 1.1',         months: ['Ocak'] },
+        { name: 'Tüm Kullanıcı Hesapları Yıllık Gözden Geçirme', type: 'BT', freq: 'ANNUAL',    dir: dirBTAg, mehaz: 'ISO 27001 A.9',    months: ['Ocak'] },
+        { name: 'Kritik Sistem Değişiklik Kontrolü',          type: 'BT',    freq: 'AD_HOC',     dir: dirAO,   mehaz: 'ITIL',             months: ['Ocak'] },
+        { name: 'Acil Durum Müdahale Tatbikatı',              type: 'BT',    freq: 'AD_HOC',     dir: dirBG,   mehaz: 'ISO 27001 A.16',   months: ['Şubat'] },
+        { name: 'Güvenlik Olay Log Taraması',                 type: 'BT',    freq: 'WEEKLY',     dir: dirBG,   mehaz: 'SOC Prosedürü' },
+        { name: 'Yedekleme Tamamlanma Doğrulama',             type: 'BT',    freq: 'WEEKLY',     dir: dirAO,   mehaz: 'YD-01' },
+        { name: 'Kritik Servis Sağlık Kontrolü',              type: 'BT',    freq: 'DAILY',      dir: dirAO,   mehaz: 'SLA' },
+        { name: 'Fraud Alarm Gözden Geçirme',                 type: 'BT_DISI',freq: 'DAILY',     dir: dirISY,  mehaz: 'MASAK 2.1' },
+        { name: 'Döviz Pozisyon Limiti Kontrolü',              type: 'BT_DISI',freq: 'DAILY',     dir: dirISY,  mehaz: 'BDDK 5.3' },
     ];
 
-    const risks = await Promise.all(
-        riskData.map(r => prisma.risk.create({
-            data: {
-                riskId: r.riskId,
-                name: r.name,
-                description: r.description,
-                categoryId: r.categoryId,
-                ownerId: users[1].id,
-                status: 'ASSESSED'
-            }
-        }))
-    );
+    let ctrlNum = 1;
+    const controls: any[] = [];
+    for (const def of cDefs) {
+        const owner = randOf([uMgr1, uMgr2, uAud1, uAud2, uAud3]);
+        const c = await prisma.control.create({ data: {
+            controlId: `C-2026-${(ctrlNum++).toString().padStart(4, '0')}`,
+            name: def.name,
+            description: `${def.name} için kapsamlı test prosedürü. Dayanak: ${def.mehaz}`,
+            type: def.type as any,
+            nature: randOf(['PREVENTIVE', 'DETECTIVE']) as any,
+            automation: randOf(['MANUAL', 'AUTOMATED', 'SEMI_AUTOMATED']) as any,
+            frequency: def.freq as any,
+            status: 'ACTIVE',
+            directorateId: def.dir.id,
+            directorate: def.dir.name,
+            gmy: def.dir.gmy,
+            mehaz: def.mehaz,
+            selectedMonths: (def as any).months || [],
+            ownerId: owner.id,
+            testPerformerId: randOf(auditors).id,
+            reviewerId: randOf(managers).id,
+            effectivenessStatus: randOf(['NOT_TESTED','EFFECTIVE','PARTIALLY_EFFECTIVE','INEFFECTIVE']) as any,
+            testSteps: `1. İlgili sisteme erişin\n2. Kayıtları gözden geçirin\n3. Anormallikleri raporlayın`,
+        }});
+        controls.push(c);
+    }
+    console.log(`✅ ${controls.length} kontrol`);
 
-    // Create 50 Controls
-    console.log('🛡️ Creating 50 controls...');
-    const directorates = ['BT Ağ Yönetimi', 'Bilgi Güvenliği', 'Altyapı', 'Uygulama Geliştirme', 'Operasyon'];
-    const frequencies = ['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'SEMI_ANNUAL', 'ANNUAL', 'AD_HOC'];
-    const controlTypes = ['BT', 'BT_DISI'];
-    const natures = ['PREVENTIVE', 'DETECTIVE'];
-    const automations = ['MANUAL', 'AUTOMATED', 'SEMI_AUTOMATED'];
-
-    const controls = [];
-    for (let i = 1; i <= 50; i++) {
-        const idStr = `C-${2026}-${String(i).padStart(4, '0')}`;
-        const dir = directorates[(i - 1) % directorates.length];
-        const freq = frequencies[(i - 1) % frequencies.length] as any;
-        const type = controlTypes[(i - 1) % controlTypes.length] as any;
-        const nature = natures[(i - 1) % natures.length] as any;
-        const aut = automations[(i - 1) % automations.length] as any;
-        const owner = users[3 + (i % 3)]; // distribute owners
-        const status = i % 10 === 0 ? 'PASSIVE' : 'ACTIVE';
-        const effectiveness = i % 7 === 0 ? 'INEFFECTIVE' : (i % 5 === 0 ? 'PARTIALLY_EFFECTIVE' : 'EFFECTIVE');
-
-        const control = await prisma.control.create({
-            data: {
-                controlId: idStr,
-                name: `${dir} ${freq} Kontrolü - ${i}`,
-                description: `${dir} kapsamında ${freq.toLowerCase()} olarak yürütülen ${nature.toLowerCase()} kontrol faaliyeti.`,
-                type,
-                nature,
-                automation: aut,
-                frequency: freq,
-                status: status as any,
-                directorate: dir,
-                gmy: 'Teknoloji Genel Müdür Yardımcılığı',
-                mehaz: 'BDDK Bilgi Sistemleri Yönetmeliği',
-                testSteps: '1. Logları incele.\n2. Yetki listesini kontrol et.\n3. Kanıtı yükle.',
-                ownerId: owner.id,
-                testPerformerId: users[5].id,
-                reviewerId: users[2].id,
-                effectivenessStatus: effectiveness as any,
-            }
-        });
-        controls.push(control);
-
-        // Map to a risk
-        await prisma.controlRiskMapping.create({
-            data: {
-                controlId: control.id,
-                riskId: risks[i % risks.length].id,
-                mappingType: 'PRIMARY'
-            }
-        });
+    // Risk-Kontrol eşleştirme
+    for (let i = 0; i < controls.length; i++) {
+        try {
+            await prisma.controlRiskMapping.create({ data: { controlId: controls[i].id, riskId: risks[i % risks.length].id, mappingType: 'PRIMARY' } });
+        } catch { /* duplicate ok */ }
     }
 
-    // Create 150 TestRecords & ControlTests (Control -> Tests)
-    console.log('🧪 Creating 150 test records...');
-    let testCount = 0;
-    const testRecords = [];
+    // ── 7. Kontrol Testleri ──────────────────────────────────────────────────
+    let testNum = 1;
+    const genTestNo = () => `T-2026-${(testNum++).toString().padStart(4, '0')}`;
+    const controlTests: any[] = [];
 
-    // Past Completed Tests using ControlTest (en az 100 adet)
-    for (let i = 0; i < 100; i++) {
-        const ctrl = controls[i % controls.length];
-        const tester = users[3 + (i % 3)];
-        const result = i % 12 === 0 ? 'INEFFECTIVE' : (i % 9 === 0 ? 'PARTIALLY_EFFECTIVE' : 'EFFECTIVE');
-        
-        await prisma.controlTest.create({
-            data: {
-                controlId: ctrl.id,
-                testDate: new Date(Date.now() - (i + 1) * 2 * 24 * 60 * 60 * 1000), // in the past
-                tester: `${tester.firstName} ${tester.lastName}`,
-                result,
-                evidenceUrls: ['/evidences/test-log.pdf'],
-                findings: result !== 'EFFECTIVE' ? 'Kontrol testinde hedeflenen eşik değerin altında kalındığı tespit edilmiştir.' : null,
-                notes: 'Rutine uygun yapılmıştır.',
-                approvalStatus: 'APPROVED',
-                approvedBy: 'Mehmet Demir',
-                approvedAt: new Date(),
-                hasFinding: result !== 'EFFECTIVE'
-            }
-        });
-        testCount++;
+    for (let ci = 0; ci < Math.min(controls.length, 20); ci++) {
+        const ctrl = controls[ci];
+        // Geçmiş — onaylı, bulgu yok
+        const t1 = await prisma.controlTest.create({ data: {
+            testNo: genTestNo(), controlId: ctrl.id, isAutoGenerated: true,
+            plannedDate: pastDate(randInt(45, 90)), completedAt: pastDate(randInt(10, 44)),
+            status: 'ONAYLANDI', findingStatus: 'BULGUSU_YOK',
+            resultText: 'Test başarıyla tamamlandı, bulgu tespit edilmedi.',
+            evidenceSummary: 'Sistem kayıtları kontrol edildi.',
+            assigneeId: ctrl.testPerformerId, directorateId: ctrl.directorateId,
+            approvedAt: pastDate(randInt(1, 9)), approvedById: randOf(managers).id,
+        }});
+        // Geçmiş — tamamlandı, bulgu VAR
+        const t2 = await prisma.controlTest.create({ data: {
+            testNo: genTestNo(), controlId: ctrl.id, isAutoGenerated: true,
+            plannedDate: pastDate(randInt(91, 150)), completedAt: pastDate(randInt(45, 90)),
+            status: 'TAMAMLANDI', findingStatus: 'BULGUSU_VAR',
+            resultText: 'Test sırasında kontrol zayıflığı tespit edildi.',
+            evidenceSummary: 'Eksiklik kanıtları doküman halinde hazır.',
+            assigneeId: ctrl.testPerformerId, directorateId: ctrl.directorateId,
+        }});
+        // Gelecek — bekliyor
+        const t3 = await prisma.controlTest.create({ data: {
+            testNo: genTestNo(), controlId: ctrl.id, isAutoGenerated: true,
+            plannedDate: futureDate(randInt(7, 45)), status: 'BEKLIYOR',
+            assigneeId: ctrl.testPerformerId, directorateId: ctrl.directorateId,
+        }});
+        controlTests.push(t1, t2, t3);
+        await prisma.control.update({ where: { id: ctrl.id }, data: { lastTestDate: t1.completedAt } });
+    }
+    for (let ci = 20; ci < controls.length; ci++) {
+        const ctrl = controls[ci];
+        const t = await prisma.controlTest.create({ data: {
+            testNo: genTestNo(), controlId: ctrl.id, isAutoGenerated: true,
+            plannedDate: futureDate(randInt(10, 60)), status: 'BEKLIYOR',
+            assigneeId: ctrl.testPerformerId, directorateId: ctrl.directorateId,
+        }});
+        controlTests.push(t);
+    }
+    console.log(`✅ ${controlTests.length} kontrol testi`);
+
+    // ── 8. Bulgular ──────────────────────────────────────────────────────────
+    const issueTests = controlTests.filter(t => t.findingStatus === 'BULGUSU_VAR');
+    const fTemplates = [
+        { summary: 'Ağ Erişim Hakları Gözden Geçirme Eksikliği',   desc: 'Ağ erişim hakları periyodik gözden geçirilmemektedir.' },
+        { summary: 'Yetkisiz Güvenlik Duvarı Değişikliği',          desc: 'Güvenlik duvarı kurallarında yetkisiz değişiklik tespit edildi.' },
+        { summary: 'Yetersiz Log Yönetimi',                          desc: 'Kritik sistemlerde loglama mekanizması yetersiz kalmaktadır.' },
+        { summary: 'Yama Yönetim Gecikmesi',                         desc: 'Kritik yamalar belirlenen sürede uygulanmamaktadır.' },
+        { summary: 'Yedekleme Test Eksikliği',                       desc: 'Yedekleme restore testleri planlandığı şekilde yapılmamaktadır.' },
+        { summary: 'Kullanıcı Hesap Kontrolü Eksikliği',             desc: 'Kullanıcı hesapları yıllık gözden geçirilmemektedir.' },
+        { summary: 'Tedarikçi Sözleşme Eksikliği',                   desc: 'Tedarikçi sözleşmelerinde bilgi güvenliği maddeleri eksik.' },
+        { summary: 'Zayıf Kimlik Doğrulama Politikası',              desc: 'Kimlik doğrulama politikası güncel standartları karşılamamaktadır.' },
+        { summary: 'BCP Tatbikat Eksikliği',                         desc: 'BCP tatbikatları planlandığı şekilde gerçekleştirilmemiştir.' },
+        { summary: 'Güvenlik Farkındalık Eğitimi Eksikliği',         desc: 'Personel güvenlik farkındalık eğitimleri tamamlanmamıştır.' },
+        { summary: 'Bordro Hesaplama Tutarsızlığı',                   desc: 'Bordro hesaplamalarında tutarsızlık tespit edilmiştir.' },
+        { summary: 'Müşteri Şikayet Takip Eksikliği',                desc: 'Müşteri şikayet kayıt süreci takip edilmemektedir.' },
+        { summary: 'ORI Raporlama Gecikmesi',                        desc: 'Operasyonel risk göstergeleri zamanında raporlanmamaktadır.' },
+        { summary: 'Onay Limiti Aşımı',                              desc: 'Belirlenen eşiklerin üzerinde onay mekanizması bypass edilmiş.' },
+        { summary: 'Değişiklik Yönetimi Uyumsuzluğu',               desc: 'Sistem değişiklik yönetimi prosedürüne uyulmamıştır.' },
+        { summary: 'Döviz Pozisyon Limiti Aşımı',                    desc: 'Günlük döviz pozisyon limiti aşılmıştır.' },
+        { summary: 'KVKK Uyumsuzluğu',                               desc: 'KVKK kapsamında veri işleme süreçlerinde eksiklik tespit edildi.' },
+        { summary: 'ISO 27001 Gereklilik Eksikliği',                  desc: 'ISO 27001 gerekliliklerinin bir bölümü karşılanmamaktadır.' },
+        { summary: 'Penetrasyon Testi Bulgularının Kapatılmaması',   desc: 'Penetrasyon testi sonuçlarındaki bulgular giderilmemiş.' },
+        { summary: 'Yetersiz Uygulama Erişim Yetkilendirmesi',       desc: 'Kritik uygulama kaynakları için erişim yetkilendirmesi yetersiz.' },
+    ];
+
+    let fNumBT = 1, fNumIB = 1;
+    const genFId = (t: string) => t === 'BT'
+        ? `2026.BT.${(fNumBT++).toString().padStart(2, '0')}`
+        : `2026.İB.${(fNumIB++).toString().padStart(2, '0')}`;
+
+    const wflows = ['TASLAK','MUTABAKATA_GONDERILDI','IC_KONTROL_ONAYINA_GONDERILDI','MUTABAKAT_YAPILDI'];
+    const rstats = ['DEVAM_EDIYOR','KISMEN_KAPATILDI','KAPATILDI'];
+    const sevs = ['CRITICAL','HIGH','MEDIUM','LOW'];
+
+    const findings: any[] = [];
+    for (let i = 0; i < Math.min(issueTests.length, 20); i++) {
+        const test = issueTests[i];
+        const ctrl = controls.find(c => c.id === test.controlId);
+        const tmpl = fTemplates[i % fTemplates.length];
+        const ftype = ctrl?.type === 'BT_DISI' ? 'IB' : 'BT';
+        const sev = sevs[i % sevs.length];
+        const wf = wflows[i % wflows.length];
+        const rs = wf === 'MUTABAKAT_YAPILDI' ? 'KAPATILDI' : rstats[i % 3];
+
+        const f = await prisma.finding.create({ data: {
+            findingId: genFId(ftype),
+            description: tmpl.desc,
+            summary: tmpl.summary,
+            impact: 'Kontrol zayıflığı operasyonel ve uyum risklerini artırabilir.',
+            severity: sev as any,
+            findingType: ftype as any,
+            workflowStatus: wf as any,
+            resolutionStatus: rs as any,
+            status: rs === 'KAPATILDI' ? 'CLOSED' : rs === 'KISMEN_KAPATILDI' ? 'PARTIALLY_CLOSED' : 'IN_PROGRESS',
+            controlId: ctrl?.id || null,
+            controlTestId: test.id,
+            directorateId: ctrl?.directorateId || null,
+            relatedDepartment: ctrl?.directorate || null,
+            gmy: ctrl?.gmy || null,
+            iletisimKisisi: `${randOf(['Ahmet','Mehmet','Ayşe','Fatma'])} ${randOf(['Yılmaz','Kaya','Demir'])}`,
+            assigneeId: randOf(auditors).id,
+            birimCevabi: wf !== 'TASLAK' ? `Birim değerlendirmesi: ${tmpl.summary} konusunda gerekli aksiyonlar planlanmaktadır.` : null,
+            internalControlAssessment: ['MUTABAKAT_YAPILDI','IC_KONTROL_ONAYINA_GONDERILDI'].includes(wf) ? `İKS değerlendirmesi: Bulgu geçerliliği teyit edilmiş, aksiyon takibi yapılmaktadır.` : null,
+            closedDate: rs === 'KAPATILDI' ? pastDate(randInt(1, 15)) : null,
+            testDate: rs !== 'KAPATILDI' ? futureDate(randInt(30, 90)) : null,
+            source: 'CONTROL_TEST' as any,
+        }});
+        findings.push(f);
+
+        // Risk eşleştirme
+        try {
+            await prisma.finding.update({ where: { id: f.id }, data: { linkedRisks: { connect: { id: risks[i % risks.length].id } } } });
+        } catch { /* ok */ }
+    }
+    console.log(`✅ ${findings.length} bulgu`);
+
+    // ── 9. Aksiyonlar ────────────────────────────────────────────────────────
+    let aNum = 1;
+    const genAId = () => `A-2026-${(aNum++).toString().padStart(4, '0')}`;
+    const aDescs = [
+        'Erişim hakları gözden geçirilecek, gereksiz yetkiler kaldırılacaktır.',
+        'Güvenlik duvarı kuralları denetlenecek ve revize edilecektir.',
+        'Loglama kapsamı genişletilecek, merkezi log yönetim sistemi kurulacaktır.',
+        'Yama uygulaması için acil eylem planı hazırlanacaktır.',
+        'Yedekleme prosedürü güncellenecek, test sıklığı artırılacaktır.',
+        'Kullanıcı hesapları gözden geçirilecek, atıl hesaplar kapatılacaktır.',
+        'Tedarikçi sözleşmeleri güvenlik maddeleri eklenerek yenilenecektir.',
+        'Parola politikası güçlendirilecek, MFA devreye alınacaktır.',
+        'BCP tatbikatı yeniden planlanacak ve tamamlanacaktır.',
+        'Güvenlik farkındalık eğitim programı tüm personele verilecektir.',
+    ];
+
+    const actions: any[] = [];
+    for (let i = 0; i < Math.min(findings.length, 20); i++) {
+        const f = findings[i];
+        const isClosed = f.resolutionStatus === 'KAPATILDI';
+        const aStat = isClosed ? 'KAPATILDI' : f.resolutionStatus === 'KISMEN_KAPATILDI' ? 'TAMAMLANDI' : ['BEKLIYOR','DEVAM_EDIYOR'][i % 2];
+        const dueDate = aStat === 'KAPATILDI' ? pastDate(randInt(1, 30)) : futureDate(randInt(30, 120));
+
+        const a1 = await prisma.action.create({ data: {
+            actionId: genAId(), findingId: f.id,
+            description: aDescs[i % aDescs.length],
+            ownerId: randOf([uMgr1, uMgr2, ...auditors]).id,
+            directorateId: f.directorateId, responsibleDepartment: f.relatedDepartment,
+            status: aStat as any, dueDate,
+            completedAt: aStat === 'KAPATILDI' ? pastDate(randInt(1, 15)) : null,
+            notes: 'Aksiyon öncelikli takip edilmektedir.', controlId: f.controlId,
+        }});
+        actions.push(a1);
+
+        if (i % 3 === 0) {
+            const a2 = await prisma.action.create({ data: {
+                actionId: genAId(), findingId: f.id,
+                description: `Ek düzeltici aksiyon: ${f.summary} için süreç iyileştirme çalışması.`,
+                ownerId: randOf(managers).id,
+                directorateId: f.directorateId,
+                status: 'BEKLIYOR', dueDate: futureDate(randInt(60, 180)), controlId: f.controlId,
+            }});
+            actions.push(a2);
+        }
+
+        // targetResolutionDate hesapla
+        const openActs = await prisma.action.findMany({ where: { findingId: f.id, status: { not: 'KAPATILDI' } }, select: { dueDate: true } });
+        if (openActs.length > 0) {
+            const maxD = new Date(Math.max(...openActs.map(a => new Date(a.dueDate).getTime())));
+            await prisma.finding.update({ where: { id: f.id }, data: { targetResolutionDate: maxD } });
+        }
+    }
+    console.log(`✅ ${actions.length} aksiyon`);
+
+    // ── 10. Bulgu Takip Çalışmaları ──────────────────────────────────────────
+    let fuNum = 1;
+    const genFuId = () => `FU-2026-${String(new Date().getMonth()+1).padStart(2,'0')}-${(fuNum++).toString().padStart(4,'0')}`;
+    const followUps: any[] = [];
+
+    for (const action of actions.slice(0, 30)) {
+        const f = findings.find(fi => fi.id === action.findingId);
+        if (!f) continue;
+
+        const fuStat = action.status === 'KAPATILDI' ? 'ONAYLANDI' : action.status === 'TAMAMLANDI' ? 'TAMAMLANDI' : 'BEKLIYOR';
+        const result = fuStat === 'ONAYLANDI' ? 'YETERLI' : fuStat === 'TAMAMLANDI' ? 'YETERSIZ' : null;
+        const resOut = result === 'YETERLI' ? 'KAPATILDI' : result === 'YETERSIZ' ? 'YENI_AKSIYON_GEREKLI' : 'DEVAM_EDIYOR';
+
+        const fu = await prisma.findingFollowUp.create({ data: {
+            followUpId: genFuId(), findingId: f.id, actionId: action.id,
+            status: fuStat as any, plannedDate: action.dueDate, directorateId: f.directorateId,
+            birimCevabi: fuStat !== 'BEKLIYOR' ? 'Birim aksiyonları değerlendirdi ve ilerleme bildirdi.' : null,
+            currentStatusDetail: fuStat !== 'BEKLIYOR' ? `${f.summary} konusunda alınan aksiyonlar devam etmektedir.` : null,
+            internalControlAssessment: ['ONAYLANDI','TAMAMLANDI'].includes(fuStat) ? 'İKS değerlendirmesi tamamlandı.' : null,
+            result: result as any, resolutionOutcome: resOut as any,
+            evaluatorId: ['ONAYLANDI','TAMAMLANDI'].includes(fuStat) ? randOf(managers).id : null,
+            evaluatedAt: ['ONAYLANDI','TAMAMLANDI'].includes(fuStat) ? pastDate(randInt(1,10)) : null,
+            approvalStatus: fuStat === 'ONAYLANDI' ? 'ONAYLANDI' : 'BEKLIYOR',
+            approvedBy: fuStat === 'ONAYLANDI' ? randOf(managers).id : null,
+            approvedAt: fuStat === 'ONAYLANDI' ? pastDate(randInt(1,5)) : null,
+        }});
+        followUps.push(fu);
+    }
+    console.log(`✅ ${followUps.length} takip çalışması`);
+
+    // ── 11. Audit Trail & StatusLog ──────────────────────────────────────────
+    for (const f of findings.slice(0, 10)) {
+        await prisma.findingStatusLog.create({ data: {
+            findingId: f.id,
+            text: `${f.summary} için ilk değerlendirme tamamlandı. Aksiyon planı hazırlanmaktadır.`,
+            authorId: randOf(auditors).id, authorName: 'İKS Çalışanı',
+        }});
+        await prisma.findingStatusHistory.create({ data: {
+            findingId: f.id, operation: 'FINDING_CREATED', changeType: 'FINDING_CREATED',
+            userId: randOf(auditors).id, evaluator: 'Sistem',
+            explanation: `Bulgu kaydı oluşturuldu: ${f.findingId}`,
+            workflowStatus: 'TASLAK' as any,
+        }});
     }
 
-    // Active/Pending/In Progress TestRecords (en az 50 adet)
-    for (let i = 0; i < 55; i++) {
-        const ctrl = controls[i % controls.length];
-        const status = i % 4 === 0 ? 'OVERDUE' : (i % 3 === 0 ? 'IN_PROGRESS' : (i % 2 === 0 ? 'COMPLETED' : 'PENDING'));
-        const result = status === 'COMPLETED' ? (i % 5 === 0 ? 'INEFFECTIVE' : 'EFFECTIVE') : null;
-        
-        const record = await prisma.testRecord.create({
-            data: {
-                controlId: ctrl.id,
-                dueDate: new Date(Date.now() + (i - 10) * 24 * 60 * 60 * 1000), // some overdue, some future
-                status: status as any,
-                assigneeId: ctrl.ownerId,
-                completedAt: status === 'COMPLETED' ? new Date() : null,
-                testResult: result as any,
-                hasFinding: result === 'INEFFECTIVE',
-                notes: status === 'COMPLETED' ? 'İşlem tamamlandı, kanıtlar doğrulandı.' : null
-            }
-        });
-        testRecords.push(record);
-        testCount++;
-    }
-    console.log(`Total tests created: ${testCount}`);
-
-    // Create 30 Findings (Tests -> Findings)
-    console.log('🔍 Creating 30 findings...');
-    const findings = [];
-    const severities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
-    const findingStatuses = ['OPEN', 'IN_PROGRESS', 'CLOSED', 'VERIFIED'];
-
-    for (let i = 1; i <= 30; i++) {
-        const sev = severities[(i - 1) % severities.length];
-        const fStatus = findingStatuses[(i - 1) % findingStatuses.length];
-        const ctrl = controls[i % controls.length];
-        
-        const finding = await prisma.finding.create({
-            data: {
-                findingId: `F-2026-${String(i).padStart(4, '0')}`,
-                description: `${ctrl.directorate} biriminde yapılan kontrolde yetki aşımı/süreç sapması tespit edilmiştir.`,
-                impact: 'Bankacılık operasyonlarında uyumsuzluk ve süreç aksaması riski.',
-                severity: sev as any,
-                status: fStatus as any,
-                isRecurrent: i % 7 === 0,
-                riskId: risks[i % risks.length].id,
-                controlId: ctrl.id,
-                source: 'CONTROL_TEST',
-                affectedSystem: 'Core Banking, LDAP',
-                recommendation: 'Yetki tanımlama süreçlerinin gözden geçirilerek maker-checker kontrolünün sıkılaştırılması.',
-                managementResponse: 'Bulgu kabul edilmiş olup aksiyon planı başlatılmıştır.',
-                targetResolutionDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-                relatedDepartment: ctrl.directorate,
-                responsiblePerson: 'Ayşe Çelik'
-            }
-        });
-        findings.push(finding);
+    // ── 12. Attachments ──────────────────────────────────────────────────────
+    for (let i = 0; i < 10; i++) {
+        await prisma.attachment.create({ data: {
+            fileName: `kanit-${i+1}-${Date.now()}.pdf`, originalName: `Kanıt Belgesi ${i+1}.pdf`,
+            mimeType: 'application/pdf', sizeBytes: randInt(50000, 2000000),
+            entityType: i % 2 === 0 ? 'FINDING' : 'CORRECTIVE_ACTION',
+            entityId: i % 2 === 0 ? (findings[i % findings.length]?.id || 'na') : (actions[i % actions.length]?.id || 'na'),
+            uploadedById: randOf(auditors).id,
+        }});
     }
 
-    // Create 20 Actions (Findings -> Actions)
-    console.log('🚀 Creating 20 actions...');
-    const actionStatuses = ['BEKLIYOR', 'DEVAM_EDIYOR', 'TAMAMLANDI'];
-    for (let i = 1; i <= 20; i++) {
-        const finding = findings[i % findings.length];
-        const actStatus = actionStatuses[(i - 1) % actionStatuses.length];
-        const isOverdue = i % 4 === 0;
-        
-        await prisma.action.create({
-            data: {
-                actionId: `A-2026-${String(i).padStart(4, '0')}`,
-                description: `Bulguya yönelik otomatik log kontrol entegrasyonunun yazılması ve devreye alınması.`,
-                status: actStatus as any,
-                ownerId: users[5].id, // assigned to Can Owner
-                findingId: finding.id,
-                riskId: finding.riskId,
-                dueDate: isOverdue ? new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) : new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
-                responsibleDepartment: finding.relatedDepartment || 'Bilgi Teknolojileri',
-            }
-        });
-    }
+    // ── 13. Parametreler ─────────────────────────────────────────────────────
+    await prisma.parameter.createMany({ data: [
+        { category: 'SLA', key: 'finding_close_days_critical', value: 30, description: 'KZ kapanma SLA (gün)' },
+        { category: 'SLA', key: 'finding_close_days_high',     value: 60, description: 'KD kapanma SLA (gün)' },
+        { category: 'SLA', key: 'finding_close_days_medium',   value: 90, description: 'ÖK kapanma SLA (gün)' },
+        { category: 'GENERAL', key: 'app_name',    value: 'RMIC - İç Kontrol Sistemi' },
+        { category: 'GENERAL', key: 'current_year', value: 2026 },
+    ]});
 
-    console.log('✅ Database seeding finished successfully!');
+    // ── Özet ─────────────────────────────────────────────────────────────────
+    console.log('\n🎉 Seed tamamlandı!');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(`👥 Kullanıcılar:         10`);
+    console.log(`🏢 Direktörlükler:        5`);
+    console.log(`🔒 Kontroller:           ${controls.length}`);
+    console.log(`🧪 Kontrol Testleri:     ${controlTests.length}`);
+    console.log(`🔍 Bulgular:             ${findings.length}`);
+    console.log(`⚡ Aksiyonlar:           ${actions.length}`);
+    console.log(`📋 Takip Çalışmaları:    ${followUps.length}`);
+    console.log(`⚠️  Riskler:              ${risks.length}`);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('\n🔑 Giriş bilgileri:');
+    console.log('   admin@rmic.com  |  burak@rmic.com  →  Test1234!');
 }
 
 main()
-    .catch((e) => {
-        console.error('❌ Seed failed:', e);
-        process.exit(1);
-    })
-    .finally(async () => {
-        await prisma.$disconnect();
-        await pool.end();
-    });
+    .catch(e => { console.error('❌ Seed hatası:', e); process.exit(1); })
+    .finally(async () => { await prisma.$disconnect(); await pool.end(); });

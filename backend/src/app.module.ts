@@ -13,6 +13,9 @@ import { AdminModule } from './modules/admin/admin.module';
 import { RiskEntryModule } from './modules/risk-entry/risk-entry.module';
 import { RiskManagementControlsModule } from './modules/risk-management-controls/risk-management-controls.module';
 import { TestsModule } from './modules/tests/tests.module';
+import { DirectoratesModule } from './modules/directorates/directorates.module';
+import { RiskControlsModule } from './modules/risk-controls/risk-controls.module';
+import { RiskActionsModule } from './modules/risk-actions/risk-actions.module';
 import { JwtAuthGuard } from './common/guards';
 
 @Module({
@@ -33,6 +36,9 @@ import { JwtAuthGuard } from './common/guards';
     RiskEntryModule,
     RiskManagementControlsModule,
     TestsModule,
+    DirectoratesModule,
+    RiskControlsModule,
+    RiskActionsModule,
   ],
   providers: [
     // Apply JWT auth guard globally
