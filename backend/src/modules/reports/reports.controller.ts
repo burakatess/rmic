@@ -64,6 +64,55 @@ export class ReportsController {
         );
     }
 
+    // Monthly Management Report Endpoints
+    @Get('monthly')
+    async getMonthlyReport(
+        @Query('year') year?: string,
+        @Query('month') month?: string,
+        @Query('startDate') startDate?: string,
+        @Query('endDate') endDate?: string,
+        @Query('directorateId') directorateId?: string,
+    ) {
+        return this.reportsService.getMonthlyReport({
+            year: year ? parseInt(year) : undefined,
+            month: month ? parseInt(month) : undefined,
+            startDate: startDate ? new Date(startDate) : undefined,
+            endDate: endDate ? new Date(endDate) : undefined,
+            directorateId: directorateId || undefined,
+        });
+    }
+
+    @Get('monthly/word')
+    async downloadMonthlyWord(
+        @Query('year') year: string,
+        @Query('month') month: string,
+        @Query('startDate') startDate: string,
+        @Query('endDate') endDate: string,
+        @Query('directorateId') directorateId: string,
+        @Res() res: Response,
+    ) {
+        try {
+            const buffer = await this.reportsService.generateMonthlyReportWord({
+                year: year ? parseInt(year) : undefined,
+                month: month ? parseInt(month) : undefined,
+                startDate: startDate ? new Date(startDate) : undefined,
+                endDate: endDate ? new Date(endDate) : undefined,
+                directorateId: directorateId || undefined,
+            });
+
+            const label = month && year ? `${year}_${month}` : year ? String(year) : 'rapor';
+            res.set({
+                'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'Content-Disposition': `attachment; filename="Aylik_Yonetim_Raporu_${label}.docx"`,
+                'Content-Length': buffer.length,
+            });
+            res.send(buffer);
+        } catch (error) {
+            console.error('Monthly Word generation error:', error);
+            res.status(500).json({ message: 'Word dosyası oluşturulamadı', error: String(error) });
+        }
+    }
+
     @Get('ek6/word')
     async downloadEK6Word(
         @Query('year') year: string,
