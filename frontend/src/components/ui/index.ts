@@ -17,7 +17,7 @@ export type { FilterConfig, FilterOption } from './FilterBar';
 
 // Data Display
 export { DataTable } from './DataTable';
-export type { ColumnDef } from './DataTable';
+export type { ColumnDef, ColumnFilter } from './DataTable';
 export { ResizableTable } from './ResizableTable';
 
 // Overlay

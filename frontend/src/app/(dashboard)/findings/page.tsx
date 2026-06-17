@@ -157,6 +157,7 @@ export default function FindingsPage() {
     // Filters
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
+    const [colFilters, setColFilters] = useState<Record<string, string>>({});
     const [page, setPage] = useState(1);
     const pageSize = 20;
 
@@ -192,7 +193,7 @@ export default function FindingsPage() {
 
     // ── Filter + derived data ──────────────────────────────────────────────────
 
-    const filteredFindings = useMemo(() => {
+    const baseFilteredFindings = useMemo(() => {
         return findings.filter(f => {
             if (searchQuery) {
                 const q = searchQuery.toLowerCase();
@@ -216,11 +217,6 @@ export default function FindingsPage() {
             return true;
         });
     }, [findings, searchQuery, activeFilters]);
-
-    const paginatedFindings = useMemo(() => {
-        const start = (page - 1) * pageSize;
-        return filteredFindings.slice(start, start + pageSize);
-    }, [filteredFindings, page]);
 
     // ── KPIs ──────────────────────────────────────────────────────────────────
 
@@ -327,6 +323,7 @@ export default function FindingsPage() {
             header: 'Bulgu No',
             sortable: true,
             defaultWidth: 140,
+            filter: { type: 'text', placeholder: 'Bulgu No...', fn: (f: Finding, v) => f.findingId.toLowerCase().includes(v.toLowerCase()) },
             render: (f) => (
                 <Link href={`/findings/${f.id}`} className="font-mono text-sm font-bold text-violet-700 hover:text-violet-900 hover:underline whitespace-nowrap">
                     {f.findingId}
@@ -338,6 +335,7 @@ export default function FindingsPage() {
             header: 'Bulgu Türü',
             sortable: true,
             defaultWidth: 140,
+            filter: { type: 'select', options: Object.entries(findingTypeConfig).map(([k, v]) => ({ value: k, label: v.label })), fn: (f: Finding, v) => f.findingType === v },
             render: (f) => {
                 const cfg = findingTypeConfig[f.findingType];
                 return cfg
@@ -349,6 +347,7 @@ export default function FindingsPage() {
             key: 'summary',
             header: 'Bulgu Özeti',
             defaultWidth: 240,
+            filter: { type: 'text', placeholder: 'Özet ara...', fn: (f: Finding, v) => (f.summary || f.description || '').toLowerCase().includes(v.toLowerCase()) },
             render: (f) => (
                 <p className="text-sm text-slate-800 truncate max-w-[220px]" title={f.summary || f.description}>
                     {f.summary || f.description || '—'}
@@ -360,6 +359,7 @@ export default function FindingsPage() {
             header: 'İlgili Direktörlük',
             sortable: true,
             defaultWidth: 170,
+            filter: { type: 'text', placeholder: 'Direktörlük...', fn: (f: Finding, v) => (f.relatedDepartment || '').toLowerCase().includes(v.toLowerCase()) },
             render: (f) => (
                 <span className="text-sm text-slate-600 truncate block max-w-[160px]" title={f.relatedDepartment || ''}>
                     {f.relatedDepartment || '—'}
@@ -394,6 +394,7 @@ export default function FindingsPage() {
             header: 'Önem',
             sortable: true,
             defaultWidth: 90,
+            filter: { type: 'select', options: Object.entries(severityConfig).map(([k, v]) => ({ value: k, label: v.label })), fn: (f: Finding, v) => f.severity === v },
             render: (f) => {
                 const cfg = severityConfig[f.severity];
                 return cfg
@@ -406,6 +407,7 @@ export default function FindingsPage() {
             header: 'Mutabakat',
             sortable: true,
             defaultWidth: 190,
+            filter: { type: 'select', options: Object.entries(workflowConfig).map(([k, v]) => ({ value: k, label: v.label })), fn: (f: Finding, v) => f.workflowStatus === v },
             render: (f) => {
                 const wf = workflowConfig[f.workflowStatus] || workflowConfig['TASLAK'];
                 const rs = resolutionConfig[f.resolutionStatus] || resolutionConfig['DEVAM_EDIYOR'];
@@ -436,6 +438,7 @@ export default function FindingsPage() {
             key: 'responsiblePerson',
             header: 'Assignee',
             defaultWidth: 140,
+            filter: { type: 'text', placeholder: 'Kişi ara...', fn: (f: Finding, v) => (f.responsiblePerson || '').toLowerCase().includes(v.toLowerCase()) },
             render: (f) => (
                 <span className="text-sm text-slate-600 truncate block max-w-[130px]" title={f.responsiblePerson || ''}>
                     {f.responsiblePerson || '—'}
@@ -472,6 +475,22 @@ export default function FindingsPage() {
             ),
         },
     ], []);
+
+    // Apply column-level filters after columns are defined
+    const filteredFindings = useMemo(() => {
+        if (!Object.values(colFilters).some(v => v)) return baseFilteredFindings;
+        return baseFilteredFindings.filter(f =>
+            columns.every(col => {
+                const val = colFilters[col.key];
+                return !val || !col.filter?.fn || col.filter.fn(f, val);
+            })
+        );
+    }, [baseFilteredFindings, colFilters, columns]);
+
+    const paginatedFindings = useMemo(() => {
+        const start = (page - 1) * pageSize;
+        return filteredFindings.slice(start, start + pageSize);
+    }, [filteredFindings, page]);
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -599,6 +618,8 @@ export default function FindingsPage() {
                     emptyDescription="Filtrelerinizi değiştirin veya yeni bir bulgu ekleyin."
                     emptyActionLabel="Yeni Bulgu Ekle"
                     onEmptyAction={() => setIsCreateFindingOpen(true)}
+                    columnFilters={colFilters}
+                    onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
                 />
             </div>
 

@@ -396,6 +396,7 @@ export default function RiskInventoryPage() {
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [filters, setFilters] = useState<Record<string, string>>({});
+    const [colFilters, setColFilters] = useState<Record<string, string>>({});
     const [page, setPage] = useState(1);
     const pageSize = 20;
 
@@ -422,7 +423,7 @@ export default function RiskInventoryPage() {
 
     useEffect(() => { load(); }, [load]);
 
-    const filtered = useMemo(() => risks.filter(r => {
+    const baseFiltered = useMemo(() => risks.filter(r => {
         if (search) {
             const q = search.toLowerCase();
             if (!r.riskId.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q) && !(r.ilgiliGmy || '').toLowerCase().includes(q) && !(r.surec || '').toLowerCase().includes(q)) return false;
@@ -434,8 +435,6 @@ export default function RiskInventoryPage() {
         return true;
     }), [risks, search, filters]);
 
-    const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page]);
-
     // KPIs
     const kritik = risks.filter(r => r.dogalRiskSeviyesi === 'KRİTİK' || r.kalintiRiskSeviyesi === 'KRİTİK').length;
     const yuksek = risks.filter(r => r.dogalRiskSeviyesi === 'YÜKSEK' || r.kalintiRiskSeviyesi === 'YÜKSEK').length;
@@ -444,6 +443,7 @@ export default function RiskInventoryPage() {
     const columns: ColumnDef<Risk>[] = useMemo(() => [
         {
             key: 'riskId', header: 'Risk ID', sortable: true, defaultWidth: 130,
+            filter: { type: 'text', placeholder: 'Risk ID...', fn: (r: Risk, v) => r.riskId.toLowerCase().includes(v.toLowerCase()) },
             render: (r) => (
                 <Link href={`/risks/${r.id}`} className="font-mono text-xs font-bold text-blue-700 hover:underline">
                     {r.riskId}
@@ -452,10 +452,12 @@ export default function RiskInventoryPage() {
         },
         {
             key: 'kayitId', header: 'Kayıt ID', defaultWidth: 90,
+            filter: { type: 'text', placeholder: 'Kayıt ID...', fn: (r: Risk, v) => (r.kayitId || '').toLowerCase().includes(v.toLowerCase()) },
             render: (r) => <span className="text-xs text-slate-400 font-mono">{r.kayitId || '—'}</span>,
         },
         {
             key: 'status', header: 'Statü', defaultWidth: 120,
+            filter: { type: 'select', options: Object.entries(statusConfig).map(([k, v]) => ({ value: k, label: v.label })), fn: (r: Risk, v) => r.status === v },
             render: (r) => {
                 const c = statusConfig[r.status];
                 return c ? <StatusBadge variant={c.variant}>{c.label}</StatusBadge> : <span className="text-xs">{r.status}</span>;
@@ -463,22 +465,27 @@ export default function RiskInventoryPage() {
         },
         {
             key: 'ilgiliGmy', header: 'İlgili GMY', defaultWidth: 130,
+            filter: { type: 'text', placeholder: 'GMY ara...', fn: (r: Risk, v) => (r.ilgiliGmy || '').toLowerCase().includes(v.toLowerCase()) },
             render: (r) => <span className="text-xs text-slate-600">{r.ilgiliGmy || '—'}</span>,
         },
         {
             key: 'owner', header: 'Risk Sahibi', defaultWidth: 140,
+            filter: { type: 'text', placeholder: 'Sahip ara...', fn: (r: Risk, v) => `${r.owner?.firstName || ''} ${r.owner?.lastName || ''}`.toLowerCase().includes(v.toLowerCase()) },
             render: (r) => <span className="text-xs text-slate-700">{r.owner?.firstName} {r.owner?.lastName}</span>,
         },
         {
             key: 'surec', header: 'Süreç', defaultWidth: 120,
+            filter: { type: 'text', placeholder: 'Süreç...', fn: (r: Risk, v) => (r.surec || '').toLowerCase().includes(v.toLowerCase()) },
             render: (r) => <span className="text-xs text-slate-600">{r.surec || '—'}</span>,
         },
         {
             key: 'altSurec', header: 'Alt Süreç', defaultWidth: 120,
+            filter: { type: 'text', placeholder: 'Alt süreç...', fn: (r: Risk, v) => (r.altSurec || '').toLowerCase().includes(v.toLowerCase()) },
             render: (r) => <span className="text-xs text-slate-500">{r.altSurec || '—'}</span>,
         },
         {
             key: 'name', header: 'Risk Tanımı', defaultWidth: 200,
+            filter: { type: 'text', placeholder: 'Tanım ara...', fn: (r: Risk, v) => r.name.toLowerCase().includes(v.toLowerCase()) },
             render: (r) => <span className="text-xs text-slate-800 font-medium truncate block max-w-[190px]" title={r.name}>{r.name}</span>,
         },
         {
@@ -499,6 +506,7 @@ export default function RiskInventoryPage() {
         },
         {
             key: 'riskIsleme', header: 'Risk İşleme', defaultWidth: 100,
+            filter: { type: 'select', options: Object.entries(islemeConfig).map(([k, v]) => ({ value: k, label: v.label })), fn: (r: Risk, v) => r.riskIsleme === v },
             render: (r) => {
                 if (!r.riskIsleme) return <span className="text-xs text-slate-300">—</span>;
                 const c = islemeConfig[r.riskIsleme];
@@ -537,6 +545,16 @@ export default function RiskInventoryPage() {
             ),
         },
     ], []);
+
+    const filtered = useMemo(() => {
+        if (!Object.values(colFilters).some(v => v)) return baseFiltered;
+        return baseFiltered.filter(r => columns.every(col => {
+            const val = colFilters[col.key];
+            return !val || !col.filter?.fn || col.filter.fn(r, val);
+        }));
+    }, [baseFiltered, colFilters, columns]);
+
+    const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page]);
 
     const filterConfigs = useMemo(() => [
         {
@@ -633,6 +651,8 @@ export default function RiskInventoryPage() {
                     storageKey="risk-inventory-table"
                     emptyTitle="Risk bulunamadı"
                     emptyDescription="Filtrelerinizi değiştirin veya yeni bir risk kaydı oluşturun."
+                    columnFilters={colFilters}
+                    onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
                 />
             </div>
 

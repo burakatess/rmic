@@ -6,8 +6,16 @@ import { EmptyState } from './EmptyState';
 /* ============================================
    DATA TABLE — Quaresma + Aboubakar
    Enterprise data table with sort, pagination,
-   row selection, resizable columns
+   row selection, resizable columns, column filters
    ============================================ */
+
+export interface ColumnFilter {
+  type: 'text' | 'select';
+  options?: { value: string; label: string }[];
+  placeholder?: string;
+  /** Applied by the parent page in its filteredX useMemo via columns.every(col => col.filter?.fn(...)) */
+  fn?: (item: any, value: string) => boolean;
+}
 
 export interface ColumnDef<T> {
   key: string;
@@ -19,6 +27,8 @@ export interface ColumnDef<T> {
   render: (item: T, index: number) => React.ReactNode;
   headerClassName?: string;
   cellClassName?: string;
+  /** Column-level inline filter config */
+  filter?: ColumnFilter;
 }
 
 type SortDirection = 'asc' | 'desc' | null;
@@ -50,6 +60,9 @@ interface DataTableProps<T> {
   sortDirection?: SortDirection;
   onSort?: (key: string, direction: SortDirection) => void;
   loading?: boolean;
+  // Column filters (controlled by parent)
+  columnFilters?: Record<string, string>;
+  onColumnFilterChange?: (key: string, value: string) => void;
 }
 
 export function DataTable<T>({
@@ -77,6 +90,8 @@ export function DataTable<T>({
   sortDirection,
   onSort,
   loading = false,
+  columnFilters = {},
+  onColumnFilterChange,
 }: DataTableProps<T>) {
   // Column widths
   const getInitialWidths = useCallback(() => {
@@ -149,17 +164,41 @@ export function DataTable<T>({
     }
   };
 
+  // Check if any column filters are active
+  const hasActiveColFilters = onColumnFilterChange && columns.some(c => c.filter);
+
   // Pagination
   const total = totalCount ?? data.length;
   const totalPages = Math.ceil(total / pageSize);
   const isAllSelected = data.length > 0 && selectedRows?.size === data.length;
 
+  const activeFilterCount = Object.values(columnFilters).filter(v => v && v !== '').length;
+
   return (
     <div className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden ${className}`}>
+      {/* Active filter count badge */}
+      {activeFilterCount > 0 && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 border-b border-blue-100 text-xs text-blue-700">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
+          </svg>
+          <span><span className="font-semibold">{activeFilterCount}</span> sütun filtresi aktif</span>
+          {onColumnFilterChange && (
+            <button
+              onClick={() => columns.forEach(c => c.filter && onColumnFilterChange(c.key, ''))}
+              className="ml-1 text-blue-500 hover:text-blue-800 underline"
+            >
+              Temizle
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead className={`bg-slate-50/80 border-b border-slate-200 ${stickyHeader ? 'sticky top-0 z-10' : ''}`}>
+            {/* Main header row */}
             <tr>
               {showCheckbox && (
                 <th className="px-3 py-3 text-center w-10 bg-slate-50/80">
@@ -202,6 +241,74 @@ export function DataTable<T>({
                 </th>
               ))}
             </tr>
+
+            {/* Column filter row */}
+            {hasActiveColFilters && (
+              <tr className="bg-slate-100/80 border-b border-slate-200">
+                {showCheckbox && <th className="px-2 py-1.5 bg-slate-100/80 w-10" />}
+                {columns.map((col) => {
+                  const filterVal = columnFilters[col.key] || '';
+                  const isActive = filterVal !== '';
+                  return (
+                    <th
+                      key={col.key}
+                      className="px-2 py-1.5 bg-slate-100/80"
+                      style={{ width: columnWidths[col.key], minWidth: col.minWidth || 60 }}
+                    >
+                      {col.filter ? (
+                        col.filter.type === 'select' ? (
+                          <select
+                            value={filterVal}
+                            onChange={e => onColumnFilterChange?.(col.key, e.target.value)}
+                            onClick={e => e.stopPropagation()}
+                            className={`w-full h-7 px-2 text-[11px] rounded border focus:outline-none focus:ring-1 transition-all
+                              ${isActive
+                                ? 'bg-blue-50 border-blue-400 text-blue-800 ring-blue-400'
+                                : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                              }`}
+                          >
+                            <option value="">Tümü</option>
+                            {col.filter.options?.map(opt => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={filterVal}
+                              onChange={e => onColumnFilterChange?.(col.key, e.target.value)}
+                              onClick={e => e.stopPropagation()}
+                              placeholder={col.filter.placeholder || `${col.header}...`}
+                              className={`w-full h-7 pl-6 pr-6 text-[11px] rounded border focus:outline-none focus:ring-1 transition-all
+                                ${isActive
+                                  ? 'bg-blue-50 border-blue-400 text-blue-800 placeholder-blue-300 ring-blue-400'
+                                  : 'bg-white border-slate-200 text-slate-600 placeholder-slate-300 hover:border-slate-300'
+                                }`}
+                            />
+                            <svg className={`absolute left-1.5 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none ${isActive ? 'text-blue-400' : 'text-slate-300'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+                            </svg>
+                            {isActive && (
+                              <button
+                                onClick={e => { e.stopPropagation(); onColumnFilterChange?.(col.key, ''); }}
+                                className="absolute right-1 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center text-blue-400 hover:text-blue-600 rounded-full hover:bg-blue-100"
+                              >
+                                <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        )
+                      ) : (
+                        <div className="h-7" />
+                      )}
+                    </th>
+                  );
+                })}
+              </tr>
+            )}
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {loading ? (

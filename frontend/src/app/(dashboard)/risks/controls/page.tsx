@@ -300,6 +300,7 @@ export default function KontrolAlaniPage() {
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [filters, setFilters] = useState<Record<string, string>>({});
+    const [colFilters, setColFilters] = useState<Record<string, string>>({});
     const [page, setPage] = useState(1);
     const pageSize = 20;
 
@@ -323,7 +324,7 @@ export default function KontrolAlaniPage() {
 
     useEffect(() => { load(); }, [load]);
 
-    const filtered = useMemo(() => controls.filter(c => {
+    const baseFiltered = useMemo(() => controls.filter(c => {
         if (search) {
             const q = search.toLowerCase();
             if (!c.kontrolId.toLowerCase().includes(q) && !c.kontrolTanimi.toLowerCase().includes(q) && !(c.ilgiliGmy || '').toLowerCase().includes(q)) return false;
@@ -333,22 +334,23 @@ export default function KontrolAlaniPage() {
         return true;
     }), [controls, search, filters]);
 
-    const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page]);
-
     const aktif = controls.filter(c => c.status === 'AKTIF').length;
     const yuksek = controls.filter(c => c.butunlesikKontrolSeviyesi === 'YÜKSEK').length;
 
     const columns: ColumnDef<RiskControl>[] = useMemo(() => [
         {
             key: 'kontrolId', header: 'Kontrol ID', sortable: true, defaultWidth: 130,
+            filter: { type: 'text', placeholder: 'Kontrol ID...', fn: (c: RiskControl, v) => c.kontrolId.toLowerCase().includes(v.toLowerCase()) },
             render: (c) => <span className="font-mono text-xs font-bold text-blue-700">{c.kontrolId}</span>,
         },
         {
             key: 'kayitId', header: 'Kayıt ID', defaultWidth: 90,
+            filter: { type: 'text', placeholder: 'Kayıt ID...', fn: (c: RiskControl, v) => (c.kayitId || '').toLowerCase().includes(v.toLowerCase()) },
             render: (c) => <span className="text-xs text-slate-400 font-mono">{c.kayitId || '—'}</span>,
         },
         {
             key: 'status', header: 'Statü', defaultWidth: 90,
+            filter: { type: 'select', options: Object.entries(statusConfig).map(([k, v]) => ({ value: k, label: v.label })), fn: (c: RiskControl, v) => c.status === v },
             render: (c) => {
                 const cfg = statusConfig[c.status];
                 return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-xs">{c.status}</span>;
@@ -368,18 +370,22 @@ export default function KontrolAlaniPage() {
         },
         {
             key: 'ilgiliGmy', header: 'İlgili GMY', defaultWidth: 120,
+            filter: { type: 'text', placeholder: 'GMY ara...', fn: (c: RiskControl, v) => (c.ilgiliGmy || '').toLowerCase().includes(v.toLowerCase()) },
             render: (c) => <span className="text-xs text-slate-600">{c.ilgiliGmy || '—'}</span>,
         },
         {
             key: 'riskSahibi', header: 'Risk Sahibi', defaultWidth: 120,
+            filter: { type: 'text', placeholder: 'Sahip ara...', fn: (c: RiskControl, v) => (c.riskSahibi || '').toLowerCase().includes(v.toLowerCase()) },
             render: (c) => <span className="text-xs text-slate-600">{c.riskSahibi || '—'}</span>,
         },
         {
             key: 'surec', header: 'Süreç', defaultWidth: 110,
+            filter: { type: 'text', placeholder: 'Süreç...', fn: (c: RiskControl, v) => (c.surec || '').toLowerCase().includes(v.toLowerCase()) },
             render: (c) => <span className="text-xs text-slate-500">{c.surec || '—'}</span>,
         },
         {
             key: 'kontrolTanimi', header: 'Kontrol Tanımı', defaultWidth: 220,
+            filter: { type: 'text', placeholder: 'Tanım ara...', fn: (c: RiskControl, v) => c.kontrolTanimi.toLowerCase().includes(v.toLowerCase()) },
             render: (c) => <span className="text-xs text-slate-800 font-medium truncate block max-w-[210px]" title={c.kontrolTanimi}>{c.kontrolTanimi}</span>,
         },
         {
@@ -429,6 +435,16 @@ export default function KontrolAlaniPage() {
             ),
         },
     ], []);
+
+    const filtered = useMemo(() => {
+        if (!Object.values(colFilters).some(v => v)) return baseFiltered;
+        return baseFiltered.filter(c => columns.every(col => {
+            const val = colFilters[col.key];
+            return !val || !col.filter?.fn || col.filter.fn(c, val);
+        }));
+    }, [baseFiltered, colFilters, columns]);
+
+    const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page]);
 
     const filterConfigs = useMemo(() => [
         {
@@ -509,6 +525,8 @@ export default function KontrolAlaniPage() {
                     storageKey="risk-controls-table"
                     emptyTitle="Kontrol bulunamadı"
                     emptyDescription="Henüz risk kontrolü eklenmemiş. Yeni Kontrol butonunu kullanın."
+                    columnFilters={colFilters}
+                    onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
                 />
             </div>
 

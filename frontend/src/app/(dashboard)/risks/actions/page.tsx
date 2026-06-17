@@ -242,6 +242,7 @@ export default function AksiyonTablosuPage() {
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [filters, setFilters] = useState<Record<string, string>>({});
+    const [colFilters, setColFilters] = useState<Record<string, string>>({});
     const [page, setPage] = useState(1);
     const pageSize = 20;
 
@@ -272,7 +273,7 @@ export default function AksiyonTablosuPage() {
 
     useEffect(() => { load(); }, [load]);
 
-    const filtered = useMemo(() => actions.filter(a => {
+    const baseFiltered = useMemo(() => actions.filter(a => {
         if (search) {
             const q = search.toLowerCase();
             if (!a.aksiyonId.toLowerCase().includes(q) && !a.aksiyonTanimi.toLowerCase().includes(q)
@@ -283,8 +284,6 @@ export default function AksiyonTablosuPage() {
         return true;
     }), [actions, search, filters]);
 
-    const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page]);
-
     const acik = actions.filter(a => a.status === 'ACIK' || a.status === 'DEVAM_EDIYOR').length;
     const gecikti = actions.filter(a => isOverdue(a)).length;
     const tamamlandi = actions.filter(a => a.status === 'TAMAMLANDI').length;
@@ -292,14 +291,17 @@ export default function AksiyonTablosuPage() {
     const columns: ColumnDef<RiskAction>[] = useMemo(() => [
         {
             key: 'aksiyonId', header: 'Aksiyon ID', sortable: true, defaultWidth: 130,
+            filter: { type: 'text', placeholder: 'ID ara...', fn: (a: RiskAction, v) => a.aksiyonId.toLowerCase().includes(v.toLowerCase()) },
             render: (a) => <span className="font-mono text-xs font-bold text-indigo-700">{a.aksiyonId}</span>,
         },
         {
             key: 'kayitId', header: 'Kayıt ID', defaultWidth: 90,
+            filter: { type: 'text', placeholder: 'Kayıt ID...', fn: (a: RiskAction, v) => (a.kayitId || '').toLowerCase().includes(v.toLowerCase()) },
             render: (a) => <span className="text-xs text-slate-400 font-mono">{a.kayitId || '—'}</span>,
         },
         {
             key: 'status', header: 'Aksiyon Statü', defaultWidth: 120,
+            filter: { type: 'select', options: Object.entries(statusConfig).map(([k, v]) => ({ value: k, label: v.label })), fn: (a: RiskAction, v) => a.status === v },
             render: (a) => {
                 const cfg = statusConfig[a.status];
                 const overdue = isOverdue(a);
@@ -313,10 +315,12 @@ export default function AksiyonTablosuPage() {
         },
         {
             key: 'aksiyonTanimi', header: 'Aksiyon Tanımı', defaultWidth: 220,
+            filter: { type: 'text', placeholder: 'Tanım ara...', fn: (a: RiskAction, v) => a.aksiyonTanimi.toLowerCase().includes(v.toLowerCase()) },
             render: (a) => <span className="text-xs text-slate-800 font-medium truncate block max-w-[210px]" title={a.aksiyonTanimi}>{a.aksiyonTanimi}</span>,
         },
         {
             key: 'aksiyonSahibi', header: 'Aksiyon Sahibi', defaultWidth: 130,
+            filter: { type: 'text', placeholder: 'Sahip ara...', fn: (a: RiskAction, v) => (a.aksiyonSahibi || '').toLowerCase().includes(v.toLowerCase()) },
             render: (a) => <span className="text-xs text-slate-600">{a.aksiyonSahibi || '—'}</span>,
         },
         {
@@ -337,6 +341,7 @@ export default function AksiyonTablosuPage() {
         },
         {
             key: 'potaNo', header: 'POTA No', defaultWidth: 100,
+            filter: { type: 'text', placeholder: 'POTA No...', fn: (a: RiskAction, v) => (a.potaNo || '').toLowerCase().includes(v.toLowerCase()) },
             render: (a) => <span className="text-xs text-slate-500">{a.potaNo || '—'}</span>,
         },
         {
@@ -375,6 +380,16 @@ export default function AksiyonTablosuPage() {
             ),
         },
     ], []);
+
+    const filtered = useMemo(() => {
+        if (!Object.values(colFilters).some(v => v)) return baseFiltered;
+        return baseFiltered.filter(a => columns.every(col => {
+            const val = colFilters[col.key];
+            return !val || !col.filter?.fn || col.filter.fn(a, val);
+        }));
+    }, [baseFiltered, colFilters, columns]);
+
+    const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page]);
 
     const filterConfigs = useMemo(() => [
         {
@@ -454,6 +469,8 @@ export default function AksiyonTablosuPage() {
                     storageKey="risk-actions-table"
                     emptyTitle="Aksiyon bulunamadı"
                     emptyDescription="Henüz risk aksiyonu eklenmemiş."
+                    columnFilters={colFilters}
+                    onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
                 />
             </div>
 

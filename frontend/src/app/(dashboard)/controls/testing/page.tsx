@@ -303,6 +303,7 @@ export default function ControlTestingPage() {
 
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
+    const [colFilters, setColFilters] = useState<Record<string, string>>({});
     const [page, setPage] = useState(1);
     const pageSize = 25;
 
@@ -361,8 +362,6 @@ export default function ControlTestingPage() {
         });
     }, [tests, searchQuery, activeFilters]);
 
-    const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page]);
-
     const filterConfigs = useMemo(() => [
         {
             key: 'status', label: 'Statü',
@@ -386,6 +385,7 @@ export default function ControlTestingPage() {
             header: 'Test No',
             sortable: true,
             defaultWidth: 130,
+            filter: { type: 'text', placeholder: 'Test No...', fn: (t: ControlTest, v) => t.testNo.toLowerCase().includes(v.toLowerCase()) },
             render: (t) => (
                 <button onClick={() => setActiveTest(t)} className="font-mono text-xs font-bold text-violet-700 hover:underline text-left">
                     {t.testNo}
@@ -396,6 +396,7 @@ export default function ControlTestingPage() {
             key: 'control',
             header: 'Kontrol',
             defaultWidth: 220,
+            filter: { type: 'text', placeholder: 'Kontrol adı...', fn: (t: ControlTest, v) => (t.control.name + ' ' + t.control.controlId).toLowerCase().includes(v.toLowerCase()) },
             render: (t) => (
                 <div className="min-w-0">
                     <p className="text-xs font-semibold text-slate-700 truncate">{t.control.name}</p>
@@ -408,6 +409,7 @@ export default function ControlTestingPage() {
             header: 'Direktörlük',
             sortable: true,
             defaultWidth: 160,
+            filter: { type: 'text', placeholder: 'Direktörlük...', fn: (t: ControlTest, v) => (t.directorate?.name || '').toLowerCase().includes(v.toLowerCase()) },
             render: (t) => (
                 <span className="text-xs text-slate-600 truncate block max-w-[150px]">{t.directorate?.name || '—'}</span>
             ),
@@ -427,6 +429,7 @@ export default function ControlTestingPage() {
             header: 'Statü',
             sortable: true,
             defaultWidth: 140,
+            filter: { type: 'select', options: Object.entries(statusConfig).map(([k, v]) => ({ value: k, label: v.label })), fn: (t: ControlTest, v) => t.status === v },
             render: (t) => {
                 const sc = statusConfig[t.status];
                 const fc = t.findingStatus ? findingStatusConfig[t.findingStatus] : null;
@@ -460,6 +463,16 @@ export default function ControlTestingPage() {
             ),
         },
     ], []);
+
+    const colFiltered = useMemo(() => {
+        if (!Object.values(colFilters).some(v => v)) return filtered;
+        return filtered.filter(t => columns.every(col => {
+            const val = colFilters[col.key];
+            return !val || !col.filter?.fn || col.filter.fn(t, val);
+        }));
+    }, [filtered, colFilters, columns]);
+
+    const paginated = useMemo(() => colFiltered.slice((page - 1) * pageSize, page * pageSize), [colFiltered, page]);
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -511,7 +524,7 @@ export default function ControlTestingPage() {
                         data={paginated}
                         rowKey={t => t.id}
                         loading={loading}
-                        totalCount={filtered.length}
+                        totalCount={colFiltered.length}
                         page={page}
                         pageSize={pageSize}
                         onPageChange={setPage}
@@ -519,6 +532,8 @@ export default function ControlTestingPage() {
                         emptyTitle="Test kaydı bulunamadı"
                         emptyDescription="Kontrolleri aktif yaparak test kayıtlarını otomatik oluşturun."
                         onRowClick={t => setActiveTest(t)}
+                        columnFilters={colFilters}
+                        onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
                     />
                 </div>
             </div>

@@ -252,16 +252,23 @@ export default function ControlInventoryPage() {
             result = result.filter(c => c.status === colFilters.status);
         }
 
-        if (colFilters.effectiveness) {
-            result = result.filter(c => c.effectivenessStatus === colFilters.effectiveness);
+        if (colFilters.effectiveness || colFilters.effectivenessStatus) {
+            const val = colFilters.effectiveness || colFilters.effectivenessStatus;
+            result = result.filter(c => c.effectivenessStatus === val);
         }
 
-        if (colFilters.hasFinding) {
-            result = result.filter(c => 
-                colFilters.hasFinding === 'true' 
-                    ? c.linkedFindings.length > 0 
+        if (colFilters.hasFinding || colFilters.findingStatus) {
+            const val = colFilters.hasFinding || colFilters.findingStatus;
+            result = result.filter(c =>
+                val === 'true'
+                    ? c.linkedFindings.length > 0
                     : c.linkedFindings.length === 0
             );
+        }
+
+        if (colFilters.owner) {
+            const q = colFilters.owner.toLowerCase();
+            result = result.filter(c => c.owner.name.toLowerCase().includes(q));
         }
 
         // Sorting
@@ -337,6 +344,7 @@ export default function ControlInventoryPage() {
     const columns: ColumnDef<Control>[] = useMemo(() => [
         {
             key: 'controlId', header: 'Kontrol ID', sortable: true, defaultWidth: 120,
+            filter: { type: 'text', placeholder: 'ID ara...' },
             render: (c) => (
                 <Link href={`/controls/${c.id}`} className="font-mono font-semibold text-emerald-700 hover:underline">
                     {c.controlId}
@@ -345,10 +353,12 @@ export default function ControlInventoryPage() {
         },
         {
             key: 'name', header: 'Kontrol Adı', sortable: true, defaultWidth: 220,
+            filter: { type: 'text', placeholder: 'Ad ara...' },
             render: (c) => <span className="font-medium text-slate-800 truncate block max-w-[200px]" title={c.name}>{c.name}</span>,
         },
         {
             key: 'findingStatus', header: 'Bulgu Durumu', defaultWidth: 120,
+            filter: { type: 'select', options: [{ value: 'true', label: 'Bulgulu' }, { value: 'false', label: 'Bulgusu Yok' }] },
             render: (c) => {
                 const hasFinding = c.linkedFindings.length > 0;
                 return (
@@ -372,6 +382,7 @@ export default function ControlInventoryPage() {
         },
         {
             key: 'owner', header: 'Sahip', defaultWidth: 150,
+            filter: { type: 'text', placeholder: 'Sahip ara...' },
             render: (c) => (
                 <div>
                     <p className="text-sm font-semibold text-slate-800">{c.owner.name}</p>
@@ -400,6 +411,7 @@ export default function ControlInventoryPage() {
         },
         {
             key: 'effectivenessStatus', header: 'Etkinlik', defaultWidth: 120,
+            filter: { type: 'select', options: Object.entries(effectivenessLabel).map(([k, v]) => ({ value: k, label: v.label })) },
             render: (c) => {
                 const cfg = effectivenessLabel[c.effectivenessStatus];
                 return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-gray-400">—</span>;
@@ -407,6 +419,7 @@ export default function ControlInventoryPage() {
         },
         {
             key: 'status', header: 'Durum', defaultWidth: 90,
+            filter: { type: 'select', options: Object.entries(statusLabel).map(([k, v]) => ({ value: k, label: v.label })) },
             render: (c) => {
                 const cfg = statusLabel[c.status];
                 return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-gray-400">—</span>;
@@ -582,6 +595,8 @@ export default function ControlInventoryPage() {
                     emptyDescription="Filtrelerinizi değiştirin veya yeni bir kontrol ekleyin."
                     emptyActionLabel="Yeni Kontrol Ekle"
                     onEmptyAction={() => window.location.href = '/controls/new'}
+                    columnFilters={colFilters}
+                    onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
                 />
             </div>
 

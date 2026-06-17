@@ -58,6 +58,7 @@ export default function ActionsPage() {
 
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
+    const [colFilters, setColFilters] = useState<Record<string, string>>({});
     const [page, setPage] = useState(1);
     const pageSize = 15;
 
@@ -91,7 +92,7 @@ export default function ActionsPage() {
         },
     ], [activeFilters]);
 
-    const filteredActions = useMemo(() => {
+    const baseFilteredActions = useMemo(() => {
         return actions.filter(a => {
             if (searchQuery) {
                 const q = searchQuery.toLowerCase();
@@ -103,10 +104,6 @@ export default function ActionsPage() {
         });
     }, [actions, searchQuery, activeFilters]);
 
-    const paginatedActions = useMemo(() => {
-        return filteredActions.slice((page - 1) * pageSize, page * pageSize);
-    }, [filteredActions, page, pageSize]);
-
     // KPIs
     const inProgress = actions.filter(a => a.status === 'IN_PROGRESS').length;
     const completed = actions.filter(a => a.status === 'COMPLETED' || a.status === 'CLOSED').length;
@@ -115,6 +112,7 @@ export default function ActionsPage() {
     const columns: ColumnDef<Action>[] = useMemo(() => [
         {
             key: 'actionId', header: 'Aksiyon ID', sortable: true, defaultWidth: 120,
+            filter: { type: 'text', placeholder: 'ID ara...', fn: (a: Action, v) => a.actionId.toLowerCase().includes(v.toLowerCase()) },
             render: (a) => (
                 <Link href={`/actions/${a.id}`} className="font-mono font-semibold text-orange-600 hover:underline">
                     {a.actionId}
@@ -123,14 +121,17 @@ export default function ActionsPage() {
         },
         {
             key: 'description', header: 'Açıklama', defaultWidth: 250,
+            filter: { type: 'text', placeholder: 'Açıklama ara...', fn: (a: Action, v) => a.description.toLowerCase().includes(v.toLowerCase()) },
             render: (a) => <span className="font-medium text-slate-800 truncate block max-w-[230px]" title={a.description}>{a.description}</span>,
         },
         {
             key: 'source', header: 'Kaynak', defaultWidth: 110,
+            filter: { type: 'select', options: Object.entries(sourceLabels).map(([k, v]) => ({ value: k, label: v })), fn: (a: Action, v) => a.source === v },
             render: (a) => <span className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded-md">{sourceLabels[a.source] || a.source}</span>,
         },
         {
             key: 'owner', header: 'Sorumlu', defaultWidth: 150,
+            filter: { type: 'text', placeholder: 'Kişi ara...', fn: (a: Action, v) => `${a.owner?.firstName || ''} ${a.owner?.lastName || ''}`.toLowerCase().includes(v.toLowerCase()) },
             render: (a) => <span className="text-sm text-slate-700">{a.owner?.firstName} {a.owner?.lastName}</span>,
         },
         {
@@ -159,6 +160,7 @@ export default function ActionsPage() {
         },
         {
             key: 'status', header: 'Durum', defaultWidth: 130,
+            filter: { type: 'select', options: Object.entries(statusLabels).map(([k, v]) => ({ value: k, label: v.label })), fn: (a: Action, v) => a.status === v },
             render: (a) => {
                 const c = statusLabels[a.status];
                 return c ? <StatusBadge variant={c.variant}>{c.label}</StatusBadge> : null;
@@ -192,6 +194,18 @@ export default function ActionsPage() {
             ),
         },
     ], []);
+
+    const filteredActions = useMemo(() => {
+        if (!Object.values(colFilters).some(v => v)) return baseFilteredActions;
+        return baseFilteredActions.filter(a =>
+            columns.every(col => {
+                const val = colFilters[col.key];
+                return !val || !col.filter?.fn || col.filter.fn(a, val);
+            })
+        );
+    }, [baseFilteredActions, colFilters, columns]);
+
+    const paginatedActions = useMemo(() => filteredActions.slice((page - 1) * pageSize, page * pageSize), [filteredActions, page]);
 
     return (
         <div className="flex flex-col h-full bg-slate-50/50">
@@ -254,6 +268,8 @@ export default function ActionsPage() {
                     storageKey="actions-table"
                     emptyTitle="Aksiyon bulunamadı"
                     emptyDescription="Filtrelerinizi değiştirin veya yeni bir aksiyon oluşturun."
+                    columnFilters={colFilters}
+                    onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
                 />
             </div>
         </div>

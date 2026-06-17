@@ -91,6 +91,7 @@ export default function FollowUpsPage() {
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
+    const [colFilters, setColFilters] = useState<Record<string, string>>({});
     const [page, setPage] = useState(1);
     const pageSize = 25;
 
@@ -147,7 +148,6 @@ export default function FollowUpsPage() {
         });
     }, [followUps, searchQuery, activeFilters]);
 
-    const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page]);
 
     // ── Filter configs ────────────────────────────────────────────────────────
 
@@ -192,6 +192,7 @@ export default function FollowUpsPage() {
             header: 'Takip No',
             sortable: true,
             defaultWidth: 160,
+            filter: { type: 'text', placeholder: 'Takip No...', fn: (f: FollowUp, v) => f.followUpId.toLowerCase().includes(v.toLowerCase()) },
             render: (f) => (
                 <span className="font-mono text-xs font-bold text-violet-700">{f.followUpId}</span>
             ),
@@ -201,6 +202,7 @@ export default function FollowUpsPage() {
             header: 'Bulgu No',
             sortable: true,
             defaultWidth: 140,
+            filter: { type: 'text', placeholder: 'Bulgu No...', fn: (f: FollowUp, v) => f.finding.findingId.toLowerCase().includes(v.toLowerCase()) },
             render: (f) => (
                 <Link href={`/findings/${f.finding.id}`} className="font-mono text-xs font-bold text-violet-600 hover:text-violet-900 hover:underline">
                     {f.finding.findingId}
@@ -211,6 +213,7 @@ export default function FollowUpsPage() {
             key: 'summary',
             header: 'Bulgu Özeti',
             defaultWidth: 220,
+            filter: { type: 'text', placeholder: 'Özet ara...', fn: (f: FollowUp, v) => (f.finding.summary || f.finding.description).toLowerCase().includes(v.toLowerCase()) },
             render: (f) => (
                 <p className="text-xs text-slate-700 truncate max-w-[200px]" title={f.finding.summary || f.finding.description}>
                     {f.finding.summary || f.finding.description}
@@ -222,6 +225,7 @@ export default function FollowUpsPage() {
             header: 'İlgili Direktörlük',
             sortable: true,
             defaultWidth: 160,
+            filter: { type: 'text', placeholder: 'Direktörlük...', fn: (f: FollowUp, v) => (f.finding.relatedDepartment || '').toLowerCase().includes(v.toLowerCase()) },
             render: (f) => (
                 <span className="text-xs text-slate-600 truncate block max-w-[150px]">{f.finding.relatedDepartment || '—'}</span>
             ),
@@ -262,6 +266,7 @@ export default function FollowUpsPage() {
             header: 'Takip Statüsü',
             sortable: true,
             defaultWidth: 160,
+            filter: { type: 'select', options: Object.entries(followUpStatusConfig).map(([k, v]) => ({ value: k, label: v.label })), fn: (f: FollowUp, v) => f.status === v },
             render: (f) => {
                 const sc = followUpStatusConfig[f.status];
                 const rc = f.resolutionOutcome ? resolutionConfig[f.resolutionOutcome] : null;
@@ -305,6 +310,18 @@ export default function FollowUpsPage() {
             ),
         },
     ], []);
+
+    const colFiltered = useMemo(() => {
+        if (!Object.values(colFilters).some(v => v)) return filtered;
+        return filtered.filter(f =>
+            columns.every(col => {
+                const val = colFilters[col.key];
+                return !val || !col.filter?.fn || col.filter.fn(f, val);
+            })
+        );
+    }, [filtered, colFilters, columns]);
+
+    const paginated = useMemo(() => colFiltered.slice((page - 1) * pageSize, page * pageSize), [colFiltered, page]);
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -367,13 +384,15 @@ export default function FollowUpsPage() {
                     data={paginated}
                     rowKey={(f) => f.id}
                     loading={loading}
-                    totalCount={filtered.length}
+                    totalCount={colFiltered.length}
                     page={page}
                     pageSize={pageSize}
                     onPageChange={setPage}
                     storageKey="follow-ups-list-v1"
                     emptyTitle="Takip çalışması bulunamadı"
                     emptyDescription="Bulgulara aksiyon eklendiğinde otomatik oluşturulur."
+                    columnFilters={colFilters}
+                    onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
                 />
             </div>
         </div>

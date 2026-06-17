@@ -260,6 +260,7 @@ export default function RcaMappingPage() {
 
     // Column groups for visual separation
     const colGroups = [
+        { label: 'NAV', cols: 1, color: 'bg-slate-600' },
         { label: 'RİSK', cols: 14, color: 'bg-blue-600' },
         { label: 'KONTROL', cols: 8, color: 'bg-emerald-600' },
         { label: 'AKSİYON', cols: 9, color: 'bg-indigo-600' },
@@ -327,6 +328,8 @@ export default function RcaMappingPage() {
                                         ))}
                                     </tr>
                                     <tr className="bg-slate-100 border-b border-slate-200">
+                                        {/* NAV col */}
+                                        <th className="text-left px-2 py-2.5 font-semibold text-slate-500 whitespace-nowrap border-r border-slate-200 text-[10px]">Git</th>
                                         {/* RISK cols */}
                                         {[
                                             'Risk ID', 'Kayıt ID', 'Risk Statü', 'İlgili GMY', 'Risk Sahibi',
@@ -353,7 +356,7 @@ export default function RcaMappingPage() {
                                 <tbody>
                                     {filtered.length === 0 ? (
                                         <tr>
-                                            <td colSpan={31} className="text-center py-16 text-slate-400">
+                                            <td colSpan={32} className="text-center py-16 text-slate-400">
                                                 <div className="text-2xl mb-2">📊</div>
                                                 <p>Kayıt bulunamadı</p>
                                                 <p className="text-xs mt-1">Risk, Kontrol ve Aksiyon verisi oluşturduktan sonra burada görünür</p>
@@ -366,6 +369,30 @@ export default function RcaMappingPage() {
 
                                         return (
                                             <tr key={idx} className={`border-b border-slate-100 hover:bg-blue-50/30 transition-colors ${idx % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
+                                                {/* NAV */}
+                                                <td className="px-2 py-2.5 border-r border-slate-100">
+                                                    <div className="flex items-center gap-1">
+                                                        <Link href={`/risks/${row.riskDbId}`} title="Risk detayına git"
+                                                            className="w-6 h-6 flex items-center justify-center rounded bg-blue-100 hover:bg-blue-200 text-blue-700 transition-colors"
+                                                            onClick={e => e.stopPropagation()}>
+                                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3l8 4.5v5C20 16.4 16.6 20.2 12 21 7.4 20.2 4 16.4 4 12.5V7.5L12 3z" /></svg>
+                                                        </Link>
+                                                        {row.kontrolDbId && (
+                                                            <Link href={`/risks/controls?search=${row.kontrolId}`} title="Kontrol detayına git"
+                                                                className="w-6 h-6 flex items-center justify-center rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-700 transition-colors"
+                                                                onClick={e => e.stopPropagation()}>
+                                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+                                                            </Link>
+                                                        )}
+                                                        {row.aksiyonDbId && (
+                                                            <Link href={`/risks/actions?search=${row.aksiyonId}`} title="Aksiyon detayına git"
+                                                                className="w-6 h-6 flex items-center justify-center rounded bg-indigo-100 hover:bg-indigo-200 text-indigo-700 transition-colors"
+                                                                onClick={e => e.stopPropagation()}>
+                                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                                            </Link>
+                                                        )}
+                                                    </div>
+                                                </td>
                                                 {/* RISK */}
                                                 <td className="px-3 py-2.5 border-r border-slate-100">
                                                     <Link href={`/risks/${row.riskDbId}`} className="font-mono font-bold text-blue-700 hover:underline">{row.riskId}</Link>
