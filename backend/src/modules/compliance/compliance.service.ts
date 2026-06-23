@@ -84,6 +84,40 @@ export class ComplianceService {
         return this.prisma.regulationArticle.findMany({
             where: { regulationId },
             orderBy: { articleCode: 'asc' },
+            include: {
+                crossRefsFrom: {
+                    include: { target: { include: { regulation: { select: { id: true, code: true, name: true } } } } },
+                },
+                crossRefsTo: {
+                    include: { source: { include: { regulation: { select: { id: true, code: true, name: true } } } } },
+                },
+            },
+        });
+    }
+
+    async searchArticles(q: string, regulationId?: string, category?: string) {
+        const where: any = {};
+        if (regulationId) where.regulationId = regulationId;
+        if (category) where.category = category;
+        if (q) {
+            where.OR = [
+                { articleCode: { contains: q, mode: 'insensitive' } },
+                { title: { contains: q, mode: 'insensitive' } },
+                { description: { contains: q, mode: 'insensitive' } },
+            ];
+        }
+        return this.prisma.regulationArticle.findMany({
+            where,
+            orderBy: [{ regulationId: 'asc' }, { articleCode: 'asc' }],
+            include: {
+                regulation: { select: { id: true, code: true, name: true } },
+                crossRefsFrom: {
+                    include: { target: { include: { regulation: { select: { id: true, code: true, name: true } } } } },
+                },
+                crossRefsTo: {
+                    include: { source: { include: { regulation: { select: { id: true, code: true, name: true } } } } },
+                },
+            },
         });
     }
 

@@ -1014,11 +1014,15 @@ model FindingStatusLog {
 // ==========================================
 
 model Regulation {
-  id          String  @id @default(cuid())
-  code        String  @unique // BDDK, DORA, ISO27001
-  name        String
-  description String? @db.Text
-  isActive    Boolean @default(true)
+  id            String    @id @default(cuid())
+  code          String    @unique
+  name          String
+  description   String?   @db.Text
+  issuer        String?
+  publishDate   DateTime?
+  effectiveDate DateTime?
+  status        String    @default("ACTIVE")
+  isActive      Boolean   @default(true)
 
   // Relations
   articles RegulationArticle[]
@@ -1034,15 +1038,33 @@ model RegulationArticle {
   articleCode  String     // Article number/code
   title        String
   description  String     @db.Text
+  category     String?    // Yönetişim, Risk, Teknik, Erişim, Personel, Fiziksel, Denetim, Süreklilik, Genel
 
   // Mappings
   risks    RiskRegulation[]
   controls ControlRegulation[]
 
+  // Cross-references to other articles
+  crossRefsFrom ArticleCrossRef[] @relation("CrossRefSource")
+  crossRefsTo   ArticleCrossRef[] @relation("CrossRefTarget")
+
   createdAt DateTime @default(now())
 
   @@unique([regulationId, articleCode])
   @@index([regulationId])
+}
+
+model ArticleCrossRef {
+  id       String            @id @default(cuid())
+  sourceId String
+  source   RegulationArticle @relation("CrossRefSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetId String
+  target   RegulationArticle @relation("CrossRefTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  note     String?
+
+  @@unique([sourceId, targetId])
+  @@index([sourceId])
+  @@index([targetId])
 }
 
 model RiskRegulation {

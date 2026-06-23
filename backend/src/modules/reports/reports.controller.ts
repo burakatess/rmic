@@ -64,6 +64,24 @@ export class ReportsController {
         );
     }
 
+    // Bulgu Takip Report
+    @Get('bulgu-takip')
+    async getBulgeTakipReport(
+        @Query('year') year?: string,
+        @Query('month') month?: string,
+        @Query('startDate') startDate?: string,
+        @Query('endDate') endDate?: string,
+        @Query('directorateId') directorateId?: string,
+    ) {
+        return this.reportsService.getBulgeTakipReport({
+            year: year ? parseInt(year) : undefined,
+            month: month ? parseInt(month) : undefined,
+            startDate: startDate ? new Date(startDate) : undefined,
+            endDate: endDate ? new Date(endDate) : undefined,
+            directorateId: directorateId || undefined,
+        });
+    }
+
     // Monthly Management Report Endpoints
     @Get('monthly')
     async getMonthlyReport(

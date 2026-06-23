@@ -6,6 +6,7 @@ import {
     Delete,
     Body,
     Param,
+    Query,
     UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
@@ -53,6 +54,15 @@ export class ComplianceController {
     @Get('regulations/:id/articles')
     async findArticlesByRegulation(@Param('id') regulationId: string) {
         return this.complianceService.findArticlesByRegulation(regulationId);
+    }
+
+    @Get('articles/search')
+    async searchArticles(
+        @Query('q') q: string,
+        @Query('regulationId') regulationId?: string,
+        @Query('category') category?: string,
+    ) {
+        return this.complianceService.searchArticles(q || '', regulationId, category);
     }
 
     @Post('regulations/:id/articles')

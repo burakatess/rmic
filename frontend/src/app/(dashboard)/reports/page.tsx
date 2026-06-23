@@ -41,6 +41,31 @@ export default function ReportsPage() {
                             </div>
                         </Link>
 
+                        {/* Bulgu Takip Report Card */}
+                        <Link href="/reports/bulgu-takip" className="group bg-white rounded-xl p-6 shadow-sm border border-slate-200 hover:border-teal-300 hover:shadow-md transition-all cursor-pointer block relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-24 h-24 bg-teal-50 rounded-bl-[100px] -mr-8 -mt-8 transition-transform group-hover:scale-110" />
+                            <div className="relative">
+                                <div className="w-12 h-12 bg-teal-100 rounded-xl flex items-center justify-center mb-5 group-hover:bg-teal-600 transition-colors">
+                                    <svg className="w-6 h-6 text-teal-600 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                                    </svg>
+                                </div>
+                                <div className="flex items-center gap-3 mb-2">
+                                    <h3 className="font-bold text-slate-900 text-lg">Bulgu Takip Raporu</h3>
+                                </div>
+                                <div className="flex gap-2 mb-4">
+                                    <span className="px-2 py-0.5 bg-teal-100 text-teal-700 text-[10px] font-bold tracking-wider rounded uppercase">Görüntüle</span>
+                                    <span className="px-2 py-0.5 bg-slate-100 text-slate-700 text-[10px] font-bold tracking-wider rounded uppercase">Sunum</span>
+                                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold tracking-wider rounded uppercase">Excel</span>
+                                    <span className="px-2 py-0.5 bg-red-100 text-red-700 text-[10px] font-bold tracking-wider rounded uppercase">PDF</span>
+                                </div>
+                                <p className="text-sm text-slate-500 mb-6 font-medium">Tespit edilen bulgular, takip çalışmaları ve bekleyen bulguların dönemsel raporu.</p>
+                                <span className="text-sm text-teal-600 font-semibold group-hover:text-teal-700 flex items-center gap-1">
+                                    Oluştur <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
+                                </span>
+                            </div>
+                        </Link>
+
                         {/* EK-6 Report Card */}
                         <Link href="/reports/ek6" className="group bg-white rounded-xl p-6 shadow-sm border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer block relative overflow-hidden">
                             <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-[100px] -mr-8 -mt-8 transition-transform group-hover:scale-110" />

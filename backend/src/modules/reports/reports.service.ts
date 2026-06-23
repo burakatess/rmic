@@ -523,6 +523,95 @@ export class ReportsService {
         return trend;
     }
 
+    async getBulgeTakipReport(params: {
+        year?: number; month?: number;
+        startDate?: Date; endDate?: Date;
+        directorateId?: string;
+    }) {
+        const { start, end, label } = this.resolveMonthlyPeriod(params);
+        const dirFilter = params.directorateId ? { directorateId: params.directorateId } : {};
+
+        // 1. Dönemde tespit edilen bulgular
+        const tespitEdilenBulgular = await this.prisma.finding.findMany({
+            where: { createdAt: { gte: start, lte: end }, ...dirFilter },
+            select: {
+                id: true, findingId: true, summary: true, severity: true,
+                targetResolutionDate: true, resolutionStatus: true, workflowStatus: true,
+                source: true, responsiblePerson: true, gmy: true, createdAt: true,
+                directorateRel: { select: { name: true } },
+            },
+            orderBy: { findingId: 'asc' },
+        });
+
+        // 2. Dönemde gerçekleştirilen takip çalışmaları (status != BEKLIYOR)
+        const takipCalismalari = await this.prisma.findingFollowUp.findMany({
+            where: {
+                createdAt: { gte: start, lte: end },
+                status: { not: 'BEKLIYOR' as any },
+                ...(params.directorateId ? { directorateId: params.directorateId } : {}),
+            },
+            include: {
+                finding: { select: { findingId: true, summary: true, severity: true } },
+                directorate: { select: { name: true } },
+            },
+            orderBy: { createdAt: 'asc' },
+        });
+
+        // 3. Daha önce takip yapılmış ancak kapatılmamış bulgular
+        const takipliAcikBulgular = await this.prisma.finding.findMany({
+            where: {
+                followUps: { some: {} },
+                status: { not: 'CLOSED' },
+                resolutionStatus: { not: 'KAPATILDI' as any },
+                ...dirFilter,
+            },
+            include: {
+                followUps: {
+                    orderBy: { createdAt: 'desc' },
+                    take: 1,
+                    select: { status: true, plannedDate: true, result: true, approvalStatus: true, createdAt: true },
+                },
+                directorateRel: { select: { name: true } },
+            },
+            orderBy: { findingId: 'asc' },
+        });
+
+        // 4. Takip çalışması gerçekleşmemiş veya hedef tarihi belirsiz açık bulgular
+        const takipsizBulgular = await this.prisma.finding.findMany({
+            where: {
+                status: { not: 'CLOSED' },
+                ...dirFilter,
+                OR: [{ followUps: { none: {} } }, { targetResolutionDate: null }],
+            },
+            select: {
+                id: true, findingId: true, summary: true, severity: true,
+                targetResolutionDate: true, createdAt: true, responsiblePerson: true,
+                resolutionStatus: true, workflowStatus: true,
+                directorateRel: { select: { name: true } },
+                _count: { select: { followUps: true } },
+            },
+            orderBy: { createdAt: 'asc' },
+        });
+
+        return {
+            period: { label, start, end },
+            tespitEdilenBulgular: tespitEdilenBulgular.map((f: any) => ({
+                ...f, directorate: f.directorateRel,
+            })),
+            takipCalismalari,
+            takipliAcikBulgular: takipliAcikBulgular.map((f: any) => ({
+                ...f,
+                directorate: f.directorateRel,
+                sonTakip: f.followUps?.[0] ?? null,
+            })),
+            takipsizBulgular: takipsizBulgular.map((f: any) => ({
+                ...f,
+                directorate: f.directorateRel,
+                neden: f._count?.followUps === 0 ? 'Takip Yok' : 'Tarih Belirsiz',
+            })),
+        };
+    }
+
     async generateMonthlyReportWord(params: {
         year?: number; month?: number;
         startDate?: Date; endDate?: Date;
