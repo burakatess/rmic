@@ -3,6 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ControlsService } from './controls.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
+import { CreateControlDto, UpdateControlDto } from './dto';
 
 @ApiTags('Controls')
 @ApiBearerAuth('JWT-Auth')
@@ -18,6 +19,60 @@ export class ControlsController {
         return this.controlsService.findAll(query);
     }
 
+    // ─── ControlTests (literal path — :id'den ÖNCE olmalı, NestJS route order) ─
+    @Get('tests')
+    async getAllTests(@Query() query: any) {
+        return this.controlsService.getAllTests(query);
+    }
+
+    @Patch('tests/:testId/start')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    async startTest(@Param('testId') testId: string, @CurrentUser('id') userId: string) {
+        return this.controlsService.startTest(testId, userId);
+    }
+
+    @Patch('tests/:testId/complete')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    async completeTest(@Param('testId') testId: string, @Body() data: any, @CurrentUser('id') userId: string) {
+        return this.controlsService.completeTest(testId, data, userId);
+    }
+
+    @Patch('tests/:testId/approve')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    async approveTest(@Param('testId') testId: string, @CurrentUser('id') userId: string) {
+        return this.controlsService.approveTest(testId, userId);
+    }
+
+    @Patch('tests/:testId/return')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    async returnTest(
+        @Param('testId') testId: string,
+        @Body('reason') reason: string,
+        @CurrentUser('id') userId: string,
+    ) {
+        return this.controlsService.returnTest(testId, reason, userId);
+    }
+
+    @Post('tests/:testId/attachments')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    async addTestAttachment(
+        @Param('testId') testId: string,
+        @Body() meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number },
+        @CurrentUser('id') userId: string,
+    ) {
+        return this.controlsService.addControlTestAttachment(testId, meta, userId);
+    }
+
+    @Delete('tests/:testId/attachments/:attachmentId')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    async removeTestAttachment(
+        @Param('testId') testId: string,
+        @Param('attachmentId') attachmentId: string,
+        @CurrentUser('id') userId: string,
+    ) {
+        return this.controlsService.removeControlTestAttachment(testId, attachmentId, userId);
+    }
+
     @Get(':id/relations')
     async getRelations(@Param('id') id: string) {
         return this.controlsService.getRelations(id);
@@ -30,13 +85,13 @@ export class ControlsController {
 
     @Post()
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async create(@Body() data: any, @CurrentUser('id') userId: string) {
+    async create(@Body() data: CreateControlDto, @CurrentUser('id') userId: string) {
         return this.controlsService.create(data, userId);
     }
 
     @Put(':id')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async update(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
+    async update(@Param('id') id: string, @Body() data: UpdateControlDto, @CurrentUser('id') userId: string) {
         return this.controlsService.update(id, data, userId);
     }
 
@@ -70,13 +125,6 @@ export class ControlsController {
         return this.controlsService.unmapRisk(id, riskId);
     }
 
-    // ─── ControlTests (Global List) ───────────────────────────────────────────
-
-    @Get('tests')
-    async getAllTests(@Query() query: any) {
-        return this.controlsService.getAllTests(query);
-    }
-
     // ─── ControlTests (Per-Control) ───────────────────────────────────────────
 
     @Get(':id/tests')
@@ -94,34 +142,6 @@ export class ControlsController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
     async generateTests(@Param('id') id: string, @CurrentUser('id') userId: string) {
         return this.controlsService.generateTestsForControl(id);
-    }
-
-    @Patch('tests/:testId/start')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async startTest(@Param('testId') testId: string, @CurrentUser('id') userId: string) {
-        return this.controlsService.startTest(testId, userId);
-    }
-
-    @Patch('tests/:testId/complete')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async completeTest(@Param('testId') testId: string, @Body() data: any, @CurrentUser('id') userId: string) {
-        return this.controlsService.completeTest(testId, data, userId);
-    }
-
-    @Patch('tests/:testId/approve')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async approveTest(@Param('testId') testId: string, @CurrentUser('id') userId: string) {
-        return this.controlsService.approveTest(testId, userId);
-    }
-
-    @Patch('tests/:testId/return')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async returnTest(
-        @Param('testId') testId: string,
-        @Body('reason') reason: string,
-        @CurrentUser('id') userId: string,
-    ) {
-        return this.controlsService.returnTest(testId, reason, userId);
     }
 
     // Legacy: POST :id/test — backward compat

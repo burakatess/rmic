@@ -27,6 +27,7 @@ interface Control {
     automation: string;
     frequency: string;
     owner: { id: string; name: string; department: string };
+    mehaz: string;
     lastTestDate: string;
     lastTestResult: string;
     effectivenessStatus: string;
@@ -136,6 +137,7 @@ export default function ControlInventoryPage() {
                     name: `${c.owner?.firstName || ''} ${c.owner?.lastName || ''}`.trim() || 'Bilinmiyor',
                     department: String(c.owner?.department || ''),
                 },
+                mehaz: String(c.mehaz || ''),
                 lastTestDate: c.lastTestDate ? new Date(c.lastTestDate).toISOString().split('T')[0] : '',
                 lastTestResult: String(c.lastTestResult || 'NOT_TESTED'),
                 effectivenessStatus: String(c.effectivenessStatus || 'NOT_TESTED'),
@@ -242,6 +244,15 @@ export default function ControlInventoryPage() {
 
         if (colFilters.automation) {
             result = result.filter(c => c.automation === colFilters.automation);
+        }
+
+        if (colFilters.mehaz) {
+            const q = colFilters.mehaz.toLowerCase();
+            result = result.filter(c => c.mehaz.toLowerCase().includes(q));
+        }
+
+        if (colFilters.lastTestResult) {
+            result = result.filter(c => c.lastTestResult === colFilters.lastTestResult);
         }
 
         if (colFilters.frequency) {
@@ -357,7 +368,29 @@ export default function ControlInventoryPage() {
             render: (c) => <span className="font-medium text-slate-800 truncate block max-w-[200px]" title={c.name}>{c.name}</span>,
         },
         {
-            key: 'findingStatus', header: 'Bulgu Durumu', defaultWidth: 120,
+            key: 'mehaz', header: 'Mehaz', defaultWidth: 140, hideable: true, defaultHidden: true,
+            filter: { type: 'text', placeholder: 'Mehaz ara...' },
+            render: (c) => c.mehaz
+                ? <span className="text-xs text-slate-600 truncate block max-w-[130px]" title={c.mehaz}>{c.mehaz}</span>
+                : <span className="text-slate-300">—</span>,
+        },
+        {
+            key: 'lastTestResult', header: 'Son Kontrol Sonucu', defaultWidth: 140, hideable: true, defaultHidden: true,
+            filter: {
+                type: 'select', options: [
+                    { value: 'EFFECTIVE', label: 'Etkin' },
+                    { value: 'PARTIALLY_EFFECTIVE', label: 'Kısmen Etkin' },
+                    { value: 'INEFFECTIVE', label: 'Etkin Değil' },
+                    { value: 'NOT_TESTED', label: 'Test Edilmedi' },
+                ],
+            },
+            render: (c) => {
+                const cfg = effectivenessLabel[c.lastTestResult];
+                return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-slate-300">—</span>;
+            },
+        },
+        {
+            key: 'findingStatus', header: 'Bulgu Durumu', defaultWidth: 120, hideable: true,
             filter: { type: 'select', options: [{ value: 'true', label: 'Bulgulu' }, { value: 'false', label: 'Bulgusu Yok' }] },
             render: (c) => {
                 const hasFinding = c.linkedFindings.length > 0;
@@ -369,7 +402,7 @@ export default function ControlInventoryPage() {
             },
         },
         {
-            key: 'findingsCount', header: 'Bulgu Sayısı', defaultWidth: 100,
+            key: 'findingsCount', header: 'Bulgu Sayısı', defaultWidth: 100, hideable: true,
             render: (c) => (
                 <span className={`px-2 py-0.5 rounded-full text-xs font-extrabold ${
                     c.linkedFindings.length > 0 
@@ -381,7 +414,7 @@ export default function ControlInventoryPage() {
             ),
         },
         {
-            key: 'owner', header: 'Sahip', defaultWidth: 150,
+            key: 'owner', header: 'Sahip', defaultWidth: 150, hideable: true,
             filter: { type: 'text', placeholder: 'Sahip ara...' },
             render: (c) => (
                 <div>
@@ -391,15 +424,16 @@ export default function ControlInventoryPage() {
             ),
         },
         {
-            key: 'frequency', header: 'Sıklık', defaultWidth: 90,
+            key: 'frequency', header: 'Sıklık', defaultWidth: 90, hideable: true,
+            filter: { type: 'select', options: Object.entries(frequencyLabel).map(([k, v]) => ({ value: k, label: v })) },
             render: (c) => <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">{frequencyLabel[c.frequency] || c.frequency}</span>,
         },
         {
-            key: 'lastTestDate', header: 'Son Test', sortable: true, defaultWidth: 110,
+            key: 'lastTestDate', header: 'Son Test', sortable: true, defaultWidth: 110, hideable: true,
             render: (c) => <span className="text-sm text-slate-600">{formatDate(c.lastTestDate)}</span>,
         },
         {
-            key: 'linkedRisks', header: 'Risk', defaultWidth: 90,
+            key: 'linkedRisks', header: 'Risk', defaultWidth: 90, hideable: true,
             render: (c) => c.linkedRisks.length > 0 ? (
                 <div className="flex flex-wrap gap-1">
                     {c.linkedRisks.slice(0, 2).map(r => (
@@ -410,7 +444,7 @@ export default function ControlInventoryPage() {
             ) : <span className="text-slate-300">—</span>,
         },
         {
-            key: 'effectivenessStatus', header: 'Etkinlik', defaultWidth: 120,
+            key: 'effectivenessStatus', header: 'Etkinlik', defaultWidth: 120, hideable: true,
             filter: { type: 'select', options: Object.entries(effectivenessLabel).map(([k, v]) => ({ value: k, label: v.label })) },
             render: (c) => {
                 const cfg = effectivenessLabel[c.effectivenessStatus];

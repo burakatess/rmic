@@ -87,42 +87,45 @@ export default function LoginPage() {
                         </Button>
                     </form>
 
-                    {/* Divider */}
-                    <div className="flex items-center gap-4 my-8">
-                        <div className="flex-1 h-px bg-slate-700" />
-                        <span className="text-xs font-medium text-slate-500 tracking-wider">HIZLI DEMO ERİŞİMİ</span>
-                        <div className="flex-1 h-px bg-slate-700" />
-                    </div>
+                    {/* Demo giriş kısayolları — yalnızca development ortamında gösterilir.
+                        Gerçek e-posta/şifre bilgisi production build'inde asla render edilmez. */}
+                    {process.env.NODE_ENV !== 'production' && (
+                        <>
+                            <div className="flex items-center gap-4 my-8">
+                                <div className="flex-1 h-px bg-slate-700" />
+                                <span className="text-xs font-medium text-slate-500 tracking-wider">HIZLI DEMO ERİŞİMİ (DEV)</span>
+                                <div className="flex-1 h-px bg-slate-700" />
+                            </div>
 
-                    {/* Demo Logins */}
-                    <div className="space-y-3">
-                        {[
-                            { email: 'burak@rmic.com',  label: 'Sistem Yöneticisi', desc: 'Tüm yetkiler' },
-                            { email: 'mgr1@rmic.com',   label: 'İKS Yöneticisi',    desc: 'Bulgu & aksiyon yönetimi' },
-                            { email: 'aud1@rmic.com',   label: 'İKS Çalışanı',      desc: 'Denetim ve bulgular' },
-                        ].map(({ email: dEmail, label, desc }) => (
-                            <button
-                                key={dEmail}
-                                type="button"
-                                onClick={() => handleDemoLogin(dEmail)}
-                                disabled={isLoading}
-                                className="w-full flex items-center justify-between p-3 bg-slate-900/50 hover:bg-slate-900 border border-slate-700/50 rounded-xl transition-colors text-left group disabled:opacity-50"
-                            >
-                                <div>
-                                    <p className="text-sm font-medium text-slate-200 group-hover:text-white">{label}</p>
-                                    <p className="text-xs text-slate-500">{desc} — {dEmail}</p>
-                                </div>
-                                <svg className="w-5 h-5 text-slate-600 group-hover:text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                            </button>
-                        ))}
-                    </div>
+                            <div className="space-y-3">
+                                {[
+                                    { email: 'burak@rmic.com',  label: 'Sistem Yöneticisi', desc: 'Tüm yetkiler' },
+                                    { email: 'mgr1@rmic.com',   label: 'İKS Yöneticisi',    desc: 'Bulgu & aksiyon yönetimi' },
+                                    { email: 'aud1@rmic.com',   label: 'İKS Çalışanı',      desc: 'Denetim ve bulgular' },
+                                ].map(({ email: dEmail, label, desc }) => (
+                                    <button
+                                        key={dEmail}
+                                        type="button"
+                                        onClick={() => handleDemoLogin(dEmail)}
+                                        disabled={isLoading}
+                                        className="w-full flex items-center justify-between p-3 bg-slate-900/50 hover:bg-slate-900 border border-slate-700/50 rounded-xl transition-colors text-left group disabled:opacity-50"
+                                    >
+                                        <div>
+                                            <p className="text-sm font-medium text-slate-200 group-hover:text-white">{label}</p>
+                                            <p className="text-xs text-slate-500">{desc} — {dEmail}</p>
+                                        </div>
+                                        <svg className="w-5 h-5 text-slate-600 group-hover:text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                        </svg>
+                                    </button>
+                                ))}
+                            </div>
 
-                    {/* Şifre bilgisi */}
-                    <p className="text-center text-xs text-slate-600 mt-4">
-                        Tüm demo hesapların şifresi: <span className="font-mono text-slate-400">Test1234!</span>
-                    </p>
+                            <p className="text-center text-xs text-slate-600 mt-4">
+                                Tüm demo hesapların şifresi: <span className="font-mono text-slate-400">Test1234!</span>
+                            </p>
+                        </>
+                    )}
                 </div>
 
                 <div className="text-center mt-8">

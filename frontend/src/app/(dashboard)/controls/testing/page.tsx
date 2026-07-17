@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
 import { PageHeader, StatusBadge, Button, DataTable, FilterBar } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { CreateFindingModal } from '@/components/modals/CreateFindingModal';
+import { FileUpload, type AttachmentMeta } from '@/components/ui';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +37,7 @@ interface ControlTest {
     };
     directorate?: { id: string; name: string; code?: string | null } | null;
     findings?: { id: string; findingId: string; severity: string; resolutionStatus: string }[];
+    attachments?: { id: string; fileName: string; originalName: string; mimeType: string; sizeBytes: number }[];
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -64,6 +67,9 @@ const fmt = (d?: string | null) => {
     return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('tr-TR');
 };
 
+const MONTHS_TR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+const MONTHS_SHORT = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+
 // ─── WorkspacePanel ──────────────────────────────────────────────────────────
 
 function WorkspacePanel({
@@ -83,11 +89,17 @@ function WorkspacePanel({
         findingStatus: test.findingStatus || 'BULGUSU_YOK',
     });
 
+    const hasFindings = (test.findings?.length ?? 0) > 0;
     const canStart    = test.status === 'BEKLIYOR';
     const canComplete = test.status === 'DEVAM_EDIYOR';
     const canApprove  = test.status === 'TAMAMLANDI';
     const canReturn   = test.status === 'TAMAMLANDI';
     const isDone      = test.status === 'ONAYLANDI';
+    // BULGUSU_VAR seçildiyse bulgu eklenene kadar "Testi Tamamla" disabled
+    const needsFindingFirst = form.findingStatus === 'BULGUSU_VAR' && !hasFindings;
+    const completeBlockedReason = needsFindingFirst
+        ? 'Önce "Bulgu Kaydı Oluştur" ile bir bulgu kaydı ekleyin.'
+        : null;
 
     const handleStart = async () => {
         setSaving(true);
@@ -174,6 +186,29 @@ function WorkspacePanel({
                     {test.control.gmy && <p className="text-xs text-slate-500">👤 {test.control.gmy}</p>}
                 </div>
 
+                {/* Kanıt Ekleri — Bulgu Var/Yok'tan bağımsız her zaman görünür */}
+                <div>
+                    <FileUpload
+                        label="Kanıt Ekleri"
+                        disabled={isDone}
+                        attachments={(test.attachments ?? []) as AttachmentMeta[]}
+                        onUpload={async (meta) => {
+                            try {
+                                await api.addControlTestAttachment(test.id, meta);
+                                success('Yüklendi', `${meta.originalName} eklendi.`);
+                                onRefresh();
+                            } catch { showError('Hata', 'Dosya eklenemedi.'); }
+                        }}
+                        onRemove={async (att) => {
+                            if (!att.id) return;
+                            try {
+                                await api.removeControlTestAttachment(test.id, att.id);
+                                onRefresh();
+                            } catch { showError('Hata', 'Dosya silinemedi.'); }
+                        }}
+                    />
+                </div>
+
                 {/* İş Akışı Butonları */}
                 {!isDone && (
                     <div className="space-y-2">
@@ -184,9 +219,17 @@ function WorkspacePanel({
                             </Button>
                         )}
                         {canComplete && (
-                            <Button variant="primary" size="sm" className="w-full" onClick={handleComplete} disabled={saving || !form.findingStatus}>
-                                ✓ Testi Tamamla
-                            </Button>
+                            <div>
+                                <Button variant="primary" size="sm" className="w-full"
+                                    onClick={handleComplete}
+                                    disabled={saving || !form.findingStatus || needsFindingFirst}
+                                    title={completeBlockedReason ?? undefined}>
+                                    ✓ Testi Tamamla
+                                </Button>
+                                {completeBlockedReason && (
+                                    <p className="text-[11px] text-amber-600 mt-1.5">{completeBlockedReason}</p>
+                                )}
+                            </div>
                         )}
                         {canApprove && (
                             <Button variant="primary" size="sm" className="w-full" onClick={handleApprove} disabled={saving}>
@@ -224,8 +267,13 @@ function WorkspacePanel({
                         </div>
 
                         {form.findingStatus === 'BULGUSU_VAR' && !isDone && (
-                            <Button variant="danger" size="sm" className="w-full" onClick={() => setFindingModalOpen(true)}>
-                                + Bulgu Kaydı Oluştur
+                            <Button
+                                variant={needsFindingFirst ? 'primary' : 'secondary'}
+                                size="sm"
+                                className={`w-full ${needsFindingFirst ? 'bg-rose-600 hover:bg-rose-700 ring-rose-600' : ''}`}
+                                onClick={() => setFindingModalOpen(true)}
+                            >
+                                + Bulgu Kaydı Oluştur {hasFindings ? `(${test.findings?.length})` : ''}
                             </Button>
                         )}
 
@@ -293,8 +341,10 @@ function WorkspacePanel({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function ControlTestingPage() {
+function ControlTestingPageContent() {
     const { error: showError } = useToast();
+    const searchParams = useSearchParams();
+    const recordId = searchParams.get('recordId');
 
     const [tests, setTests] = useState<ControlTest[]>([]);
     const [loading, setLoading] = useState(true);
@@ -304,6 +354,7 @@ export default function ControlTestingPage() {
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
     const [colFilters, setColFilters] = useState<Record<string, string>>({});
+    const [selectedMonth, setSelectedMonth] = useState<number | null>(new Date().getMonth()); // 0-11 or null for all
     const [page, setPage] = useState(1);
     const pageSize = 25;
 
@@ -311,7 +362,7 @@ export default function ControlTestingPage() {
         setLoading(true);
         try {
             const [testsRes, usersRes] = await Promise.allSettled([
-                api.getAllControlTests({ limit: 500 }) as Promise<{ data: ControlTest[] }>,
+                api.getAllControlTests({ limit: 2000 }) as Promise<{ data: ControlTest[] }>,
                 api.getUsers() as Promise<any[]>,
             ]);
 
@@ -333,23 +384,42 @@ export default function ControlTestingPage() {
 
     useEffect(() => { load(); }, [load]);
 
-    // ── KPIs ─────────────────────────────────────────────────────────────────
+    useEffect(() => {
+        if (recordId && tests.length > 0) {
+            const found = tests.find(t => t.id === recordId);
+            if (found) {
+                setActiveTest(found);
+                const d = new Date(found.plannedDate);
+                setSelectedMonth(d.getMonth());
+            }
+        }
+    }, [recordId, tests]);
+
+    // ── KPIs (ay filtresine göre) ─────────────────────────────────────────
+
+    const monthFiltered = useMemo(() => {
+        if (selectedMonth === null) return tests;
+        return tests.filter(t => {
+            const d = new Date(t.plannedDate);
+            return d.getMonth() === selectedMonth && d.getFullYear() === new Date().getFullYear();
+        });
+    }, [tests, selectedMonth]);
 
     const kpis = useMemo(() => {
-        const total      = tests.length;
-        const bekliyor   = tests.filter(t => t.status === 'BEKLIYOR').length;
-        const devam      = tests.filter(t => t.status === 'DEVAM_EDIYOR').length;
-        const tamamlandi = tests.filter(t => t.status === 'TAMAMLANDI').length;
-        const onaylandi  = tests.filter(t => t.status === 'ONAYLANDI').length;
-        const bulgulu    = tests.filter(t => t.findingStatus === 'BULGUSU_VAR').length;
-        const overdue    = tests.filter(t => ['BEKLIYOR', 'DEVAM_EDIYOR'].includes(t.status) && new Date(t.plannedDate) < new Date()).length;
+        const total      = monthFiltered.length;
+        const bekliyor   = monthFiltered.filter(t => t.status === 'BEKLIYOR').length;
+        const devam      = monthFiltered.filter(t => t.status === 'DEVAM_EDIYOR').length;
+        const tamamlandi = monthFiltered.filter(t => t.status === 'TAMAMLANDI').length;
+        const onaylandi  = monthFiltered.filter(t => t.status === 'ONAYLANDI').length;
+        const bulgulu    = monthFiltered.filter(t => t.findingStatus === 'BULGUSU_VAR').length;
+        const overdue    = monthFiltered.filter(t => ['BEKLIYOR', 'DEVAM_EDIYOR'].includes(t.status) && new Date(t.plannedDate) < new Date()).length;
         return { total, bekliyor, devam, tamamlandi, onaylandi, bulgulu, overdue };
-    }, [tests]);
+    }, [monthFiltered]);
 
     // ── Filter ────────────────────────────────────────────────────────────────
 
     const filtered = useMemo(() => {
-        return tests.filter(t => {
+        return monthFiltered.filter(t => {
             if (searchQuery) {
                 const q = searchQuery.toLowerCase();
                 const txt = [t.testNo, t.control.controlId, t.control.name, t.directorate?.name, t.summary].filter(Boolean).join(' ').toLowerCase();
@@ -360,7 +430,7 @@ export default function ControlTestingPage() {
             if (activeFilters.directorateId && t.directorate?.id !== activeFilters.directorateId) return false;
             return true;
         });
-    }, [tests, searchQuery, activeFilters]);
+    }, [monthFiltered, searchQuery, activeFilters]);
 
     const filterConfigs = useMemo(() => [
         {
@@ -487,6 +557,42 @@ export default function ControlTestingPage() {
                         breadcrumbs={[{ label: 'Kontrol Testleri' }]}
                     />
 
+                    {/* Month Filter */}
+                    <div className="mb-4 bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide mr-2 whitespace-nowrap">📅 Ay:</span>
+                            <button
+                                onClick={() => { setSelectedMonth(null); setPage(1); }}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                    selectedMonth === null
+                                        ? 'bg-violet-600 text-white shadow-sm'
+                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                }`}
+                            >
+                                Tümü
+                            </button>
+                            {MONTHS_SHORT.map((m, i) => {
+                                const isCurrentMonth = i === new Date().getMonth();
+                                return (
+                                    <button
+                                        key={i}
+                                        onClick={() => { setSelectedMonth(i); setPage(1); }}
+                                        className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                            selectedMonth === i
+                                                ? 'bg-violet-600 text-white shadow-sm'
+                                                : isCurrentMonth
+                                                    ? 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100'
+                                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                        }`}
+                                        title={MONTHS_TR[i]}
+                                    >
+                                        {m}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
                     {/* KPIs */}
                     <div className="grid grid-cols-7 gap-2 mb-4">
                         {[
@@ -550,5 +656,13 @@ export default function ControlTestingPage() {
                 </div>
             )}
         </div>
+    );
+}
+
+export default function ControlTestingPage() {
+    return (
+        <Suspense fallback={<div className="p-6 text-center text-sm text-slate-500">Yükleniyor...</div>}>
+            <ControlTestingPageContent />
+        </Suspense>
     );
 }

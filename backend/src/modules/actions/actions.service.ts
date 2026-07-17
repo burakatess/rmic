@@ -132,8 +132,35 @@ export class ActionsService {
             throw new BadRequestException('Action must be linked to a risk or a finding');
         }
 
+        // FK doğrulaması — Prisma FK 500 yerine okunur 400
+        if (data.riskId) {
+            const riskExists = await this.prisma.risk.findUnique({ where: { id: data.riskId }, select: { id: true } });
+            if (!riskExists) throw new BadRequestException('Geçersiz risk: seçilen risk bulunamadı');
+        }
+        if (data.findingId) {
+            const findingExists = await this.prisma.finding.findUnique({ where: { id: data.findingId }, select: { id: true } });
+            if (!findingExists) throw new BadRequestException('Geçersiz bulgu: seçilen bulgu bulunamadı');
+        }
+        if (data.controlId) {
+            const controlExists = await this.prisma.control.findUnique({ where: { id: data.controlId }, select: { id: true } });
+            if (!controlExists) throw new BadRequestException('Geçersiz kontrol: seçilen kontrol bulunamadı');
+        }
+        if (data.ownerId) {
+            const ownerExists = await this.prisma.user.findUnique({ where: { id: data.ownerId }, select: { id: true } });
+            if (!ownerExists) throw new BadRequestException('Geçersiz kullanıcı: aksiyon sorumlusu bulunamadı');
+        }
+
         const action = await this.prisma.action.create({
-            data: { ...data, actionId: this.generateActionId() },
+            data: {
+                actionId: this.generateActionId(),
+                description: data.description,
+                ownerId: data.ownerId || userId,
+                riskId: data.riskId || null,
+                findingId: data.findingId || null,
+                controlId: data.controlId || null,
+                dueDate: new Date(data.dueDate),
+                status: data.status || undefined,
+            },
             include: {
                 owner: { select: { id: true, firstName: true, lastName: true, email: true } },
                 risk: { select: { id: true, riskId: true, name: true } },
@@ -149,9 +176,20 @@ export class ActionsService {
     }
 
     async update(id: string, data: any, userId: string) {
+        // Whitelist — findingId/riskId/controlId burada DEĞİŞTİRİLEMEZ (iş kuralı + mass-assignment koruması)
+        if (data.ownerId) {
+            const ownerExists = await this.prisma.user.findUnique({ where: { id: data.ownerId }, select: { id: true } });
+            if (!ownerExists) throw new BadRequestException('Geçersiz kullanıcı: aksiyon sorumlusu bulunamadı');
+        }
+
         const action = await this.prisma.action.update({
             where: { id },
-            data,
+            data: {
+                description: data.description !== undefined ? data.description : undefined,
+                ownerId: data.ownerId !== undefined ? data.ownerId : undefined,
+                dueDate: data.dueDate !== undefined ? new Date(data.dueDate) : undefined,
+                status: data.status !== undefined ? data.status : undefined,
+            },
             include: {
                 owner: { select: { id: true, firstName: true, lastName: true, email: true } },
                 risk: { select: { id: true, riskId: true, name: true } },
@@ -179,22 +217,24 @@ export class ActionsService {
         return action;
     }
 
-    async extend(id: string, data: { newDueDate: Date; reason: string }, userId: string) {
+    async extend(id: string, data: { newDueDate: string; reason: string }, userId: string) {
         if (!data.reason) {
             throw new BadRequestException('Extension reason is mandatory');
         }
 
+        const newDueDate = new Date(data.newDueDate);
+
         const action = await this.prisma.action.update({
             where: { id },
             data: {
-                dueDate: data.newDueDate,
+                dueDate: newDueDate,
                 extensionReason: data.reason,
                 extensionApproved: false,
             },
         });
 
         await this.prisma.auditLog.create({
-            data: { userId, action: 'EXTEND', entityType: 'Action', entityId: id, newValue: { newDueDate: data.newDueDate, reason: data.reason } },
+            data: { userId, action: 'EXTEND', entityType: 'Action', entityId: id, newValue: { newDueDate, reason: data.reason } },
         });
 
         return action;

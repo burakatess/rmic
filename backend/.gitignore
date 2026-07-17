@@ -1,5 +1,10 @@
 node_modules
 # Keep environment variables out of version control
 .env
+.env.test
+.env.local
 
 /generated/prisma
+
+# Yüklenen dosyalar
+uploads/

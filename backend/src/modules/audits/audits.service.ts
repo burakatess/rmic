@@ -109,7 +109,7 @@ export class AuditsService {
 
     async createFinding(data: any, userId: string) {
         const {
-            risk, control, riskId, controlId, testRecordId,
+            risk, control, riskId, controlId, testRecordId, controlTestId,
             source, affectedSystem, recommendation, managementResponse,
             targetResolutionDate, closedDate, relatedDepartment, responsiblePerson,
             findingType, summary, gmy, internalControlAssessment, currentStatusDetail,
@@ -118,8 +118,41 @@ export class AuditsService {
             ...rest
         } = data;
 
+        // controlTestId doğrulaması (varsa)
+        const resolvedTestId = controlTestId || testRecordId || null;
+        if (resolvedTestId) {
+            const testExists = await this.prisma.controlTest.findUnique({
+                where: { id: resolvedTestId }, select: { id: true },
+            });
+            if (!testExists) throw new BadRequestException('Geçersiz kontrol testi kaydı');
+        }
+
+        // riskId / controlId / assigneeId FK doğrulaması — Prisma FK 500 yerine okunur 400
+        if (riskId) {
+            const riskExists = await this.prisma.risk.findUnique({ where: { id: riskId }, select: { id: true } });
+            if (!riskExists) throw new BadRequestException('Geçersiz risk: seçilen risk bulunamadı');
+        }
+        if (controlId) {
+            const controlExists = await this.prisma.control.findUnique({ where: { id: controlId }, select: { id: true } });
+            if (!controlExists) throw new BadRequestException('Geçersiz kontrol: seçilen kontrol bulunamadı');
+        }
+        if (assigneeId) {
+            const assigneeExists = await this.prisma.user.findUnique({ where: { id: assigneeId }, select: { id: true } });
+            if (!assigneeExists) throw new BadRequestException('Geçersiz kullanıcı: seçilen sorumlu bulunamadı');
+        }
+        if (actions && Array.isArray(actions)) {
+            for (const act of actions) {
+                if (act.ownerId) {
+                    const ownerExists = await this.prisma.user.findUnique({ where: { id: act.ownerId }, select: { id: true } });
+                    if (!ownerExists) throw new BadRequestException('Geçersiz kullanıcı: aksiyon sorumlusu bulunamadı');
+                }
+            }
+        }
+
         const findingData: any = {
             ...rest,
+            impact: (rest.impact && String(rest.impact).trim()) || 'Kontrol testi veya iç denetim sırasında sapma tespit edilmiştir.',
+            controlTestId: resolvedTestId,
             source: source || 'INTERNAL_AUDIT',
             affectedSystem: affectedSystem || null,
             recommendation: recommendation || null,
@@ -138,7 +171,6 @@ export class AuditsService {
             internalControlAssessment: internalControlAssessment || null,
             currentStatusDetail: currentStatusDetail || null,
             testDate: testDate ? new Date(testDate) : null,
-            attachment: attachment || null,
             sendEmail: sendEmail === true || sendEmail === 'true',
             assigneeId: assigneeId || null,
             iletisimKisisi: iletisimKisisi || null,
@@ -155,10 +187,9 @@ export class AuditsService {
             findingData.closedDate = new Date();
         }
 
-        // Generate new-format findingId: YYYY.TÜR.NN
+        // Generate new-format findingId: B-YYYY-NNNN
         const year = new Date().getFullYear();
-        const typeCode = findingType === 'IB' ? 'İB' : 'BT';
-        const prefix = `${year}.${typeCode}.`;
+        const prefix = `B-${year}-`;
 
         const lastFinding = await this.prisma.finding.findFirst({
             where: { findingId: { startsWith: prefix } },
@@ -167,11 +198,11 @@ export class AuditsService {
 
         let nextNum = 1;
         if (lastFinding) {
-            const parts = lastFinding.findingId.split('.');
+            const parts = lastFinding.findingId.split('-');
             const lastNum = parseInt(parts[parts.length - 1], 10);
             if (!isNaN(lastNum)) nextNum = lastNum + 1;
         }
-        const findingId = `${prefix}${nextNum.toString().padStart(2, '0')}`;
+        const findingId = `${prefix}${nextNum.toString().padStart(4, '0')}`;
 
         const finding = await this.prisma.finding.create({
             data: { ...findingData, findingId },
@@ -187,22 +218,38 @@ export class AuditsService {
         // Create actions if passed
         if (actions && Array.isArray(actions) && actions.length > 0) {
             for (const act of actions) {
-                await this.prisma.action.create({
+                const createdAction = await this.prisma.action.create({
                     data: {
-                        actionId: this.generateActionId(),
+                        actionId: await this.generateActionId(),
                         findingId: finding.id,
                         description: act.description,
                         ownerId: act.ownerId,
                         responsibleDepartment: act.responsibleDepartment || null,
                         dueDate: new Date(act.dueDate),
                         notes: act.notes || null,
-                        
+
                         status: act.status || 'BEKLIYOR',
                         controlId: finding.controlId,
-                        
+
                         riskId: finding.riskId,
                     }
                 });
+
+                // Aksiyona yüklenen dosya eklerini bağla
+                if (Array.isArray(act.attachments) && act.attachments.length > 0) {
+                    await this.prisma.actionAttachment.createMany({
+                        data: act.attachments
+                            .filter((a: any) => a?.fileName)
+                            .map((a: any) => ({
+                                actionId: createdAction.id,
+                                fileName: a.fileName,
+                                originalName: a.originalName,
+                                mimeType: a.mimeType,
+                                sizeBytes: a.sizeBytes,
+                                uploadedBy: userId,
+                            })),
+                    });
+                }
             }
             await this.recalculateFindingTargetDate(finding.id);
         }
@@ -244,13 +291,31 @@ export class AuditsService {
             internalControlAssessment: internalControlAssessment !== undefined ? (internalControlAssessment || null) : undefined,
             currentStatusDetail: currentStatusDetail !== undefined ? (currentStatusDetail || null) : undefined,
             testDate: testDate !== undefined ? (testDate ? new Date(testDate) : null) : undefined,
-            attachment: attachment !== undefined ? (attachment || null) : undefined,
             sendEmail: sendEmail !== undefined ? (sendEmail === true || sendEmail === 'true') : undefined,
             assigneeId: assigneeId !== undefined ? (assigneeId || null) : undefined,
             iletisimKisisi: iletisimKisisi !== undefined ? (iletisimKisisi || null) : undefined,
             workflowStatus: workflowStatus || undefined,
             resolutionStatus: resolutionStatus || undefined,
         };
+
+        // controlId / riskId / assigneeId doğrulaması: Prisma FK 500 yerine okunur 400
+        if (findingData.controlId) {
+            const controlExists = await this.prisma.control.findUnique({
+                where: { id: findingData.controlId },
+                select: { id: true },
+            });
+            if (!controlExists) {
+                throw new BadRequestException('Geçersiz kontrol: seçilen kontrol bulunamadı');
+            }
+        }
+        if (findingData.riskId) {
+            const riskExists = await this.prisma.risk.findUnique({ where: { id: findingData.riskId }, select: { id: true } });
+            if (!riskExists) throw new BadRequestException('Geçersiz risk: seçilen risk bulunamadı');
+        }
+        if (findingData.assigneeId) {
+            const assigneeExists = await this.prisma.user.findUnique({ where: { id: findingData.assigneeId }, select: { id: true } });
+            if (!assigneeExists) throw new BadRequestException('Geçersiz kullanıcı: seçilen sorumlu bulunamadı');
+        }
 
         // Auto-set closedDate when resolution becomes KAPATILDI
         if (findingData.resolutionStatus === 'KAPATILDI') {
@@ -527,14 +592,7 @@ export class AuditsService {
         });
         if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
 
-        // Generate followUpId: YYYY.MM.TÜR.BULGUNO
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const typeCode = finding.findingType === 'IB' ? 'İB' : 'BT';
-        // Extract finding number from findingId (last part)
-        const findingNum = finding.findingId.split('.').pop() || '01';
-        const followUpId = `${year}.${month}.${typeCode}.${findingNum}`;
+        const followUpId = await this.generateFollowUpId();
 
         const {
             birimCevabi, currentStatusDetail, internalControlAssessment,
@@ -574,7 +632,7 @@ export class AuditsService {
             birimCevabi, currentStatusDetail, internalControlAssessment,
             targetResolutionDate, testDate, attachment, secondControllerId, sprint, notes, status,
             actionId, evaluatorId, evaluatedAt, result, explanation, evidence, approvalStatus, approvedBy, approvedAt,
-            resolutionOutcome, newFollowUpDate,
+            resolutionOutcome, newFollowUpDate, newAction,
         } = data;
 
         const updated = await this.prisma.findingFollowUp.update({
@@ -658,8 +716,30 @@ export class AuditsService {
                 });
                 await this.recordAuditTrail({ findingId, actionId: updated.actionId, operation: 'ACTION_UPDATED', userId, explanation: 'Takip sonucu yetersiz — aksiyon durumu güncellendi.' });
             } else if (resolvedResult === 'YENI_AKSIYON_GEREKLI') {
-                // Yeni aksiyon oluşturulması gerekiyor — tetikleme kaydı
-                await this.recordAuditTrail({ findingId, followUpId: updated.id, operation: 'FOLLOWUP_COMPLETED', userId, explanation: 'Yeni düzeltici aksiyon gerekli olarak işaretlendi.' });
+                // Yeni düzeltici aksiyon otomatik oluşturulur — kullanıcı newAction ile detay
+                // sağlamışsa onunla, sağlamamışsa fallback placeholder ile. createAction() reuse
+                // edildiği için yeni aksiyon için otomatik FollowUp de kurulur.
+                let ownerId = newAction?.ownerId;
+                if (!ownerId) {
+                    const originalAction = await this.prisma.action.findUnique({
+                        where: { id: updated.actionId! }, select: { ownerId: true },
+                    });
+                    ownerId = originalAction?.ownerId;
+                }
+                const dueDate = newAction?.dueDate
+                    || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+                await this.createAction(findingId, {
+                    description: newAction?.description
+                        || `Takip değerlendirmesi sonucu yeni düzeltici aksiyon gerekli: ${updated.explanation || currentStatusDetail || 'Detay için takip kaydına bakınız.'}`,
+                    ownerId,
+                    responsibleDepartment: newAction?.responsibleDepartment,
+                    dueDate,
+                    notes: newAction?.notes,
+                    status: 'BEKLIYOR',
+                }, userId);
+
+                await this.recordAuditTrail({ findingId, followUpId: updated.id, operation: 'FOLLOWUP_COMPLETED', userId, explanation: 'Yeni düzeltici aksiyon otomatik oluşturuldu.' });
             }
         }
 
@@ -672,10 +752,36 @@ export class AuditsService {
 
     // ─── Actions Finding-Scoped CRUD ──────────────────────────────────────────
 
-    generateActionId(): string {
+    async generateActionId(): Promise<string> {
         const year = new Date().getFullYear();
-        const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-        return `A-${year}-${random}`;
+        const prefix = `A-${year}-`;
+        const last = await this.prisma.action.findFirst({
+            where: { actionId: { startsWith: prefix } },
+            orderBy: { actionId: 'desc' },
+        });
+        let next = 1;
+        if (last) {
+            const parts = last.actionId.split('-');
+            const n = parseInt(parts[2], 10);
+            if (!isNaN(n)) next = n + 1;
+        }
+        return `${prefix}${next.toString().padStart(4, '0')}`;
+    }
+
+    private async generateFollowUpId(): Promise<string> {
+        const year = new Date().getFullYear();
+        const prefix = `T-${year}-`;
+        const last = await this.prisma.findingFollowUp.findFirst({
+            where: { followUpId: { startsWith: prefix } },
+            orderBy: { followUpId: 'desc' },
+        });
+        let next = 1;
+        if (last) {
+            const parts = last.followUpId.split('-');
+            const n = parseInt(parts[2], 10);
+            if (!isNaN(n)) next = n + 1;
+        }
+        return `${prefix}${next.toString().padStart(4, '0')}`;
     }
 
     async getActions(findingId: string) {
@@ -695,11 +801,16 @@ export class AuditsService {
         const finding = await this.prisma.finding.findUnique({ where: { id: findingId } });
         if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
 
+        if (data.ownerId) {
+            const ownerExists = await this.prisma.user.findUnique({ where: { id: data.ownerId }, select: { id: true } });
+            if (!ownerExists) throw new BadRequestException('Geçersiz kullanıcı: aksiyon sorumlusu bulunamadı');
+        }
+
         const dueDate = new Date(data.dueDate);
 
         const action = await this.prisma.action.create({
             data: {
-                actionId: this.generateActionId(),
+                actionId: await this.generateActionId(),
                 findingId,
                 description: data.description,
                 ownerId: data.ownerId,
@@ -742,12 +853,7 @@ export class AuditsService {
             where: { actionId, status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] } },
         });
 
-        const year = dueDate.getFullYear();
-        const month = String(dueDate.getMonth() + 1).padStart(2, '0');
-        const typeCode = finding.findingType === 'IB' ? 'İB' : 'BT';
-        const findingNum = finding.findingId?.split('.').pop() || '01';
-        const actionSuffix = actionId.slice(-4);
-        const followUpId = `${year}.${month}.${typeCode}.${findingNum}.A${actionSuffix}`;
+        const followUpId = await this.generateFollowUpId();
 
         if (existing) {
             await this.prisma.findingFollowUp.update({
@@ -781,6 +887,11 @@ export class AuditsService {
             where: { id: actionId, findingId },
         });
         if (!action) throw new NotFoundException(`Action ${actionId} not found under finding ${findingId}`);
+
+        if (data.ownerId) {
+            const ownerExists = await this.prisma.user.findUnique({ where: { id: data.ownerId }, select: { id: true } });
+            if (!ownerExists) throw new BadRequestException('Geçersiz kullanıcı: aksiyon sorumlusu bulunamadı');
+        }
 
         const updated = await this.prisma.action.update({
             where: { id: actionId },
@@ -889,14 +1000,7 @@ export class AuditsService {
             include: { finding: true },
         });
         if (!action) throw new NotFoundException(`Action ${actionId} not found under finding ${findingId}`);
-
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const typeCode = action.finding.findingType === 'IB' ? 'İB' : 'BT';
-        const findingNum = action.finding.findingId.split('.').pop() || '01';
-        const actionNum = action.actionId.split('-').pop() || '001';
-        const followUpId = `${year}.${month}.${typeCode}.${findingNum}.A${actionNum}`;
+        const followUpId = await this.generateFollowUpId();
 
         const followUp = await this.prisma.findingFollowUp.create({
             data: {
@@ -939,12 +1043,7 @@ export class AuditsService {
 
         let count = 0;
         for (const action of actionsDue) {
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const typeCode = action.finding.findingType === 'IB' ? 'İB' : 'BT';
-            const findingNum = action.finding.findingId.split('.').pop() || '01';
-            const actionNum = action.actionId.split('-').pop() || '001';
-            const followUpId = `${year}.${month}.${typeCode}.${findingNum}.A${actionNum}`;
+            const followUpId = await this.generateFollowUpId();
 
             await this.prisma.findingFollowUp.create({
                 data: {

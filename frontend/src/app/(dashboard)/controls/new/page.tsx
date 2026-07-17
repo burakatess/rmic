@@ -169,7 +169,7 @@ export default function NewControlPage() {
                 directorate: formData.directorate,
                 frequency: formData.frequency,
                 months: formData.months,
-                dueDate: formData.dueDate || null,
+                // Not: "dueDate" (pasife alınacağı tarih) alanının backend karşılığı yok — göndermiyoruz.
                 notes: formData.notes,
                 isActive: formData.status === 'ACTIVE',
                 ownerId: formData.assigneeId || null,

@@ -3,6 +3,10 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AuditsService } from './audits.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
+import {
+    CreateFindingDto, UpdateFindingDto, CreateActionDto, UpdateActionDto,
+    CreateFollowUpDto, UpdateFollowUpDto,
+} from './dto';
 
 @ApiTags('Findings')
 @ApiBearerAuth('JWT-Auth')
@@ -63,13 +67,13 @@ export class AuditsController {
 
     @Post('findings')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async createFinding(@Body() data: any, @CurrentUser('id') userId: string) {
+    async createFinding(@Body() data: CreateFindingDto, @CurrentUser('id') userId: string) {
         return this.auditsService.createFinding(data, userId);
     }
 
     @Put('findings/:id')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async updateFinding(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
+    async updateFinding(@Param('id') id: string, @Body() data: UpdateFindingDto, @CurrentUser('id') userId: string) {
         return this.auditsService.updateFinding(id, data, userId);
     }
 
@@ -150,7 +154,7 @@ export class AuditsController {
 
     @Post('findings/:id/follow-ups')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async createFollowUp(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
+    async createFollowUp(@Param('id') id: string, @Body() data: CreateFollowUpDto, @CurrentUser('id') userId: string) {
         return this.auditsService.createFollowUp(id, data, userId);
     }
 
@@ -159,7 +163,7 @@ export class AuditsController {
     async updateFollowUp(
         @Param('id') id: string,
         @Param('followUpId') followUpId: string,
-        @Body() data: any,
+        @Body() data: UpdateFollowUpDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.auditsService.updateFollowUp(id, followUpId, data, userId);
@@ -176,7 +180,7 @@ export class AuditsController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async createAction(
         @Param('id') id: string,
-        @Body() data: any,
+        @Body() data: CreateActionDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.auditsService.createAction(id, data, userId);
@@ -187,7 +191,7 @@ export class AuditsController {
     async updateAction(
         @Param('id') id: string,
         @Param('actionId') actionId: string,
-        @Body() data: any,
+        @Body() data: UpdateActionDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.auditsService.updateAction(id, actionId, data, userId);

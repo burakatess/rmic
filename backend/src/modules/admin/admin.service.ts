@@ -252,6 +252,82 @@ export class AdminService {
         });
     }
 
+    // SIEM Export
+    async exportAuditLogs(params: {
+        userId?: string;
+        entityType?: string;
+        action?: string;
+        startDate?: Date;
+        endDate?: Date;
+        limit?: number;
+    }, format: 'cef' | 'leef' | 'json') {
+        const logs = await this.findAuditLogs({ ...params, limit: params.limit || 10000 });
+
+        const sevMap: Record<string, number> = { DELETE: 7, UPDATE: 4, CREATE: 3, APPROVAL: 4, LOGIN: 2, LOGOUT: 1 };
+        const esc = (v: unknown) => String(v ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/=/g, '\\=').replace(/[\r\n\t]/g, ' ');
+
+        const lines = logs.map((log: any) => {
+            const ts = new Date(log.createdAt).getTime();
+            const email = log.user?.email ?? 'system';
+            switch (format) {
+                case 'cef':
+                    return `CEF:0|RMIC|GRC|1.0|${esc(log.action)}|${esc(log.action)} ${esc(log.entityType)}|${sevMap[log.action] ?? 3}|end=${ts} suser=${esc(email)} act=${esc(log.action)} cs1Label=entityType cs1=${esc(log.entityType)} cs2Label=entityId cs2=${esc(log.entityId)}${log.ipAddress ? ` src=${esc(log.ipAddress)}` : ''}${log.userAgent ? ` requestClientApplication=${esc(log.userAgent)}` : ''}`;
+                case 'leef':
+                    return `LEEF:2.0|RMIC|GRC|1.0|${esc(log.action)}|devTime=${new Date(log.createdAt).toISOString()}\tusrName=${email}\taction=${log.action}\tentityType=${log.entityType}\tentityId=${log.entityId}${log.ipAddress ? `\tsrc=${log.ipAddress}` : ''}`;
+                case 'json':
+                default:
+                    return JSON.stringify({
+                        timestamp: new Date(log.createdAt).toISOString(),
+                        vendor: 'RMIC', product: 'GRC', version: '1.0',
+                        severity: sevMap[log.action] ?? 3,
+                        user: email,
+                        action: log.action,
+                        entityType: log.entityType,
+                        entityId: log.entityId,
+                        ipAddress: log.ipAddress ?? null,
+                        userAgent: log.userAgent ?? null,
+                        oldValue: log.oldValue ?? null,
+                        newValue: log.newValue ?? null,
+                    });
+            }
+        });
+
+        return lines.join('\n');
+    }
+
+    // SIEM Config (Parameter tablosunda saklanır)
+    private readonly SIEM_CONFIG_KEY = 'siem_export_config';
+
+    async getSiemConfig() {
+        const param = await this.prisma.parameter.findUnique({ where: { key: this.SIEM_CONFIG_KEY } });
+        return param?.value ?? { format: 'CEF', syslogHost: '', syslogPort: 514, enabled: false };
+    }
+
+    async updateSiemConfig(value: Record<string, unknown>, userId: string) {
+        const updated = await this.prisma.parameter.upsert({
+            where: { key: this.SIEM_CONFIG_KEY },
+            update: { value: value as object },
+            create: {
+                category: 'SIEM',
+                key: this.SIEM_CONFIG_KEY,
+                value: value as object,
+                description: 'SIEM dışa aktarım / syslog yönlendirme yapılandırması',
+            },
+        });
+
+        await this.prisma.auditLog.create({
+            data: {
+                userId,
+                action: 'UPDATE',
+                entityType: 'Parameter',
+                entityId: updated.id,
+                newValue: value as object,
+            },
+        });
+
+        return updated.value;
+    }
+
     // Risk Categories Management
     async findAllRiskCategories() {
         return this.prisma.riskCategory.findMany({

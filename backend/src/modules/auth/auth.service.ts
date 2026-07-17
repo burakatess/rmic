@@ -143,6 +143,58 @@ export class AuthService {
         return result;
     }
 
+    async updateProfile(userId: string, dto: { firstName: string; lastName: string; department?: string }) {
+        const user = await this.prisma.user.update({
+            where: { id: userId },
+            data: {
+                firstName: dto.firstName,
+                lastName: dto.lastName,
+                department: dto.department ?? null,
+            },
+            include: { role: true },
+        });
+
+        await this.prisma.auditLog.create({
+            data: {
+                userId,
+                action: 'UPDATE',
+                entityType: 'User',
+                entityId: userId,
+                newValue: { firstName: dto.firstName, lastName: dto.lastName, department: dto.department },
+            },
+        });
+
+        const { passwordHash, ...result } = user;
+        return result;
+    }
+
+    async changePassword(userId: string, dto: { currentPassword: string; newPassword: string }) {
+        const user = await this.prisma.user.findUnique({ where: { id: userId } });
+        if (!user) {
+            throw new UnauthorizedException('Kullanıcı bulunamadı');
+        }
+
+        const isValid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+        if (!isValid) {
+            throw new UnauthorizedException('Mevcut şifre hatalı');
+        }
+
+        const passwordHash = await bcrypt.hash(dto.newPassword, 10);
+        await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+
+        await this.prisma.auditLog.create({
+            data: {
+                userId,
+                action: 'UPDATE',
+                entityType: 'User',
+                entityId: userId,
+                newValue: { event: 'CHANGE_PASSWORD' },
+            },
+        });
+
+        return { message: 'Şifre başarıyla değiştirildi' };
+    }
+
     private async generateTokens(user: any): Promise<TokenResponseDto> {
         const payload = {
             sub: user.id,

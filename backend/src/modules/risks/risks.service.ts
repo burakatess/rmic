@@ -246,6 +246,16 @@ export class RisksService {
                     },
                     orderBy: { olusturmaTarihi: 'desc' },
                 },
+                riskControls: {
+                    include: {
+                        riskControl: true,
+                    },
+                },
+                riskActions: {
+                    include: {
+                        riskAction: true,
+                    },
+                },
             },
         });
 

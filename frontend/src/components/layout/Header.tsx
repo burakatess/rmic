@@ -3,15 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import api from '@/lib/api';
-
-interface User {
-    id: string;
-    email: string;
-    firstName: string;
-    lastName: string;
-    role: { name: string };
-}
+import { useAuth } from '@/components/auth';
 
 
 interface SearchResult {
@@ -22,19 +14,9 @@ interface SearchResult {
     url: string;
 }
 
-// Demo search data
-const DEMO_SEARCH_DATA: SearchResult[] = [
-    { id: '1', type: 'risk', title: 'BT-2025-0001', subtitle: 'Siber Saldırı ve Veri İhlali Riski', url: '/risks/1' },
-    { id: '2', type: 'risk', title: 'UR-2025-0001', subtitle: 'BDDK Regülasyon Uyumsuzluk Riski', url: '/risks/2' },
-    { id: '3', type: 'risk', title: 'OPR-2025-0001', subtitle: 'Operasyonel Kesinti ve İş Sürekliliği', url: '/risks/3' },
-    { id: '4', type: 'control', title: 'C-2024-0001', subtitle: 'Güvenlik Duvarı Yönetimi', url: '/controls/1' },
-    { id: '5', type: 'control', title: 'C-2024-0002', subtitle: 'Erişim Yetkilendirme Kontrolü', url: '/controls/2' },
-    { id: '6', type: 'control', title: 'C-2024-0003', subtitle: 'Yedekleme Doğrulama Kontrolü', url: '/controls/3' },
-    { id: '7', type: 'finding', title: 'F-LZQ1X2-AB12', subtitle: 'Yetkisiz erişim loglarında eksiklik', url: '/findings/1' },
-    { id: '8', type: 'finding', title: 'F-LZQ1X3-CD34', subtitle: 'Şifre politikası güncel değil', url: '/findings/2' },
-    { id: '9', type: 'action', title: 'A-2024-0001', subtitle: 'Güvenlik duvarı kuralları güncellenmesi', url: '/actions/1' },
-    { id: '10', type: 'action', title: 'A-2024-0002', subtitle: 'Şifre politikası revizyonu', url: '/actions/2' },
-];
+// Not: Genel arama için henüz bir backend endpoint'i yok. Sahte/demo sonuç
+// göstermek yerine arama kutusu her zaman "Sonuç bulunamadı" boş state'ine düşer
+// (bkz. aşağıdaki arama efekti) — gerçek bir /search API'si eklenince buraya bağlanacak.
 
 const TYPE_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
     risk: { label: 'Risk', color: 'text-red-700', bg: 'bg-red-100' },
@@ -45,7 +27,7 @@ const TYPE_CONFIG: Record<string, { label: string; color: string; bg: string }> 
 
 export default function Header() {
     const router = useRouter();
-    const [user, setUser] = useState<User | null>(null);
+    const { user } = useAuth();
     const [showDropdown, setShowDropdown] = useState(false);
     const [showNotifications, setShowNotifications] = useState(false);
 
@@ -55,20 +37,6 @@ export default function Header() {
     const [showSearchResults, setShowSearchResults] = useState(false);
     const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
     const searchRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        api.getProfile()
-            .then(setUser)
-            .catch(() => {
-                setUser({
-                    id: 'demo',
-                    email: 'admin@grc.com',
-                    firstName: 'Burak',
-                    lastName: 'Yönetici',
-                    role: { name: 'ADMIN' }
-                });
-            });
-    }, []);
 
     // Close search results when clicking outside
     useEffect(() => {
@@ -81,19 +49,9 @@ export default function Header() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Search logic
+    // Genel arama backend'i henüz yok — sonuç listesi her zaman boş kalır (bkz. yukarıdaki not).
     useEffect(() => {
-        if (searchQuery.length < 2) {
-            setSearchResults([]);
-            return;
-        }
-        const query = searchQuery.toLowerCase();
-        const filtered = DEMO_SEARCH_DATA.filter(item => {
-            const matchesQuery = item.title.toLowerCase().includes(query) || item.subtitle.toLowerCase().includes(query);
-            const matchesCategory = searchCategory === 'all' || item.type === searchCategory;
-            return matchesQuery && matchesCategory;
-        });
-        setSearchResults(filtered.slice(0, 8));
+        setSearchResults([]);
     }, [searchQuery, searchCategory]);
 
     const handleLogout = () => {

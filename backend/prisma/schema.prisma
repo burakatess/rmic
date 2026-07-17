@@ -34,6 +34,7 @@ model User {
   ownedActions  Action[] @relation("ActionOwner")
   auditLogs     AuditLog[]
   refreshTokens RefreshToken[]
+  riskProposals RiskProposal[] @relation("RiskProposalRequester")
 }
 
 model Role {
@@ -71,11 +72,40 @@ model Directorate {
   actions       Action[]         @relation("ActionDirectorate")
   followUps     FindingFollowUp[] @relation("FollowUpDirectorate")
   controlTests  ControlTest[]    @relation("ControlTestDirectorate")
+  riskProposals RiskProposal[]   @relation("RiskProposalDirectorate")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([isActive])
+}
+
+enum RiskProposalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Bir bulguyu karşılayan risk yoksa kullanıcı yeni risk tanımı önerir → admin onayına düşer
+model RiskProposal {
+  id            String             @id @default(cuid())
+  finding       Finding?           @relation("FindingRiskProposals", fields: [findingId], references: [id], onDelete: SetNull)
+  findingId     String?
+  directorate   Directorate?       @relation("RiskProposalDirectorate", fields: [directorateId], references: [id])
+  directorateId String?
+  riskTanimi    String             @db.Text
+  status        RiskProposalStatus @default(PENDING)
+  requestedBy   User               @relation("RiskProposalRequester", fields: [requestedById], references: [id])
+  requestedById String
+  reviewedById  String?
+  reviewedAt    DateTime?
+  reviewNote    String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([status])
+  @@index([findingId])
+  @@index([requestedById])
 }
 
 // ==========================================
@@ -407,6 +437,9 @@ model ControlTest {
   // İlgili bulgular
   findings Finding[]
 
+  // Kanıt dosya ekleri
+  attachments ControlTestAttachment[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -599,6 +632,7 @@ model Finding {
   statusHistory FindingStatusHistory[]
   attachments   FindingAttachment[]
   statusLogs    FindingStatusLog[]
+  riskProposals RiskProposal[]        @relation("FindingRiskProposals")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -992,6 +1026,21 @@ model FollowUpAttachment {
   createdAt    DateTime @default(now())
 
   @@index([followUpId])
+}
+
+model ControlTestAttachment {
+  id            String      @id @default(cuid())
+  controlTest   ControlTest @relation(fields: [controlTestId], references: [id], onDelete: Cascade)
+  controlTestId String
+  fileName      String
+  originalName  String
+  mimeType      String
+  sizeBytes     Int
+  url           String?
+  uploadedBy    String?
+  createdAt     DateTime    @default(now())
+
+  @@index([controlTestId])
 }
 
 // Bulgunun güncel durum log'u — append-only, üzerine yazılmaz

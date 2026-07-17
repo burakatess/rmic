@@ -9,7 +9,7 @@ export class ControlsService {
 
     private async generateControlId(): Promise<string> {
         const year = new Date().getFullYear();
-        const prefix = `C-${year}-`;
+        const prefix = `K-${year}-`;
         const last = await this.prisma.control.findFirst({
             where: { controlId: { startsWith: prefix } },
             orderBy: { controlId: 'desc' },
@@ -23,9 +23,9 @@ export class ControlsService {
         return `${prefix}${next.toString().padStart(4, '0')}`;
     }
 
-    private async generateTestNo(): Promise<string> {
-        const year = new Date().getFullYear();
-        const prefix = `T-${year}-`;
+    async generateTestNo(controlType: string, plannedDate: Date): Promise<string> {
+        const year = plannedDate.getFullYear();
+        const prefix = `TST-${year}-`;
         const last = await this.prisma.controlTest.findFirst({
             where: { testNo: { startsWith: prefix } },
             orderBy: { testNo: 'desc' },
@@ -90,8 +90,7 @@ export class ControlsService {
                 directorateRel: { select: { id: true, name: true, code: true, gmy: true } },
                 risks: { include: { risk: true } },
                 tests: {
-                    orderBy: { plannedDate: 'desc' },
-                    take: 10,
+                    orderBy: { plannedDate: 'asc' },
                     include: {
                         findings: { select: { id: true, findingId: true, severity: true, resolutionStatus: true } },
                     },
@@ -114,6 +113,18 @@ export class ControlsService {
         const { months, status, isActive, ...rest } = data;
         let controlStatus: 'ACTIVE' | 'PASSIVE' = 'ACTIVE';
         if (isActive === false || status === 'PASSIVE') controlStatus = 'PASSIVE';
+
+        // directorateId / ownerId FK doğrulaması — Prisma FK 500 yerine okunur 400
+        if (data.directorateId) {
+            const dirExists = await this.prisma.directorate.findUnique({
+                where: { id: data.directorateId }, select: { id: true },
+            });
+            if (!dirExists) throw new BadRequestException('Geçersiz direktörlük: seçilen direktörlük bulunamadı');
+        }
+        if (data.ownerId) {
+            const ownerExists = await this.prisma.user.findUnique({ where: { id: data.ownerId }, select: { id: true } });
+            if (!ownerExists) throw new BadRequestException('Geçersiz kullanıcı: kontrol sahibi bulunamadı');
+        }
 
         const controlId = data.controlId || await this.generateControlId();
 
@@ -151,24 +162,57 @@ export class ControlsService {
 
     async update(id: string, data: any, userId: string) {
         const existing = await this.findOne(id);
-        const { months, status, isActive, ...rest } = data;
 
         let controlStatus: 'ACTIVE' | 'PASSIVE' | undefined;
-        if (isActive !== undefined) {
-            controlStatus = isActive ? 'ACTIVE' : 'PASSIVE';
-        } else if (status !== undefined) {
-            controlStatus = status === 'ACTIVE' ? 'ACTIVE' : 'PASSIVE';
+        if (data.isActive !== undefined) {
+            controlStatus = data.isActive ? 'ACTIVE' : 'PASSIVE';
+        } else if (data.status !== undefined) {
+            controlStatus = data.status === 'ACTIVE' ? 'ACTIVE' : 'PASSIVE';
         }
+
+        // directorateId / ownerId doğrulaması: FK 500 yerine 400
+        if (data.directorateId) {
+            const dirExists = await this.prisma.directorate.findUnique({
+                where: { id: data.directorateId },
+                select: { id: true },
+            });
+            if (!dirExists) {
+                throw new BadRequestException('Geçersiz direktörlük: seçilen direktörlük bulunamadı');
+            }
+        }
+        if (data.ownerId) {
+            const ownerExists = await this.prisma.user.findUnique({ where: { id: data.ownerId }, select: { id: true } });
+            if (!ownerExists) throw new BadRequestException('Geçersiz kullanıcı: kontrol sahibi bulunamadı');
+        }
+
+        // Whitelist: yalnızca Control şemasında olan alanlar
+        const updateData: any = {};
+        const ALLOWED = ['controlId', 'name', 'description', 'type', 'nature', 'automation', 'frequency',
+            'controlPeriod', 'controlDate', 'mehaz', 'testSteps', 'notes', 'gmy'];
+        for (const key of ALLOWED) {
+            if (data[key] !== undefined) updateData[key] = data[key];
+        }
+
+        // FK alanları: yalnızca dolu (truthy) ise yaz; boş/null gelirse mevcut değeri koru
+        if (data.ownerId) updateData.ownerId = data.ownerId;
+        if (data.testPerformerId) updateData.testPerformerId = data.testPerformerId;
+        else if (data.testPerformerId === null) updateData.testPerformerId = null;
+        if (data.secondControllerId) updateData.secondControllerId = data.secondControllerId;
+        else if (data.secondControllerId === null) updateData.secondControllerId = null;
+        if (data.contactPersonId) updateData.contactPersonId = data.contactPersonId;
+        else if (data.contactPersonId === null) updateData.contactPersonId = null;
+        if (data.reviewerId) updateData.reviewerId = data.reviewerId;
+        else if (data.reviewerId === null) updateData.reviewerId = null;
+
+        // Özel alanlar
+        if (data.months !== undefined) updateData.selectedMonths = data.months;
+        if (data.selectedMonths !== undefined) updateData.selectedMonths = data.selectedMonths;
+        if (controlStatus !== undefined) updateData.status = controlStatus;
+        if (data.directorateId !== undefined) updateData.directorateId = data.directorateId || null;
 
         const control = await this.prisma.control.update({
             where: { id },
-            data: {
-                ...rest,
-                name: data.name || existing.name,
-                selectedMonths: months !== undefined ? months : existing.selectedMonths,
-                status: controlStatus !== undefined ? controlStatus : existing.status,
-                directorateId: data.directorateId !== undefined ? (data.directorateId || null) : undefined,
-            },
+            data: updateData,
             include: {
                 owner: { select: { id: true, firstName: true, lastName: true, email: true } },
                 directorateRel: { select: { id: true, name: true, code: true } },
@@ -285,6 +329,7 @@ export class ControlsService {
                     control: { select: { id: true, controlId: true, name: true, type: true, frequency: true, gmy: true } },
                     directorate: { select: { id: true, name: true, code: true } },
                     findings: { select: { id: true, findingId: true, severity: true, resolutionStatus: true } },
+                    attachments: true,
                 },
                 skip,
                 take: limit,
@@ -302,18 +347,22 @@ export class ControlsService {
             include: {
                 findings: { select: { id: true, findingId: true, severity: true, resolutionStatus: true } },
                 directorate: { select: { id: true, name: true } },
+                attachments: true,
             },
             orderBy: { plannedDate: 'desc' },
         });
     }
 
     async createTest(controlId: string, data: any, userId: string) {
-        const testNo = await this.generateTestNo();
+        const control = await this.prisma.control.findUnique({ where: { id: controlId }, select: { type: true } });
+        if (!control) throw new NotFoundException(`Control ${controlId} not found`);
+        const plannedDate = data.plannedDate ? new Date(data.plannedDate) : new Date();
+        const testNo = await this.generateTestNo(control.type, plannedDate);
         const test = await this.prisma.controlTest.create({
             data: {
                 testNo,
                 controlId,
-                plannedDate: data.plannedDate ? new Date(data.plannedDate) : new Date(),
+                plannedDate,
                 summary: data.summary || null,
                 description: data.description || null,
                 assigneeId: data.assigneeId || null,
@@ -330,6 +379,46 @@ export class ControlsService {
         });
 
         return test;
+    }
+
+    // ─── ControlTest Kanıt Ekleri ─────────────────────────────────────────────
+    async addControlTestAttachment(
+        testId: string,
+        meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number },
+        userId: string,
+    ) {
+        const test = await this.prisma.controlTest.findUnique({ where: { id: testId }, select: { id: true } });
+        if (!test) throw new NotFoundException(`Test ${testId} not found`);
+
+        const att = await this.prisma.controlTestAttachment.create({
+            data: {
+                controlTestId: testId,
+                fileName: meta.fileName,
+                originalName: meta.originalName,
+                mimeType: meta.mimeType,
+                sizeBytes: meta.sizeBytes,
+                uploadedBy: userId,
+            },
+        });
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'FILE_UPLOADED', entityType: 'ControlTestAttachment', entityId: att.id, newValue: { testId, originalName: meta.originalName } },
+        });
+
+        return att;
+    }
+
+    async removeControlTestAttachment(testId: string, attachmentId: string, userId: string) {
+        const att = await this.prisma.controlTestAttachment.findFirst({
+            where: { id: attachmentId, controlTestId: testId },
+        });
+        if (!att) throw new NotFoundException('Ek bulunamadı');
+
+        await this.prisma.controlTestAttachment.delete({ where: { id: attachmentId } });
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'FILE_DELETED', entityType: 'ControlTestAttachment', entityId: attachmentId },
+        });
+        return { success: true };
     }
 
     async startTest(testId: string, userId: string) {
@@ -352,6 +441,19 @@ export class ControlsService {
     async completeTest(testId: string, data: any, userId: string) {
         const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
         if (!test) throw new NotFoundException(`Test ${testId} not found`);
+
+        // İş kuralı: BULGUSU_VAR seçildiyse en az 1 bulgu kaydı olmalı
+        const findingCount = await this.prisma.finding.count({ where: { controlTestId: testId } });
+        if (data.findingStatus === 'BULGUSU_VAR' && findingCount === 0) {
+            throw new BadRequestException(
+                'BULGUSU_VAR seçilen test için en az bir bulgu kaydı oluşturulmalıdır.',
+            );
+        }
+        if (data.findingStatus === 'BULGUSU_YOK' && findingCount > 0) {
+            throw new BadRequestException(
+                'Bu teste bağlı bulgu kayıtları var. Sonuç BULGUSU_YOK olamaz.',
+            );
+        }
 
         const updated = await this.prisma.controlTest.update({
             where: { id: testId },
@@ -393,6 +495,7 @@ export class ControlsService {
             where: { id: test.controlId },
             data: {
                 lastTestDate: test.completedAt || new Date(),
+                lastTestResult: effectiveness as any,
                 effectivenessStatus: effectiveness as any,
             },
         });
@@ -420,6 +523,34 @@ export class ControlsService {
         return updated;
     }
 
+    // ─── Helpers ───────────────────────────────────────────────────────────────
+
+    /** Ayın son iş gününü döner (Cmt→Cuma, Paz→Cuma) */
+    private getLastBusinessDay(year: number, month: number): Date {
+        const lastDay = new Date(year, month + 1, 0);
+        const dow = lastDay.getDay();
+        if (dow === 0) lastDay.setDate(lastDay.getDate() - 2);
+        else if (dow === 6) lastDay.setDate(lastDay.getDate() - 1);
+        return lastDay;
+    }
+
+    /** Yılın tüm Cuma tarihlerini döner */
+    private getFridaysInYear(year: number): Date[] {
+        const fridays: Date[] = [];
+        const d = new Date(year, 0, 1);
+        while (d.getDay() !== 5) d.setDate(d.getDate() + 1);
+        while (d.getFullYear() === year) {
+            fridays.push(new Date(d));
+            d.setDate(d.getDate() + 7);
+        }
+        return fridays;
+    }
+
+    private static readonly turkishMonthIndex: Record<string, number> = {
+        'Ocak': 0, 'Şubat': 1, 'Mart': 2, 'Nisan': 3, 'Mayıs': 4, 'Haziran': 5,
+        'Temmuz': 6, 'Ağustos': 7, 'Eylül': 8, 'Ekim': 9, 'Kasım': 10, 'Aralık': 11,
+    };
+
     // ─── Test Auto-Generation (Frekansa göre yıllık testler) ─────────────────
 
     async generateTestsForControl(controlId: string) {
@@ -435,41 +566,60 @@ export class ControlsService {
         const currentYear = new Date().getFullYear();
         const now = new Date();
 
-        const turkishMonths: Record<string, number> = {
-            'Ocak': 0, 'Şubat': 1, 'Mart': 2, 'Nisan': 3, 'Mayıs': 4, 'Haziran': 5,
-            'Temmuz': 6, 'Ağustos': 7, 'Eylül': 8, 'Ekim': 9, 'Kasım': 10, 'Aralık': 11,
-        };
+        let plannedDates: Date[] = [];
 
-        const dates: Date[] = [];
+        switch (control.frequency) {
+            case 'DAILY':
+                // Günlük kontroller için test kaydı üretilmez
+                return { generated: 0, message: 'Daily controls do not generate test records' };
 
-        if (control.frequency === 'DAILY') {
-            for (let i = 1; i <= 20; i++) {
-                const d = new Date(); d.setDate(now.getDate() + i);
-                if (d.getDay() !== 0 && d.getDay() !== 6) dates.push(d);
+            case 'WEEKLY': {
+                // Her Cuma tarihli kayıt — sadece gelecek Cumalar
+                const allFridays = this.getFridaysInYear(currentYear);
+                plannedDates = allFridays.filter(f => f >= now);
+                break;
             }
-        } else if (control.frequency === 'WEEKLY') {
-            for (let i = 1; i <= 8; i++) {
-                const d = new Date(); d.setDate(now.getDate() + i * 7);
-                dates.push(d);
+
+            case 'MONTHLY': {
+                // 12 kayıt — her ayın son iş günü
+                for (let m = 0; m < 12; m++) {
+                    plannedDates.push(this.getLastBusinessDay(currentYear, m));
+                }
+                break;
             }
-        } else if (control.frequency === 'MONTHLY') {
-            for (let i = 0; i < 12; i++) {
-                const d = new Date(currentYear, now.getMonth() + i + 1, 0);
-                dates.push(d);
+
+            case 'QUARTERLY':
+            case 'SEMI_ANNUAL':
+            case 'ANNUAL':
+            case 'AD_HOC': {
+                // Seçili aylardaki son iş günleri
+                const months = control.selectedMonths || [];
+                for (const monthName of months) {
+                    const mi = ControlsService.turkishMonthIndex[monthName];
+                    if (mi === undefined) continue;
+                    plannedDates.push(this.getLastBusinessDay(currentYear, mi));
+                }
+                break;
             }
-        } else {
-            const months = control.selectedMonths || [];
-            for (const monthName of months) {
-                const mi = turkishMonths[monthName];
-                if (mi === undefined) continue;
-                const yr = mi < now.getMonth() ? currentYear + 1 : currentYear;
-                dates.push(new Date(yr, mi + 1, 0));
+
+            default: {
+                // Bilinmeyen frekans — selectedMonths varsa kullan
+                const months = control.selectedMonths || [];
+                for (const monthName of months) {
+                    const mi = ControlsService.turkishMonthIndex[monthName];
+                    if (mi === undefined) continue;
+                    plannedDates.push(this.getLastBusinessDay(currentYear, mi));
+                }
+                break;
             }
         }
 
+        // Tarih sırasına göre sırala
+        plannedDates.sort((a, b) => a.getTime() - b.getTime());
+
         let generated = 0;
-        for (const plannedDate of dates) {
-            const testNo = await this.generateTestNo();
+        for (const plannedDate of plannedDates) {
+            const testNo = await this.generateTestNo(control.type, plannedDate);
             await this.prisma.controlTest.create({
                 data: {
                     testNo,
