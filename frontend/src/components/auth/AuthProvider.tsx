@@ -28,6 +28,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
   // Permission checks
   hasPermission: (permission: string) => boolean;
   hasAnyPermission: (permissions: string[]) => boolean;
@@ -72,30 +73,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
       })
       .catch(() => {
-        // If API fails, use demo user for development
-        setUser({
-          id: 'demo',
-          email: 'admin@grc.com',
-          firstName: 'Burak',
-          lastName: 'Yönetici',
-          department: 'IT',
-          role: {
-            id: 'demo-role',
-            name: 'ADMIN',
-            permissions: [
-              'dashboard:view',
-              'risk:view', 'risk:create', 'risk:update', 'risk:delete', 'risk:assess', 'risk:treat', 'risk:export',
-              'control:view', 'control:create', 'control:update', 'control:delete', 'control:test', 'control:approve', 'control:export',
-              'audit:view', 'audit:create', 'audit:update', 'audit:delete', 'audit:execute',
-              'finding:view', 'finding:create', 'finding:update', 'finding:delete', 'finding:export',
-              'action:view', 'action:create', 'action:update', 'action:delete', 'action:effectiveness',
-              'compliance:view', 'compliance:create', 'compliance:update', 'compliance:delete', 'compliance:map',
-              'report:view', 'report:create', 'report:export',
-              'user:view', 'user:create', 'user:update', 'user:delete', 'role:manage',
-              'parameter:view', 'parameter:manage', 'audit_log:view', 'integration:manage',
-            ],
-          },
-        });
+        // Profil alınamadı (token geçersiz/süresi dolmuş, backend erişilemez vb.)
+        // — yetkisiz kabul et ve girişe yönlendir. Asla demo/otomatik-admin'e düşme.
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        setUser(null);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -129,6 +111,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     router.push('/dashboard');
   }, [router]);
+
+  const refreshUser = useCallback(async () => {
+    const profile = await api.getProfile();
+    setUser({
+      id: profile.id,
+      email: profile.email,
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      department: profile.department,
+      role: {
+        id: profile.role?.id || '',
+        name: profile.role?.name || 'VIEWER',
+        permissions: Array.isArray(profile.role?.permissions) ? profile.role.permissions : [],
+      },
+    });
+  }, []);
 
   const logout = useCallback(() => {
     localStorage.removeItem('accessToken');
@@ -168,6 +166,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isAuthenticated: !!user,
     login,
     logout,
+    refreshUser,
     hasPermission,
     hasAnyPermission,
     hasAllPermissions,

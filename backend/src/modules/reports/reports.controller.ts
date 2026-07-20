@@ -3,7 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ReportsService } from './reports.service';
 import { JwtAuthGuard } from '../../common/guards';
-import { Public } from '../../common/decorators';
+import { Public, CurrentUser } from '../../common/decorators';
 
 @ApiTags('Reports')
 @ApiBearerAuth('JWT-Auth')
@@ -62,6 +62,15 @@ export class ReportsController {
             parseInt(year),
             month ? parseInt(month) : undefined
         );
+    }
+
+    // My Work (rol bazlı dashboard için)
+    @Get('my-work')
+    async getMyWork(
+        @CurrentUser('id') userId: string,
+        @Query('month') month?: string,
+    ) {
+        return this.reportsService.getMyWork(userId, month);
     }
 
     // Bulgu Takip Report

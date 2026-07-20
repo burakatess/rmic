@@ -1,5 +1,16 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
+export class ApiError extends Error {
+    status: number;
+    body: unknown;
+    constructor(message: string, status: number, body?: unknown) {
+        super(message);
+        this.name = 'ApiError';
+        this.status = status;
+        this.body = body;
+    }
+}
+
 interface ApiOptions {
     method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
     body?: unknown;
@@ -75,8 +86,11 @@ class ApiClient {
         }
 
         if (!response.ok) {
-            const error = await response.json().catch(() => ({ message: 'An error occurred' }));
-            throw new Error(error.message || 'Request failed');
+            const errorBody = await response.json().catch(() => null);
+            const rawMessage = errorBody?.message;
+            const message = Array.isArray(rawMessage) ? rawMessage.join(', ')
+                : rawMessage || `İstek başarısız (HTTP ${response.status})`;
+            throw new ApiError(message, response.status, errorBody);
         }
 
         return response.json();
@@ -142,8 +156,61 @@ class ApiClient {
         }>('/auth/me');
     }
 
+    async updateProfile(data: { firstName: string; lastName: string; department?: string }) {
+        return this.request<any>('/auth/me', { method: 'PATCH', body: data });
+    }
+
+    async changePassword(data: { currentPassword: string; newPassword: string }) {
+        return this.request<{ message: string }>('/auth/change-password', { method: 'POST', body: data });
+    }
+
+    async getMyWork(month?: string) {
+        return this.request<any>(`/reports/my-work${month ? `?month=${month}` : ''}`);
+    }
+
     async getUsers() {
         return this.request<any[]>('/admin/users');
+    }
+
+    // ─── Dosya Yükleme / İndirme ──────────────────────────────────────────────
+    async uploadFile(file: File): Promise<{ fileName: string; originalName: string; mimeType: string; sizeBytes: number }> {
+        const token = this.getToken();
+        const form = new FormData();
+        form.append('file', file);
+        const res = await fetch(`${this.baseUrl}/uploads`, {
+            method: 'POST',
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            body: form,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => null);
+            throw new ApiError(err?.message || 'Dosya yüklenemedi', res.status, err);
+        }
+        return res.json();
+    }
+
+    async addControlTestAttachment(testId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
+        return this.request<any>(`/controls/tests/${testId}/attachments`, { method: 'POST', body: meta });
+    }
+
+    async removeControlTestAttachment(testId: string, attachmentId: string) {
+        return this.request<any>(`/controls/tests/${testId}/attachments/${attachmentId}`, { method: 'DELETE' });
+    }
+
+    async downloadAttachment(fileName: string, originalName: string): Promise<void> {
+        const token = this.getToken();
+        const q = new URLSearchParams({ file: fileName, name: originalName });
+        const res = await fetch(`${this.baseUrl}/uploads/download?${q}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) throw new ApiError('Dosya indirilemedi', res.status);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = originalName;
+        a.click();
+        URL.revokeObjectURL(url);
     }
 
     // Directorates
@@ -311,6 +378,10 @@ class ApiClient {
 
     async getAction(id: string) {
         return this.request(`/actions/${id}`);
+    }
+
+    async deleteAction(id: string) {
+        return this.request(`/actions/${id}`, { method: 'DELETE' });
     }
 
     // Relations endpoints
@@ -498,6 +569,23 @@ class ApiClient {
         });
     }
 
+    // ─── Risk Öneri Talepleri ─────────────────────────────────────────────────
+    async createRiskProposal(dto: { findingId?: string; directorateId?: string; riskTanimi: string }) {
+        return this.request<any>('/risk-proposals', { method: 'POST', body: dto });
+    }
+
+    async getRiskProposals(status?: string) {
+        return this.request<any[]>(`/risk-proposals${status ? `?status=${status}` : ''}`);
+    }
+
+    async approveRiskProposal(id: string) {
+        return this.request<any>(`/risk-proposals/${id}/approve`, { method: 'PATCH' });
+    }
+
+    async rejectRiskProposal(id: string, reviewNote: string) {
+        return this.request<any>(`/risk-proposals/${id}/reject`, { method: 'PATCH', body: { reviewNote } });
+    }
+
     // ── Finding Follow-Ups ───────────────────────────────────────────────────
 
     async getFollowUps(findingId: string) {
@@ -516,6 +604,10 @@ class ApiClient {
             method: 'PUT',
             body: data
         });
+    }
+
+    async deleteFollowUp(findingId: string, followUpId: string) {
+        return this.request(`/findings/${findingId}/follow-ups/${followUpId}`, { method: 'DELETE' });
     }
 
     // Actions (Finding-Scoped)

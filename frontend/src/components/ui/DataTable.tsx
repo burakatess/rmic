@@ -29,6 +29,10 @@ export interface ColumnDef<T> {
   cellClassName?: string;
   /** Column-level inline filter config */
   filter?: ColumnFilter;
+  /** Kolon seçicide gizlenebilir/gösterilebilir */
+  hideable?: boolean;
+  /** Varsayılan olarak gizli başlar (hideable ima eder) */
+  defaultHidden?: boolean;
 }
 
 type SortDirection = 'asc' | 'desc' | null;
@@ -108,6 +112,44 @@ export function DataTable<T>({
   }, [columns, storageKey]);
 
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(getInitialWidths);
+
+  // ── Kolon görünürlüğü (kişiselleştirilebilir) ──
+  const hasHideable = columns.some(c => c.hideable || c.defaultHidden);
+  const getInitialVisible = useCallback((): string[] => {
+    if (storageKey && typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`table-cols-${storageKey}`);
+      if (saved) {
+        try { return JSON.parse(saved) as string[]; } catch { /* ignore */ }
+      }
+    }
+    return columns.filter(c => !c.defaultHidden).map(c => c.key);
+  }, [columns, storageKey]);
+
+  const [visibleKeys, setVisibleKeys] = useState<string[]>(getInitialVisible);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (storageKey && typeof window !== 'undefined' && hasHideable) {
+      localStorage.setItem(`table-cols-${storageKey}`, JSON.stringify(visibleKeys));
+    }
+  }, [visibleKeys, storageKey, hasHideable]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setPickerOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [pickerOpen]);
+
+  const toggleColumn = (key: string) => {
+    setVisibleKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+  };
+
+  const visibleColumns = hasHideable ? columns.filter(c => visibleKeys.includes(c.key)) : columns;
+
   const [resizing, setResizing] = useState<string | null>(null);
   const startX = useRef(0);
   const startWidth = useRef(0);
@@ -165,7 +207,7 @@ export function DataTable<T>({
   };
 
   // Check if any column filters are active
-  const hasActiveColFilters = onColumnFilterChange && columns.some(c => c.filter);
+  const hasActiveColFilters = onColumnFilterChange && visibleColumns.some(c => c.filter);
 
   // Pagination
   const total = totalCount ?? data.length;
@@ -176,6 +218,47 @@ export function DataTable<T>({
 
   return (
     <div className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden ${className}`}>
+      {/* Kolon seçici */}
+      {hasHideable && (
+        <div className="flex items-center justify-end px-3 py-1.5 border-b border-slate-100 bg-slate-50/50">
+          <div className="relative" ref={pickerRef}>
+            <button
+              onClick={() => setPickerOpen(o => !o)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              Kolonlar
+            </button>
+            {pickerOpen && (
+              <div className="absolute right-0 top-full mt-1 z-30 w-56 bg-white border border-slate-200 rounded-xl shadow-lg py-2 max-h-72 overflow-y-auto">
+                <p className="px-3 pb-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wide border-b border-slate-100 mb-1">Görünür Kolonlar</p>
+                {columns.map(col => {
+                  const isVisible = visibleKeys.includes(col.key);
+                  const locked = !(col.hideable || col.defaultHidden);
+                  return (
+                    <label key={col.key}
+                      className={`flex items-center gap-2 px-3 py-1.5 text-xs ${locked ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:bg-slate-50 cursor-pointer'}`}>
+                      <input
+                        type="checkbox"
+                        checked={isVisible}
+                        disabled={locked}
+                        onChange={() => toggleColumn(col.key)}
+                        className="w-3.5 h-3.5 text-blue-600 rounded border-slate-300"
+                      />
+                      {col.header}
+                      {locked && <span className="ml-auto text-[9px] text-slate-300">sabit</span>}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Active filter count badge */}
       {activeFilterCount > 0 && (
         <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 border-b border-blue-100 text-xs text-blue-700">
@@ -185,7 +268,7 @@ export function DataTable<T>({
           <span><span className="font-semibold">{activeFilterCount}</span> sütun filtresi aktif</span>
           {onColumnFilterChange && (
             <button
-              onClick={() => columns.forEach(c => c.filter && onColumnFilterChange(c.key, ''))}
+              onClick={() => visibleColumns.forEach(c => c.filter && onColumnFilterChange(c.key, ''))}
               className="ml-1 text-blue-500 hover:text-blue-800 underline"
             >
               Temizle
@@ -210,7 +293,7 @@ export function DataTable<T>({
                   />
                 </th>
               )}
-              {columns.map((col, idx) => (
+              {visibleColumns.map((col, idx) => (
                 <th
                   key={col.key}
                   className={`px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider
@@ -229,7 +312,7 @@ export function DataTable<T>({
                     )}
                   </div>
                   {/* Resize handle */}
-                  {idx < columns.length - 1 && (
+                  {idx < visibleColumns.length - 1 && (
                     <div
                       className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group"
                       onMouseDown={(e) => handleMouseDown(e, col.key)}
@@ -246,7 +329,7 @@ export function DataTable<T>({
             {hasActiveColFilters && (
               <tr className="bg-slate-100/80 border-b border-slate-200">
                 {showCheckbox && <th className="px-2 py-1.5 bg-slate-100/80 w-10" />}
-                {columns.map((col) => {
+                {visibleColumns.map((col) => {
                   const filterVal = columnFilters[col.key] || '';
                   const isActive = filterVal !== '';
                   return (
@@ -316,7 +399,7 @@ export function DataTable<T>({
               Array.from({ length: 5 }).map((_, i) => (
                 <tr key={`skeleton-${i}`}>
                   {showCheckbox && <td className="px-3 py-3"><div className="w-4 h-4 bg-slate-100 rounded animate-shimmer" /></td>}
-                  {columns.map((col) => (
+                  {visibleColumns.map((col) => (
                     <td key={col.key} className="px-3 py-3">
                       <div className="h-4 bg-slate-100 rounded animate-shimmer" style={{ width: `${60 + Math.random() * 40}%` }} />
                     </td>
@@ -325,7 +408,7 @@ export function DataTable<T>({
               ))
             ) : data.length === 0 ? (
               <tr>
-                <td colSpan={columns.length + (showCheckbox ? 1 : 0)}>
+                <td colSpan={visibleColumns.length + (showCheckbox ? 1 : 0)}>
                   <EmptyState
                     title={emptyTitle}
                     description={emptyDescription}
@@ -358,7 +441,7 @@ export function DataTable<T>({
                         />
                       </td>
                     )}
-                    {columns.map((col) => (
+                    {visibleColumns.map((col) => (
                       <td
                         key={col.key}
                         className={`px-3 py-3 ${col.cellClassName || ''}`}

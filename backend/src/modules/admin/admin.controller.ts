@@ -8,6 +8,7 @@ import {
     Param,
     Query,
     UseGuards,
+    Res,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
@@ -140,6 +141,46 @@ export class AdminController {
             endDate: endDate ? new Date(endDate) : undefined,
             limit: limit ? parseInt(limit) : undefined,
         });
+    }
+
+    // SIEM Export
+    @Get('audit-logs/export')
+    async exportAuditLogs(
+        @Res() res: any,
+        @Query('format') format?: string,
+        @Query('userId') userId?: string,
+        @Query('entityType') entityType?: string,
+        @Query('action') action?: string,
+        @Query('startDate') startDate?: string,
+        @Query('endDate') endDate?: string,
+        @Query('limit') limit?: string,
+    ) {
+        const fmt = (['cef', 'leef', 'json'].includes(format || '') ? format : 'json') as 'cef' | 'leef' | 'json';
+        const content = await this.adminService.exportAuditLogs({
+            userId, entityType, action,
+            startDate: startDate ? new Date(startDate) : undefined,
+            endDate: endDate ? new Date(endDate) : undefined,
+            limit: limit ? parseInt(limit) : undefined,
+        }, fmt);
+
+        const ext = fmt === 'json' ? 'ndjson' : 'log';
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="audit-logs-${fmt}-${new Date().toISOString().slice(0, 10)}.${ext}"`);
+        res.send(content);
+    }
+
+    // SIEM Config
+    @Get('siem-config')
+    async getSiemConfig() {
+        return this.adminService.getSiemConfig();
+    }
+
+    @Put('siem-config')
+    async updateSiemConfig(
+        @Body() body: Record<string, unknown>,
+        @CurrentUser() user: { id: string },
+    ) {
+        return this.adminService.updateSiemConfig(body, user.id);
     }
 
     // Risk Categories

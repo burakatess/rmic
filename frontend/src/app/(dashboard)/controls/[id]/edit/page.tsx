@@ -203,24 +203,26 @@ export default function ControlEditPage() {
         setSaving(true);
 
         try {
-            await api.updateControl(params.id as string, {
+            const payload: Record<string, unknown> = {
                 controlId: formData.summary,
                 name: formData.summary,
                 description: formData.description,
                 mehaz: formData.mehaz,
                 testSteps: formData.testSteps,
                 gmy: formData.gmy,
-                directorate: formData.directorate,
+                directorateId: formData.directorate,
                 frequency: formData.frequency,
                 months: formData.months,
-                dueDate: formData.dueDate || null,
                 notes: formData.notes,
                 isActive: formData.status === 'ACTIVE',
-                ownerId: formData.assigneeId || null,
-                testPerformerId: formData.contactPersonId || null,
-                secondControllerId: formData.secondControllerId || null,
-                status: isDraft ? 'DRAFT' : 'ACTIVE'
-            });
+                status: isDraft ? 'DRAFT' : 'ACTIVE',
+            };
+            // Boş FK alanlarını payload'dan tamamen çıkar (Prisma FK/NOT NULL patlamasın)
+            if (formData.assigneeId) payload.ownerId = formData.assigneeId;
+            if (formData.contactPersonId) payload.testPerformerId = formData.contactPersonId;
+            if (formData.secondControllerId) payload.secondControllerId = formData.secondControllerId;
+
+            await api.updateControl(params.id as string, payload);
 
             toastSuccess('Başarılı', 'Kontrol başarıyla güncellendi.');
             router.push(`/controls/${params.id}`);

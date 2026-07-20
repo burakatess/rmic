@@ -1,14 +1,20 @@
-import { Controller, Post } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { Controller, Post, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { PrismaService } from '../../prisma';
+import { ControlsService } from '../controls/controls.service';
+import { JwtAuthGuard, RolesGuard } from '../../common/guards';
+import { Roles } from '../../common/decorators';
 
 @ApiTags('Tests Generation')
+@ApiBearerAuth('JWT-Auth')
 @Controller('tests')
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class TestsController {
-    constructor(private prisma: PrismaService) {}
+    constructor(private prisma: PrismaService, private controlsService: ControlsService) {}
 
     // Legacy endpoint — tüm aktif kontroller için test oluştur
     @Post('generate')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
     async generateTests() {
         try {
             const controls = await this.prisma.control.findMany({
@@ -43,15 +49,7 @@ export class TestsController {
                 }
 
                 if (dueDate) {
-                    // testNo üret
-                    const prefix = `T-${year}-`;
-                    const last = await this.prisma.controlTest.findFirst({
-                        where: { testNo: { startsWith: prefix } },
-                        orderBy: { testNo: 'desc' },
-                    });
-                    let next = 1;
-                    if (last) { const n = parseInt(last.testNo.split('-')[2]); if (!isNaN(n)) next = n + 1; }
-                    const testNo = `${prefix}${next.toString().padStart(4, '0')}`;
+                    const testNo = await this.controlsService.generateTestNo(control.type, dueDate);
 
                     await this.prisma.controlTest.create({
                         data: {

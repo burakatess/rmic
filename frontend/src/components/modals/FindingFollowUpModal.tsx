@@ -168,6 +168,9 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
 
         setSaving(true);
         try {
+            const isNewActionCase = form.resolutionOutcome === 'YENI_AKSIYON_GEREKLI'
+                && newActionForm.description && newActionForm.ownerId && newActionForm.dueDate;
+
             const payload: Record<string, any> = {
                 actionId:                  form.actionId || null,
                 status:                    form.status,
@@ -182,26 +185,27 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                 explanation:               form.explanation || null,
                 notes:                     form.notes || null,
                 newActionRequired:         form.resolutionOutcome === 'YENI_AKSIYON_GEREKLI',
+                // Backend, YENI_AKSIYON_GEREKLI sonucunda bu bilgiyle (veya boşsa fallback ile)
+                // aynı istekte otomatik yeni Action + FollowUp oluşturur — ayrı bir çağrı gerekmez.
+                ...(isNewActionCase ? {
+                    newAction: {
+                        description:           newActionForm.description,
+                        ownerId:               newActionForm.ownerId,
+                        responsibleDepartment: newActionForm.responsibleDepartment || undefined,
+                        dueDate:               newActionForm.dueDate,
+                        notes:                 newActionForm.notes || undefined,
+                    },
+                } : {}),
             };
 
             if (isEdit && followUp) {
                 await api.updateFollowUp(findingId, followUp.id, payload);
-                success('Güncellendi', 'Takip çalışması güncellendi.');
+                success('Güncellendi', isNewActionCase
+                    ? 'Takip çalışması güncellendi ve yeni düzeltici aksiyon oluşturuldu.'
+                    : 'Takip çalışması güncellendi.');
             } else {
                 await api.createFollowUp(findingId, payload);
                 success('Oluşturuldu', 'Takip çalışması oluşturuldu.');
-            }
-
-            // Yeni aksiyon oluştur
-            if (form.resolutionOutcome === 'YENI_AKSIYON_GEREKLI' && newActionForm.description && newActionForm.ownerId && newActionForm.dueDate) {
-                await api.createFindingAction(findingId, {
-                    description:          newActionForm.description,
-                    ownerId:              newActionForm.ownerId,
-                    responsibleDepartment:newActionForm.responsibleDepartment || null,
-                    dueDate:              newActionForm.dueDate,
-                    notes:                newActionForm.notes || null,
-                });
-                success('Aksiyon Oluşturuldu', 'Yeni düzeltici aksiyon sisteme eklendi.');
             }
 
             onSuccess();

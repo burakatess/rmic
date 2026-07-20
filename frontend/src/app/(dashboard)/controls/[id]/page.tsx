@@ -50,6 +50,7 @@ interface ControlTest {
 
 interface TestRecord {
     id: string;
+    testNo: string;
     dueDate: string;
     status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'OVERDUE';
     testResult?: string;
@@ -162,8 +163,38 @@ export default function ControlDetailPage() {
                         };
                     }),
                     linkedFindings: data.findings || [],
-                    linkedTests: data.tests || [],
-                    linkedTestRecords: data.testRecords || []
+                    linkedTests: (data.tests || [])
+                        .filter((t: any) => t.status === 'ONAYLANDI' || t.status === 'TAMAMLANDI')
+                        .map((t: any) => ({
+                            id: t.id,
+                            testDate: t.completedAt || t.plannedDate,
+                            tester: t.assignee ? `${t.assignee.firstName} ${t.assignee.lastName}` : 'Belirlenmemiş',
+                            result: t.findingStatus === 'BULGUSU_YOK' ? 'EFFECTIVE' : t.findingStatus === 'BULGUSU_VAR' ? 'INEFFECTIVE' : 'NOT_TESTED',
+                            findings: t.findings?.map((f: any) => f.findingId).join(', ') || undefined,
+                            notes: t.resultText || undefined
+                        })),
+                    linkedTestRecords: (data.tests || []).map((t: any) => {
+                        const isOverdue = ['BEKLIYOR', 'DEVAM_EDIYOR'].includes(t.status) && new Date(t.plannedDate) < new Date();
+                        
+                        let status = 'PENDING';
+                        if (isOverdue) {
+                            status = 'OVERDUE';
+                        } else if (t.status === 'DEVAM_EDIYOR') {
+                            status = 'IN_PROGRESS';
+                        } else if (t.status === 'TAMAMLANDI' || t.status === 'ONAYLANDI') {
+                            status = 'COMPLETED';
+                        }
+
+                        return {
+                            id: t.id,
+                            testNo: t.testNo,
+                            dueDate: t.plannedDate,
+                            status: status,
+                            testResult: t.findingStatus === 'BULGUSU_YOK' ? 'EFFECTIVE' : t.findingStatus === 'BULGUSU_VAR' ? 'INEFFECTIVE' : undefined,
+                            notes: t.resultText,
+                            hasFinding: t.findingStatus === 'BULGUSU_VAR'
+                        };
+                    })
                 });
             }
         } catch (err) {
@@ -516,7 +547,7 @@ export default function ControlDetailPage() {
                                             {control.linkedTestRecords.map(tr => (
                                                 <tr key={tr.id} className="hover:bg-slate-50/50 transition-colors">
                                                     <td className="px-5 py-3.5 font-mono text-xs font-bold text-slate-600">
-                                                        T-{tr.id.substring(tr.id.length - 8).toUpperCase()}
+                                                        {tr.testNo}
                                                     </td>
                                                     <td className="px-5 py-3.5 font-bold text-slate-700">
                                                         {frequencyLabel[control.frequency] || control.frequency}

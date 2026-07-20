@@ -11,10 +11,16 @@ export class ReportsService {
             risksByScore,
             risksAboveAppetite,
             criticalFindings,
+            criticalHighFindings,
             overdueActions,
             controlEffectiveness,
             riskTrend,
             recentActivity,
+            controlTestStatusDistribution,
+            findingWorkflowStatusDistribution,
+            followUpResultDistributionRaw,
+            overdueActionsByDirectorateRaw,
+            findingsByDirectorateRaw,
         ] = await Promise.all([
             // Risk summary by status
             this.prisma.risk.groupBy({
@@ -27,6 +33,8 @@ export class ReportsService {
             this.prisma.risk.count({ where: { isAboveAppetite: true } }),
             // Critical findings
             this.prisma.finding.count({ where: { severity: 'CRITICAL', status: { not: 'CLOSED' } } }),
+            // Kritik + Yüksek önem düzeyindeki açık bulgular
+            this.prisma.finding.count({ where: { severity: { in: ['CRITICAL', 'HIGH'] }, status: { not: 'CLOSED' } } }),
             // Overdue actions
             this.prisma.action.count({
                 where: {
@@ -47,6 +55,24 @@ export class ReportsService {
                 orderBy: { createdAt: 'desc' },
                 include: { user: { select: { firstName: true, lastName: true } } },
             }),
+            // Kontrol testi durum dağılımı
+            this.prisma.controlTest.groupBy({ by: ['status'], _count: true }),
+            // Bulgu mutabakat workflow durum dağılımı
+            this.prisma.finding.groupBy({ by: ['workflowStatus'], _count: true }),
+            // Takip çalışması sonuç dağılımı (yalnızca sonuçlanmış olanlar)
+            this.prisma.findingFollowUp.groupBy({ by: ['result'], where: { result: { not: null } }, _count: true }),
+            // Direktörlük bazlı gecikmiş aksiyon sayısı
+            this.prisma.action.groupBy({
+                by: ['directorateId'],
+                where: { status: { notIn: ['CLOSED', 'COMPLETED', 'KAPATILDI', 'TAMAMLANDI'] }, dueDate: { lt: new Date() } },
+                _count: true,
+            }),
+            // Direktörlük bazlı açık bulgu sayısı
+            this.prisma.finding.groupBy({
+                by: ['directorateId'],
+                where: { status: { not: 'CLOSED' } },
+                _count: true,
+            }),
         ]);
 
         // Calculate totals
@@ -54,12 +80,33 @@ export class ReportsService {
         const openFindings = await this.prisma.finding.count({ where: { status: { not: 'CLOSED' } } });
         const totalControls = await this.prisma.control.count();
 
+        // Direktörlük adlarını çözümle (tek ek sorgu, N+1 değil)
+        const dirIds = [
+            ...overdueActionsByDirectorateRaw.map(d => d.directorateId),
+            ...findingsByDirectorateRaw.map(d => d.directorateId),
+        ].filter((id, idx, arr): id is string => !!id && arr.indexOf(id) === idx);
+        const directorates = dirIds.length > 0
+            ? await this.prisma.directorate.findMany({ where: { id: { in: dirIds } }, select: { id: true, name: true } })
+            : [];
+        const dirNameMap = new Map(directorates.map(d => [d.id, d.name]));
+        const overdueActionsByDirectorate = overdueActionsByDirectorateRaw.map(d => ({
+            directorateId: d.directorateId,
+            directorateName: d.directorateId ? (dirNameMap.get(d.directorateId) ?? 'Bilinmiyor') : 'Direktörlük Atanmamış',
+            count: d._count,
+        }));
+        const findingsByDirectorate = findingsByDirectorateRaw.map(d => ({
+            directorateId: d.directorateId,
+            directorateName: d.directorateId ? (dirNameMap.get(d.directorateId) ?? 'Bilinmiyor') : 'Direktörlük Atanmamış',
+            count: d._count,
+        }));
+
         return {
             summary: {
                 totalRisks,
                 risksAboveAppetite,
                 openFindings,
                 criticalFindings,
+                criticalHighFindings,
                 overdueActions,
                 totalControls,
             },
@@ -68,6 +115,11 @@ export class ReportsService {
             controlEffectiveness,
             riskTrend,
             recentActivity,
+            controlTestStatusDistribution,
+            findingWorkflowStatusDistribution,
+            followUpResultDistribution: followUpResultDistributionRaw,
+            overdueActionsByDirectorate,
+            findingsByDirectorate,
         };
     }
 
@@ -89,27 +141,23 @@ export class ReportsService {
 
     private async getRiskTrend() {
         const now = new Date();
-        const trend = [];
 
+        // Tek sorgu — önceden 12 ay için 24 ayrı round-trip yapılıyordu; tüm riskleri
+        // bir kez çekip her ay için kümülatif sayıyı JS'te hesaplıyoruz.
+        const risks = await this.prisma.risk.findMany({
+            select: { createdAt: true, inherentRiskScore: true },
+        });
+
+        const trend = [];
         for (let i = 11; i >= 0; i--) {
             const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-            const endDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+            const endDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59, 999);
 
-            const count = await this.prisma.risk.count({
-                where: { createdAt: { lte: endDate } },
-            });
-
-            const highRisks = await this.prisma.risk.count({
-                where: {
-                    createdAt: { lte: endDate },
-                    inherentRiskScore: { gte: 15 },
-                },
-            });
-
+            const upToMonth = risks.filter(r => r.createdAt <= endDate);
             trend.push({
                 month: date.toLocaleString('default', { month: 'short', year: 'numeric' }),
-                total: count,
-                high: highRisks,
+                total: upToMonth.length,
+                high: upToMonth.filter(r => r.inherentRiskScore >= 15).length,
             });
         }
 
@@ -153,16 +201,18 @@ export class ReportsService {
 
     async getRiskTrendEnhanced() {
         const now = new Date();
-        const trend = [];
 
+        // Tek sorgu — önceden 12 ay için 12 ayrı findMany yapılıyordu.
+        const allRisks = await this.prisma.risk.findMany({
+            select: { createdAt: true, inherentRiskScore: true, residualRiskScore: true },
+        });
+
+        const trend = [];
         for (let i = 11; i >= 0; i--) {
             const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-            const endDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+            const endDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59, 999);
 
-            const risks = await this.prisma.risk.findMany({
-                where: { createdAt: { lte: endDate } },
-                select: { inherentRiskScore: true, residualRiskScore: true }
-            });
+            const risks = allRisks.filter(r => r.createdAt <= endDate);
 
             let high = 0, medium = 0, low = 0;
             let totalScore = 0;
@@ -195,9 +245,10 @@ export class ReportsService {
 
     async getControlHeatmap() {
         const controls = await this.prisma.control.findMany({
-            include: {
-                risks: { include: { risk: true } },
-                tests: { orderBy: { plannedDate: 'desc' }, take: 1 },
+            select: {
+                id: true, name: true, type: true, effectivenessStatus: true,
+                risks: { select: { risk: { select: { residualRiskScore: true, inherentRiskScore: true } } } },
+                tests: { select: { findingStatus: true }, orderBy: { plannedDate: 'desc' }, take: 1 },
             },
         });
 
@@ -226,16 +277,14 @@ export class ReportsService {
     }
 
     async getActionPerformance() {
-        const actions = await this.prisma.action.findMany({
-            include: { effectivenessReview: true },
-        });
-
-        const total = actions.length;
-        const completed = actions.filter((a) => ['COMPLETED', 'CLOSED'].includes(a.status)).length;
-        const overdue = actions.filter((a) =>
-            !['COMPLETED', 'CLOSED'].includes(a.status) && a.dueDate < new Date()
-        ).length;
-        const effective = actions.filter((a) => a.effectivenessReview?.isEffective).length;
+        const [total, completed, overdue, effective] = await Promise.all([
+            this.prisma.action.count(),
+            this.prisma.action.count({ where: { status: { in: ['COMPLETED', 'CLOSED', 'TAMAMLANDI', 'KAPATILDI'] } } }),
+            this.prisma.action.count({
+                where: { status: { notIn: ['COMPLETED', 'CLOSED', 'TAMAMLANDI', 'KAPATILDI'] }, dueDate: { lt: new Date() } },
+            }),
+            this.prisma.effectivenessReview.count({ where: { isEffective: true } }),
+        ]);
 
         return {
             total,
@@ -521,6 +570,108 @@ export class ReportsService {
         }
 
         return trend;
+    }
+
+    async getMyWork(userId: string, month?: string) {
+        // month: 'YYYY-MM' — varsayılan güncel ay
+        const now = new Date();
+        let year = now.getFullYear();
+        let mon = now.getMonth(); // 0-index
+        if (month && /^\d{4}-\d{2}$/.test(month)) {
+            const [y, m] = month.split('-').map(Number);
+            year = y; mon = m - 1;
+        }
+        const start = new Date(year, mon, 1);
+        const end = new Date(year, mon + 1, 0, 23, 59, 59, 999);
+        const monthName = start.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
+
+        const user = await this.prisma.user.findUnique({ where: { id: userId } });
+        const fullName = user ? `${user.firstName} ${user.lastName}` : '';
+
+        // Ay adı (selectedMonths eşleşmesi için, örn. "Temmuz")
+        const trMonth = start.toLocaleDateString('tr-TR', { month: 'long' });
+
+        const [controlTests, assignedFindings, assignedActions, upcomingFollowUps] = await Promise.all([
+            // Kullanıcının sahibi/test edicisi olduğu, bu ay testi olan aktif kontroller
+            this.prisma.control.findMany({
+                where: {
+                    status: 'ACTIVE',
+                    OR: [{ ownerId: userId }, { testPerformerId: userId }],
+                },
+                select: {
+                    id: true, controlId: true, name: true, frequency: true,
+                    selectedMonths: true, lastTestDate: true, lastTestResult: true,
+                    directorateRel: { select: { name: true } },
+                },
+            }).then(controls => controls.filter(c =>
+                c.frequency === 'MONTHLY'
+                || (c.selectedMonths?.some(m => m.toLowerCase() === trMonth.toLowerCase()))
+                || !c.lastTestDate
+                || c.lastTestDate < start,
+            )),
+            // Sorumlusu kullanıcı olan açık bulgular
+            this.prisma.finding.findMany({
+                where: {
+                    status: { not: 'CLOSED' },
+                    OR: [
+                        { assigneeId: userId },
+                        ...(fullName ? [{ responsiblePerson: { contains: fullName, mode: 'insensitive' as any } }] : []),
+                    ],
+                },
+                select: {
+                    id: true, findingId: true, summary: true, severity: true,
+                    targetResolutionDate: true, resolutionStatus: true,
+                    directorateRel: { select: { name: true } },
+                },
+                orderBy: { targetResolutionDate: 'asc' },
+            }),
+            // Kullanıcıya atanmış açık aksiyonlar
+            this.prisma.action.findMany({
+                where: {
+                    ownerId: userId,
+                    status: { notIn: ['TAMAMLANDI', 'KAPATILDI'] as any },
+                },
+                select: {
+                    id: true, actionId: true, description: true, status: true, dueDate: true,
+                    finding: { select: { findingId: true, summary: true } },
+                },
+                orderBy: { dueDate: 'asc' },
+            }),
+            // Ay içinde planlanan takip çalışmaları (kullanıcının bulgu/aksiyonlarıyla ilişkili)
+            this.prisma.findingFollowUp.findMany({
+                where: {
+                    plannedDate: { gte: start, lte: end },
+                    status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] as any },
+                },
+                select: {
+                    id: true, followUpId: true, status: true, plannedDate: true,
+                    finding: { select: { findingId: true, summary: true, assigneeId: true, responsiblePerson: true } },
+                    action: { select: { actionId: true, ownerId: true } },
+                },
+                orderBy: { plannedDate: 'asc' },
+            }).then(fus => fus.filter(fu =>
+                fu.finding?.assigneeId === userId
+                || (fullName && fu.finding?.responsiblePerson?.toLowerCase().includes(fullName.toLowerCase()))
+                || fu.action?.ownerId === userId,
+            )),
+        ]);
+
+        // Yaklaşan vadeler: ay içi aksiyon vadeleri + takip planları birleşik
+        const upcomingDeadlines = [
+            ...assignedActions
+                .filter(a => a.dueDate >= start && a.dueDate <= end)
+                .map(a => ({ type: 'ACTION' as const, id: a.id, ref: a.actionId, title: a.description, date: a.dueDate })),
+            ...upcomingFollowUps
+                .map(fu => ({ type: 'FOLLOWUP' as const, id: fu.id, ref: fu.followUpId, title: fu.finding?.summary ?? fu.followUpId, date: fu.plannedDate! })),
+        ].sort((a, b) => +new Date(a.date) - +new Date(b.date));
+
+        return {
+            period: { label: monthName, start, end },
+            controlTests,
+            assignedFindings,
+            assignedActions,
+            upcomingDeadlines,
+        };
     }
 
     async getBulgeTakipReport(params: {
@@ -878,8 +1029,13 @@ export class ReportsService {
             endDate = new Date(year, 11, 31, 23, 59, 59);
         }
 
-        // Get all controls with their findings
+        // Dönemde en az bir testi planlanmış/gerçekleşmiş kontroller
+        // (Not: 'startDate'/'endDate' önceden hesaplanıp hiç kullanılmıyordu — tüm kontroller
+        // dönemden bağımsız dönüyordu. Bu filtre EK-6'nın "Yılında Gerçekleştirilen" anlamını uygular.)
         const controls = await this.prisma.control.findMany({
+            where: {
+                tests: { some: { plannedDate: { gte: startDate, lte: endDate } } },
+            },
             include: {
                 owner: {
                     select: {

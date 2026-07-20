@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
-import { Modal, Button, StatusBadge } from '../ui';
+import { Modal, Button, StatusBadge, FileUpload } from '../ui';
 import { useToast } from '../ui/Toast';
 
 interface User {
@@ -106,7 +106,7 @@ export function CreateFindingModal({
     });
 
     const [actions, setActions] = useState<any[]>([
-        { description: '', ownerId: '', responsibleDepartment: '', dueDate: '', evidence: '', notes: '' }
+        { description: '', ownerId: '', responsibleDepartment: '', dueDate: '', attachments: [], notes: '' }
     ]);
 
     const isTargetDateMandatory = formData.status === 'IN_PROGRESS' || formData.status === 'PARTIALLY_CLOSED';
@@ -232,7 +232,7 @@ export function CreateFindingModal({
     };
 
     const addAction = () => {
-        setActions([...actions, { description: '', ownerId: '', responsibleDepartment: '', dueDate: '', evidence: '', notes: '' }]);
+        setActions([...actions, { description: '', ownerId: '', responsibleDepartment: '', dueDate: '', attachments: [], notes: '' }]);
     };
 
     const removeAction = (index: number) => {
@@ -295,13 +295,27 @@ export function CreateFindingModal({
 
         setLoading(true);
         try {
-            const payload = {
+            // controlId: yalnızca geçerli bir cuid ise gönder (dropdown'daki kontrollerle eşleşmeli)
+            const resolvedControlId = formData.controlId
+                ? (controls.find(c => c.id === formData.controlId)?.id
+                    ?? controls.find(c => (c as any).controlId === formData.controlId)?.id
+                    ?? null)
+                : null;
+
+            const payload: any = {
                 ...formData,
-                testRecordId: testContext?.id || null,
-                source: testContext ? 'CONTROL_TEST' : 'INTERNAL_AUDIT',
-                impact: 'Kontrol testi veya iç denetim sırasında sapma tespit edilmiştir.',
-                actions: !editContext ? actions : undefined,
+                controlId: resolvedControlId,
             };
+
+            if (!editContext) {
+                // Yalnızca YENİ bulgu oluştururken source/impact ata — düzenlemede orijinal değerler korunur
+                const fromControlTest = !!(testContext?.id || prefillData?.controlTestId);
+                payload.controlTestId = testContext?.id || prefillData?.controlTestId || null;
+                payload.testRecordId = testContext?.id || null;
+                payload.source = fromControlTest ? 'CONTROL_TEST' : 'INTERNAL_AUDIT';
+                payload.impact = 'Kontrol testi veya iç denetim sırasında sapma tespit edilmiştir.';
+                payload.actions = actions;
+            }
 
             if (editContext) {
                 const updated = await api.updateFinding(editContext.id, payload) as any;
@@ -725,17 +739,14 @@ export function CreateFindingModal({
                                         />
                                     </div>
 
-                                    {/* Kanıt / JIRA Linki */}
-                                    <div>
-                                        <label className="block text-[11px] font-bold text-slate-500 mb-1 uppercase">Kanıt / JIRA Bağlantısı</label>
-                                        <input
-                                            type="text"
-                                            value={act.evidence}
-                                            onChange={e => handleActionChange(index, 'evidence', e.target.value)}
-                                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-500/20 outline-none bg-white"
-                                            placeholder="örn. JIRA-402 veya belge linki..."
-                                        />
-                                    </div>
+                                    {/* Ekler — dosya yükleme */}
+                                    <FileUpload
+                                        label="Ekler"
+                                        compact
+                                        attachments={act.attachments ?? []}
+                                        onUpload={(meta) => handleActionChange(index, 'attachments', [...(act.attachments ?? []), meta])}
+                                        onRemove={(_att, ai) => handleActionChange(index, 'attachments', (act.attachments ?? []).filter((_: any, j: number) => j !== ai))}
+                                    />
                                 </div>
                             </div>
                         ))}

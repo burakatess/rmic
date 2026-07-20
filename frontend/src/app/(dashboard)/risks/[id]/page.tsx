@@ -106,6 +106,11 @@ const actionStatusConfig: Record<string, { label: string; color: string }> = {
     IN_PROGRESS: { label: 'Devam Ediyor', color: 'bg-yellow-100 text-yellow-700' },
     COMPLETED: { label: 'Tamamlandı', color: 'bg-green-100 text-green-700' },
     CLOSED: { label: 'Kapatıldı', color: 'bg-gray-100 text-gray-600' },
+    ACIK: { label: 'Açık', color: 'bg-blue-100 text-blue-700' },
+    DEVAM_EDIYOR: { label: 'Devam Ediyor', color: 'bg-yellow-100 text-yellow-700' },
+    TAMAMLANDI: { label: 'Tamamlandı', color: 'bg-green-100 text-green-700' },
+    GECIKTI: { label: 'Gecikmiş', color: 'bg-red-100 text-red-700' },
+    IPTAL: { label: 'İptal Edildi', color: 'bg-gray-100 text-gray-600' },
 };
 
 const getScoreColor = (score: number) => {
@@ -226,7 +231,19 @@ export default function RiskDetailPage() {
                         })));
                     }
 
-                    if (data.actions?.length && actions.length === 0) {
+                    if (data.riskActions?.length) {
+                        setActions(data.riskActions.map((ram: any) => {
+                            const ra = ram.riskAction;
+                            return {
+                                id: String(ra.id || ''),
+                                actionId: String(ra.aksiyonId || ''),
+                                description: String(ra.aksiyonTanimi || ra.ozet || ''),
+                                status: String(ra.status || 'ACIK'),
+                                dueDate: ra.hedeflenenTamamlanmaTarihi || ra.createdAt || new Date().toISOString(),
+                                owner: ra.aksiyonSahibi || 'Belirlenmemiş',
+                            };
+                        }));
+                    } else if (data.actions?.length && actions.length === 0) {
                         setActions(data.actions.map((a: any) => ({
                             id: String(a.id || ''),
                             actionId: String(a.actionId || ''),
@@ -239,8 +256,23 @@ export default function RiskDetailPage() {
                         })));
                     }
 
-                    // Extract RYK controls from riskEntries
-                    if (data.riskEntries?.length) {
+                    // Extract RYK controls from riskControls or fallback to riskEntries
+                    if (data.riskControls?.length) {
+                        setRykControls(data.riskControls.map((rcm: any) => {
+                            const rc = rcm.riskControl;
+                            return {
+                                id: String(rc.id || ''),
+                                controlCode: String(rc.kontrolId || ''),
+                                name: String(rc.kontrolTanimi || rc.ozet || ''),
+                                description: String(rc.kontrolTanimi || ''),
+                                effectiveness: rc.kontrolTuru || 'Önleyici',
+                                frequency: rc.birSeviyeKontrolSikligi || 'Aylık',
+                                automationLevel: rc.kontrolIslevi || 'Manuel',
+                                controlScore: rc.kontrolPuani || 3,
+                                applicabilityScore: 3,
+                            };
+                        }));
+                    } else if (data.riskEntries?.length) {
                         const allRykControls: RYKControl[] = [];
                         data.riskEntries.forEach((entry: any) => {
                             if (entry.riskManagementControls?.length) {
@@ -591,13 +623,13 @@ export default function RiskDetailPage() {
                             <div>
                                 <div className="flex items-center justify-between mb-4">
                                     <p className="text-sm text-gray-500">{actions.length} aksiyon bu riskle ilişkilendirilmiş</p>
-                                    <Link href="/actions/new" className="text-sm text-blue-600 hover:underline">
+                                    <Link href="/risks/actions" className="text-sm text-blue-600 hover:underline">
                                         Yeni Aksiyon →
                                     </Link>
                                 </div>
                                 <div className="space-y-3">
                                     {actions.map(action => (
-                                        <Link key={action.id} href={`/actions/${action.id}`} className="block">
+                                        <Link key={action.id} href="/risks/actions" className="block">
                                             <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer group">
                                                 <div className="flex items-center gap-4">
                                                     <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center text-orange-600">

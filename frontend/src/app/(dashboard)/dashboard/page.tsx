@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
 import { PageHeader } from '@/components/ui';
+import { useAuth } from '@/components/auth/AuthProvider';
+import MyWorkSection from '@/components/dashboard/MyWorkSection';
 import {
     LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
@@ -17,6 +19,7 @@ interface DashboardData {
         risksAboveAppetite: number;
         openFindings: number;
         criticalFindings: number;
+        criticalHighFindings: number;
         overdueActions: number;
         totalControls: number;
     };
@@ -34,7 +37,23 @@ interface DashboardData {
         effectivenessStatus: string;
         _count: number;
     }>;
+    controlTestStatusDistribution: Array<{ status: string; _count: number }>;
+    findingWorkflowStatusDistribution: Array<{ workflowStatus: string; _count: number }>;
+    followUpResultDistribution: Array<{ result: string; _count: number }>;
+    overdueActionsByDirectorate: Array<{ directorateId: string | null; directorateName: string; count: number }>;
+    findingsByDirectorate: Array<{ directorateId: string | null; directorateName: string; count: number }>;
 }
+
+const CONTROL_TEST_STATUS_LABELS: Record<string, string> = {
+    BEKLIYOR: 'Bekliyor', DEVAM_EDIYOR: 'Devam Ediyor', TAMAMLANDI: 'Tamamlandı', ONAYLANDI: 'Onaylandı',
+};
+const WORKFLOW_STATUS_LABELS: Record<string, string> = {
+    TASLAK: 'Taslak', MUTABAKATA_GONDERILDI: 'Mutabakata Gönderildi',
+    IC_KONTROL_ONAYINA_GONDERILDI: 'İç Kontrol Onayında', MUTABAKAT_YAPILDI: 'Mutabakat Yapıldı', IPTAL: 'İptal',
+};
+const FOLLOWUP_RESULT_LABELS: Record<string, string> = {
+    YETERLI: 'Yeterli', YETERSIZ: 'Yetersiz', YENI_AKSIYON_GEREKLI: 'Yeni Aksiyon Gerekli',
+};
 
 interface TrendData {
     month: string;
@@ -73,9 +92,83 @@ const getHeatmapColor = (row: number, col: number): string => {
     return 'bg-emerald-400 hover:bg-emerald-500 ring-emerald-200';
 };
 
+// ─── Rol Bazlı Dashboard ──────────────────────────────────────────────────────
+
+function RoleDashboard({ roleName, firstName }: { roleName: string; firstName?: string }) {
+    const [heatmapData, setHeatmapData] = useState<HeatmapCell[][]>([]);
+    const [actionPerf, setActionPerf] = useState<any | null>(null);
+    const showHeatmap = roleName === 'RISK_ANALYST';
+    const showActionPerf = roleName === 'IKS_MANAGER' || roleName === 'AUDITOR';
+
+    useEffect(() => {
+        if (showHeatmap) {
+            api.request('/reports/risk-heatmap').then((d: any) => setHeatmapData(d)).catch(() => { });
+        }
+        if (showActionPerf) {
+            api.request('/reports/action-performance').then((d: any) => setActionPerf(d)).catch(() => { });
+        }
+    }, [showHeatmap, showActionPerf]);
+
+    const roleLabels: Record<string, string> = {
+        IKS_EMPLOYEE: 'İKS Çalışanı', IKS_MANAGER: 'İKS Yöneticisi',
+        AUDITOR: 'Denetçi', RISK_ANALYST: 'Risk Analisti', VIEWER: 'İzleyici',
+    };
+
+    return (
+        <div className="space-y-8">
+            <PageHeader
+                title={`Hoş geldiniz${firstName ? `, ${firstName}` : ''}`}
+                description={`${roleLabels[roleName] ?? roleName} paneli — bu ayki işleriniz ve öncelikleriniz`}
+            />
+
+            <MyWorkSection />
+
+            {showActionPerf && actionPerf && (
+                <div className="bg-white rounded-xl border border-slate-200 p-6">
+                    <h3 className="font-bold text-slate-800 mb-4">Aksiyon Performansı</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {Object.entries(actionPerf).filter(([, v]) => typeof v === 'number').slice(0, 4).map(([k, v]) => (
+                            <div key={k} className="bg-slate-50 rounded-lg p-4">
+                                <p className="text-xs text-slate-500">{k}</p>
+                                <p className="text-2xl font-bold text-slate-800">{String(v)}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {showHeatmap && heatmapData.length > 0 && (
+                <div className="bg-white rounded-xl border border-slate-200 p-6">
+                    <h3 className="font-bold text-slate-800 mb-4">Risk Isı Haritası</h3>
+                    <div className="grid grid-cols-5 gap-1 max-w-md">
+                        {heatmapData.map((row, ri) => row.map((cell, ci) => (
+                            <div key={`${ri}-${ci}`}
+                                className={`aspect-square rounded flex items-center justify-center text-white text-sm font-bold ${getHeatmapColor(ri, ci)}`}>
+                                {cell.count > 0 ? cell.count : ''}
+                            </div>
+                        )))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
+    const { user } = useAuth();
+    const roleName = user?.role?.name ?? 'VIEWER';
+    const isFullDashboard = roleName === 'SYSTEM_ADMIN' || roleName === 'ADMIN'
+        || roleName === 'RISK_CONTROL_MANAGER' || user?.role?.permissions?.includes('*');
+
+    if (!isFullDashboard) {
+        return <RoleDashboard roleName={roleName} firstName={user?.firstName} />;
+    }
+    return <AdminDashboard />;
+}
+
+function AdminDashboard() {
     const [data, setData] = useState<DashboardData | null>(null);
     const [trendData, setTrendData] = useState<TrendData[]>([]);
     const [heatmapData, setHeatmapData] = useState<HeatmapCell[][]>([]);
@@ -208,8 +301,7 @@ export default function DashboardPage() {
                             <div className="flex justify-between items-start">
                                 <p className="text-sm font-semibold text-slate-600">Açık Kritik Bulgular</p>
                                 <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-red-50 text-red-600 px-2 py-1 rounded">
-                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-                                    +2%
+                                    Kritik + Yüksek: {data?.summary?.criticalHighFindings ?? 0}
                                 </span>
                             </div>
                             <div className="flex items-end gap-3 mt-2">
@@ -224,10 +316,6 @@ export default function DashboardPage() {
                         <div className="relative p-6">
                             <div className="flex justify-between items-start">
                                 <p className="text-sm font-semibold text-slate-600">Gecikmiş Aksiyonlar</p>
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-50 text-emerald-600 px-2 py-1 rounded">
-                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" /></svg>
-                                    -5%
-                                </span>
                             </div>
                             <div className="flex items-end gap-3 mt-2">
                                 <p className="text-4xl font-bold text-orange-600">{data?.summary?.overdueActions || 0}</p>
@@ -417,9 +505,94 @@ export default function DashboardPage() {
                                     <YAxis domain={[0, 25]} tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
                                     <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
                                     <Line type="monotone" dataKey="avgScore" name="Ort. Skor" stroke={COLORS.primary} strokeWidth={3} dot={{ fill: COLORS.primary, strokeWidth: 2, r: 4 }} activeDot={{ r: 6, fill: COLORS.primary }} />
-                                    <Line type="monotone" dataKey={() => 12} name="Risk İştahı" stroke="#EF4444" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+                                    {/* Not: Sabit "Risk İştahı" referans çizgisi kaldırıldı — sistemde
+                                        organizasyon geneli tek bir eşik değeri (skaler) tutulmuyor,
+                                        yalnızca risk bazlı isAboveAppetite bayrağı var. Yanıltıcı sabit
+                                        veri göstermek yerine çizgi kaldırıldı; "İştah Üzerinde" KPI kartı
+                                        (yukarıda) gerçek veriye dayalı eşdeğer bilgiyi zaten sağlıyor. */}
                                 </LineChart>
                             </ResponsiveContainer>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Durum Dağılımları */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+                        <h3 className="text-sm font-bold text-slate-800 mb-4">Kontrol Testi Durum Dağılımı</h3>
+                        <div className="space-y-2">
+                            {(data?.controlTestStatusDistribution ?? []).map(d => (
+                                <div key={d.status} className="flex items-center justify-between text-sm">
+                                    <span className="text-slate-600">{CONTROL_TEST_STATUS_LABELS[d.status] ?? d.status}</span>
+                                    <span className="font-bold text-slate-800">{d._count}</span>
+                                </div>
+                            ))}
+                            {(!data?.controlTestStatusDistribution || data.controlTestStatusDistribution.length === 0) && (
+                                <p className="text-xs text-slate-400">Veri yok</p>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+                        <h3 className="text-sm font-bold text-slate-800 mb-4">Mutabakat Workflow Durumu</h3>
+                        <div className="space-y-2">
+                            {(data?.findingWorkflowStatusDistribution ?? []).map(d => (
+                                <div key={d.workflowStatus} className="flex items-center justify-between text-sm">
+                                    <span className="text-slate-600">{WORKFLOW_STATUS_LABELS[d.workflowStatus] ?? d.workflowStatus}</span>
+                                    <span className="font-bold text-slate-800">{d._count}</span>
+                                </div>
+                            ))}
+                            {(!data?.findingWorkflowStatusDistribution || data.findingWorkflowStatusDistribution.length === 0) && (
+                                <p className="text-xs text-slate-400">Veri yok</p>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+                        <h3 className="text-sm font-bold text-slate-800 mb-4">Takip Çalışması Sonuç Dağılımı</h3>
+                        <div className="space-y-2">
+                            {(data?.followUpResultDistribution ?? []).map(d => (
+                                <div key={d.result} className="flex items-center justify-between text-sm">
+                                    <span className="text-slate-600">{FOLLOWUP_RESULT_LABELS[d.result] ?? d.result}</span>
+                                    <span className="font-bold text-slate-800">{d._count}</span>
+                                </div>
+                            ))}
+                            {(!data?.followUpResultDistribution || data.followUpResultDistribution.length === 0) && (
+                                <p className="text-xs text-slate-400">Veri yok</p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Direktörlük Bazlı Dağılımlar */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+                        <h3 className="text-sm font-bold text-slate-800 mb-4">Direktörlük Bazlı Açık Bulgular</h3>
+                        <div className="space-y-2">
+                            {(data?.findingsByDirectorate ?? []).map(d => (
+                                <div key={d.directorateId ?? 'none'} className="flex items-center justify-between text-sm">
+                                    <span className="text-slate-600">{d.directorateName}</span>
+                                    <span className="font-bold text-slate-800">{d.count}</span>
+                                </div>
+                            ))}
+                            {(!data?.findingsByDirectorate || data.findingsByDirectorate.length === 0) && (
+                                <p className="text-xs text-slate-400">Açık bulgu yok</p>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+                        <h3 className="text-sm font-bold text-slate-800 mb-4">Direktörlük Bazlı Gecikmiş Aksiyonlar</h3>
+                        <div className="space-y-2">
+                            {(data?.overdueActionsByDirectorate ?? []).map(d => (
+                                <div key={d.directorateId ?? 'none'} className="flex items-center justify-between text-sm">
+                                    <span className="text-slate-600">{d.directorateName}</span>
+                                    <span className="font-bold text-red-600">{d.count}</span>
+                                </div>
+                            ))}
+                            {(!data?.overdueActionsByDirectorate || data.overdueActionsByDirectorate.length === 0) && (
+                                <p className="text-xs text-slate-400">Gecikmiş aksiyon yok</p>
+                            )}
                         </div>
                     </div>
                 </div>

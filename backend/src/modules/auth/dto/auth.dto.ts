@@ -37,6 +37,30 @@ export class RegisterDto {
     roleId: string;
 }
 
+export class UpdateProfileDto {
+    @IsString()
+    @IsNotEmpty()
+    firstName: string;
+
+    @IsString()
+    @IsNotEmpty()
+    lastName: string;
+
+    @IsString()
+    department?: string;
+}
+
+export class ChangePasswordDto {
+    @IsString()
+    @IsNotEmpty()
+    currentPassword: string;
+
+    @IsString()
+    @IsNotEmpty()
+    @MinLength(8)
+    newPassword: string;
+}
+
 export class RefreshTokenDto {
     @IsString()
     @IsNotEmpty()

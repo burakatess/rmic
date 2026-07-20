@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_FILTER } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './prisma';
 import { AuthModule } from './modules/auth';
 import { RisksModule } from './modules/risks/risks.module';
@@ -16,7 +17,10 @@ import { TestsModule } from './modules/tests/tests.module';
 import { DirectoratesModule } from './modules/directorates/directorates.module';
 import { RiskControlsModule } from './modules/risk-controls/risk-controls.module';
 import { RiskActionsModule } from './modules/risk-actions/risk-actions.module';
+import { UploadsModule } from './modules/uploads/uploads.module';
+import { RiskProposalsModule } from './modules/risk-proposals/risk-proposals.module';
 import { JwtAuthGuard } from './common/guards';
+import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
 
 @Module({
   imports: [
@@ -24,6 +28,10 @@ import { JwtAuthGuard } from './common/guards';
       isGlobal: true,
       envFilePath: '.env',
     }),
+    // Genel rate limit — dashboard gibi sayfaların paralel GET isteklerini rahatça
+    // karşılayacak kadar geniş; hassas auth route'ları kendi @Throttle override'larıyla
+    // (login/register/refresh: 5 istek/60sn) çok daha sıkı sınırlanır.
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     PrismaModule,
     AuthModule,
     RisksModule,
@@ -39,12 +47,23 @@ import { JwtAuthGuard } from './common/guards';
     DirectoratesModule,
     RiskControlsModule,
     RiskActionsModule,
+    UploadsModule,
+    RiskProposalsModule,
   ],
   providers: [
-    // Apply JWT auth guard globally
+    // Rate limit önce, sonra JWT auth
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    // Prisma hatalarının çıplak sızmasını önle — bkz. common/filters/prisma-exception.filter.ts
+    {
+      provide: APP_FILTER,
+      useClass: PrismaExceptionFilter,
     },
   ],
 })

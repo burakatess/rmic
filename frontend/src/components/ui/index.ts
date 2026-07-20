@@ -19,6 +19,8 @@ export type { FilterConfig, FilterOption } from './FilterBar';
 export { DataTable } from './DataTable';
 export type { ColumnDef, ColumnFilter } from './DataTable';
 export { ResizableTable } from './ResizableTable';
+export { FileUpload } from './FileUpload';
+export type { AttachmentMeta } from './FileUpload';
 
 // Overlay
 export { Modal } from './Modal';

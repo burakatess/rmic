@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Put, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ActionsService } from './actions.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
+import { CreateStandaloneActionDto, UpdateStandaloneActionDto, ExtendActionDto, CreateEffectivenessReviewDto } from './dto';
 
 @ApiTags('Actions')
 @ApiBearerAuth('JWT-Auth')
@@ -28,14 +29,20 @@ export class ActionsController {
 
     @Post()
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async create(@Body() data: any, @CurrentUser('id') userId: string) {
+    async create(@Body() data: CreateStandaloneActionDto, @CurrentUser('id') userId: string) {
         return this.actionsService.create(data, userId);
     }
 
     @Put(':id')
     @Roles('SYSTEM_ADMIN', 'AUDITOR', 'AUDITEE')
-    async update(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
+    async update(@Param('id') id: string, @Body() data: UpdateStandaloneActionDto, @CurrentUser('id') userId: string) {
         return this.actionsService.update(id, data, userId);
+    }
+
+    @Delete(':id')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    async remove(@Param('id') id: string, @CurrentUser('id') userId: string) {
+        return this.actionsService.delete(id, userId);
     }
 
     @Post(':id/complete')
@@ -46,13 +53,13 @@ export class ActionsController {
 
     @Post(':id/extend')
     @Roles('SYSTEM_ADMIN', 'AUDITOR', 'AUDITEE')
-    async extend(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
+    async extend(@Param('id') id: string, @Body() data: ExtendActionDto, @CurrentUser('id') userId: string) {
         return this.actionsService.extend(id, data, userId);
     }
 
     @Post(':id/effectiveness-review')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async createEffectivenessReview(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
+    async createEffectivenessReview(@Param('id') id: string, @Body() data: CreateEffectivenessReviewDto, @CurrentUser('id') userId: string) {
         return this.actionsService.createEffectivenessReview(id, data, userId);
     }
 

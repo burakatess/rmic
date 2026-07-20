@@ -3,8 +3,11 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
-import { PageHeader, DataTable, FilterBar, StatusBadge, Button } from '@/components/ui';
+import { PageHeader, DataTable, FilterBar, StatusBadge, Button, ConfirmDialog } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
+import ActionEditModal from '@/components/actions/ActionEditModal';
+import { PermissionGate } from '@/components/auth/AuthProvider';
+import { useToast } from '@/components/ui/Toast';
 
 interface Action {
     id: string;
@@ -14,7 +17,10 @@ interface Action {
     status: string;
     dueDate: string;
     slaInDays: number;
+    notes?: string | null;
+    responsibleDepartment?: string | null;
     owner: {
+        id: string;
         firstName: string;
         lastName: string;
     };
@@ -39,12 +45,20 @@ const sourceLabels: Record<string, string> = {
 };
 
 const statusLabels: Record<string, { label: string; variant: BadgeVariant }> = {
+    BEKLIYOR: { label: 'Bekliyor', variant: 'info' },
+    DEVAM_EDIYOR: { label: 'Devam Ediyor', variant: 'warning' },
+    TAMAMLANDI: { label: 'Tamamlandı', variant: 'success' },
+    YETERSIZ: { label: 'Yetersiz', variant: 'critical' },
+    KAPATILDI: { label: 'Kapatıldı', variant: 'neutral' },
+    // Legacy
     OPEN: { label: 'Açık', variant: 'info' },
     IN_PROGRESS: { label: 'Devam Ediyor', variant: 'warning' },
     COMPLETED: { label: 'Tamamlandı', variant: 'success' },
     CLOSED: { label: 'Kapatıldı', variant: 'neutral' },
     OVERDUE: { label: 'Gecikmiş', variant: 'critical' },
 };
+
+const CLOSED_STATUSES = ['TAMAMLANDI', 'KAPATILDI', 'COMPLETED', 'CLOSED'];
 
 const getDaysRemaining = (dueDate: string) => {
     const due = new Date(dueDate);
@@ -53,14 +67,21 @@ const getDaysRemaining = (dueDate: string) => {
 };
 
 export default function ActionsPage() {
+    const { success, error: showError } = useToast();
     const [actions, setActions] = useState<Action[]>([]);
     const [loading, setLoading] = useState(true);
+    const [editAction, setEditAction] = useState<Action | null>(null);
 
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
     const [colFilters, setColFilters] = useState<Record<string, string>>({});
     const [page, setPage] = useState(1);
     const pageSize = 15;
+
+    // Toplu seçim
+    const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+    const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
 
     const loadActions = useCallback(async () => {
         setLoading(true);
@@ -105,9 +126,9 @@ export default function ActionsPage() {
     }, [actions, searchQuery, activeFilters]);
 
     // KPIs
-    const inProgress = actions.filter(a => a.status === 'IN_PROGRESS').length;
-    const completed = actions.filter(a => a.status === 'COMPLETED' || a.status === 'CLOSED').length;
-    const overdue = actions.filter(a => a.status === 'OVERDUE' || (getDaysRemaining(a.dueDate) < 0 && a.status !== 'COMPLETED' && a.status !== 'CLOSED')).length;
+    const inProgress = actions.filter(a => a.status === 'IN_PROGRESS' || a.status === 'DEVAM_EDIYOR').length;
+    const completed = actions.filter(a => CLOSED_STATUSES.includes(a.status)).length;
+    const overdue = actions.filter(a => a.status === 'OVERDUE' || (getDaysRemaining(a.dueDate) < 0 && !CLOSED_STATUSES.includes(a.status))).length;
 
     const columns: ColumnDef<Action>[] = useMemo(() => [
         {
@@ -137,7 +158,7 @@ export default function ActionsPage() {
         {
             key: 'dueDate', header: 'Hedef Tarih', sortable: true, defaultWidth: 120,
             render: (a) => {
-                const isOverdue = getDaysRemaining(a.dueDate) < 0 && a.status !== 'COMPLETED' && a.status !== 'CLOSED';
+                const isOverdue = getDaysRemaining(a.dueDate) < 0 && !CLOSED_STATUSES.includes(a.status);
                 return (
                     <span className={`text-sm ${isOverdue ? 'text-red-600 font-medium' : 'text-slate-600'}`}>
                         {new Date(a.dueDate).toLocaleDateString('tr-TR')}
@@ -149,8 +170,8 @@ export default function ActionsPage() {
             key: 'remainingDays', header: 'Kalan', defaultWidth: 110,
             render: (a) => {
                 const d = getDaysRemaining(a.dueDate);
-                const isOverdue = d < 0 && a.status !== 'COMPLETED' && a.status !== 'CLOSED';
-                if (a.status === 'COMPLETED' || a.status === 'CLOSED') return <span className="text-xs text-slate-400">—</span>;
+                const isOverdue = d < 0 && !CLOSED_STATUSES.includes(a.status);
+                if (CLOSED_STATUSES.includes(a.status)) return <span className="text-xs text-slate-400">—</span>;
                 return (
                     <span className={`text-xs ${isOverdue ? 'text-red-500' : d <= 7 ? 'text-amber-500' : 'text-slate-500'}`}>
                         {isOverdue ? `${Math.abs(d)} gün gecikmiş` : `${d} gün kaldı`}
@@ -184,12 +205,18 @@ export default function ActionsPage() {
             ),
         },
         {
-            key: 'actions', header: 'İşlemler', defaultWidth: 90,
+            key: 'actions', header: 'İşlemler', defaultWidth: 100,
             render: (a) => (
                 <div className="flex items-center gap-1">
                     <Link href={`/actions/${a.id}`} className="p-1.5 rounded text-slate-400 hover:text-orange-600 hover:bg-orange-50 transition-colors" title="Görüntüle">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                     </Link>
+                    <PermissionGate permission="action:update">
+                        <button onClick={(e) => { e.stopPropagation(); setEditAction(a); }}
+                            className="p-1.5 rounded text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors" title="Düzenle">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        </button>
+                    </PermissionGate>
                 </div>
             ),
         },
@@ -207,6 +234,40 @@ export default function ActionsPage() {
 
     const paginatedActions = useMemo(() => filteredActions.slice((page - 1) * pageSize, page * pageSize), [filteredActions, page]);
 
+    // ── Toplu Seçim ───────────────────────────────────────────────────────────
+
+    const handleRowSelect = (id: string) => {
+        setSelectedRows(prev => {
+            const next = new Set(prev);
+            next.has(id) ? next.delete(id) : next.add(id);
+            return next;
+        });
+    };
+
+    const handleSelectAll = () => {
+        if (selectedRows.size === filteredActions.length) {
+            setSelectedRows(new Set());
+        } else {
+            setSelectedRows(new Set(filteredActions.map(a => a.id)));
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        setDeleting(true);
+        try {
+            for (const id of selectedRows) await api.deleteAction(id);
+            setActions(prev => prev.filter(a => !selectedRows.has(a.id)));
+            setSelectedRows(new Set());
+            setConfirmDeleteOpen(false);
+            success('Başarılı', `${selectedRows.size} aksiyon silindi.`);
+        } catch (err) {
+            console.error('Delete failed:', err);
+            showError('Hata', 'Bazı aksiyonlar silinemedi.');
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     return (
         <div className="flex flex-col h-full bg-slate-50/50">
             <div className="px-8 pt-8">
@@ -215,11 +276,23 @@ export default function ActionsPage() {
                     description="Tüm aksiyonları takip edin ve yönetin"
                     breadcrumbs={[{ label: 'Bulgu & Aksiyon' }, { label: 'Aksiyon Listesi' }]}
                     actions={
-                        <Link href="/actions/new">
-                            <Button variant="primary" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>} className="bg-orange-600 hover:bg-orange-700 ring-orange-600">
-                                Yeni Aksiyon
-                            </Button>
-                        </Link>
+                        <div className="flex items-center gap-2">
+                            {selectedRows.size > 0 && (
+                                <Button
+                                    variant="danger"
+                                    size="sm"
+                                    onClick={() => setConfirmDeleteOpen(true)}
+                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
+                                >
+                                    {selectedRows.size} Seçiliyi Sil
+                                </Button>
+                            )}
+                            <Link href="/actions/new">
+                                <Button variant="primary" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>} className="bg-orange-600 hover:bg-orange-700 ring-orange-600">
+                                    Yeni Aksiyon
+                                </Button>
+                            </Link>
+                        </div>
                     }
                 />
 
@@ -261,6 +334,10 @@ export default function ActionsPage() {
                     data={paginatedActions}
                     rowKey={(a) => a.id}
                     loading={loading}
+                    showCheckbox
+                    selectedRows={selectedRows}
+                    onRowSelect={handleRowSelect}
+                    onSelectAll={handleSelectAll}
                     totalCount={filteredActions.length}
                     page={page}
                     pageSize={pageSize}
@@ -272,6 +349,24 @@ export default function ActionsPage() {
                     onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
                 />
             </div>
+
+            <ConfirmDialog
+                open={confirmDeleteOpen}
+                onClose={() => setConfirmDeleteOpen(false)}
+                onConfirm={handleBulkDelete}
+                title="Aksiyonlar Silinecek"
+                message={`Seçilen ${selectedRows.size} aksiyon kalıcı olarak silinecektir. Bu işlem geri alınamaz.`}
+                confirmLabel="Evet, Sil"
+                loading={deleting}
+                variant="danger"
+            />
+
+            <ActionEditModal
+                isOpen={!!editAction}
+                onClose={() => setEditAction(null)}
+                onSuccess={loadActions}
+                action={editAction as any}
+            />
         </div>
     );
 }

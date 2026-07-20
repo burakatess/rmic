@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
-import { PageHeader, DataTable, FilterBar, StatusBadge, Button } from '@/components/ui';
+import { PageHeader, DataTable, FilterBar, StatusBadge, Button, ConfirmDialog } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 
@@ -86,7 +86,7 @@ const YEARS = [currentYear - 1, currentYear, currentYear + 1].map(y => String(y)
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function FollowUpsPage() {
-    const { error: showError } = useToast();
+    const { success, error: showError } = useToast();
     const [followUps, setFollowUps] = useState<FollowUp[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
@@ -94,6 +94,11 @@ export default function FollowUpsPage() {
     const [colFilters, setColFilters] = useState<Record<string, string>>({});
     const [page, setPage] = useState(1);
     const pageSize = 25;
+
+    // Toplu seçim
+    const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+    const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -323,6 +328,43 @@ export default function FollowUpsPage() {
 
     const paginated = useMemo(() => colFiltered.slice((page - 1) * pageSize, page * pageSize), [colFiltered, page]);
 
+    // ── Toplu Seçim ───────────────────────────────────────────────────────────
+
+    const handleRowSelect = (id: string) => {
+        setSelectedRows(prev => {
+            const next = new Set(prev);
+            next.has(id) ? next.delete(id) : next.add(id);
+            return next;
+        });
+    };
+
+    const handleSelectAll = () => {
+        if (selectedRows.size === colFiltered.length) {
+            setSelectedRows(new Set());
+        } else {
+            setSelectedRows(new Set(colFiltered.map(f => f.id)));
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        setDeleting(true);
+        try {
+            for (const id of selectedRows) {
+                const f = followUps.find(fu => fu.id === id);
+                if (f) await api.deleteFollowUp(f.finding.id, f.id);
+            }
+            setFollowUps(prev => prev.filter(f => !selectedRows.has(f.id)));
+            setSelectedRows(new Set());
+            setConfirmDeleteOpen(false);
+            success('Başarılı', `${selectedRows.size} takip çalışması silindi.`);
+        } catch (err) {
+            console.error('Delete failed:', err);
+            showError('Hata', 'Bazı takip çalışmaları silinemedi.');
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     // ─────────────────────────────────────────────────────────────────────────
 
     return (
@@ -334,13 +376,25 @@ export default function FollowUpsPage() {
                     description="Aksiyonlara bağlı periyodik takip kayıtları — bulgunun kapanma sürecini yönetin"
                     breadcrumbs={[{ label: 'Bulgu Takip Çalışmaları' }]}
                     actions={
-                        <Button variant="secondary" size="sm" onClick={() => load()} icon={
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                            </svg>
-                        }>
-                            Yenile
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            {selectedRows.size > 0 && (
+                                <Button
+                                    variant="danger"
+                                    size="sm"
+                                    onClick={() => setConfirmDeleteOpen(true)}
+                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
+                                >
+                                    {selectedRows.size} Seçiliyi Sil
+                                </Button>
+                            )}
+                            <Button variant="secondary" size="sm" onClick={() => load()} icon={
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                            }>
+                                Yenile
+                            </Button>
+                        </div>
                     }
                 />
 
@@ -384,6 +438,10 @@ export default function FollowUpsPage() {
                     data={paginated}
                     rowKey={(f) => f.id}
                     loading={loading}
+                    showCheckbox
+                    selectedRows={selectedRows}
+                    onRowSelect={handleRowSelect}
+                    onSelectAll={handleSelectAll}
                     totalCount={colFiltered.length}
                     page={page}
                     pageSize={pageSize}
@@ -395,6 +453,17 @@ export default function FollowUpsPage() {
                     onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
                 />
             </div>
+
+            <ConfirmDialog
+                open={confirmDeleteOpen}
+                onClose={() => setConfirmDeleteOpen(false)}
+                onConfirm={handleBulkDelete}
+                title="Takip Çalışmaları Silinecek"
+                message={`Seçilen ${selectedRows.size} takip çalışması kalıcı olarak silinecektir. Bu işlem geri alınamaz.`}
+                confirmLabel="Evet, Sil"
+                loading={deleting}
+                variant="danger"
+            />
         </div>
     );
 }
