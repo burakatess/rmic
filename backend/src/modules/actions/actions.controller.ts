@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ActionsService } from './actions.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
@@ -37,6 +37,12 @@ export class ActionsController {
     @Roles('SYSTEM_ADMIN', 'AUDITOR', 'AUDITEE')
     async update(@Param('id') id: string, @Body() data: UpdateStandaloneActionDto, @CurrentUser('id') userId: string) {
         return this.actionsService.update(id, data, userId);
+    }
+
+    @Delete(':id')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    async remove(@Param('id') id: string, @CurrentUser('id') userId: string) {
+        return this.actionsService.delete(id, userId);
     }
 
     @Post(':id/complete')

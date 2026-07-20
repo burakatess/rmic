@@ -2,6 +2,11 @@ import type { NextConfig } from "next";
 
 const isProd = process.env.NODE_ENV === 'production';
 
+// Backend API farklı origin'de çalışabiliyor (dev'de localhost:3001) — connect-src
+// bunu içermezse tüm fetch çağrıları CSP tarafından sessizce engellenir.
+const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+const apiOrigin = new URL(apiUrl).origin;
+
 // Recharts SVG/inline stilleri ve Next.js'in kendi inline script'leri için
 // 'unsafe-inline' gerekiyor; dış kaynaklardan script/style yüklenmiyor.
 const csp = [
@@ -10,7 +15,7 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  "connect-src 'self'",
+  `connect-src 'self' ${apiOrigin}`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

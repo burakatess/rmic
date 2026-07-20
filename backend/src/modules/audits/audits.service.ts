@@ -478,7 +478,7 @@ export class AuditsService {
         const finding = await this.prisma.finding.findUnique({ where: { id }, select: { workflowStatus: true } });
         if (!finding) throw new NotFoundException(`Finding ${id} not found`);
         if (finding.workflowStatus !== 'TASLAK') {
-            throw new Error(`Bulgu TASLAK statüsünde değil: ${finding.workflowStatus}`);
+            throw new BadRequestException(`Bulgu TASLAK statüsünde değil: ${finding.workflowStatus}`);
         }
         return this.transitionWorkflow(id, 'MUTABAKATA_GONDERILDI', userId, 'Bulgu mutabakata gönderildi.');
     }
@@ -488,7 +488,7 @@ export class AuditsService {
         const finding = await this.prisma.finding.findUnique({ where: { id }, select: { workflowStatus: true } });
         if (!finding) throw new NotFoundException(`Finding ${id} not found`);
         if (finding.workflowStatus !== 'MUTABAKATA_GONDERILDI') {
-            throw new Error(`Beklenen statü MUTABAKATA_GONDERILDI, mevcut: ${finding.workflowStatus}`);
+            throw new BadRequestException(`Beklenen statü MUTABAKATA_GONDERILDI, mevcut: ${finding.workflowStatus}`);
         }
         // Birim cevabını kaydet
         await this.prisma.finding.update({
@@ -506,7 +506,7 @@ export class AuditsService {
         const finding = await this.prisma.finding.findUnique({ where: { id }, select: { workflowStatus: true } });
         if (!finding) throw new NotFoundException(`Finding ${id} not found`);
         if (finding.workflowStatus !== 'IC_KONTROL_ONAYINA_GONDERILDI') {
-            throw new Error(`Beklenen statü IC_KONTROL_ONAYINA_GONDERILDI, mevcut: ${finding.workflowStatus}`);
+            throw new BadRequestException(`Beklenen statü IC_KONTROL_ONAYINA_GONDERILDI, mevcut: ${finding.workflowStatus}`);
         }
         const updateData: any = {};
         if (data.internalControlAssessment) updateData.internalControlAssessment = data.internalControlAssessment;
@@ -525,7 +525,7 @@ export class AuditsService {
         const finding = await this.prisma.finding.findUnique({ where: { id }, select: { workflowStatus: true } });
         if (!finding) throw new NotFoundException(`Finding ${id} not found`);
         if (finding.workflowStatus !== 'IC_KONTROL_ONAYINA_GONDERILDI') {
-            throw new Error(`Beklenen statü IC_KONTROL_ONAYINA_GONDERILDI, mevcut: ${finding.workflowStatus}`);
+            throw new BadRequestException(`Beklenen statü IC_KONTROL_ONAYINA_GONDERILDI, mevcut: ${finding.workflowStatus}`);
         }
         return this.transitionWorkflow(id, 'MUTABAKATA_GONDERILDI', userId, `Yetersiz yanıt, birime geri gönderildi: ${reason}`);
     }
@@ -535,7 +535,7 @@ export class AuditsService {
         const finding = await this.prisma.finding.findUnique({ where: { id }, select: { workflowStatus: true } });
         if (!finding) throw new NotFoundException(`Finding ${id} not found`);
         if (finding.workflowStatus === 'IPTAL') {
-            throw new Error('Bulgu zaten iptal edilmiş.');
+            throw new BadRequestException('Bulgu zaten iptal edilmiş.');
         }
         return this.transitionWorkflow(id, 'IPTAL', userId, `İptal gerekçesi: ${reason}`);
     }
@@ -622,6 +622,28 @@ export class AuditsService {
         return followUp;
     }
 
+    async deleteFollowUp(findingId: string, followUpId: string, userId: string) {
+        const followUp = await this.prisma.findingFollowUp.findFirst({
+            where: { id: followUpId, findingId },
+        });
+        if (!followUp) throw new NotFoundException('Takip çalışması bulunamadı');
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'DELETE', entityType: 'FindingFollowUp', entityId: followUpId, oldValue: followUp },
+        });
+
+        // FindingStatusHistory.followUpId cascade değil — silmeden önce bağı koparılmalı,
+        // yoksa FK constraint hatası (500) alınır. Geçmiş kaydı kendisi korunur.
+        await this.prisma.findingStatusHistory.updateMany({
+            where: { followUpId },
+            data: { followUpId: null },
+        });
+        // FollowUpAttachment onDelete: Cascade — otomatik silinir.
+        await this.prisma.findingFollowUp.delete({ where: { id: followUpId } });
+
+        return { message: 'Takip çalışması silindi' };
+    }
+
     async updateFollowUp(findingId: string, followUpId: string, data: any, userId: string) {
         const followUp = await this.prisma.findingFollowUp.findFirst({
             where: { id: followUpId, findingId },
@@ -634,6 +656,24 @@ export class AuditsService {
             actionId, evaluatorId, evaluatedAt, result, explanation, evidence, approvalStatus, approvedBy, approvedAt,
             resolutionOutcome, newFollowUpDate, newAction,
         } = data;
+
+        // İş kuralı: YENI_AKSIYON_GEREKLI seçildiğinde yeni aksiyon bilgisi zorunlu —
+        // placeholder/otomatik-türetilmiş değerlerle Action üretilmez. Yazmadan önce doğrula.
+        const wantsNewAction = result === 'YENI_AKSIYON_GEREKLI' || resolutionOutcome === 'YENI_AKSIYON_GEREKLI';
+        if (wantsNewAction) {
+            if (!newAction || !newAction.description || !newAction.ownerId || !newAction.dueDate) {
+                throw new BadRequestException(
+                    'YENI_AKSIYON_GEREKLI seçildiğinde newAction.description, newAction.ownerId ve newAction.dueDate zorunludur.',
+                );
+            }
+            const ownerExists = await this.prisma.user.findUnique({ where: { id: newAction.ownerId }, select: { id: true } });
+            if (!ownerExists) throw new BadRequestException('Geçersiz kullanıcı: yeni aksiyon sorumlusu bulunamadı');
+        }
+
+        // İş kuralı: ERTELENDI seçildiğinde yeni takip tarihi zorunlu.
+        if (resolutionOutcome === 'ERTELENDI' && !newFollowUpDate) {
+            throw new BadRequestException('ERTELENDI seçildiğinde newFollowUpDate zorunludur.');
+        }
 
         const updated = await this.prisma.findingFollowUp.update({
             where: { id: followUpId },
@@ -668,9 +708,11 @@ export class AuditsService {
             const findingUpdate: any = { resolutionStatus: effectiveResolution };
 
             if (effectiveResolution === 'KAPATILDI') {
-                findingUpdate.closedDate = new Date();
+                // status/closedDate burada KOŞULSUZ set edilmez — bulguya bağlı birden fazla
+                // aksiyon olabilir, hepsi kapanmadan bulgu tam kapanmamalı (bkz. aşağıdaki
+                // checkAndCloseFindinIfAllActionsClosed çağrısı, iş kuralı: "tüm aksiyonlar
+                // kapanmadan bulgu kapanmasın").
                 findingUpdate.testDate = null;
-                findingUpdate.status = 'CLOSED';
             } else if (effectiveResolution === 'ERTELENDI' && newFollowUpDate) {
                 findingUpdate.testDate = new Date(newFollowUpDate);
             } else if (effectiveResolution === 'KISMEN_KAPATILDI') {
@@ -716,31 +758,27 @@ export class AuditsService {
                 });
                 await this.recordAuditTrail({ findingId, actionId: updated.actionId, operation: 'ACTION_UPDATED', userId, explanation: 'Takip sonucu yetersiz — aksiyon durumu güncellendi.' });
             } else if (resolvedResult === 'YENI_AKSIYON_GEREKLI') {
-                // Yeni düzeltici aksiyon otomatik oluşturulur — kullanıcı newAction ile detay
-                // sağlamışsa onunla, sağlamamışsa fallback placeholder ile. createAction() reuse
-                // edildiği için yeni aksiyon için otomatik FollowUp de kurulur.
-                let ownerId = newAction?.ownerId;
-                if (!ownerId) {
-                    const originalAction = await this.prisma.action.findUnique({
-                        where: { id: updated.actionId! }, select: { ownerId: true },
-                    });
-                    ownerId = originalAction?.ownerId;
-                }
-                const dueDate = newAction?.dueDate
-                    || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-
+                // newAction zorunluluğu metodun başında doğrulandı — placeholder/fallback
+                // değer üretilmez, yalnızca kullanıcının sağladığı gerçek veri kullanılır.
+                // createAction() reuse edildiği için yeni aksiyon için otomatik FollowUp de kurulur.
                 await this.createAction(findingId, {
-                    description: newAction?.description
-                        || `Takip değerlendirmesi sonucu yeni düzeltici aksiyon gerekli: ${updated.explanation || currentStatusDetail || 'Detay için takip kaydına bakınız.'}`,
-                    ownerId,
-                    responsibleDepartment: newAction?.responsibleDepartment,
-                    dueDate,
-                    notes: newAction?.notes,
+                    description: newAction.description,
+                    ownerId: newAction.ownerId,
+                    responsibleDepartment: newAction.responsibleDepartment,
+                    dueDate: newAction.dueDate,
+                    notes: newAction.notes,
                     status: 'BEKLIYOR',
                 }, userId);
 
                 await this.recordAuditTrail({ findingId, followUpId: updated.id, operation: 'FOLLOWUP_COMPLETED', userId, explanation: 'Yeni düzeltici aksiyon otomatik oluşturuldu.' });
             }
+        }
+
+        // "Tüm aksiyonlar kapanmadan bulgu kapanmasın" — resolutionOutcome=KAPATILDI
+        // ile açıkça bildirilse bile, bulgunun status/closedDate alanları yalnızca
+        // TÜM aksiyonlar KAPATILDI olduğunda set edilir (bkz. checkAndCloseFindinIfAllActionsClosed).
+        if (effectiveResolution === 'KAPATILDI') {
+            await this.checkAndCloseFindinIfAllActionsClosed(findingId, userId);
         }
 
         await this.prisma.auditLog.create({

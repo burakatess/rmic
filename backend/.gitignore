@@ -3,6 +3,9 @@ node_modules
 .env
 .env.test
 .env.local
+.env.pilot
+.env.prod
+.env.*.local
 
 /generated/prisma
 

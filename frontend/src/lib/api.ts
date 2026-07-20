@@ -380,6 +380,10 @@ class ApiClient {
         return this.request(`/actions/${id}`);
     }
 
+    async deleteAction(id: string) {
+        return this.request(`/actions/${id}`, { method: 'DELETE' });
+    }
+
     // Relations endpoints
     async getRiskRelations(id: string) {
         return this.request(`/risks/${id}/relations`);
@@ -600,6 +604,10 @@ class ApiClient {
             method: 'PUT',
             body: data
         });
+    }
+
+    async deleteFollowUp(findingId: string, followUpId: string) {
+        return this.request(`/findings/${findingId}/follow-ups/${followUpId}`, { method: 'DELETE' });
     }
 
     // Actions (Finding-Scoped)

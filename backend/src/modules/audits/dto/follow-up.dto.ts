@@ -9,8 +9,10 @@ export enum FindingResolutionOutcome {
     KAPATILDI = 'KAPATILDI', ERTELENDI = 'ERTELENDI', YENI_AKSIYON_GEREKLI = 'YENI_AKSIYON_GEREKLI',
 }
 
-// resolutionOutcome === YENI_AKSIYON_GEREKLI iken UI'nin topladığı yeni aksiyon detayı.
-// Faz 5'te backend bu alanı okuyup otomatik Action oluşturacak; sağlanmazsa fallback placeholder kullanılır.
+// result/resolutionOutcome === YENI_AKSIYON_GEREKLI iken UI'nin topladığı yeni aksiyon detayı.
+// Alanlar DTO düzeyinde opsiyonel görünür (nested object tamamen boş bırakılabilmeli değil,
+// tip kontrolü içindir) — asıl zorunluluk audits.service.ts::updateFollowUp'ta iş kuralı
+// olarak uygulanır: newAction eksik/alanları boşsa 400 döner, placeholder üretilmez.
 class NewActionInputDto {
     @IsString() @IsNotEmpty() @MaxLength(2000) description: string;
     @IsString() @IsNotEmpty() ownerId: string;

@@ -204,6 +204,26 @@ export class ActionsService {
         return action;
     }
 
+    async delete(id: string, userId: string) {
+        const action = await this.prisma.action.findUnique({ where: { id } });
+        if (!action) throw new NotFoundException('Aksiyon bulunamadı');
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'DELETE', entityType: 'Action', entityId: id, oldValue: action },
+        });
+
+        // FindingFollowUp.actionId cascade değil — silmeden önce bağı koparılmalı,
+        // yoksa FK constraint hatası (500) alınır.
+        await this.prisma.findingFollowUp.updateMany({
+            where: { actionId: id },
+            data: { actionId: null },
+        });
+        // ActionAttachment ve EffectivenessReview onDelete: Cascade — otomatik silinir.
+        await this.prisma.action.delete({ where: { id } });
+
+        return { message: 'Aksiyon silindi' };
+    }
+
     async complete(id: string, userId: string) {
         const action = await this.prisma.action.update({
             where: { id },

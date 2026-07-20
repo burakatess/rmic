@@ -169,6 +169,16 @@ export class AuditsController {
         return this.auditsService.updateFollowUp(id, followUpId, data, userId);
     }
 
+    @Delete('findings/:id/follow-ups/:followUpId')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    async deleteFollowUp(
+        @Param('id') id: string,
+        @Param('followUpId') followUpId: string,
+        @CurrentUser('id') userId: string,
+    ) {
+        return this.auditsService.deleteFollowUp(id, followUpId, userId);
+    }
+
     // ─── Actions (Finding-Scoped) ─────────────────────────────────────────────
 
     @Get('findings/:id/actions')

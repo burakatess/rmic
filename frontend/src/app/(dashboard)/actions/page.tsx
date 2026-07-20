@@ -3,10 +3,11 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
-import { PageHeader, DataTable, FilterBar, StatusBadge, Button } from '@/components/ui';
+import { PageHeader, DataTable, FilterBar, StatusBadge, Button, ConfirmDialog } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
 import ActionEditModal from '@/components/actions/ActionEditModal';
 import { PermissionGate } from '@/components/auth/AuthProvider';
+import { useToast } from '@/components/ui/Toast';
 
 interface Action {
     id: string;
@@ -66,6 +67,7 @@ const getDaysRemaining = (dueDate: string) => {
 };
 
 export default function ActionsPage() {
+    const { success, error: showError } = useToast();
     const [actions, setActions] = useState<Action[]>([]);
     const [loading, setLoading] = useState(true);
     const [editAction, setEditAction] = useState<Action | null>(null);
@@ -75,6 +77,11 @@ export default function ActionsPage() {
     const [colFilters, setColFilters] = useState<Record<string, string>>({});
     const [page, setPage] = useState(1);
     const pageSize = 15;
+
+    // Toplu seçim
+    const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+    const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
 
     const loadActions = useCallback(async () => {
         setLoading(true);
@@ -227,6 +234,40 @@ export default function ActionsPage() {
 
     const paginatedActions = useMemo(() => filteredActions.slice((page - 1) * pageSize, page * pageSize), [filteredActions, page]);
 
+    // ── Toplu Seçim ───────────────────────────────────────────────────────────
+
+    const handleRowSelect = (id: string) => {
+        setSelectedRows(prev => {
+            const next = new Set(prev);
+            next.has(id) ? next.delete(id) : next.add(id);
+            return next;
+        });
+    };
+
+    const handleSelectAll = () => {
+        if (selectedRows.size === filteredActions.length) {
+            setSelectedRows(new Set());
+        } else {
+            setSelectedRows(new Set(filteredActions.map(a => a.id)));
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        setDeleting(true);
+        try {
+            for (const id of selectedRows) await api.deleteAction(id);
+            setActions(prev => prev.filter(a => !selectedRows.has(a.id)));
+            setSelectedRows(new Set());
+            setConfirmDeleteOpen(false);
+            success('Başarılı', `${selectedRows.size} aksiyon silindi.`);
+        } catch (err) {
+            console.error('Delete failed:', err);
+            showError('Hata', 'Bazı aksiyonlar silinemedi.');
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     return (
         <div className="flex flex-col h-full bg-slate-50/50">
             <div className="px-8 pt-8">
@@ -235,11 +276,23 @@ export default function ActionsPage() {
                     description="Tüm aksiyonları takip edin ve yönetin"
                     breadcrumbs={[{ label: 'Bulgu & Aksiyon' }, { label: 'Aksiyon Listesi' }]}
                     actions={
-                        <Link href="/actions/new">
-                            <Button variant="primary" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>} className="bg-orange-600 hover:bg-orange-700 ring-orange-600">
-                                Yeni Aksiyon
-                            </Button>
-                        </Link>
+                        <div className="flex items-center gap-2">
+                            {selectedRows.size > 0 && (
+                                <Button
+                                    variant="danger"
+                                    size="sm"
+                                    onClick={() => setConfirmDeleteOpen(true)}
+                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
+                                >
+                                    {selectedRows.size} Seçiliyi Sil
+                                </Button>
+                            )}
+                            <Link href="/actions/new">
+                                <Button variant="primary" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>} className="bg-orange-600 hover:bg-orange-700 ring-orange-600">
+                                    Yeni Aksiyon
+                                </Button>
+                            </Link>
+                        </div>
                     }
                 />
 
@@ -281,6 +334,10 @@ export default function ActionsPage() {
                     data={paginatedActions}
                     rowKey={(a) => a.id}
                     loading={loading}
+                    showCheckbox
+                    selectedRows={selectedRows}
+                    onRowSelect={handleRowSelect}
+                    onSelectAll={handleSelectAll}
                     totalCount={filteredActions.length}
                     page={page}
                     pageSize={pageSize}
@@ -292,6 +349,17 @@ export default function ActionsPage() {
                     onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
                 />
             </div>
+
+            <ConfirmDialog
+                open={confirmDeleteOpen}
+                onClose={() => setConfirmDeleteOpen(false)}
+                onConfirm={handleBulkDelete}
+                title="Aksiyonlar Silinecek"
+                message={`Seçilen ${selectedRows.size} aksiyon kalıcı olarak silinecektir. Bu işlem geri alınamaz.`}
+                confirmLabel="Evet, Sil"
+                loading={deleting}
+                variant="danger"
+            />
 
             <ActionEditModal
                 isOpen={!!editAction}
