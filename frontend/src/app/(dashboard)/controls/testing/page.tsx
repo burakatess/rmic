@@ -9,6 +9,7 @@ import type { ColumnDef } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { CreateFindingModal } from '@/components/modals/CreateFindingModal';
 import { FileUpload, type AttachmentMeta } from '@/components/ui';
+import { useAuth } from '@/components/auth';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,10 +44,12 @@ interface ControlTest {
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const statusConfig: Record<string, { label: string; variant: BV }> = {
-    BEKLIYOR:     { label: 'Bekliyor',     variant: 'neutral' },
-    DEVAM_EDIYOR: { label: 'Devam Ediyor', variant: 'warning' },
-    TAMAMLANDI:   { label: 'Tamamlandı',   variant: 'info' },
-    ONAYLANDI:    { label: 'Onaylandı',    variant: 'success' },
+    BEKLIYOR:         { label: 'Bekliyor',           variant: 'neutral' },
+    DEVAM_EDIYOR:     { label: 'Devam Ediyor',       variant: 'warning' },
+    TAMAMLANDI:       { label: 'Onay Bekliyor',      variant: 'info' },
+    GERI_GONDERILDI:  { label: 'Geri Gönderildi',    variant: 'critical' },
+    ONAYLANDI:        { label: 'Onaylandı',          variant: 'success' },
+    IPTAL:            { label: 'İptal Edildi',       variant: 'neutral' },
 };
 
 const findingStatusConfig: Record<string, { label: string; variant: BV }> = {
@@ -83,18 +86,46 @@ function WorkspacePanel({
     const { success, error: showError } = useToast();
     const [saving, setSaving] = useState(false);
     const [findingModalOpen, setFindingModalOpen] = useState(false);
+    const hasFindings = (test.findings?.length ?? 0) > 0;
+
+    // Madde 6: devam eden açık bulguyu referans alarak ilerletme
+    const [openFindings, setOpenFindings] = useState<{ id: string; findingId: string; summary?: string | null }[]>([]);
+    const [referencedFindingId, setReferencedFindingId] = useState('');
+    const [referenceReason, setReferenceReason] = useState('');
     const [form, setForm] = useState({
         resultText: test.resultText || '',
         evidenceSummary: test.evidenceSummary || '',
-        findingStatus: test.findingStatus || 'BULGUSU_YOK',
+        // Bağlı açık bulgu varsa BULGUSU_VAR ile başla — test.findingStatus yalnızca test
+        // tamamlanınca dolar, o ana kadar tek doğru sinyal bağlı bulgu kaydının varlığıdır.
+        findingStatus: test.findingStatus || (hasFindings ? 'BULGUSU_VAR' : 'BULGUSU_YOK'),
     });
 
-    const hasFindings = (test.findings?.length ?? 0) > 0;
+    // Madde 5 bug fix: kullanıcı "Bulgu Var" seçip yeni bulgu ekledikten sonra panel
+    // yeniden açıldığında (test/hasFindings değiştiğinde) seçim "Bulgu Yok"a düşmemeli —
+    // bağlı bulgu varsa seçim her zaman BULGUSU_VAR'a senkronize edilir.
+    useEffect(() => {
+        if (hasFindings) {
+            setForm(p => (p.findingStatus === 'BULGUSU_VAR' ? p : { ...p, findingStatus: 'BULGUSU_VAR' }));
+        }
+    }, [hasFindings, test.id]);
+
+    // Bu kontrole ait, henüz kapanmamış diğer bulguları getir (referans seçeneği için)
+    useEffect(() => {
+        if (hasFindings) return;
+        api.getFindings({ controlId: test.control.id, limit: 100 })
+            .then((res: any) => {
+                const list = Array.isArray(res) ? res : (res?.data || []);
+                setOpenFindings(list.filter((f: any) => f.status !== 'CLOSED'));
+            })
+            .catch(() => setOpenFindings([]));
+    }, [test.control.id, hasFindings]);
+
     const canStart    = test.status === 'BEKLIYOR';
-    const canComplete = test.status === 'DEVAM_EDIYOR';
+    const canComplete = test.status === 'DEVAM_EDIYOR' || test.status === 'GERI_GONDERILDI';
     const canApprove  = test.status === 'TAMAMLANDI';
     const canReturn   = test.status === 'TAMAMLANDI';
     const isDone      = test.status === 'ONAYLANDI';
+    const isCancelled = test.status === 'IPTAL';
     // BULGUSU_VAR seçildiyse bulgu eklenene kadar "Testi Tamamla" disabled
     const needsFindingFirst = form.findingStatus === 'BULGUSU_VAR' && !hasFindings;
     const completeBlockedReason = needsFindingFirst
@@ -119,9 +150,23 @@ function WorkspacePanel({
                 resultText: form.resultText,
                 evidenceSummary: form.evidenceSummary,
             });
-            success('Tamamlandı', 'Test sonucu kaydedildi, onaya gönderildi.');
+            success('Tamamlandı', 'Test sonucu kaydedildi, 2. kontrolcü onayına gönderildi.');
             onRefresh();
-        } catch { showError('Hata', 'Test tamamlanamadı.'); }
+        } catch (err: any) { showError('Hata', err.message || 'Test tamamlanamadı.'); }
+        finally { setSaving(false); }
+    };
+
+    const handleReference = async () => {
+        if (!referencedFindingId) return;
+        setSaving(true);
+        try {
+            await api.completeControlTest(test.id, {
+                referencedFindingId,
+                referenceReason,
+            });
+            success('İlerletildi', 'Test, referans verilen açık bulgu ile 2. kontrolcü onayına gönderildi.');
+            onRefresh();
+        } catch (err: any) { showError('Hata', err.message || 'Referans ile ilerletilemedi.'); }
         finally { setSaving(false); }
     };
 
@@ -136,14 +181,29 @@ function WorkspacePanel({
     };
 
     const handleReturn = async () => {
-        const reason = prompt('Geri gönderme gerekçesini yazın:');
-        if (!reason) return;
+        const reason = prompt('Geri gönderme gerekçesini yazın (zorunlu):');
+        if (!reason || !reason.trim()) return;
         setSaving(true);
         try {
             await api.returnControlTest(test.id, reason);
-            success('Geri Gönderildi', 'Test Devam Ediyor statüsüne döndürüldü.');
+            success('Geri Gönderildi', 'Test testi yapan kullanıcıya düzeltme için geri gönderildi.');
             onRefresh();
         } catch { showError('Hata', 'Geri gönderilemedi.'); }
+        finally { setSaving(false); }
+    };
+
+    const { user } = useAuth();
+    const isSystemAdmin = user?.role?.name === 'SYSTEM_ADMIN';
+
+    const handleCancelFinal = async () => {
+        const reason = prompt('Final onaylı testi iptal etme gerekçesini yazın:') || '';
+        if (!confirm('Bu final onaylı test iptal edilecek. Emin misiniz?')) return;
+        setSaving(true);
+        try {
+            await api.cancelControlTest(test.id, reason);
+            success('İptal Edildi', 'Final onaylı test iptal edildi.');
+            onRefresh();
+        } catch { showError('Hata', 'Test iptal edilemedi.'); }
         finally { setSaving(false); }
     };
 
@@ -210,7 +270,7 @@ function WorkspacePanel({
                 </div>
 
                 {/* İş Akışı Butonları */}
-                {!isDone && (
+                {!isDone && !isCancelled && (
                     <div className="space-y-2">
                         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">İş Akışı</p>
                         {canStart && (
@@ -224,7 +284,7 @@ function WorkspacePanel({
                                     onClick={handleComplete}
                                     disabled={saving || !form.findingStatus || needsFindingFirst}
                                     title={completeBlockedReason ?? undefined}>
-                                    ✓ Testi Tamamla
+                                    ✓ Testi Tamamla ve Onaya Gönder
                                 </Button>
                                 {completeBlockedReason && (
                                     <p className="text-[11px] text-amber-600 mt-1.5">{completeBlockedReason}</p>
@@ -233,7 +293,7 @@ function WorkspacePanel({
                         )}
                         {canApprove && (
                             <Button variant="primary" size="sm" className="w-full" onClick={handleApprove} disabled={saving}>
-                                ✅ Onayla
+                                ✅ Onayla (2. Kontrolcü)
                             </Button>
                         )}
                         {canReturn && (
@@ -241,6 +301,16 @@ function WorkspacePanel({
                                 ↩ Geri Gönder
                             </Button>
                         )}
+                    </div>
+                )}
+
+                {/* Final onaylı testi iptal — yalnızca SYSTEM_ADMIN */}
+                {isDone && isSystemAdmin && (
+                    <div className="space-y-2">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Yönetici İşlemleri</p>
+                        <Button variant="secondary" size="sm" className="w-full text-red-600 border-red-200 hover:bg-red-50" onClick={handleCancelFinal} disabled={saving}>
+                            ⛔ Final Onayı İptal Et
+                        </Button>
                     </div>
                 )}
 
@@ -252,9 +322,10 @@ function WorkspacePanel({
                             <div className="grid grid-cols-2 gap-2">
                                 {['BULGUSU_YOK', 'BULGUSU_VAR'].map(opt => (
                                     <button key={opt} type="button"
-                                        disabled={isDone}
+                                        disabled={isDone || (opt === 'BULGUSU_YOK' && hasFindings)}
+                                        title={opt === 'BULGUSU_YOK' && hasFindings ? 'Bu teste bağlı bulgu kaydı var, sonuç Bulgu Yok olamaz.' : undefined}
                                         onClick={() => setForm(p => ({ ...p, findingStatus: opt }))}
-                                        className={`p-3 rounded-xl border-2 text-sm font-semibold transition-all ${
+                                        className={`p-3 rounded-xl border-2 text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                                             form.findingStatus === opt
                                                 ? opt === 'BULGUSU_YOK' ? 'border-emerald-400 bg-emerald-50 text-emerald-800' : 'border-red-400 bg-red-50 text-red-800'
                                                 : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
@@ -275,6 +346,37 @@ function WorkspacePanel({
                             >
                                 + Bulgu Kaydı Oluştur {hasFindings ? `(${test.findings?.length})` : ''}
                             </Button>
+                        )}
+
+                        {/* Madde 6: devam eden açık bulguya referans ile ilerletme */}
+                        {needsFindingFirst && openFindings.length > 0 && (
+                            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+                                <p className="text-xs font-semibold text-amber-700">Ya da mevcut açık bir bulguyu referans alarak ilerletin</p>
+                                <select
+                                    value={referencedFindingId}
+                                    onChange={e => setReferencedFindingId(e.target.value)}
+                                    className="w-full px-2.5 py-2 text-xs border border-amber-300 rounded-lg bg-white"
+                                >
+                                    <option value="">Açık bulgu seçiniz...</option>
+                                    {openFindings.map(f => (
+                                        <option key={f.id} value={f.id}>{f.findingId} — {f.summary || ''}</option>
+                                    ))}
+                                </select>
+                                {referencedFindingId && (
+                                    <>
+                                        <textarea
+                                            value={referenceReason}
+                                            onChange={e => setReferenceReason(e.target.value)}
+                                            rows={2}
+                                            placeholder="Referans gerekçesi (opsiyonel)..."
+                                            className="w-full px-2.5 py-2 text-xs border border-amber-300 rounded-lg resize-none"
+                                        />
+                                        <Button variant="primary" size="sm" className="w-full" onClick={handleReference} disabled={saving}>
+                                            🔗 Referans ile Onaya Gönder
+                                        </Button>
+                                    </>
+                                )}
+                            </div>
                         )}
 
                         <div>

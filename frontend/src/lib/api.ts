@@ -257,6 +257,20 @@ class ApiClient {
         return this.request(`/controls/tests/${testId}/return`, { method: 'PATCH', body: { reason } });
     }
 
+    async cancelControlTest(testId: string, reason: string) {
+        return this.request(`/controls/tests/${testId}/cancel-final`, { method: 'PATCH', body: { reason } });
+    }
+
+    // Merkezi Onaylar
+    async getMyPendingApprovals(params?: Record<string, string>) {
+        const query = params ? '?' + new URLSearchParams(params).toString() : '';
+        return this.request(`/approvals/my-pending${query}`);
+    }
+
+    async getApprovalDetail(id: string) {
+        return this.request(`/approvals/${id}`);
+    }
+
     async generateControlTests(controlId: string) {
         return this.request(`/controls/${controlId}/generate-tests`, { method: 'POST' });
     }

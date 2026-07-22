@@ -109,7 +109,7 @@ export class AuditsService {
 
     async createFinding(data: any, userId: string) {
         const {
-            risk, control, riskId, controlId, testRecordId, controlTestId,
+            risk, control, riskId, controlId, testRecordId, controlTestId, directorateId,
             source, affectedSystem, recommendation, managementResponse,
             targetResolutionDate, closedDate, relatedDepartment, responsiblePerson,
             findingType, summary, gmy, internalControlAssessment, currentStatusDetail,
@@ -127,7 +127,7 @@ export class AuditsService {
             if (!testExists) throw new BadRequestException('Geçersiz kontrol testi kaydı');
         }
 
-        // riskId / controlId / assigneeId FK doğrulaması — Prisma FK 500 yerine okunur 400
+        // riskId / controlId / assigneeId / directorateId FK doğrulaması — Prisma FK 500 yerine okunur 400
         if (riskId) {
             const riskExists = await this.prisma.risk.findUnique({ where: { id: riskId }, select: { id: true } });
             if (!riskExists) throw new BadRequestException('Geçersiz risk: seçilen risk bulunamadı');
@@ -139,6 +139,13 @@ export class AuditsService {
         if (assigneeId) {
             const assigneeExists = await this.prisma.user.findUnique({ where: { id: assigneeId }, select: { id: true } });
             if (!assigneeExists) throw new BadRequestException('Geçersiz kullanıcı: seçilen sorumlu bulunamadı');
+        }
+        let resolvedRelatedDepartment = relatedDepartment || null;
+        if (directorateId) {
+            const dir = await this.prisma.directorate.findUnique({ where: { id: directorateId }, select: { id: true, name: true } });
+            if (!dir) throw new BadRequestException('Geçersiz direktörlük: seçilen direktörlük bulunamadı');
+            // relatedDepartment (legacy serbest metin) direktörlük adından türetilir — FK esastır (Madde 3).
+            resolvedRelatedDepartment = dir.name;
         }
         if (actions && Array.isArray(actions)) {
             for (const act of actions) {
@@ -153,18 +160,21 @@ export class AuditsService {
             ...rest,
             impact: (rest.impact && String(rest.impact).trim()) || 'Kontrol testi veya iç denetim sırasında sapma tespit edilmiştir.',
             controlTestId: resolvedTestId,
+            directorateId: directorateId || null,
             source: source || 'INTERNAL_AUDIT',
             affectedSystem: affectedSystem || null,
             recommendation: recommendation || null,
             managementResponse: managementResponse || null,
             birimCevabi: birimCevabi || null,
-            targetResolutionDate: targetResolutionDate ? new Date(targetResolutionDate) : null,
+            // targetResolutionDate İSTEMCİDEN yazılmaz — aksiyonlar eklendikten sonra
+            // recalculateFindingTargetDate() ile hesaplanır (Madde 4).
+            targetResolutionDate: null,
             closedDate: closedDate ? new Date(closedDate) : null,
-            relatedDepartment: relatedDepartment || null,
+            relatedDepartment: resolvedRelatedDepartment,
             responsiblePerson: responsiblePerson || null,
             riskId: riskId || null,
             controlId: controlId || null,
-            
+
             findingType: findingType || null,
             summary: summary || null,
             gmy: gmy || null,
@@ -254,6 +264,12 @@ export class AuditsService {
             await this.recalculateFindingTargetDate(finding.id);
         }
 
+        // Madde 7: testDate'in bulunduğu ay için otomatik bir FollowUp oluştur
+        // (aksiyona bağlı olmak zorunda değil — actionId nullable).
+        if (finding.testDate) {
+            await this.autoCreateMonthlyFollowUp(finding.id, finding.testDate, userId);
+        }
+
         await this.prisma.auditLog.create({
             data: { userId, action: 'CREATE', entityType: 'Finding', entityId: finding.id, newValue: finding },
         });
@@ -261,9 +277,43 @@ export class AuditsService {
         return finding;
     }
 
+    /** Ayın son gününü döner (basit kural — repo'da hazır "son iş günü" helper'ı bu modülde yok). */
+    private lastDayOfMonth(year: number, month: number): Date {
+        return new Date(year, month + 1, 0);
+    }
+
+    /**
+     * Madde 7: Bulgunun testDate'inin bulunduğu ay için otomatik bir FindingFollowUp
+     * oluşturur — aynı ay için zaten bir FollowUp varsa duplicate üretmez.
+     */
+    private async autoCreateMonthlyFollowUp(findingId: string, testDate: Date, userId: string) {
+        const year = testDate.getFullYear();
+        const month = testDate.getMonth();
+        const monthStart = new Date(year, month, 1);
+        const monthEnd = new Date(year, month + 1, 1);
+
+        const existing = await this.prisma.findingFollowUp.findFirst({
+            where: { findingId, plannedDate: { gte: monthStart, lt: monthEnd } },
+        });
+        if (existing) return existing;
+
+        const plannedDate = this.lastDayOfMonth(year, month);
+        const followUpId = await this.generateFollowUpId();
+
+        const followUp = await this.prisma.findingFollowUp.create({
+            data: { followUpId, findingId, status: 'BEKLIYOR', plannedDate },
+        });
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'CREATE', entityType: 'FindingFollowUp', entityId: followUp.id, newValue: { auto: true, reason: 'testDate ayı için otomatik takip' } },
+        });
+
+        return followUp;
+    }
+
     async updateFinding(id: string, data: any, userId: string) {
         const {
-            risk, control, riskId, controlId, testRecordId,
+            risk, control, riskId, controlId, testRecordId, directorateId,
             source, affectedSystem, recommendation, managementResponse,
             targetResolutionDate, closedDate, relatedDepartment, responsiblePerson,
             findingType, summary, gmy, internalControlAssessment, currentStatusDetail,
@@ -272,6 +322,18 @@ export class AuditsService {
             ...rest
         } = data;
 
+        // targetResolutionDate İSTEMCİDEN ASLA yazılmaz — tek otorite bağlı aksiyonların
+        // dueDate'lerinden hesaplanan recalculateFindingTargetDate()'tir (Madde 4).
+        void targetResolutionDate;
+
+        let resolvedRelatedDepartment = relatedDepartment !== undefined ? (relatedDepartment || null) : undefined;
+        if (directorateId) {
+            const dir = await this.prisma.directorate.findUnique({ where: { id: directorateId }, select: { id: true, name: true } });
+            if (!dir) throw new BadRequestException('Geçersiz direktörlük: seçilen direktörlük bulunamadı');
+            // relatedDepartment (legacy serbest metin) direktörlük adından türetilir — FK esastır.
+            resolvedRelatedDepartment = dir.name;
+        }
+
         const findingData: any = {
             ...rest,
             source: source || undefined,
@@ -279,12 +341,12 @@ export class AuditsService {
             recommendation: recommendation !== undefined ? (recommendation || null) : undefined,
             managementResponse: managementResponse !== undefined ? (managementResponse || null) : undefined,
             birimCevabi: birimCevabi !== undefined ? (birimCevabi || null) : undefined,
-            targetResolutionDate: targetResolutionDate !== undefined ? (targetResolutionDate ? new Date(targetResolutionDate) : null) : undefined,
-            relatedDepartment: relatedDepartment !== undefined ? (relatedDepartment || null) : undefined,
+            relatedDepartment: resolvedRelatedDepartment,
+            directorateId: directorateId !== undefined ? (directorateId || null) : undefined,
             responsiblePerson: responsiblePerson !== undefined ? (responsiblePerson || null) : undefined,
             riskId: riskId !== undefined ? (riskId || null) : undefined,
             controlId: controlId !== undefined ? (controlId || null) : undefined,
-            
+
             findingType: findingType !== undefined ? (findingType || null) : undefined,
             summary: summary !== undefined ? (summary || null) : undefined,
             gmy: gmy !== undefined ? (gmy || null) : undefined,

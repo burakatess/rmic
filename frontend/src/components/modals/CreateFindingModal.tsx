@@ -22,6 +22,11 @@ interface Control {
     owner?: { id: string; firstName?: string; lastName?: string; department?: string };
 }
 
+interface Directorate {
+    id: string;
+    name: string;
+}
+
 interface CreateFindingModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -52,22 +57,17 @@ const findingTypeOptions = [
     { value: 'IB', label: 'İş Birimleri Bulgusu' },
 ];
 
-// Önem Derecesi: KZ=CRITICAL, KD=HIGH, ÖK=MEDIUM
+// İş kuralı: Önem Derecesi yalnızca KZ (Kontrol Zayıflığı) / KD (Kayda Değer Kontrol Eksikliği).
 const severityOptions = [
-    { value: 'CRITICAL', label: 'KZ', sublabel: 'Kritik Zayıflık', color: 'border-rose-500 bg-rose-50 text-rose-700 ring-rose-500' },
-    { value: 'HIGH',     label: 'KD', sublabel: 'Kritik Düzey',   color: 'border-orange-500 bg-orange-50 text-orange-700 ring-orange-500' },
-    { value: 'MEDIUM',   label: 'ÖK', sublabel: 'Önemli Kontrol', color: 'border-amber-500 bg-amber-50 text-amber-700 ring-amber-500' },
-    { value: 'LOW',      label: 'Düşük', sublabel: 'Düşük Risk',  color: 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-emerald-500' },
+    { value: 'CRITICAL', label: 'KZ', sublabel: 'Kontrol Zayıflığı',            color: 'border-rose-500 bg-rose-50 text-rose-700 ring-rose-500' },
+    { value: 'HIGH',     label: 'KD', sublabel: 'Kayda Değer Kontrol Eksikliği', color: 'border-orange-500 bg-orange-50 text-orange-700 ring-orange-500' },
 ];
 
-// Bulgunun Durumu
+// İş kuralı: Bulgunun Durumu yalnızca bu 3 seçenekten biri olabilir.
 const statusOptions = [
     { value: 'IN_PROGRESS',       label: 'Devam Ediyor' },
     { value: 'PARTIALLY_CLOSED',  label: 'Kısmen Kapatıldı' },
     { value: 'CLOSED',            label: 'Kapatıldı' },
-    // Legacy
-    { value: 'OPEN',              label: 'Açık (Eski)' },
-    { value: 'PENDING_REVIEW',    label: 'İnceleme Bekliyor (Eski)' },
 ];
 
 export function CreateFindingModal({
@@ -83,6 +83,7 @@ export function CreateFindingModal({
     const [loading, setLoading] = useState(false);
     const [controls, setControls] = useState<Control[]>([]);
     const [users, setUsers] = useState<User[]>([]);
+    const [directorates, setDirectorates] = useState<Directorate[]>([]);
 
     const [formData, setFormData] = useState({
         findingType: 'BT',
@@ -91,12 +92,15 @@ export function CreateFindingModal({
         summary: '',
         gmy: '',
         relatedDepartment: '',
+        directorateId: '',
         responsiblePerson: '',
         status: 'IN_PROGRESS',
         severity: 'HIGH',
         internalControlAssessment: '',
         currentStatusDetail: '',
         birimCevabi: '',
+        // Öngörülen tamamlanma tarihi artık bağlı aksiyonların hedef tarihlerinden
+        // backend'de hesaplanır (Madde 4) — burada yalnızca görüntülenir, salt okunur.
         targetResolutionDate: '',
         closedDate: '',
         testDate: '',
@@ -108,8 +112,6 @@ export function CreateFindingModal({
     const [actions, setActions] = useState<any[]>([
         { description: '', ownerId: '', responsibleDepartment: '', dueDate: '', attachments: [], notes: '' }
     ]);
-
-    const isTargetDateMandatory = formData.status === 'IN_PROGRESS' || formData.status === 'PARTIALLY_CLOSED';
 
     useEffect(() => {
         if (!isOpen) return;
@@ -131,6 +133,11 @@ export function CreateFindingModal({
                 const res = await api.getControls() as any;
                 setControls(Array.isArray(res) ? res : (res?.data || []));
 
+                try {
+                    const dirs = await api.getDirectorates({ isActive: 'true' }) as any;
+                    setDirectorates(Array.isArray(dirs) ? dirs : (dirs?.data || []));
+                } catch { /* yetki yoksa boş liste */ }
+
                 if (editContext) {
                     setFormData({
                         findingType: editContext.findingType || 'BT',
@@ -139,6 +146,7 @@ export function CreateFindingModal({
                         summary: editContext.summary || '',
                         gmy: editContext.gmy || '',
                         relatedDepartment: editContext.relatedDepartment || '',
+                        directorateId: editContext.directorateId || (editContext.directorateRel?.id || ''),
                         responsiblePerson: editContext.responsiblePerson || '',
                         status: editContext.status || 'IN_PROGRESS',
                         severity: editContext.severity || 'HIGH',
@@ -159,6 +167,7 @@ export function CreateFindingModal({
                 let initialControlId = '';
                 let initialGMY = '';
                 let initialDept = '';
+                let initialDirectorateId = '';
                 let initialResponsible = '';
                 let initialAssigneeId = '';
 
@@ -173,6 +182,7 @@ export function CreateFindingModal({
                     if (matchedUser) initialAssigneeId = matchedUser.id;
                 } else if (prefillData) {
                     initialControlId = prefillData.controlId || '';
+                    initialDirectorateId = prefillData.directorateId || '';
                 } else if (controlContext) {
                     initialControlId = controlContext.id || '';
                     initialGMY = controlContext.gmy || '';
@@ -190,6 +200,7 @@ export function CreateFindingModal({
                     summary: '',
                     gmy: initialGMY,
                     relatedDepartment: initialDept,
+                    directorateId: initialDirectorateId,
                     responsiblePerson: initialResponsible,
                     status: 'IN_PROGRESS',
                     severity: 'HIGH',
@@ -255,7 +266,7 @@ export function CreateFindingModal({
             showToastError('Hata', 'Bulgu Özeti girmek zorunludur.');
             return;
         }
-        if (!formData.relatedDepartment.trim()) {
+        if (!formData.directorateId) {
             showToastError('Hata', 'İlgili Direktörlük zorunludur.');
             return;
         }
@@ -263,12 +274,9 @@ export function CreateFindingModal({
             showToastError('Hata', 'Bulgunun Durumu seçimi zorunludur.');
             return;
         }
-        
-        // Target Resolution Date check (only manual if no actions defined)
-        if (editContext && isTargetDateMandatory && !formData.targetResolutionDate) {
-            showToastError('Hata', '"Devam Ediyor" veya "Kısmen Kapatıldı" durumunda Öngörülen Tamamlanma Tarihi zorunludur.');
-            return;
-        }
+
+        // Öngörülen Tamamlanma Tarihi artık bağlı aksiyonlardan hesaplanır — manuel
+        // zorunluluk kontrolü kaldırıldı (Madde 4).
 
         // Actions validation for new findings
         if (!editContext) {
@@ -411,14 +419,20 @@ export function CreateFindingModal({
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">İlgili Direktörlük *</label>
-                            <input
-                                type="text"
+                            <select
                                 required
-                                value={formData.relatedDepartment}
-                                onChange={e => setFormData({ ...formData, relatedDepartment: e.target.value })}
+                                value={formData.directorateId}
+                                onChange={e => {
+                                    const dir = directorates.find(d => d.id === e.target.value);
+                                    setFormData({ ...formData, directorateId: e.target.value, relatedDepartment: dir?.name || '' });
+                                }}
                                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none bg-white"
-                                placeholder="Örn: BT Güvenlik Direktörlüğü..."
-                            />
+                            >
+                                <option value="">Seçiniz...</option>
+                                {directorates.map(d => (
+                                    <option key={d.id} value={d.id}>{d.name}</option>
+                                ))}
+                            </select>
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">Bulgunun Durumu *</label>
@@ -504,7 +518,7 @@ export function CreateFindingModal({
                     {/* Önem Derecesi */}
                     <div>
                         <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Önem Derecesi</label>
-                        <div className="grid grid-cols-4 gap-2">
+                        <div className="grid grid-cols-2 gap-2">
                             {severityOptions.map(sev => (
                                 <button
                                     key={sev.value}
@@ -535,17 +549,16 @@ export function CreateFindingModal({
                             />
                         </div>
                         <div>
-                            <label className={`block text-xs font-bold mb-1.5 uppercase ${isTargetDateMandatory ? 'text-red-500' : 'text-slate-500'}`}>
-                                Öngörülen Tamamlanma {isTargetDateMandatory ? '*' : ''}
-                            </label>
+                            <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Öngörülen Tamamlanma</label>
                             <input
                                 type="date"
                                 value={formData.targetResolutionDate}
-                                onChange={e => setFormData({ ...formData, targetResolutionDate: e.target.value })}
-                                className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none bg-white ${
-                                    isTargetDateMandatory ? 'border-red-300 focus:border-red-400' : 'border-slate-200'
-                                }`}
+                                readOnly
+                                disabled
+                                title="Bu tarih bağlı aksiyonların hedef tamamlanma tarihlerinden otomatik hesaplanır."
+                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none bg-slate-50 text-slate-500 cursor-not-allowed"
                             />
+                            <p className="text-[10px] text-slate-400 mt-1">Aksiyonların hedef tarihinden otomatik hesaplanır.</p>
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">

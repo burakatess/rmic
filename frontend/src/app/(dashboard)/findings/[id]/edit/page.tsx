@@ -23,6 +23,11 @@ interface Control {
     owner?: { id: string; firstName?: string; lastName?: string; department?: string };
 }
 
+interface Directorate {
+    id: string;
+    name: string;
+}
+
 const findingTypeOptions = [
     { value: 'CONTROL_DEFICIENCY', label: 'Kontrol Eksikliği' },
     { value: 'PROCESS_GAP', label: 'Süreç Açığı' },
@@ -32,12 +37,17 @@ const findingTypeOptions = [
     { value: 'OPERATIONAL', label: 'Operasyonel' },
 ];
 
+// İş kuralı: bulgunun durumu yalnızca bu 3 seçenekten biri olabilir.
 const statusOptions = [
-    { value: 'OPEN', label: 'Açık' },
     { value: 'IN_PROGRESS', label: 'Devam Ediyor' },
-    { value: 'PENDING_REVIEW', label: 'İnceleme Bekliyor' },
+    { value: 'PARTIALLY_CLOSED', label: 'Kısmen Kapatıldı' },
     { value: 'CLOSED', label: 'Kapatıldı' },
-    { value: 'VERIFIED', label: 'Doğrulandı' },
+];
+
+// İş kuralı: önem derecesi yalnızca KZ (Kontrol Zayıflığı) / KD (Kayda Değer Kontrol Eksikliği).
+const severityOptions = [
+    { value: 'CRITICAL', label: 'KZ', sublabel: 'Kontrol Zayıflığı', color: 'border-rose-500 bg-rose-50 text-rose-700' },
+    { value: 'HIGH', label: 'KD', sublabel: 'Kayda Değer Kontrol Eksikliği', color: 'border-orange-500 bg-orange-50 text-orange-700' },
 ];
 
 export default function FindingEditPage() {
@@ -49,6 +59,7 @@ export default function FindingEditPage() {
     const [saving, setSaving] = useState(false);
     const [controls, setControls] = useState<Control[]>([]);
     const [users, setUsers] = useState<User[]>([]);
+    const [directorates, setDirectorates] = useState<Directorate[]>([]);
 
     const [formData, setFormData] = useState({
         findingType: 'CONTROL_DEFICIENCY',
@@ -57,12 +68,15 @@ export default function FindingEditPage() {
         summary: '',
         gmy: '',
         relatedDepartment: '',
+        directorateId: '',
         responsiblePerson: '',
-        status: 'OPEN',
-        severity: 'MEDIUM',
+        status: 'IN_PROGRESS',
+        severity: 'HIGH',
         internalControlAssessment: '',
         currentStatusDetail: '',
         birimCevabi: '',
+        // targetResolutionDate artık salt-okunur — bağlı aksiyonların hedef tarihlerinden
+        // backend'de hesaplanır (Madde 4), burada yalnızca görüntülenir.
         targetResolutionDate: '',
         closedDate: '',
         testDate: '',
@@ -88,6 +102,12 @@ export default function FindingEditPage() {
                 const listControls = Array.isArray(resControls) ? resControls : (resControls?.data || []);
                 setControls(listControls);
 
+                // Fetch directorates
+                try {
+                    const dirs = await api.getDirectorates({ isActive: 'true' }) as any;
+                    setDirectorates(Array.isArray(dirs) ? dirs : (dirs?.data || []));
+                } catch { /* yetki yoksa boş liste */ }
+
                 // Fetch finding
                 const data = await api.getFinding(params.id as string) as any;
                 if (data) {
@@ -98,9 +118,10 @@ export default function FindingEditPage() {
                         summary: data.summary || '',
                         gmy: data.gmy || '',
                         relatedDepartment: data.relatedDepartment || '',
+                        directorateId: data.directorateId || (data.directorateRel?.id || ''),
                         responsiblePerson: data.responsiblePerson || '',
-                        status: data.status || 'OPEN',
-                        severity: data.severity || 'MEDIUM',
+                        status: data.status || 'IN_PROGRESS',
+                        severity: data.severity || 'HIGH',
                         internalControlAssessment: data.internalControlAssessment || '',
                         currentStatusDetail: data.currentStatusDetail || '',
                         birimCevabi: data.birimCevabi || '',
@@ -146,10 +167,11 @@ export default function FindingEditPage() {
 
         setSaving(true);
         try {
-            const payload = {
-                ...formData,
-                impact: 'Kontrol testi veya iç denetim sırasında sapma tespit edilmiştir.',
-            };
+            // targetResolutionDate gönderilmiyor — backend'de authoritative olarak
+            // bağlı aksiyonlardan hesaplanıyor (Madde 4), buradan gelen değer zaten
+            // yok sayılıyor ama kafa karışıklığını önlemek için hiç göndermiyoruz.
+            const { targetResolutionDate, ...rest } = formData;
+            const payload = { ...rest };
 
             await api.updateFinding(params.id as string, payload);
             showToastSuccess('Başarılı', 'Bulgu başarıyla güncellendi.');
@@ -238,13 +260,19 @@ export default function FindingEditPage() {
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">İlgili Direktörlük</label>
-                                <input
-                                    type="text"
-                                    value={formData.relatedDepartment}
-                                    onChange={e => setFormData({ ...formData, relatedDepartment: e.target.value })}
-                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none"
-                                    placeholder="Örn: BT Güvenlik..."
-                                />
+                                <select
+                                    value={formData.directorateId}
+                                    onChange={e => {
+                                        const dir = directorates.find(d => d.id === e.target.value);
+                                        setFormData({ ...formData, directorateId: e.target.value, relatedDepartment: dir?.name || formData.relatedDepartment });
+                                    }}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/10 outline-none"
+                                >
+                                    <option value="">Seçiniz...</option>
+                                    {directorates.map(d => (
+                                        <option key={d.id} value={d.id}>{d.name}</option>
+                                    ))}
+                                </select>
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">İletişim Kişisi</label>
@@ -293,12 +321,7 @@ export default function FindingEditPage() {
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Önem Derecesi (Severity)</label>
                                 <div className="flex gap-1.5">
-                                    {[
-                                        { value: 'LOW', label: 'Düşük', color: 'border-emerald-500 bg-emerald-50 text-emerald-700' },
-                                        { value: 'MEDIUM', label: 'Orta', color: 'border-amber-500 bg-amber-50 text-amber-700' },
-                                        { value: 'HIGH', label: 'Yüksek', color: 'border-orange-500 bg-orange-50 text-orange-700' },
-                                        { value: 'CRITICAL', label: 'Kritik', color: 'border-rose-500 bg-rose-50 text-rose-700' },
-                                    ].map(sev => (
+                                    {severityOptions.map(sev => (
                                         <button
                                             key={sev.value}
                                             type="button"
@@ -385,9 +408,12 @@ export default function FindingEditPage() {
                                 <input
                                     type="date"
                                     value={formData.targetResolutionDate}
-                                    onChange={e => setFormData({ ...formData, targetResolutionDate: e.target.value })}
-                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none bg-white"
+                                    readOnly
+                                    disabled
+                                    title="Bu tarih bağlı aksiyonların hedef tamamlanma tarihlerinden otomatik hesaplanır."
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none bg-slate-50 text-slate-500 cursor-not-allowed"
                                 />
+                                <p className="text-[10px] text-slate-400 mt-1">Aksiyonların hedef tarihinden otomatik hesaplanır.</p>
                             </div>
 
                             <div>
