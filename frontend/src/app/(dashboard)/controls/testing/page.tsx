@@ -4,8 +4,11 @@ import { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
-import { PageHeader, StatusBadge, Button, DataTable, FilterBar } from '@/components/ui';
-import type { ColumnDef } from '@/components/ui';
+import {
+    PageHeader, PageShell, StatusBadge, Button, DataTable, Modal,
+    KpiCard, KpiGrid, AdvancedFilterPanel, ActiveFilterChips, SavedViewMenu,
+} from '@/components/ui';
+import type { ColumnDef, ActiveFilterChip, AdvancedFilterField } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { CreateFindingModal } from '@/components/modals/CreateFindingModal';
 import { FileUpload, type AttachmentMeta } from '@/components/ui';
@@ -73,6 +76,103 @@ const fmt = (d?: string | null) => {
 const MONTHS_TR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
 const MONTHS_SHORT = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
 
+/** Gecikmiş testi belirleyen tek predicate — KPI ve filtre aynı kuralı kullanır */
+const isOverdue = (t: ControlTest) =>
+    ['BEKLIYOR', 'DEVAM_EDIYOR'].includes(t.status) && new Date(t.plannedDate) < new Date();
+
+// ─── Inline SVG Icons ─────────────────────────────────────────────────────────
+
+const icn = 'w-3.5 h-3.5';
+
+const IconCalendar = ({ className = icn }: { className?: string }) => (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+);
+const IconPin = ({ className = icn }: { className?: string }) => (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+);
+const IconUser = ({ className = icn }: { className?: string }) => (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+);
+const IconPlay = ({ className = icn }: { className?: string }) => (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+);
+const IconCheck = ({ className = icn }: { className?: string }) => (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+);
+const IconCheckCircle = ({ className = icn }: { className?: string }) => (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+);
+const IconReturn = ({ className = icn }: { className?: string }) => (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v1M3 10l5-5m-5 5l5 5" /></svg>
+);
+const IconBan = ({ className = icn }: { className?: string }) => (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+);
+const IconWarning = ({ className = icn }: { className?: string }) => (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+);
+const IconLink = ({ className = icn }: { className?: string }) => (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 010 5.656l-4 4a4 4 0 01-5.656-5.656l1.102-1.101m9.554-9.554l1.102-1.101a4 4 0 015.656 5.656l-4 4a4 4 0 01-5.656 0" /></svg>
+);
+const IconPlus = ({ className = icn }: { className?: string }) => (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+);
+
+// ─── Reason Modal (prompt/confirm yerine) ─────────────────────────────────────
+
+function ReasonModal({
+    open, title, description, confirmLabel, reasonRequired, saving, onConfirm, onClose,
+}: {
+    open: boolean;
+    title: string;
+    description?: string;
+    confirmLabel: string;
+    /** true ise gerekçe boşken Onayla disabled */
+    reasonRequired: boolean;
+    saving: boolean;
+    onConfirm: (reason: string) => void;
+    onClose: () => void;
+}) {
+    const [reason, setReason] = useState('');
+    useEffect(() => { if (open) setReason(''); }, [open]);
+
+    return (
+        <Modal
+            open={open}
+            onClose={onClose}
+            title={title}
+            description={description}
+            size="sm"
+            footer={
+                <>
+                    <Button variant="outline" onClick={onClose} disabled={saving}>İptal</Button>
+                    <Button
+                        variant="primary"
+                        onClick={() => onConfirm(reason)}
+                        loading={saving}
+                        disabled={saving || (reasonRequired && !reason.trim())}
+                    >
+                        {confirmLabel}
+                    </Button>
+                </>
+            }
+        >
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                Gerekçe {reasonRequired ? <span className="text-red-500">*</span> : <span className="text-slate-400">(opsiyonel)</span>}
+            </label>
+            <textarea
+                autoFocus
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                rows={3}
+                placeholder="Gerekçenizi yazın..."
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 resize-none
+                           focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all duration-150"
+            />
+        </Modal>
+    );
+}
+
 // ─── WorkspacePanel ──────────────────────────────────────────────────────────
 
 function WorkspacePanel({
@@ -86,6 +186,7 @@ function WorkspacePanel({
     const { success, error: showError } = useToast();
     const [saving, setSaving] = useState(false);
     const [findingModalOpen, setFindingModalOpen] = useState(false);
+    const [reasonModal, setReasonModal] = useState<null | 'return' | 'cancel'>(null);
     const hasFindings = (test.findings?.length ?? 0) > 0;
 
     // Madde 6: devam eden açık bulguyu referans alarak ilerletme
@@ -180,13 +281,14 @@ function WorkspacePanel({
         finally { setSaving(false); }
     };
 
-    const handleReturn = async () => {
-        const reason = prompt('Geri gönderme gerekçesini yazın (zorunlu):');
-        if (!reason || !reason.trim()) return;
+    // prompt() yerine ReasonModal — geri gönderme gerekçesi zorunlu
+    const handleReturnConfirm = async (reason: string) => {
+        if (!reason.trim()) return;
         setSaving(true);
         try {
             await api.returnControlTest(test.id, reason);
             success('Geri Gönderildi', 'Test testi yapan kullanıcıya düzeltme için geri gönderildi.');
+            setReasonModal(null);
             onRefresh();
         } catch { showError('Hata', 'Geri gönderilemedi.'); }
         finally { setSaving(false); }
@@ -195,13 +297,13 @@ function WorkspacePanel({
     const { user } = useAuth();
     const isSystemAdmin = user?.role?.name === 'SYSTEM_ADMIN';
 
-    const handleCancelFinal = async () => {
-        const reason = prompt('Final onaylı testi iptal etme gerekçesini yazın:') || '';
-        if (!confirm('Bu final onaylı test iptal edilecek. Emin misiniz?')) return;
+    // prompt()+confirm() yerine ReasonModal — iptal gerekçesi opsiyonel, modal onayı confirm yerine geçer
+    const handleCancelFinalConfirm = async (reason: string) => {
         setSaving(true);
         try {
             await api.cancelControlTest(test.id, reason);
             success('İptal Edildi', 'Final onaylı test iptal edildi.');
+            setReasonModal(null);
             onRefresh();
         } catch { showError('Hata', 'Test iptal edilemedi.'); }
         finally { setSaving(false); }
@@ -210,12 +312,12 @@ function WorkspacePanel({
     const stCfg = statusConfig[test.status] || { label: test.status, variant: 'neutral' as BV };
 
     return (
-        <div className="h-full flex flex-col bg-white border-l border-slate-200">
+        <div className="h-full flex flex-col bg-white">
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50">
-                <div>
-                    <div className="flex items-center gap-2 mb-1">
-                        <span className="font-mono text-xs font-bold text-violet-700">{test.testNo}</span>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 bg-slate-50">
+                <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-1.5">
+                        <span className="font-mono text-xs font-semibold text-slate-600 bg-slate-100 border border-slate-200 rounded px-2 py-0.5">{test.testNo}</span>
                         <StatusBadge variant={stCfg.variant}>{stCfg.label}</StatusBadge>
                         {test.findingStatus && (
                             <StatusBadge variant={findingStatusConfig[test.findingStatus]?.variant || 'neutral'}>
@@ -224,26 +326,32 @@ function WorkspacePanel({
                         )}
                     </div>
                     <p className="text-sm font-semibold text-slate-800 max-w-xs truncate">{test.control.name}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                        {test.directorate?.name && <span className="mr-2">📍 {test.directorate.name}</span>}
-                        <span>📅 Plan: {fmt(test.plannedDate)}</span>
-                        {test.completedAt && <span className="ml-2">✅ {fmt(test.completedAt)}</span>}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400 mt-1">
+                        {test.directorate?.name && (
+                            <span className="inline-flex items-center gap-1"><IconPin className="w-3 h-3" />{test.directorate.name}</span>
+                        )}
+                        <span className="inline-flex items-center gap-1"><IconCalendar className="w-3 h-3" />Plan: {fmt(test.plannedDate)}</span>
+                        {test.completedAt && (
+                            <span className="inline-flex items-center gap-1 text-emerald-600"><IconCheck className="w-3 h-3" />{fmt(test.completedAt)}</span>
+                        )}
+                    </div>
                 </div>
-                <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100">
+                <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer" aria-label="Paneli kapat">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-5 space-y-5">
                 {/* Kontrol Bilgisi */}
-                <div className="bg-slate-50 rounded-xl p-4 space-y-2 text-sm">
+                <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-2 text-sm">
                     <div className="flex items-center justify-between">
-                        <span className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Kontrol</span>
-                        <Link href={`/controls/${test.control.id}`} className="text-violet-600 hover:underline text-xs font-mono">{test.control.controlId}</Link>
+                        <span className="text-sm font-semibold text-slate-700">Kontrol</span>
+                        <Link href={`/controls/${test.control.id}`} className="text-blue-600 hover:underline text-xs font-mono">{test.control.controlId}</Link>
                     </div>
                     <p className="text-slate-800 font-medium">{test.control.name}</p>
-                    {test.control.gmy && <p className="text-xs text-slate-500">👤 {test.control.gmy}</p>}
+                    {test.control.gmy && (
+                        <p className="text-xs text-slate-500 inline-flex items-center gap-1.5"><IconUser className="w-3 h-3" />{test.control.gmy}</p>
+                    )}
                 </div>
 
                 {/* Kanıt Ekleri — Bulgu Var/Yok'tan bağımsız her zaman görünür */}
@@ -272,10 +380,10 @@ function WorkspacePanel({
                 {/* İş Akışı Butonları */}
                 {!isDone && !isCancelled && (
                     <div className="space-y-2">
-                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">İş Akışı</p>
+                        <p className="text-sm font-semibold text-slate-700">İş Akışı</p>
                         {canStart && (
-                            <Button variant="primary" size="sm" className="w-full" onClick={handleStart} disabled={saving}>
-                                ▶ Testi Başlat
+                            <Button variant="primary" size="sm" className="w-full" onClick={handleStart} disabled={saving} icon={<IconPlay />}>
+                                Testi Başlat
                             </Button>
                         )}
                         {canComplete && (
@@ -283,8 +391,9 @@ function WorkspacePanel({
                                 <Button variant="primary" size="sm" className="w-full"
                                     onClick={handleComplete}
                                     disabled={saving || !form.findingStatus || needsFindingFirst}
-                                    title={completeBlockedReason ?? undefined}>
-                                    ✓ Testi Tamamla ve Onaya Gönder
+                                    title={completeBlockedReason ?? undefined}
+                                    icon={<IconCheck />}>
+                                    Testi Tamamla ve Onaya Gönder
                                 </Button>
                                 {completeBlockedReason && (
                                     <p className="text-[11px] text-amber-600 mt-1.5">{completeBlockedReason}</p>
@@ -292,13 +401,13 @@ function WorkspacePanel({
                             </div>
                         )}
                         {canApprove && (
-                            <Button variant="primary" size="sm" className="w-full" onClick={handleApprove} disabled={saving}>
-                                ✅ Onayla (2. Kontrolcü)
+                            <Button variant="primary" size="sm" className="w-full" onClick={handleApprove} disabled={saving} icon={<IconCheckCircle />}>
+                                Onayla (2. Kontrolcü)
                             </Button>
                         )}
                         {canReturn && (
-                            <Button variant="secondary" size="sm" className="w-full" onClick={handleReturn} disabled={saving}>
-                                ↩ Geri Gönder
+                            <Button variant="secondary" size="sm" className="w-full" onClick={() => setReasonModal('return')} disabled={saving} icon={<IconReturn />}>
+                                Geri Gönder
                             </Button>
                         )}
                     </div>
@@ -307,9 +416,9 @@ function WorkspacePanel({
                 {/* Final onaylı testi iptal — yalnızca SYSTEM_ADMIN */}
                 {isDone && isSystemAdmin && (
                     <div className="space-y-2">
-                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Yönetici İşlemleri</p>
-                        <Button variant="secondary" size="sm" className="w-full text-red-600 border-red-200 hover:bg-red-50" onClick={handleCancelFinal} disabled={saving}>
-                            ⛔ Final Onayı İptal Et
+                        <p className="text-sm font-semibold text-slate-700">Yönetici İşlemleri</p>
+                        <Button variant="secondary" size="sm" className="w-full text-red-600 border-red-200 hover:bg-red-50" onClick={() => setReasonModal('cancel')} disabled={saving} icon={<IconBan />}>
+                            Final Onayı İptal Et
                         </Button>
                     </div>
                 )}
@@ -318,7 +427,7 @@ function WorkspacePanel({
                 {(canComplete || isDone) && (
                     <div className="space-y-4">
                         <div>
-                            <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Kontrol Sonucu</p>
+                            <p className="text-sm font-semibold text-slate-700 mb-2">Kontrol Sonucu</p>
                             <div className="grid grid-cols-2 gap-2">
                                 {['BULGUSU_YOK', 'BULGUSU_VAR'].map(opt => (
                                     <button key={opt} type="button"
@@ -331,7 +440,10 @@ function WorkspacePanel({
                                                 : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                                         } ${isDone ? 'opacity-60 cursor-default' : ''}`}
                                     >
-                                        {opt === 'BULGUSU_YOK' ? '✅ Bulgu Yok' : '⚠ Bulgu Var'}
+                                        <span className="inline-flex items-center gap-1.5">
+                                            {opt === 'BULGUSU_YOK' ? <IconCheck className="w-4 h-4" /> : <IconWarning className="w-4 h-4" />}
+                                            {opt === 'BULGUSU_YOK' ? 'Bulgu Yok' : 'Bulgu Var'}
+                                        </span>
                                     </button>
                                 ))}
                             </div>
@@ -343,8 +455,9 @@ function WorkspacePanel({
                                 size="sm"
                                 className={`w-full ${needsFindingFirst ? 'bg-rose-600 hover:bg-rose-700 ring-rose-600' : ''}`}
                                 onClick={() => setFindingModalOpen(true)}
+                                icon={<IconPlus />}
                             >
-                                + Bulgu Kaydı Oluştur {hasFindings ? `(${test.findings?.length})` : ''}
+                                Bulgu Kaydı Oluştur {hasFindings ? `(${test.findings?.length})` : ''}
                             </Button>
                         )}
 
@@ -371,8 +484,8 @@ function WorkspacePanel({
                                             placeholder="Referans gerekçesi (opsiyonel)..."
                                             className="w-full px-2.5 py-2 text-xs border border-amber-300 rounded-lg resize-none"
                                         />
-                                        <Button variant="primary" size="sm" className="w-full" onClick={handleReference} disabled={saving}>
-                                            🔗 Referans ile Onaya Gönder
+                                        <Button variant="primary" size="sm" className="w-full" onClick={handleReference} disabled={saving} icon={<IconLink />}>
+                                            Referans ile Onaya Gönder
                                         </Button>
                                     </>
                                 )}
@@ -380,7 +493,7 @@ function WorkspacePanel({
                         )}
 
                         <div>
-                            <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide block mb-1.5">
+                            <label className="text-sm font-semibold text-slate-700 block mb-1.5">
                                 Kontrol Sonucu Açıklaması
                             </label>
                             <textarea
@@ -389,11 +502,11 @@ function WorkspacePanel({
                                 onChange={e => setForm(p => ({ ...p, resultText: e.target.value }))}
                                 rows={3}
                                 placeholder="Test sonucuna ilişkin açıklama..."
-                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 resize-none disabled:bg-slate-50 disabled:text-slate-500"
+                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-none disabled:bg-slate-50 disabled:text-slate-500"
                             />
                         </div>
                         <div>
-                            <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide block mb-1.5">
+                            <label className="text-sm font-semibold text-slate-700 block mb-1.5">
                                 Kanıt Özeti
                             </label>
                             <textarea
@@ -402,7 +515,7 @@ function WorkspacePanel({
                                 onChange={e => setForm(p => ({ ...p, evidenceSummary: e.target.value }))}
                                 rows={2}
                                 placeholder="İncelenen kanıtların özeti..."
-                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 resize-none disabled:bg-slate-50 disabled:text-slate-500"
+                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-none disabled:bg-slate-50 disabled:text-slate-500"
                             />
                         </div>
                     </div>
@@ -411,15 +524,15 @@ function WorkspacePanel({
                 {/* İlgili bulgular */}
                 {test.findings && test.findings.length > 0 && (
                     <div>
-                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">İlgili Bulgular ({test.findings.length})</p>
+                        <p className="text-sm font-semibold text-slate-700 mb-2">İlgili Bulgular ({test.findings.length})</p>
                         <div className="space-y-2">
                             {test.findings.map(f => {
                                 const sv = severityConfig[f.severity];
                                 return (
                                     <Link key={f.id} href={`/findings/${f.id}`}
-                                        className="flex items-center gap-2 p-2.5 bg-slate-50 hover:bg-violet-50 rounded-lg border border-slate-200 hover:border-violet-300 transition-all">
+                                        className="flex items-center gap-2 p-2.5 bg-slate-50 hover:bg-blue-50 rounded-lg border border-slate-200 hover:border-blue-300 transition-all">
                                         {sv && <StatusBadge variant={sv.variant}>{sv.label}</StatusBadge>}
-                                        <span className="font-mono text-xs text-violet-700 font-semibold">{f.findingId}</span>
+                                        <span className="font-mono text-xs text-blue-700 font-semibold">{f.findingId}</span>
                                         <svg className="w-3 h-3 text-slate-400 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                                     </Link>
                                 );
@@ -437,6 +550,30 @@ function WorkspacePanel({
                     prefillData={{ controlId: test.control.id, controlTestId: test.id, directorateId: test.directorate?.id }}
                 />
             )}
+
+            {/* Geri gönderme gerekçesi — gerekçe zorunlu */}
+            <ReasonModal
+                open={reasonModal === 'return'}
+                title="Geri Gönder"
+                description="Test, testi yapan kullanıcıya düzeltme için geri gönderilecek."
+                confirmLabel="Onayla"
+                reasonRequired
+                saving={saving}
+                onConfirm={handleReturnConfirm}
+                onClose={() => setReasonModal(null)}
+            />
+
+            {/* Final onay iptali — gerekçe opsiyonel, modal onayı emin misiniz yerine geçer */}
+            <ReasonModal
+                open={reasonModal === 'cancel'}
+                title="Final Onayı İptal Et"
+                description="Bu final onaylı test iptal edilecek. Emin misiniz?"
+                confirmLabel="Onayla"
+                reasonRequired={false}
+                saving={saving}
+                onConfirm={handleCancelFinalConfirm}
+                onClose={() => setReasonModal(null)}
+            />
         </div>
     );
 }
@@ -514,7 +651,7 @@ function ControlTestingPageContent() {
         const tamamlandi = monthFiltered.filter(t => t.status === 'TAMAMLANDI').length;
         const onaylandi  = monthFiltered.filter(t => t.status === 'ONAYLANDI').length;
         const bulgulu    = monthFiltered.filter(t => t.findingStatus === 'BULGUSU_VAR').length;
-        const overdue    = monthFiltered.filter(t => ['BEKLIYOR', 'DEVAM_EDIYOR'].includes(t.status) && new Date(t.plannedDate) < new Date()).length;
+        const overdue    = monthFiltered.filter(isOverdue).length;
         return { total, bekliyor, devam, tamamlandi, onaylandi, bulgulu, overdue };
     }, [monthFiltered]);
 
@@ -530,24 +667,58 @@ function ControlTestingPageContent() {
             if (activeFilters.status && activeFilters.status !== 'all' && t.status !== activeFilters.status) return false;
             if (activeFilters.findingStatus && t.findingStatus !== activeFilters.findingStatus) return false;
             if (activeFilters.directorateId && t.directorate?.id !== activeFilters.directorateId) return false;
+            if (activeFilters.overdue === 'evet' && !isOverdue(t)) return false;
             return true;
         });
     }, [monthFiltered, searchQuery, activeFilters]);
 
-    const filterConfigs = useMemo(() => [
+    // KPI click-to-filter yardımcıları (aynı karta tekrar tıklanınca filtre kalkar)
+    const toggleStatusFilter = (status: string) => {
+        setActiveFilters(p => (p.status === status ? {} : { status }) as Record<string, string>);
+        setPage(1);
+    };
+    const hasAnyFilter = Object.values(activeFilters).some(v => v && v !== 'all');
+
+    // ── Gelişmiş filtre alanları ──────────────────────────────────────────────
+
+    const advancedFields: AdvancedFilterField[] = useMemo(() => [
         {
-            key: 'status', label: 'Statü',
+            type: 'select', key: 'status', label: 'Statü',
             value: activeFilters['status'] || '',
             onChange: (v: string) => { setActiveFilters(p => ({ ...p, status: v })); setPage(1); },
             options: Object.entries(statusConfig).map(([k, v]) => ({ value: k, label: v.label })),
         },
         {
-            key: 'findingStatus', label: 'Kontrol Sonucu',
+            type: 'select', key: 'findingStatus', label: 'Kontrol Sonucu',
             value: activeFilters['findingStatus'] || '',
             onChange: (v: string) => { setActiveFilters(p => ({ ...p, findingStatus: v })); setPage(1); },
             options: Object.entries(findingStatusConfig).map(([k, v]) => ({ value: k, label: v.label })),
         },
     ], [activeFilters]);
+
+    // ── Aktif filtre chip'leri ────────────────────────────────────────────────
+
+    const filterLabels: Record<string, string> = { status: 'Statü', findingStatus: 'Kontrol Sonucu', overdue: 'Gecikmiş', directorateId: 'Direktörlük' };
+    const filterValueLabel = (key: string, value: string): string => {
+        if (key === 'status') return statusConfig[value]?.label ?? value;
+        if (key === 'findingStatus') return findingStatusConfig[value]?.label ?? value;
+        if (key === 'overdue') return 'Evet';
+        return value;
+    };
+    const activeChips: ActiveFilterChip[] = useMemo(() => {
+        const chips: ActiveFilterChip[] = [];
+        if (searchQuery) chips.push({ key: 'search', label: 'Arama', value: searchQuery, onRemove: () => { setSearchQuery(''); setPage(1); } });
+        Object.entries(activeFilters).forEach(([k, v]) => {
+            if (v && v !== 'all') chips.push({
+                key: k, label: filterLabels[k] ?? k, value: filterValueLabel(k, v),
+                onRemove: () => { setActiveFilters(p => ({ ...p, [k]: '' })); setPage(1); },
+            });
+        });
+        return chips;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchQuery, activeFilters]);
+
+    const clearAll = () => { setSearchQuery(''); setActiveFilters({}); setColFilters({}); setPage(1); };
 
     // ── Columns ───────────────────────────────────────────────────────────────
 
@@ -559,7 +730,7 @@ function ControlTestingPageContent() {
             defaultWidth: 130,
             filter: { type: 'text', placeholder: 'Test No...', fn: (t: ControlTest, v) => t.testNo.toLowerCase().includes(v.toLowerCase()) },
             render: (t) => (
-                <button onClick={() => setActiveTest(t)} className="font-mono text-xs font-bold text-violet-700 hover:underline text-left">
+                <button onClick={() => setActiveTest(t)} className="font-mono text-xs font-bold text-blue-700 hover:underline text-left cursor-pointer">
                     {t.testNo}
                 </button>
             ),
@@ -592,8 +763,13 @@ function ControlTestingPageContent() {
             sortable: true,
             defaultWidth: 110,
             render: (t) => {
-                const isOverdue = ['BEKLIYOR', 'DEVAM_EDIYOR'].includes(t.status) && new Date(t.plannedDate) < new Date();
-                return <span className={`text-xs font-medium ${isOverdue ? 'text-red-600' : 'text-slate-700'}`}>{fmt(t.plannedDate)}{isOverdue && ' ⚠'}</span>;
+                const overdue = isOverdue(t);
+                return (
+                    <span className={`inline-flex items-center gap-1 text-xs font-medium ${overdue ? 'text-red-600' : 'text-slate-700'}`}>
+                        {fmt(t.plannedDate)}
+                        {overdue && <IconWarning className="w-3 h-3" />}
+                    </span>
+                );
             },
         },
         {
@@ -629,7 +805,7 @@ function ControlTestingPageContent() {
             header: '',
             defaultWidth: 60,
             render: (t) => (
-                <button onClick={() => setActiveTest(t)} className="p-1.5 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded transition-colors" title="Aç">
+                <button onClick={() => setActiveTest(t)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer" title="Aç">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                 </button>
             ),
@@ -649,84 +825,95 @@ function ControlTestingPageContent() {
     // ─────────────────────────────────────────────────────────────────────────
 
     return (
-        <div className="flex h-full bg-slate-50/50">
-            {/* List Panel */}
-            <div className={`flex flex-col ${activeTest ? 'flex-1' : 'w-full'} min-w-0`}>
-                <div className="px-6 pt-6">
+        <PageShell fullHeight>
+            <div className="flex flex-1 min-h-0 gap-4 pb-4">
+                {/* List Panel */}
+                <div className={`flex flex-col ${activeTest ? 'flex-1' : 'w-full'} min-w-0 overflow-y-auto`}>
                     <PageHeader
                         title="Kontrol Testleri"
                         description="Kontrollere ait test kayıtlarını yönetin — başlatın, tamamlayın, onaylayın"
                         breadcrumbs={[{ label: 'Kontrol Testleri' }]}
                     />
 
-                    {/* Month Filter */}
-                    <div className="mb-4 bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
-                        <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide mr-2 whitespace-nowrap">📅 Ay:</span>
-                            <button
-                                onClick={() => { setSelectedMonth(null); setPage(1); }}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                                    selectedMonth === null
-                                        ? 'bg-violet-600 text-white shadow-sm'
-                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                }`}
-                            >
-                                Tümü
-                            </button>
-                            {MONTHS_SHORT.map((m, i) => {
-                                const isCurrentMonth = i === new Date().getMonth();
-                                return (
-                                    <button
-                                        key={i}
-                                        onClick={() => { setSelectedMonth(i); setPage(1); }}
-                                        className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                                            selectedMonth === i
-                                                ? 'bg-violet-600 text-white shadow-sm'
-                                                : isCurrentMonth
-                                                    ? 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100'
-                                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                        }`}
-                                        title={MONTHS_TR[i]}
-                                    >
-                                        {m}
-                                    </button>
-                                );
-                            })}
-                        </div>
+                    {/* Ay seçici — QuickFilterBar chip diliyle hizalı (13 öğeli özel picker) */}
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 mr-1">
+                            <IconCalendar className="w-3.5 h-3.5" />
+                            Ay:
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => { setSelectedMonth(null); setPage(1); }}
+                            aria-pressed={selectedMonth === null}
+                            className={`inline-flex items-center h-8 px-3 rounded-full text-xs font-medium border transition-colors duration-150 cursor-pointer ${
+                                selectedMonth === null
+                                    ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                                    : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50/50'
+                            }`}
+                        >
+                            Tümü
+                        </button>
+                        {MONTHS_SHORT.map((m, i) => {
+                            const isCurrentMonth = i === new Date().getMonth();
+                            return (
+                                <button
+                                    key={i}
+                                    type="button"
+                                    onClick={() => { setSelectedMonth(i); setPage(1); }}
+                                    aria-pressed={selectedMonth === i}
+                                    className={`inline-flex items-center h-8 px-2.5 rounded-full text-xs font-medium border transition-colors duration-150 cursor-pointer ${
+                                        selectedMonth === i
+                                            ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                                            : isCurrentMonth
+                                                ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
+                                                : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50/50'
+                                    }`}
+                                    title={MONTHS_TR[i]}
+                                >
+                                    {m}
+                                </button>
+                            );
+                        })}
                     </div>
 
-                    {/* KPIs */}
-                    <div className="grid grid-cols-7 gap-2 mb-4">
-                        {[
-                            { label: 'Toplam', value: kpis.total, color: 'slate', onClick: () => setActiveFilters({}) },
-                            { label: 'Bekliyor', value: kpis.bekliyor, color: 'slate', onClick: () => { setActiveFilters({ status: 'BEKLIYOR' }); setPage(1); } },
-                            { label: 'Devam', value: kpis.devam, color: 'amber', onClick: () => { setActiveFilters({ status: 'DEVAM_EDIYOR' }); setPage(1); } },
-                            { label: 'Tamamlandı', value: kpis.tamamlandi, color: 'blue', onClick: () => { setActiveFilters({ status: 'TAMAMLANDI' }); setPage(1); } },
-                            { label: 'Onaylı', value: kpis.onaylandi, color: 'emerald', onClick: () => { setActiveFilters({ status: 'ONAYLANDI' }); setPage(1); } },
-                            { label: 'Bulgulu', value: kpis.bulgulu, color: 'red', onClick: () => { setActiveFilters({ findingStatus: 'BULGUSU_VAR' }); setPage(1); } },
-                            { label: 'Gecikmiş', value: kpis.overdue, color: 'orange', onClick: () => {} },
-                        ].map(k => (
-                            <button key={k.label} onClick={k.onClick}
-                                className={`bg-white border border-${k.color}-100 rounded-xl p-3 text-center hover:border-${k.color}-300 hover:shadow-sm transition-all`}>
-                                <p className={`text-xl font-bold text-${k.color}-700`}>{k.value}</p>
-                                <p className={`text-[10px] font-semibold text-${k.color}-500 uppercase tracking-wide`}>{k.label}</p>
-                            </button>
-                        ))}
-                    </div>
+                    {/* KPI'lar — click-to-filter */}
+                    <KpiGrid columns={4}>
+                        <KpiCard title="Toplam" value={kpis.total} variant="default"
+                            active={!hasAnyFilter}
+                            onClick={() => { setActiveFilters({}); setPage(1); }} />
+                        <KpiCard title="Bekliyor" value={kpis.bekliyor} variant="default"
+                            active={activeFilters.status === 'BEKLIYOR'}
+                            onClick={() => toggleStatusFilter('BEKLIYOR')} />
+                        <KpiCard title="Devam" value={kpis.devam} variant="warning"
+                            active={activeFilters.status === 'DEVAM_EDIYOR'}
+                            onClick={() => toggleStatusFilter('DEVAM_EDIYOR')} />
+                        <KpiCard title="Tamamlandı" value={kpis.tamamlandi} variant="primary"
+                            active={activeFilters.status === 'TAMAMLANDI'}
+                            onClick={() => toggleStatusFilter('TAMAMLANDI')} />
+                        <KpiCard title="Onaylı" value={kpis.onaylandi} variant="success"
+                            active={activeFilters.status === 'ONAYLANDI'}
+                            onClick={() => toggleStatusFilter('ONAYLANDI')} />
+                        <KpiCard title="Bulgulu" value={kpis.bulgulu} variant="critical"
+                            active={activeFilters.findingStatus === 'BULGUSU_VAR'}
+                            onClick={() => { setActiveFilters(p => (p.findingStatus === 'BULGUSU_VAR' ? {} : { findingStatus: 'BULGUSU_VAR' }) as Record<string, string>); setPage(1); }} />
+                        <KpiCard title="Gecikmiş" value={kpis.overdue} variant="high"
+                            active={activeFilters.overdue === 'evet'}
+                            onClick={() => { setActiveFilters(p => (p.overdue === 'evet' ? {} : { overdue: 'evet' }) as Record<string, string>); setPage(1); }} />
+                    </KpiGrid>
 
-                    {/* Filter */}
-                    <div className="mb-4 bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
-                        <FilterBar
-                            searchValue={searchQuery}
-                            onSearchChange={v => { setSearchQuery(v); setPage(1); }}
-                            searchPlaceholder="Test No, Kontrol adı, Direktörlük ara..."
-                            filters={filterConfigs}
-                            onClearAll={() => { setSearchQuery(''); setActiveFilters({}); setPage(1); }}
-                        />
-                    </div>
-                </div>
+                    {/* Gelişmiş filtre paneli */}
+                    <AdvancedFilterPanel
+                        searchValue={searchQuery}
+                        onSearchChange={v => { setSearchQuery(v); setPage(1); }}
+                        searchPlaceholder="Test No, Kontrol adı, Direktörlük ara..."
+                        fields={advancedFields}
+                        activeCount={Object.values(activeFilters).filter(v => v && v !== 'all').length}
+                        onClearAll={clearAll}
+                    />
 
-                <div className="px-6 pb-6 flex-1">
+                    {/* Aktif filtre chip'leri */}
+                    <ActiveFilterChips chips={activeChips} onClearAll={clearAll} />
+
                     <DataTable
                         columns={columns}
                         data={paginated}
@@ -742,28 +929,43 @@ function ControlTestingPageContent() {
                         onRowClick={t => setActiveTest(t)}
                         columnFilters={colFilters}
                         onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
+                        stickyFirstColumn
+                        onRefresh={load}
+                        toolbar={
+                            <SavedViewMenu
+                                storageKey="control-tests-v1"
+                                getPayload={() => ({ search: searchQuery, filters: activeFilters, columnFilters: colFilters, selectedMonth })}
+                                onApply={(p) => {
+                                    setSearchQuery(typeof p.search === 'string' ? p.search : '');
+                                    setActiveFilters((p.filters as Record<string, string>) || {});
+                                    setColFilters((p.columnFilters as Record<string, string>) || {});
+                                    setSelectedMonth(typeof p.selectedMonth === 'number' ? p.selectedMonth : null);
+                                    setPage(1);
+                                }}
+                            />
+                        }
                     />
                 </div>
-            </div>
 
-            {/* Workspace Panel */}
-            {activeTest && (
-                <div className="w-96 flex-shrink-0 border-l border-slate-200 overflow-hidden">
-                    <WorkspacePanel
-                        test={activeTest}
-                        users={users}
-                        onRefresh={() => { load(); setActiveTest(null); }}
-                        onClose={() => setActiveTest(null)}
-                    />
-                </div>
-            )}
-        </div>
+                {/* Workspace Panel */}
+                {activeTest && (
+                    <div className="w-96 flex-shrink-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                        <WorkspacePanel
+                            test={activeTest}
+                            users={users}
+                            onRefresh={() => { load(); setActiveTest(null); }}
+                            onClose={() => setActiveTest(null)}
+                        />
+                    </div>
+                )}
+            </div>
+        </PageShell>
     );
 }
 
 export default function ControlTestingPage() {
     return (
-        <Suspense fallback={<div className="p-6 text-center text-sm text-slate-500">Yükleniyor...</div>}>
+        <Suspense fallback={<PageShell><div className="p-6 text-center text-sm text-slate-500">Yükleniyor...</div></PageShell>}>
             <ControlTestingPageContent />
         </Suspense>
     );

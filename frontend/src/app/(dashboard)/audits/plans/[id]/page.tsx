@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { DetailShell, DetailHeader, Tabs, StatusBadge, Button } from '@/components/ui';
 
 // Finding ID generator - persists across sessions using timestamp + random
 const generateFindingId = () => {
@@ -67,36 +68,38 @@ const DEMO_AUDIT = {
 };
 
 // Config
-const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-    PLANNED: { label: 'Planlandı', color: 'bg-blue-100 text-blue-700' },
-    IN_PROGRESS: { label: 'Devam Ediyor', color: 'bg-amber-100 text-amber-700' },
-    COMPLETED: { label: 'Tamamlandı', color: 'bg-green-100 text-green-700' },
+type BadgeVariant = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'success' | 'warning' | 'neutral' | 'primary';
+
+const STATUS_CONFIG: Record<string, { label: string; variant: BadgeVariant }> = {
+    PLANNED: { label: 'Planlandı', variant: 'info' },
+    IN_PROGRESS: { label: 'Devam Ediyor', variant: 'warning' },
+    COMPLETED: { label: 'Tamamlandı', variant: 'success' },
 };
 
-const PHASE_CONFIG: Record<string, { label: string; color: string }> = {
-    PLANNING: { label: 'Planlama', color: 'bg-slate-100 text-slate-700' },
-    FIELDWORK: { label: 'Saha Çalışması', color: 'bg-indigo-100 text-indigo-700' },
-    REPORTING: { label: 'Raporlama', color: 'bg-purple-100 text-purple-700' },
-    CLOSED: { label: 'Kapatıldı', color: 'bg-gray-100 text-gray-600' },
+const PHASE_CONFIG: Record<string, { label: string; variant: BadgeVariant }> = {
+    PLANNING: { label: 'Planlama', variant: 'neutral' },
+    FIELDWORK: { label: 'Saha Çalışması', variant: 'primary' },
+    REPORTING: { label: 'Raporlama', variant: 'medium' },
+    CLOSED: { label: 'Kapatıldı', variant: 'low' },
 };
 
-const PRIORITY_CONFIG: Record<string, { label: string; color: string }> = {
-    LOW: { label: 'Düşük', color: 'bg-green-100 text-green-700' },
-    MEDIUM: { label: 'Orta', color: 'bg-yellow-100 text-yellow-700' },
-    HIGH: { label: 'Yüksek', color: 'bg-red-100 text-red-700' },
+const PRIORITY_CONFIG: Record<string, { label: string; variant: BadgeVariant }> = {
+    LOW: { label: 'Düşük', variant: 'low' },
+    MEDIUM: { label: 'Orta', variant: 'warning' },
+    HIGH: { label: 'Yüksek', variant: 'critical' },
 };
 
-const SEVERITY_CONFIG: Record<string, { label: string; color: string }> = {
-    LOW: { label: 'Düşük', color: 'bg-green-100 text-green-700' },
-    MEDIUM: { label: 'Orta', color: 'bg-yellow-100 text-yellow-700' },
-    HIGH: { label: 'Yüksek', color: 'bg-red-100 text-red-700' },
-    CRITICAL: { label: 'Kritik', color: 'bg-red-200 text-red-800' },
+const SEVERITY_CONFIG: Record<string, { label: string; variant: BadgeVariant }> = {
+    LOW: { label: 'Düşük', variant: 'low' },
+    MEDIUM: { label: 'Orta', variant: 'warning' },
+    HIGH: { label: 'Yüksek', variant: 'high' },
+    CRITICAL: { label: 'Kritik', variant: 'critical' },
 };
 
-const FINDING_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-    OPEN: { label: 'Açık', color: 'text-red-600' },
-    IN_PROGRESS: { label: 'Devam Ediyor', color: 'text-amber-600' },
-    CLOSED: { label: 'Kapatıldı', color: 'text-green-600' },
+const FINDING_STATUS_CONFIG: Record<string, { label: string; variant: BadgeVariant }> = {
+    OPEN: { label: 'Açık', variant: 'critical' },
+    IN_PROGRESS: { label: 'Devam Ediyor', variant: 'warning' },
+    CLOSED: { label: 'Kapatıldı', variant: 'success' },
 };
 
 const formatDate = (dateString: string | null): string => {
@@ -107,7 +110,7 @@ const formatDate = (dateString: string | null): string => {
 
 export default function AuditPlanDetailPage() {
     const params = useParams();
-    const [activeTab, setActiveTab] = useState<'overview' | 'findings' | 'timeline' | 'activity'>('overview');
+    const [activeTab, setActiveTab] = useState<string>('overview');
     const [showReportMenu, setShowReportMenu] = useState(false);
     const [showAddFindingModal, setShowAddFindingModal] = useState(false);
     const [showImportModal, setShowImportModal] = useState(false);
@@ -237,151 +240,163 @@ Rapor Tarihi: ${new Date().toLocaleDateString('tr-TR')}
         setImportPreview([]);
     };
 
+    const tabs = [
+        { key: 'overview', label: 'Genel Bakış' },
+        { key: 'findings', label: 'Bulgular', count: findings.length },
+        { key: 'timeline', label: 'Zaman Çizelgesi' },
+        { key: 'activity', label: 'Aktivite' },
+    ];
+
+    const statusCfg = STATUS_CONFIG[audit.status];
+    const phaseCfg = PHASE_CONFIG[audit.phase];
+
     return (
-        <div className="min-h-screen bg-gray-50">
-            <div className="max-w-[1400px] mx-auto px-6 py-6">
-                {/* Header */}
-                <div className="mb-6">
-                    <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
-                        <Link href="/audits/plans" className="hover:text-gray-700">Denetim Planları</Link>
-                        <span>›</span>
-                        <span className="text-gray-900">{audit.auditCode}</span>
-                    </div>
-
-                    <div className="flex items-start justify-between">
-                        <div>
-                            <div className="flex items-center gap-3 mb-1">
-                                <h1 className="text-2xl font-bold text-gray-900">{audit.auditName}</h1>
-                                <span className={`px-2.5 py-1 text-xs font-medium rounded ${STATUS_CONFIG[audit.status].color}`}>
-                                    {STATUS_CONFIG[audit.status].label}
-                                </span>
-                                <span className={`px-2.5 py-1 text-xs font-medium rounded ${PHASE_CONFIG[audit.phase].color}`}>
-                                    {PHASE_CONFIG[audit.phase].label}
-                                </span>
-                            </div>
-                            <p className="text-gray-500">{audit.auditCode} • {audit.auditedUnit} • {audit.year} {audit.period}</p>
+        <DetailShell>
+            <DetailHeader
+                breadcrumbs={[
+                    { label: 'Denetim' },
+                    { label: 'Denetim Planları', href: '/audits/plans' },
+                    { label: audit.auditCode },
+                ]}
+                entityId={audit.auditCode}
+                title={audit.auditName}
+                badges={
+                    <>
+                        {statusCfg && <StatusBadge variant={statusCfg.variant}>{statusCfg.label}</StatusBadge>}
+                        {phaseCfg && <StatusBadge variant={phaseCfg.variant}>{phaseCfg.label}</StatusBadge>}
+                    </>
+                }
+                meta={
+                    <>
+                        <span>{audit.auditedUnit}</span>
+                        <span>{audit.year} {audit.period}</span>
+                        <span>Ekip Lideri: {audit.teamLeader.name}</span>
+                    </>
+                }
+                actions={
+                    <>
+                        <Link href={`/audits/plans/${params.id}/edit`}>
+                            <Button variant="outline" size="sm">Düzenle</Button>
+                        </Link>
+                        <div className="relative">
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => setShowReportMenu(!showReportMenu)}
+                                icon={<svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>}
+                            >
+                                Raporu İndir
+                            </Button>
+                            {showReportMenu && (
+                                <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-20 py-1.5">
+                                    <button onClick={() => handleDownloadReport('pdf')} className="w-full px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer">PDF Olarak İndir</button>
+                                    <button onClick={() => handleDownloadReport('word')} className="w-full px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer">Word Olarak İndir</button>
+                                </div>
+                            )}
                         </div>
+                    </>
+                }
+            />
 
+            {/* Hızlı istatistikler */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <p className="text-xs font-medium text-slate-500 mb-1.5">Öncelik</p>
+                    {PRIORITY_CONFIG[audit.priority] && (
+                        <StatusBadge variant={PRIORITY_CONFIG[audit.priority].variant}>{PRIORITY_CONFIG[audit.priority].label}</StatusBadge>
+                    )}
+                </div>
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <p className="text-xs font-medium text-slate-500 mb-1">Planlanan Gün</p>
+                    <p className="text-xl font-bold tabular-nums text-slate-800">{audit.plannedManDays}</p>
+                </div>
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <p className="text-xs font-medium text-slate-500 mb-1">Gerçekleşen Gün</p>
+                    <p className="text-xl font-bold tabular-nums text-slate-800">{audit.actualManDays}</p>
+                </div>
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <p className="text-xs font-medium text-slate-500 mb-1">Sapma</p>
+                    <p className={`text-xl font-bold tabular-nums ${audit.scheduleVariance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                        {audit.scheduleVariance > 0 ? '+' : ''}{audit.scheduleVariance} gün
+                    </p>
+                </div>
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <p className="text-xs font-medium text-slate-500 mb-1">Toplam Bulgu</p>
+                    <p className="text-xl font-bold tabular-nums text-slate-800">{findings.length}</p>
+                </div>
+                <div className="bg-white rounded-xl border border-red-200 shadow-sm p-4">
+                    <p className="text-xs font-medium text-red-600 mb-1">Açık Bulgu</p>
+                    <p className="text-xl font-bold tabular-nums text-red-700">{openFindings}</p>
+                </div>
+            </div>
+
+            {/* Tabs */}
+            <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} className="mb-6" />
+
+            {/* Findings Tab */}
+            {activeTab === 'findings' && (
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    {/* Findings Header */}
+                    <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                        <h2 className="text-sm font-semibold text-slate-700">Denetim Bulguları</h2>
                         <div className="flex items-center gap-2">
-                            <Link href={`/audits/plans/${params.id}/edit`} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">
-                                Düzenle
-                            </Link>
-                            <div className="relative">
-                                <button onClick={() => setShowReportMenu(!showReportMenu)} className="px-4 py-2 text-sm font-medium text-white bg-[#1e3a5f] rounded-lg hover:bg-[#152a45] flex items-center gap-1">
-                                    Raporu İndir
-                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                                </button>
-                                {showReportMenu && (
-                                    <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-20">
-                                        <button onClick={() => handleDownloadReport('pdf')} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">PDF Olarak İndir</button>
-                                        <button onClick={() => handleDownloadReport('word')} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">Word Olarak İndir</button>
-                                    </div>
-                                )}
-                            </div>
+                            <button onClick={handleExportTemplate} className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer flex items-center gap-1">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                Şablon İndir
+                            </button>
+                            <button onClick={handleExportFindings} className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer flex items-center gap-1">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                Dışa Aktar
+                            </button>
+                            <input type="file" ref={fileInputRef} accept=".csv" onChange={handleFileChange} className="hidden" />
+                            <button onClick={() => fileInputRef.current?.click()} className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer flex items-center gap-1">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                                İçe Aktar
+                            </button>
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => setShowAddFindingModal(true)}
+                                icon={<svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}
+                            >
+                                Bulgu Ekle
+                            </Button>
                         </div>
                     </div>
-                </div>
 
-                {/* Quick Stats */}
-                <div className="grid grid-cols-6 gap-4 mb-6">
-                    <div className="bg-white rounded-lg p-4 border border-gray-200">
-                        <p className="text-xs text-gray-500 mb-1">Öncelik</p>
-                        <span className={`px-2 py-0.5 text-xs font-medium rounded ${PRIORITY_CONFIG[audit.priority].color}`}>{PRIORITY_CONFIG[audit.priority].label}</span>
-                    </div>
-                    <div className="bg-white rounded-lg p-4 border border-gray-200">
-                        <p className="text-xs text-gray-500 mb-1">Planlanan Gün</p>
-                        <p className="text-xl font-bold text-gray-900">{audit.plannedManDays}</p>
-                    </div>
-                    <div className="bg-white rounded-lg p-4 border border-gray-200">
-                        <p className="text-xs text-gray-500 mb-1">Gerçekleşen Gün</p>
-                        <p className="text-xl font-bold text-gray-900">{audit.actualManDays}</p>
-                    </div>
-                    <div className="bg-white rounded-lg p-4 border border-gray-200">
-                        <p className="text-xs text-gray-500 mb-1">Sapma</p>
-                        <p className={`text-xl font-bold ${audit.scheduleVariance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                            {audit.scheduleVariance > 0 ? '+' : ''}{audit.scheduleVariance} gün
-                        </p>
-                    </div>
-                    <div className="bg-white rounded-lg p-4 border border-gray-200">
-                        <p className="text-xs text-gray-500 mb-1">Toplam Bulgu</p>
-                        <p className="text-xl font-bold text-gray-900">{findings.length}</p>
-                    </div>
-                    <div className="bg-white rounded-lg p-4 border border-red-100">
-                        <p className="text-xs text-red-600 mb-1">Açık Bulgu</p>
-                        <p className="text-xl font-bold text-red-600">{openFindings}</p>
-                    </div>
-                </div>
-
-                {/* Tabs */}
-                <div className="flex gap-1 border-b border-gray-200 mb-6">
-                    {[
-                        { id: 'overview', label: 'Genel Bakış' },
-                        { id: 'findings', label: `Bulgular (${findings.length})` },
-                        { id: 'timeline', label: 'Zaman Çizelgesi' },
-                        { id: 'activity', label: 'Aktivite' },
-                    ].map(tab => (
-                        <button key={tab.id} onClick={() => setActiveTab(tab.id as typeof activeTab)}
-                            className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px ${activeTab === tab.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'}`}>
-                            {tab.label}
-                        </button>
-                    ))}
-                </div>
-
-                {/* Findings Tab */}
-                {activeTab === 'findings' && (
-                    <div className="bg-white rounded-lg border border-gray-200">
-                        {/* Findings Header */}
-                        <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                            <h2 className="font-semibold text-gray-900">Denetim Bulguları</h2>
-                            <div className="flex items-center gap-2">
-                                <button onClick={handleExportTemplate} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded flex items-center gap-1">
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                    Şablon İndir
-                                </button>
-                                <button onClick={handleExportFindings} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded flex items-center gap-1">
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                                    Dışa Aktar
-                                </button>
-                                <input type="file" ref={fileInputRef} accept=".csv" onChange={handleFileChange} className="hidden" />
-                                <button onClick={() => fileInputRef.current?.click()} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded flex items-center gap-1">
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                                    İçe Aktar
-                                </button>
-                                <button onClick={() => setShowAddFindingModal(true)} className="px-3 py-1.5 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded flex items-center gap-1">
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                                    Bulgu Ekle
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Findings Table */}
+                    {/* Findings Table */}
+                    <div className="overflow-x-auto">
                         <table className="w-full text-sm">
-                            <thead className="bg-gray-50 border-b border-gray-200">
+                            <thead className="bg-slate-50/80 border-b border-slate-200">
                                 <tr>
-                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Bulgu ID</th>
-                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Başlık</th>
-                                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Ciddiyet</th>
-                                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Durum</th>
-                                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">İşlem</th>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Bulgu ID</th>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Başlık</th>
+                                    <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Ciddiyet</th>
+                                    <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Durum</th>
+                                    <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">İşlem</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100">
+                            <tbody className="divide-y divide-slate-100">
                                 {findings.map(f => (
-                                    <tr key={f.id} className="hover:bg-gray-50">
-                                        <td className="px-4 py-3"><span className="text-blue-700 font-medium">{f.id}</span></td>
-                                        <td className="px-4 py-3 text-gray-900">{f.title}</td>
+                                    <tr key={f.id} className="hover:bg-slate-50/50 transition-colors">
+                                        <td className="px-4 py-3"><span className="font-mono text-xs font-semibold text-blue-700">{f.id}</span></td>
+                                        <td className="px-4 py-3 text-slate-800">{f.title}</td>
                                         <td className="px-4 py-3 text-center">
-                                            <span className={`px-2 py-0.5 text-xs font-medium rounded ${SEVERITY_CONFIG[f.severity]?.color || ''}`}>
-                                                {SEVERITY_CONFIG[f.severity]?.label || f.severity}
-                                            </span>
+                                            {SEVERITY_CONFIG[f.severity] ? (
+                                                <StatusBadge variant={SEVERITY_CONFIG[f.severity].variant}>{SEVERITY_CONFIG[f.severity].label}</StatusBadge>
+                                            ) : (
+                                                <span className="text-xs text-slate-500">{f.severity}</span>
+                                            )}
                                         </td>
                                         <td className="px-4 py-3 text-center">
-                                            <span className={`text-sm font-medium ${FINDING_STATUS_CONFIG[f.status]?.color || ''}`}>
-                                                {FINDING_STATUS_CONFIG[f.status]?.label || f.status}
-                                            </span>
+                                            {FINDING_STATUS_CONFIG[f.status] ? (
+                                                <StatusBadge variant={FINDING_STATUS_CONFIG[f.status].variant}>{FINDING_STATUS_CONFIG[f.status].label}</StatusBadge>
+                                            ) : (
+                                                <span className="text-xs text-slate-500">{f.status}</span>
+                                            )}
                                         </td>
                                         <td className="px-4 py-3 text-center">
-                                            <button className="text-gray-400 hover:text-blue-600">
+                                            <button className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer" title="Görüntüle" aria-label="Görüntüle">
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                                             </button>
                                         </td>
@@ -390,125 +405,129 @@ Rapor Tarihi: ${new Date().toLocaleDateString('tr-TR')}
                             </tbody>
                         </table>
                     </div>
-                )}
+                </div>
+            )}
 
-                {/* Overview Tab */}
-                {activeTab === 'overview' && (
-                    <div className="grid grid-cols-3 gap-6">
-                        <div className="col-span-2 space-y-6">
-                            <div className="bg-white rounded-lg border border-gray-200 p-6">
-                                <h2 className="text-lg font-semibold text-gray-900 mb-4">Denetim Hedefleri</h2>
-                                <p className="text-gray-700">{audit.objectives}</p>
-                            </div>
-                            <div className="bg-white rounded-lg border border-gray-200 p-6">
-                                <h2 className="text-lg font-semibold text-gray-900 mb-4">Denetim Kapsamı</h2>
-                                <p className="text-gray-700">{audit.scope}</p>
-                            </div>
-                            <div className="bg-white rounded-lg border border-gray-200 p-6">
-                                <h2 className="text-lg font-semibold text-gray-900 mb-4">Takvim</h2>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="p-3 bg-gray-50 rounded-lg">
-                                        <p className="text-xs text-gray-500 mb-1">Planlanan Başlangıç</p>
-                                        <p className="font-medium text-gray-900">{formatDate(audit.plannedStartDate)}</p>
-                                    </div>
-                                    <div className="p-3 bg-gray-50 rounded-lg">
-                                        <p className="text-xs text-gray-500 mb-1">Planlanan Bitiş</p>
-                                        <p className="font-medium text-gray-900">{formatDate(audit.plannedEndDate)}</p>
-                                    </div>
+            {/* Overview Tab */}
+            {activeTab === 'overview' && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="lg:col-span-2 space-y-6">
+                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                            <h2 className="text-sm font-semibold text-slate-700 mb-3">Denetim Hedefleri</h2>
+                            <p className="text-sm text-slate-600 leading-relaxed">{audit.objectives}</p>
+                        </div>
+                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                            <h2 className="text-sm font-semibold text-slate-700 mb-3">Denetim Kapsamı</h2>
+                            <p className="text-sm text-slate-600 leading-relaxed">{audit.scope}</p>
+                        </div>
+                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                            <h2 className="text-sm font-semibold text-slate-700 mb-3">Takvim</h2>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="p-3 bg-slate-50 rounded-lg">
+                                    <p className="text-xs text-slate-500 mb-1">Planlanan Başlangıç</p>
+                                    <p className="font-medium text-slate-800">{formatDate(audit.plannedStartDate)}</p>
+                                </div>
+                                <div className="p-3 bg-slate-50 rounded-lg">
+                                    <p className="text-xs text-slate-500 mb-1">Planlanan Bitiş</p>
+                                    <p className="font-medium text-slate-800">{formatDate(audit.plannedEndDate)}</p>
                                 </div>
                             </div>
                         </div>
-                        <div className="space-y-6">
-                            <div className="bg-white rounded-lg border border-gray-200 p-6">
-                                <h2 className="text-lg font-semibold text-gray-900 mb-4">Denetim Ekibi</h2>
-                                <div className="space-y-3">
-                                    {audit.teamMembers.map(m => (
-                                        <div key={m.id} className="flex items-center justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 font-medium text-sm">
-                                                    {m.name.split(' ').map(n => n[0]).join('')}
-                                                </div>
-                                                <div>
-                                                    <p className="text-sm font-medium text-gray-900">{m.name}</p>
-                                                    <p className="text-xs text-gray-500">{m.email}</p>
-                                                </div>
+                    </div>
+                    <div className="space-y-6">
+                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                            <h2 className="text-sm font-semibold text-slate-700 mb-3">Denetim Ekibi</h2>
+                            <div className="space-y-3">
+                                {audit.teamMembers.map(m => (
+                                    <div key={m.id} className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 font-medium text-sm">
+                                                {m.name.split(' ').map(n => n[0]).join('')}
                                             </div>
-                                            {m.role === 'LEADER' && <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded">Lider</span>}
+                                            <div>
+                                                <p className="text-sm font-medium text-slate-800">{m.name}</p>
+                                                <p className="text-xs text-slate-500">{m.email}</p>
+                                            </div>
                                         </div>
-                                    ))}
-                                </div>
+                                        {m.role === 'LEADER' && <StatusBadge variant="primary">Lider</StatusBadge>}
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     </div>
-                )}
+                </div>
+            )}
 
-                {/* Timeline Tab */}
-                {activeTab === 'timeline' && (
-                    <div className="bg-white rounded-lg border border-gray-200 p-6">
-                        <div className="space-y-6">
-                            {audit.milestones.map((m, idx) => (
-                                <div key={idx} className="flex gap-4">
-                                    <div className="flex flex-col items-center">
-                                        <div className={`w-4 h-4 rounded-full ${m.status === 'COMPLETED' ? 'bg-green-500' : 'bg-gray-300'}`} />
-                                        {idx < audit.milestones.length - 1 && <div className="w-0.5 h-12 bg-gray-200" />}
-                                    </div>
-                                    <div className="flex-1">
-                                        <p className="font-medium text-gray-900">{m.name}</p>
-                                        <p className="text-sm text-gray-500">Planlanan: {formatDate(m.plannedDate)}</p>
-                                    </div>
-                                    <span className={m.status === 'COMPLETED' ? 'text-green-600 text-sm' : 'text-gray-400 text-sm'}>
-                                        {m.status === 'COMPLETED' ? '✓ Tamamlandı' : 'Bekliyor'}
-                                    </span>
+            {/* Timeline Tab */}
+            {activeTab === 'timeline' && (
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                    <h2 className="text-sm font-semibold text-slate-700 mb-4">Kilometre Taşları</h2>
+                    <div className="space-y-6">
+                        {audit.milestones.map((m, idx) => (
+                            <div key={idx} className="flex gap-4">
+                                <div className="flex flex-col items-center">
+                                    <div className={`w-4 h-4 rounded-full ${m.status === 'COMPLETED' ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                                    {idx < audit.milestones.length - 1 && <div className="w-0.5 h-12 bg-slate-200" />}
                                 </div>
-                            ))}
-                        </div>
+                                <div className="flex-1">
+                                    <p className="font-medium text-slate-800">{m.name}</p>
+                                    <p className="text-sm text-slate-500">Planlanan: {formatDate(m.plannedDate)}</p>
+                                </div>
+                                {m.status === 'COMPLETED' ? (
+                                    <StatusBadge variant="success">Tamamlandı</StatusBadge>
+                                ) : (
+                                    <StatusBadge variant="neutral">Bekliyor</StatusBadge>
+                                )}
+                            </div>
+                        ))}
                     </div>
-                )}
+                </div>
+            )}
 
-                {/* Activity Tab */}
-                {activeTab === 'activity' && (
-                    <div className="bg-white rounded-lg border border-gray-200 p-6">
-                        <div className="space-y-4">
-                            {audit.activities.map((a, idx) => (
-                                <div key={idx} className="flex items-start gap-3 pb-4 border-b border-gray-100 last:border-0">
-                                    <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-gray-600 text-sm font-medium">
-                                        {a.user.split(' ').map(n => n[0]).join('')}
-                                    </div>
-                                    <div>
-                                        <p className="text-sm text-gray-900"><span className="font-medium">{a.user}</span> {a.action}</p>
-                                        <p className="text-xs text-gray-500 mt-0.5">{formatDate(a.date)}</p>
-                                    </div>
+            {/* Activity Tab */}
+            {activeTab === 'activity' && (
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                    <h2 className="text-sm font-semibold text-slate-700 mb-4">Aktivite Geçmişi</h2>
+                    <div className="space-y-4">
+                        {audit.activities.map((a, idx) => (
+                            <div key={idx} className="flex items-start gap-3 pb-4 border-b border-slate-100 last:border-0">
+                                <div className="w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 text-sm font-medium">
+                                    {a.user.split(' ').map(n => n[0]).join('')}
                                 </div>
-                            ))}
-                        </div>
+                                <div>
+                                    <p className="text-sm text-slate-800"><span className="font-medium">{a.user}</span> {a.action}</p>
+                                    <p className="text-xs text-slate-500 mt-0.5">{formatDate(a.date)}</p>
+                                </div>
+                            </div>
+                        ))}
                     </div>
-                )}
-            </div>
+                </div>
+            )}
 
             {/* Add Finding Modal */}
             {showAddFindingModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                     <div className="bg-white rounded-xl w-full max-w-lg mx-4 shadow-2xl">
-                        <div className="px-6 py-4 border-b border-gray-200">
-                            <h2 className="text-lg font-semibold text-gray-900">Yeni Bulgu Ekle</h2>
-                            <p className="text-sm text-gray-500">Otomatik eşsiz ID atanacak</p>
+                        <div className="px-6 py-4 border-b border-slate-200">
+                            <h2 className="text-sm font-semibold text-slate-700">Yeni Bulgu Ekle</h2>
+                            <p className="text-xs text-slate-500 mt-0.5">Otomatik eşsiz ID atanacak</p>
                         </div>
                         <div className="p-6 space-y-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Başlık *</label>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1">Başlık <span className="text-red-500">*</span></label>
                                 <input type="text" value={newFinding.title} onChange={e => setNewFinding({ ...newFinding, title: e.target.value })}
-                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg" placeholder="Bulgu başlığı" />
+                                    className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Bulgu başlığı" />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Açıklama</label>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1">Açıklama</label>
                                 <textarea value={newFinding.description} onChange={e => setNewFinding({ ...newFinding, description: e.target.value })}
-                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg" rows={2} placeholder="Detaylı açıklama" />
+                                    className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none" rows={2} placeholder="Detaylı açıklama" />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Ciddiyet</label>
+                                    <label className="block text-xs font-semibold text-slate-600 mb-1">Ciddiyet</label>
                                     <select value={newFinding.severity} onChange={e => setNewFinding({ ...newFinding, severity: e.target.value })}
-                                        className="w-full px-4 py-2 border border-gray-200 rounded-lg">
+                                        className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500">
                                         <option value="LOW">Düşük</option>
                                         <option value="MEDIUM">Orta</option>
                                         <option value="HIGH">Yüksek</option>
@@ -516,20 +535,20 @@ Rapor Tarihi: ${new Date().toLocaleDateString('tr-TR')}
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Sorumlu Birim</label>
+                                    <label className="block text-xs font-semibold text-slate-600 mb-1">Sorumlu Birim</label>
                                     <input type="text" value={newFinding.responsibleUnit} onChange={e => setNewFinding({ ...newFinding, responsibleUnit: e.target.value })}
-                                        className="w-full px-4 py-2 border border-gray-200 rounded-lg" placeholder="Birim adı" />
+                                        className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Birim adı" />
                                 </div>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Öneri</label>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1">Öneri</label>
                                 <textarea value={newFinding.recommendation} onChange={e => setNewFinding({ ...newFinding, recommendation: e.target.value })}
-                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg" rows={2} placeholder="İyileştirme önerileri" />
+                                    className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none" rows={2} placeholder="İyileştirme önerileri" />
                             </div>
                         </div>
-                        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
-                            <button onClick={() => setShowAddFindingModal(false)} className="px-4 py-2 text-sm text-gray-600">İptal</button>
-                            <button onClick={handleAddFinding} disabled={!newFinding.title} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg disabled:bg-gray-300">Bulgu Ekle</button>
+                        <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-3">
+                            <Button variant="secondary" onClick={() => setShowAddFindingModal(false)}>İptal</Button>
+                            <Button variant="primary" onClick={handleAddFinding} disabled={!newFinding.title}>Bulgu Ekle</Button>
                         </div>
                     </div>
                 </div>
@@ -539,26 +558,26 @@ Rapor Tarihi: ${new Date().toLocaleDateString('tr-TR')}
             {showImportModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                     <div className="bg-white rounded-xl w-full max-w-2xl mx-4 shadow-2xl">
-                        <div className="px-6 py-4 border-b border-gray-200">
-                            <h2 className="text-lg font-semibold text-gray-900">Bulgu İçe Aktar</h2>
-                            <p className="text-sm text-gray-500">Her bulguya otomatik eşsiz ID atanacak</p>
+                        <div className="px-6 py-4 border-b border-slate-200">
+                            <h2 className="text-sm font-semibold text-slate-700">Bulgu İçe Aktar</h2>
+                            <p className="text-xs text-slate-500 mt-0.5">Her bulguya otomatik eşsiz ID atanacak</p>
                         </div>
                         <div className="p-6">
                             {importPreview.length > 0 && (
-                                <div className="border border-gray-200 rounded-lg overflow-x-auto">
+                                <div className="border border-slate-200 rounded-lg overflow-x-auto">
                                     <table className="w-full text-xs">
-                                        <thead className="bg-gray-50">
+                                        <thead className="bg-slate-50">
                                             <tr>
                                                 {importPreview[0]?.map((h, i) => (
-                                                    <th key={i} className="px-3 py-2 text-left text-gray-500">{h}</th>
+                                                    <th key={i} className="px-3 py-2 text-left text-slate-500">{h}</th>
                                                 ))}
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-gray-100">
+                                        <tbody className="divide-y divide-slate-100">
                                             {importPreview.slice(1).map((row, ri) => (
                                                 <tr key={ri}>
                                                     {row.map((c, ci) => (
-                                                        <td key={ci} className="px-3 py-2 text-gray-700">{c}</td>
+                                                        <td key={ci} className="px-3 py-2 text-slate-700">{c}</td>
                                                     ))}
                                                 </tr>
                                             ))}
@@ -566,15 +585,15 @@ Rapor Tarihi: ${new Date().toLocaleDateString('tr-TR')}
                                     </table>
                                 </div>
                             )}
-                            <p className="text-sm text-gray-500 mt-3">{importPreview.length - 1} bulgu import edilecek. Her birine eşsiz ID atanacak.</p>
+                            <p className="text-sm text-slate-500 mt-3">{importPreview.length - 1} bulgu import edilecek. Her birine eşsiz ID atanacak.</p>
                         </div>
-                        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
-                            <button onClick={() => { setShowImportModal(false); setImportPreview([]); }} className="px-4 py-2 text-sm text-gray-600">İptal</button>
-                            <button onClick={handleImportConfirm} className="px-4 py-2 text-sm text-white bg-green-600 rounded-lg">İçe Aktar</button>
+                        <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-3">
+                            <Button variant="secondary" onClick={() => { setShowImportModal(false); setImportPreview([]); }}>İptal</Button>
+                            <Button variant="primary" onClick={handleImportConfirm}>İçe Aktar</Button>
                         </div>
                     </div>
                 </div>
             )}
-        </div>
+        </DetailShell>
     );
 }

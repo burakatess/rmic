@@ -3,8 +3,20 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
-import { PageHeader, DataTable, FilterBar, StatusBadge, Button, ConfirmDialog } from '@/components/ui';
-import type { ColumnDef } from '@/components/ui';
+import {
+    PageShell,
+    PageHeader,
+    DataTable,
+    StatusBadge,
+    Button,
+    ConfirmDialog,
+    KpiCard,
+    KpiGrid,
+    AdvancedFilterPanel,
+    ActiveFilterChips,
+    SavedViewMenu,
+} from '@/components/ui';
+import type { ColumnDef, ActiveFilterChip, AdvancedFilterField } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -79,9 +91,38 @@ const getDaysLeft = (d?: string | null) => {
     return Math.ceil((new Date(d).getTime() - Date.now()) / 86400000);
 };
 
+const isOverdue = (f: FollowUp) => {
+    if (f.status === 'ONAYLANDI' || f.status === 'TAMAMLANDI') return false;
+    const dl = getDaysLeft(f.plannedDate);
+    return dl !== null && dl < 0;
+};
+
 const MONTHS = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
 const currentYear = new Date().getFullYear();
 const YEARS = [currentYear - 1, currentYear, currentYear + 1].map(y => String(y));
+
+// ─── Icons (inline SVG — emoji yasak) ─────────────────────────────────────────
+
+const iconProps = { fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' } as const;
+
+const ClipboardIcon = ({ className = 'w-4 h-4' }: { className?: string }) => (
+    <svg className={className} {...iconProps}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+);
+const PauseIcon = ({ className = 'w-4 h-4' }: { className?: string }) => (
+    <svg className={className} {...iconProps}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+);
+const RefreshIcon = ({ className = 'w-4 h-4' }: { className?: string }) => (
+    <svg className={className} {...iconProps}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+);
+const CheckCircleIcon = ({ className = 'w-4 h-4' }: { className?: string }) => (
+    <svg className={className} {...iconProps}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+);
+const WarningIcon = ({ className = 'w-4 h-4' }: { className?: string }) => (
+    <svg className={className} {...iconProps}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+);
+const BoltIcon = ({ className = 'w-4 h-4' }: { className?: string }) => (
+    <svg className={className} {...iconProps}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+);
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -92,6 +133,7 @@ export default function FollowUpsPage() {
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
     const [colFilters, setColFilters] = useState<Record<string, string>>({});
+    const [quickFilter, setQuickFilter] = useState<string | null>(null);
     const [page, setPage] = useState(1);
     const pageSize = 25;
 
@@ -111,6 +153,7 @@ export default function FollowUpsPage() {
         } finally {
             setLoading(false);
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useEffect(() => { load(); }, [load]);
@@ -122,10 +165,22 @@ export default function FollowUpsPage() {
         const bekliyor  = followUps.filter(f => f.status === 'BEKLIYOR').length;
         const devam     = followUps.filter(f => f.status === 'DEVAM_EDIYOR').length;
         const tamamlandi= followUps.filter(f => f.status === 'TAMAMLANDI' || f.status === 'ONAYLANDI').length;
-        const overdue   = followUps.filter(f => f.status !== 'ONAYLANDI' && f.status !== 'TAMAMLANDI' && getDaysLeft(f.plannedDate) !== null && getDaysLeft(f.plannedDate)! < 0).length;
+        const overdue   = followUps.filter(isOverdue).length;
         const yeniAksiyon = followUps.filter(f => f.newActionRequired).length;
         return { total, bekliyor, devam, tamamlandi, overdue, yeniAksiyon };
     }, [followUps]);
+
+    // ── Quick filter predicate'leri (KPI kartları) ────────────────────────────
+
+    const quickFilterFns: Record<string, (f: FollowUp) => boolean> = useMemo(() => ({
+        'gecikmis': isOverdue,
+        'yeni-aksiyon': (f) => !!f.newActionRequired || f.result === 'YENI_AKSIYON_GEREKLI',
+    }), []);
+
+    const quickFilterLabels: Record<string, string> = {
+        'gecikmis': 'Gecikmiş',
+        'yeni-aksiyon': 'Yeni Aksiyon Gerekli',
+    };
 
     // ── Filter ────────────────────────────────────────────────────────────────
 
@@ -149,39 +204,45 @@ export default function FollowUpsPage() {
             if (activeFilters.year && f.plannedDate) {
                 if (new Date(f.plannedDate).getFullYear() !== parseInt(activeFilters.year)) return false;
             }
+            if (quickFilter && quickFilterFns[quickFilter] && !quickFilterFns[quickFilter](f)) return false;
             return true;
         });
-    }, [followUps, searchQuery, activeFilters]);
+    }, [followUps, searchQuery, activeFilters, quickFilter, quickFilterFns]);
 
 
-    // ── Filter configs ────────────────────────────────────────────────────────
+    // ── Gelişmiş filtre alanları ──────────────────────────────────────────────
 
-    const filterConfigs = useMemo(() => [
+    const advancedFields: AdvancedFilterField[] = useMemo(() => [
         {
+            type: 'select',
             key: 'status', label: 'Takip Statüsü',
             value: activeFilters['status'] || '',
             onChange: (v: string) => { setActiveFilters(p => ({ ...p, status: v })); setPage(1); },
             options: Object.entries(followUpStatusConfig).map(([k, v]) => ({ value: k, label: v.label })),
         },
         {
+            type: 'select',
             key: 'resolutionOutcome', label: 'Kapanış Kararı',
             value: activeFilters['resolutionOutcome'] || '',
             onChange: (v: string) => { setActiveFilters(p => ({ ...p, resolutionOutcome: v })); setPage(1); },
             options: Object.entries(resolutionConfig).map(([k, v]) => ({ value: k, label: v.label })),
         },
         {
+            type: 'select',
             key: 'severity', label: 'Önem',
             value: activeFilters['severity'] || '',
             onChange: (v: string) => { setActiveFilters(p => ({ ...p, severity: v })); setPage(1); },
             options: Object.entries(severityConfig).map(([k, v]) => ({ value: k, label: v.label })),
         },
         {
+            type: 'select',
             key: 'month', label: 'Ay',
             value: activeFilters['month'] || '',
             onChange: (v: string) => { setActiveFilters(p => ({ ...p, month: v })); setPage(1); },
             options: MONTHS.map((m, i) => ({ value: String(i + 1), label: m })),
         },
         {
+            type: 'select',
             key: 'year', label: 'Yıl',
             value: activeFilters['year'] || '',
             onChange: (v: string) => { setActiveFilters(p => ({ ...p, year: v })); setPage(1); },
@@ -257,11 +318,11 @@ export default function FollowUpsPage() {
             sortable: true,
             defaultWidth: 120,
             render: (f) => {
-                const dl = getDaysLeft(f.plannedDate);
-                const isOD = f.status !== 'ONAYLANDI' && f.status !== 'TAMAMLANDI' && dl !== null && dl < 0;
+                const isOD = isOverdue(f);
                 return (
-                    <span className={`text-xs font-medium ${isOD ? 'text-red-600' : 'text-slate-700'}`}>
-                        {fmt(f.plannedDate)}{isOD && ' ⚠'}
+                    <span className={`inline-flex items-center gap-1 text-xs font-medium ${isOD ? 'text-red-600' : 'text-slate-700'}`}>
+                        {fmt(f.plannedDate)}
+                        {isOD && <WarningIcon className="w-3 h-3 text-red-500" />}
                     </span>
                 );
             },
@@ -365,94 +426,153 @@ export default function FollowUpsPage() {
         }
     };
 
+    // ── Aktif filtre chip'leri ────────────────────────────────────────────────
+
+    const filterLabels: Record<string, string> = {
+        status: 'Takip Statüsü', resolutionOutcome: 'Kapanış Kararı', severity: 'Önem',
+        relatedDepartment: 'Direktörlük', month: 'Ay', year: 'Yıl',
+    };
+
+    const filterValueLabel = (key: string, value: string): string => {
+        if (key === 'status') return followUpStatusConfig[value]?.label ?? value;
+        if (key === 'resolutionOutcome') return resolutionConfig[value]?.label ?? value;
+        if (key === 'severity') return severityConfig[value]?.label ?? value;
+        if (key === 'month') return MONTHS[parseInt(value) - 1] ?? value;
+        return value;
+    };
+
+    const clearAll = () => {
+        setSearchQuery('');
+        setActiveFilters({});
+        setQuickFilter(null);
+        setColFilters({});
+        setPage(1);
+    };
+
+    const activeFilterCount = Object.values(activeFilters).filter(v => v && v !== 'all').length;
+
+    const activeChips: ActiveFilterChip[] = useMemo(() => {
+        const chips: ActiveFilterChip[] = [];
+        if (searchQuery) chips.push({ key: 'search', label: 'Arama', value: searchQuery, onRemove: () => { setSearchQuery(''); setPage(1); } });
+        if (quickFilter) chips.push({
+            key: 'quick', label: 'Hızlı Filtre', value: quickFilterLabels[quickFilter] ?? quickFilter,
+            onRemove: () => { setQuickFilter(null); setPage(1); },
+        });
+        Object.entries(activeFilters).forEach(([k, v]) => {
+            if (v && v !== 'all') chips.push({
+                key: k,
+                label: filterLabels[k] ?? k,
+                value: filterValueLabel(k, v),
+                onRemove: () => { setActiveFilters(p => ({ ...p, [k]: '' })); setPage(1); },
+            });
+        });
+        return chips;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchQuery, activeFilters, quickFilter]);
+
     // ─────────────────────────────────────────────────────────────────────────
 
     return (
-        <div className="flex flex-col h-full bg-slate-50/50">
-            <div className="px-8 pt-8">
-                {/* Header */}
-                <PageHeader
-                    title="Bulgu Takip Çalışmaları"
-                    description="Aksiyonlara bağlı periyodik takip kayıtları — bulgunun kapanma sürecini yönetin"
-                    breadcrumbs={[{ label: 'Bulgu Takip Çalışmaları' }]}
-                    actions={
-                        <div className="flex items-center gap-2">
-                            {selectedRows.size > 0 && (
-                                <Button
-                                    variant="danger"
-                                    size="sm"
-                                    onClick={() => setConfirmDeleteOpen(true)}
-                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
-                                >
-                                    {selectedRows.size} Seçiliyi Sil
-                                </Button>
-                            )}
-                            <Button variant="secondary" size="sm" onClick={() => load()} icon={
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                </svg>
-                            }>
-                                Yenile
+        <PageShell>
+            <PageHeader
+                title="Bulgu Takip Çalışmaları"
+                description="Aksiyonlara bağlı periyodik takip kayıtları — bulgunun kapanma sürecini yönetin"
+                breadcrumbs={[{ label: 'Bulgu Takip Çalışmaları' }]}
+                actions={
+                    <div className="flex items-center gap-2">
+                        {selectedRows.size > 0 && (
+                            <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={() => setConfirmDeleteOpen(true)}
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
+                            >
+                                {selectedRows.size} Seçiliyi Sil
                             </Button>
-                        </div>
-                    }
-                />
+                        )}
+                        <Button variant="secondary" size="sm" onClick={() => load()} icon={<RefreshIcon className="w-4 h-4" />}>
+                            Yenile
+                        </Button>
+                    </div>
+                }
+            />
 
-                {/* KPI Cards */}
-                <div className="grid grid-cols-6 gap-3 mb-5">
-                    {[
-                        { label: 'Toplam', value: kpis.total, color: 'slate', icon: '📋', onClick: () => setActiveFilters({}) },
-                        { label: 'Bekliyor', value: kpis.bekliyor, color: 'slate', icon: '⏸', onClick: () => { setActiveFilters({ status: 'BEKLIYOR' }); setPage(1); } },
-                        { label: 'Devam Ediyor', value: kpis.devam, color: 'amber', icon: '🔄', onClick: () => { setActiveFilters({ status: 'DEVAM_EDIYOR' }); setPage(1); } },
-                        { label: 'Tamamlandı', value: kpis.tamamlandi, color: 'emerald', icon: '✅', onClick: () => { setActiveFilters({ status: 'TAMAMLANDI' }); setPage(1); } },
-                        { label: 'Gecikmiş', value: kpis.overdue, color: 'red', icon: '⚠️', onClick: () => {} },
-                        { label: 'Yeni Aksiyon', value: kpis.yeniAksiyon, color: 'orange', icon: '⚡', onClick: () => {} },
-                    ].map(kpi => (
-                        <button key={kpi.label} onClick={kpi.onClick}
-                            className={`bg-white rounded-xl border border-${kpi.color}-100 shadow-sm p-4 flex items-center gap-3 hover:border-${kpi.color}-300 hover:shadow-md transition-all text-left w-full`}>
-                            <span className="text-xl">{kpi.icon}</span>
-                            <div>
-                                <p className={`text-xs font-semibold text-${kpi.color}-600 uppercase tracking-wide`}>{kpi.label}</p>
-                                <p className={`text-2xl font-bold text-${kpi.color}-700 mt-0.5`}>{kpi.value}</p>
-                            </div>
-                        </button>
-                    ))}
-                </div>
+            {/* KPI'lar — tümü click-to-filter */}
+            <KpiGrid columns={6}>
+                <KpiCard title="Toplam" value={kpis.total} variant="default"
+                    icon={<ClipboardIcon />}
+                    active={activeFilterCount === 0 && !quickFilter && !searchQuery}
+                    onClick={() => { setActiveFilters({}); setQuickFilter(null); setPage(1); }} />
+                <KpiCard title="Bekliyor" value={kpis.bekliyor} variant="default"
+                    icon={<PauseIcon />}
+                    active={activeFilters.status === 'BEKLIYOR'}
+                    onClick={() => { setActiveFilters(p => (p.status === 'BEKLIYOR' ? {} : { status: 'BEKLIYOR' }) as Record<string, string>); setPage(1); }} />
+                <KpiCard title="Devam Ediyor" value={kpis.devam} variant="warning"
+                    icon={<RefreshIcon />}
+                    active={activeFilters.status === 'DEVAM_EDIYOR'}
+                    onClick={() => { setActiveFilters(p => (p.status === 'DEVAM_EDIYOR' ? {} : { status: 'DEVAM_EDIYOR' }) as Record<string, string>); setPage(1); }} />
+                <KpiCard title="Tamamlandı" value={kpis.tamamlandi} variant="success"
+                    icon={<CheckCircleIcon />}
+                    active={activeFilters.status === 'TAMAMLANDI'}
+                    onClick={() => { setActiveFilters(p => (p.status === 'TAMAMLANDI' ? {} : { status: 'TAMAMLANDI' }) as Record<string, string>); setPage(1); }} />
+                <KpiCard title="Gecikmiş" value={kpis.overdue} variant="critical"
+                    icon={<WarningIcon />}
+                    active={quickFilter === 'gecikmis'}
+                    onClick={() => { setQuickFilter(q => q === 'gecikmis' ? null : 'gecikmis'); setPage(1); }} />
+                <KpiCard title="Yeni Aksiyon" value={kpis.yeniAksiyon} variant="high"
+                    icon={<BoltIcon />}
+                    active={quickFilter === 'yeni-aksiyon'}
+                    onClick={() => { setQuickFilter(q => q === 'yeni-aksiyon' ? null : 'yeni-aksiyon'); setPage(1); }} />
+            </KpiGrid>
 
-                {/* Filter bar */}
-                <div className="mb-4 bg-white border border-slate-200 rounded-xl shadow-sm p-3">
-                    <FilterBar
-                        searchValue={searchQuery}
-                        onSearchChange={(v) => { setSearchQuery(v); setPage(1); }}
-                        searchPlaceholder="Takip No, Bulgu No, Direktörlük, Aksiyon Sahibi ara…"
-                        filters={filterConfigs}
-                        onClearAll={() => { setSearchQuery(''); setActiveFilters({}); setPage(1); }}
-                    />
-                </div>
-            </div>
+            {/* Gelişmiş filtre paneli */}
+            <AdvancedFilterPanel
+                searchValue={searchQuery}
+                onSearchChange={(v) => { setSearchQuery(v); setPage(1); }}
+                searchPlaceholder="Takip No, Bulgu No, Direktörlük, Aksiyon Sahibi ara…"
+                fields={advancedFields}
+                activeCount={activeFilterCount}
+                onClearAll={clearAll}
+            />
+
+            {/* Aktif filtre chip'leri */}
+            <ActiveFilterChips chips={activeChips} onClearAll={clearAll} />
 
             {/* Tablo */}
-            <div className="px-8 pb-8 flex-1">
-                <DataTable
-                    columns={columns}
-                    data={paginated}
-                    rowKey={(f) => f.id}
-                    loading={loading}
-                    showCheckbox
-                    selectedRows={selectedRows}
-                    onRowSelect={handleRowSelect}
-                    onSelectAll={handleSelectAll}
-                    totalCount={colFiltered.length}
-                    page={page}
-                    pageSize={pageSize}
-                    onPageChange={setPage}
-                    storageKey="follow-ups-list-v1"
-                    emptyTitle="Takip çalışması bulunamadı"
-                    emptyDescription="Bulgulara aksiyon eklendiğinde otomatik oluşturulur."
-                    columnFilters={colFilters}
-                    onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
-                />
-            </div>
+            <DataTable
+                columns={columns}
+                data={paginated}
+                rowKey={(f) => f.id}
+                loading={loading}
+                showCheckbox
+                selectedRows={selectedRows}
+                onRowSelect={handleRowSelect}
+                onSelectAll={handleSelectAll}
+                totalCount={colFiltered.length}
+                page={page}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                storageKey="follow-ups-list-v1"
+                emptyTitle="Takip çalışması bulunamadı"
+                emptyDescription="Bulgulara aksiyon eklendiğinde otomatik oluşturulur."
+                columnFilters={colFilters}
+                onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
+                stickyFirstColumn
+                onRefresh={load}
+                toolbar={
+                    <SavedViewMenu
+                        storageKey="follow-ups-list-v1"
+                        getPayload={() => ({ search: searchQuery, filters: activeFilters, quickFilter, columnFilters: colFilters })}
+                        onApply={(p) => {
+                            setSearchQuery(typeof p.search === 'string' ? p.search : '');
+                            setActiveFilters((p.filters as Record<string, string>) || {});
+                            setQuickFilter(typeof p.quickFilter === 'string' ? p.quickFilter : null);
+                            setColFilters((p.columnFilters as Record<string, string>) || {});
+                            setPage(1);
+                        }}
+                    />
+                }
+            />
 
             <ConfirmDialog
                 open={confirmDeleteOpen}
@@ -464,6 +584,6 @@ export default function FollowUpsPage() {
                 loading={deleting}
                 variant="danger"
             />
-        </div>
+        </PageShell>
     );
 }

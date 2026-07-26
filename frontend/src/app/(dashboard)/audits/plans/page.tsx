@@ -2,8 +2,11 @@
 
 import { useState, useMemo } from 'react';
 import Link from 'next/link';
-import { PageHeader, DataTable, FilterBar, StatusBadge, Button } from '@/components/ui';
-import type { ColumnDef } from '@/components/ui';
+import {
+    PageShell, PageHeader, DataTable, StatusBadge, Button,
+    KpiCard, KpiGrid, AdvancedFilterPanel, ActiveFilterChips, SavedViewMenu,
+} from '@/components/ui';
+import type { ColumnDef, AdvancedFilterField, ActiveFilterChip } from '@/components/ui';
 
 interface AuditPlan {
     id: string;
@@ -82,29 +85,39 @@ export default function AuditPlanPage() {
     const [page, setPage] = useState(1);
     const pageSize = 15;
 
-    const filterConfigs = useMemo(() => [
+    const setFilter = (key: string, value: string) => {
+        setActiveFilters(p => ({ ...p, [key]: value }));
+        setPage(1);
+    };
+    const toggleFilter = (key: string, value: string) => {
+        setActiveFilters(p => ({ ...p, [key]: p[key] === value ? '' : value }));
+        setPage(1);
+    };
+    const clearAll = () => { setSearchQuery(''); setActiveFilters({}); setPage(1); };
+
+    const advancedFields: AdvancedFilterField[] = useMemo(() => [
         {
-            key: 'status', label: 'Durum',
+            type: 'select', key: 'status', label: 'Durum',
             value: activeFilters['status'] || '',
-            onChange: (v: string) => { setActiveFilters(p => ({ ...p, status: v })); setPage(1); },
+            onChange: (v: string) => setFilter('status', v),
             options: Object.entries(STATUS_CFG).map(([k, v]) => ({ value: k, label: v.label })),
         },
         {
-            key: 'phase', label: 'Faz',
+            type: 'select', key: 'phase', label: 'Faz',
             value: activeFilters['phase'] || '',
-            onChange: (v: string) => { setActiveFilters(p => ({ ...p, phase: v })); setPage(1); },
+            onChange: (v: string) => setFilter('phase', v),
             options: Object.entries(PHASE_CFG).map(([k, v]) => ({ value: k, label: v.label })),
         },
         {
-            key: 'priority', label: 'Öncelik',
+            type: 'select', key: 'priority', label: 'Öncelik',
             value: activeFilters['priority'] || '',
-            onChange: (v: string) => { setActiveFilters(p => ({ ...p, priority: v })); setPage(1); },
+            onChange: (v: string) => setFilter('priority', v),
             options: Object.entries(PRIORITY_CFG).map(([k, v]) => ({ value: k, label: v.label })),
         },
         {
-            key: 'delayStatus', label: 'Gecikme',
+            type: 'select', key: 'delayStatus', label: 'Gecikme',
             value: activeFilters['delayStatus'] || '',
-            onChange: (v: string) => { setActiveFilters(p => ({ ...p, delayStatus: v })); setPage(1); },
+            onChange: (v: string) => setFilter('delayStatus', v),
             options: Object.entries(DELAY_CFG).map(([k, v]) => ({ value: k, label: v.label })),
         },
     ], [activeFilters]);
@@ -211,65 +224,100 @@ export default function AuditPlanPage() {
     const totalPlanned = audits.reduce((s, a) => s + a.plannedManDays, 0);
     const totalActual = audits.reduce((s, a) => s + a.actualManDays, 0);
 
+    // ── Aktif filtre chip'leri ──
+    const filterLabels: Record<string, string> = { status: 'Durum', phase: 'Faz', priority: 'Öncelik', delayStatus: 'Gecikme' };
+    const filterValueLabel = (key: string, value: string): string => {
+        if (key === 'status') return STATUS_CFG[value]?.label ?? value;
+        if (key === 'phase') return PHASE_CFG[value]?.label ?? value;
+        if (key === 'priority') return PRIORITY_CFG[value]?.label ?? value;
+        if (key === 'delayStatus') return DELAY_CFG[value]?.label ?? value;
+        return value;
+    };
+    const activeChips: ActiveFilterChip[] = useMemo(() => {
+        const chips: ActiveFilterChip[] = [];
+        if (searchQuery) chips.push({ key: 'search', label: 'Arama', value: searchQuery, onRemove: () => { setSearchQuery(''); setPage(1); } });
+        Object.entries(activeFilters).forEach(([k, v]) => {
+            if (v && v !== 'all') chips.push({
+                key: k, label: filterLabels[k] ?? k, value: filterValueLabel(k, v),
+                onRemove: () => setFilter(k, ''),
+            });
+        });
+        return chips;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchQuery, activeFilters]);
+
+    const activeFilterCount = Object.values(activeFilters).filter(v => v && v !== 'all').length;
+
     return (
-        <div className="flex flex-col h-full bg-slate-50/50">
-            <div className="px-8 pt-8">
-                <PageHeader
-                    title="Denetim Planı"
-                    description="İç denetim faaliyetlerini planlayın ve takip edin"
-                    breadcrumbs={[{ label: 'Denetim & İnceleme' }, { label: 'Denetim Planı' }]}
-                    actions={
-                        <Link href="/audits/plans/new">
-                            <Button variant="primary" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}>
-                                Yeni Denetim Planı
-                            </Button>
-                        </Link>
-                    }
-                />
+        <PageShell>
+            <PageHeader
+                title="Denetim Planı"
+                description="İç denetim faaliyetlerini planlayın ve takip edin"
+                breadcrumbs={[{ label: 'Denetim & İnceleme' }, { label: 'Denetim Planı' }]}
+                actions={
+                    <Link href="/audits/plans/new">
+                        <Button variant="primary" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}>
+                            Yeni Denetim Planı
+                        </Button>
+                    </Link>
+                }
+            />
 
-                {/* KPIs */}
-                <div className="grid grid-cols-6 gap-4 mb-6">
-                    {[
-                        { label: 'Toplam Plan', value: audits.length, colorClass: 'slate' },
-                        { label: 'Devam Eden', value: inProgress, colorClass: 'amber' },
-                        { label: 'Tamamlanan', value: completed, colorClass: 'green' },
-                        { label: 'Gecikmeli', value: delayed, colorClass: 'red' },
-                        { label: 'Plan Adam-Gün', value: totalPlanned, colorClass: 'blue' },
-                        { label: 'Gerçek Adam-Gün', value: totalActual, colorClass: 'indigo' },
-                    ].map(kpi => (
-                        <div key={kpi.label} className={`bg-white rounded-xl border border-${kpi.colorClass}-100 shadow-sm p-4`}>
-                            <p className={`text-xs font-medium text-${kpi.colorClass}-600 uppercase tracking-wide`}>{kpi.label}</p>
-                            <p className={`text-2xl font-bold text-${kpi.colorClass}-700 mt-1`}>{kpi.value}</p>
-                        </div>
-                    ))}
-                </div>
+            {/* KPI'lar — statü/gecikme filtreleriyle click-to-filter */}
+            <KpiGrid columns={6}>
+                <KpiCard title="Toplam Plan" value={audits.length} variant="default"
+                    active={activeChips.length === 0}
+                    onClick={clearAll} />
+                <KpiCard title="Devam Eden" value={inProgress} variant="warning"
+                    active={activeFilters['status'] === 'IN_PROGRESS'}
+                    onClick={() => toggleFilter('status', 'IN_PROGRESS')} />
+                <KpiCard title="Tamamlanan" value={completed} variant="success"
+                    active={activeFilters['status'] === 'COMPLETED'}
+                    onClick={() => toggleFilter('status', 'COMPLETED')} />
+                <KpiCard title="Gecikmeli" value={delayed} variant="critical"
+                    active={activeFilters['delayStatus'] === 'DELAYED'}
+                    onClick={() => toggleFilter('delayStatus', 'DELAYED')} />
+                <KpiCard title="Plan Adam-Gün" value={totalPlanned} variant="primary" />
+                <KpiCard title="Gerçek Adam-Gün" value={totalActual} variant="violet" />
+            </KpiGrid>
 
-                {/* Filters */}
-                <div className="mb-4 bg-white border border-slate-200 rounded-xl shadow-sm p-3">
-                    <FilterBar
-                        searchValue={searchQuery}
-                        onSearchChange={(v) => { setSearchQuery(v); setPage(1); }}
-                        searchPlaceholder="Plan kodu veya denetim adı ara..."
-                        filters={filterConfigs}
-                        onClearAll={() => { setSearchQuery(''); setActiveFilters({}); setPage(1); }}
+            {/* Gelişmiş filtre paneli */}
+            <AdvancedFilterPanel
+                searchValue={searchQuery}
+                onSearchChange={(v) => { setSearchQuery(v); setPage(1); }}
+                searchPlaceholder="Plan kodu veya denetim adı ara..."
+                fields={advancedFields}
+                activeCount={activeFilterCount}
+                onClearAll={clearAll}
+            />
+
+            {/* Aktif filtre chip'leri */}
+            <ActiveFilterChips chips={activeChips} onClearAll={clearAll} />
+
+            <DataTable
+                columns={columns}
+                data={paginated}
+                rowKey={(a) => a.id}
+                totalCount={filtered.length}
+                page={page}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                storageKey="audit-plans-table"
+                emptyTitle="Denetim planı bulunamadı"
+                emptyDescription="Filtrelerinizi değiştirin veya yeni bir denetim planı oluşturun."
+                stickyFirstColumn
+                toolbar={
+                    <SavedViewMenu
+                        storageKey="audit-plans-table"
+                        getPayload={() => ({ search: searchQuery, filters: activeFilters })}
+                        onApply={(p) => {
+                            setSearchQuery(typeof p.search === 'string' ? p.search : '');
+                            setActiveFilters((p.filters as Record<string, string>) || {});
+                            setPage(1);
+                        }}
                     />
-                </div>
-            </div>
-
-            <div className="px-8 pb-8 flex-1">
-                <DataTable
-                    columns={columns}
-                    data={paginated}
-                    rowKey={(a) => a.id}
-                    totalCount={filtered.length}
-                    page={page}
-                    pageSize={pageSize}
-                    onPageChange={setPage}
-                    storageKey="audit-plans-table"
-                    emptyTitle="Denetim planı bulunamadı"
-                    emptyDescription="Filtrelerinizi değiştirin veya yeni bir denetim planı oluşturun."
-                />
-            </div>
-        </div>
+                }
+            />
+        </PageShell>
     );
 }

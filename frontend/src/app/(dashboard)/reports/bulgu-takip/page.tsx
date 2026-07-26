@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
-import { PageHeader } from '@/components/ui';
+import { PageShell, PageHeader, Button } from '@/components/ui';
 import * as XLSX from 'xlsx';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -288,7 +288,6 @@ export default function BulgeTakipRaporPage() {
     const [loading, setLoading] = useState(false);
     const [sunumModu, setSunumModu] = useState(false);
     const [slideIndex, setSlideIndex] = useState(0);
-    const printRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         api.request<Directorate[]>('/directorates').then(d => setDirectorates(d || []));
@@ -449,74 +448,79 @@ export default function BulgeTakipRaporPage() {
     // ── Normal Rapor Görünümü ─────────────────────────────────────────────────
 
     return (
-        <div className="flex flex-col min-h-full bg-slate-50/50 pb-10" ref={printRef}>
-            {/* Header */}
-            <div className="px-8 pt-8 pb-4 print:hidden">
-                <PageHeader
-                    title="Bulgu Takip Raporu"
-                    description="Tespit edilen bulgular, takip çalışmaları ve bekleyen bulguların dönemsel görünümü"
-                />
-            </div>
+        <PageShell className="print:px-4 print:pt-4 print:pb-0">
+            <PageHeader
+                title="Bulgu Takip Raporu"
+                description="Tespit edilen bulgular, takip çalışmaları ve bekleyen bulguların dönemsel görünümü"
+                breadcrumbs={[{ label: 'Raporlama & Analitik', href: '/reports' }, { label: 'Bulgu Takip Raporu' }]}
+                className="print:hidden"
+            />
 
             {/* Filter Toolbar */}
-            <div className="px-8 py-4 bg-white border-y border-slate-100 print:hidden">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 print:hidden">
                 <div className="flex flex-wrap gap-3 items-end">
                     {/* Mode Toggle */}
                     <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-                        <button onClick={() => setMode('month')} className={`px-3 py-2 text-sm font-medium transition-colors ${mode === 'month' ? 'bg-teal-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Ay Seçimi</button>
-                        <button onClick={() => setMode('range')} className={`px-3 py-2 text-sm font-medium transition-colors ${mode === 'range' ? 'bg-teal-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Tarih Aralığı</button>
+                        <button onClick={() => setMode('month')} className={`px-3 py-2 text-sm font-medium transition-colors cursor-pointer ${mode === 'month' ? 'bg-teal-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Ay Seçimi</button>
+                        <button onClick={() => setMode('range')} className={`px-3 py-2 text-sm font-medium transition-colors cursor-pointer ${mode === 'range' ? 'bg-teal-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Tarih Aralığı</button>
                     </div>
 
                     {mode === 'month' ? (
                         <>
-                            <select value={year} onChange={e => setYear(+e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-300">
+                            <select value={year} onChange={e => setYear(+e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100">
                                 {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
                             </select>
-                            <select value={month} onChange={e => setMonth(+e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-300">
+                            <select value={month} onChange={e => setMonth(+e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100">
                                 {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
                             </select>
                         </>
                     ) : (
                         <>
-                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100" />
                             <span className="text-slate-400 self-center">—</span>
-                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100" />
                         </>
                     )}
 
-                    <select value={directorateId} onChange={e => setDirectorateId(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-300">
+                    <select value={directorateId} onChange={e => setDirectorateId(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100">
                         <option value="">Tüm Direktörlükler</option>
                         {directorates.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
 
-                    <button onClick={fetchReport} disabled={loading} className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm rounded-lg transition-colors disabled:opacity-60">
+                    <Button onClick={fetchReport} loading={loading}>
                         {loading ? 'Yükleniyor...' : 'Raporu Oluştur'}
-                    </button>
+                    </Button>
 
                     {report && (
                         <div className="flex gap-2 ml-auto">
-                            <button onClick={() => { setSlideIndex(0); setSunumModu(true); }}
-                                className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium rounded-lg transition-colors">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>
+                            <Button
+                                variant="secondary"
+                                onClick={() => { setSlideIndex(0); setSunumModu(true); }}
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>}
+                            >
                                 Sunum Modu
-                            </button>
-                            <button onClick={handleExcel}
-                                className="flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                            </Button>
+                            <Button
+                                variant="success"
+                                onClick={handleExcel}
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>}
+                            >
                                 Excel
-                            </button>
-                            <button onClick={() => window.print()}
-                                className="flex items-center gap-2 px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium rounded-lg transition-colors">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                            </Button>
+                            <Button
+                                variant="outline"
+                                onClick={() => window.print()}
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>}
+                            >
                                 PDF
-                            </button>
+                            </Button>
                         </div>
                     )}
                 </div>
             </div>
 
             {/* Report Sections */}
-            <div className="px-8 py-6">
+            <div className="py-6">
                 {loading && (
                     <div className="flex items-center justify-center h-40 text-slate-400">
                         <div className="animate-spin w-6 h-6 border-2 border-teal-300 border-t-teal-600 rounded-full mr-3" />
@@ -556,7 +560,7 @@ export default function BulgeTakipRaporPage() {
 
                         {/* Section 1 */}
                         <Section title="Tespit Edilen Bulgular" badge="Bölüm 1" badgeColor="text-indigo-700 border-indigo-200" count={report.tespitEdilenBulgular.length}>
-                            <table className="w-full">
+                            <table className="grc-table">
                                 <thead><tr>
                                     <Th>Bulgu No</Th><Th>Özet</Th><Th>Önem</Th><Th>Direktörlük</Th>
                                     <Th>Hedef Tarih</Th><Th>Çözüm Durumu</Th><Th>Kaynak</Th>
@@ -579,7 +583,7 @@ export default function BulgeTakipRaporPage() {
 
                         {/* Section 2 */}
                         <Section title="Gerçekleştirilen Takip Çalışmaları" badge="Bölüm 2" badgeColor="text-teal-700 border-teal-200" count={report.takipCalismalari.length}>
-                            <table className="w-full">
+                            <table className="grc-table">
                                 <thead><tr>
                                     <Th>Takip No</Th><Th>Bağlı Bulgu</Th><Th>Önem</Th><Th>Direktörlük</Th>
                                     <Th>Tarih</Th><Th>Durum</Th><Th>Sonuç</Th><Th>Onay</Th>
@@ -603,7 +607,7 @@ export default function BulgeTakipRaporPage() {
 
                         {/* Section 3 */}
                         <Section title="Takipli Açık Bulgular" badge="Bölüm 3" badgeColor="text-amber-700 border-amber-200" count={report.takipliAcikBulgular.length}>
-                            <table className="w-full">
+                            <table className="grc-table">
                                 <thead><tr>
                                     <Th>Bulgu No</Th><Th>Özet</Th><Th>Önem</Th><Th>Direktörlük</Th>
                                     <Th>Son Takip</Th><Th>Son Sonuç</Th><Th>Hedef Tarih</Th>
@@ -626,7 +630,7 @@ export default function BulgeTakipRaporPage() {
 
                         {/* Section 4 */}
                         <Section title="Takipsiz / Hedef Tarihi Belirsiz Bulgular" badge="Bölüm 4" badgeColor="text-rose-700 border-rose-200" count={report.takipsizBulgular.length}>
-                            <table className="w-full">
+                            <table className="grc-table">
                                 <thead><tr>
                                     <Th>Bulgu No</Th><Th>Özet</Th><Th>Önem</Th><Th>Direktörlük</Th>
                                     <Th>Açılış Tarihi</Th><Th>Sorumlu</Th><Th>Not</Th>
@@ -653,6 +657,6 @@ export default function BulgeTakipRaporPage() {
                     </>
                 )}
             </div>
-        </div>
+        </PageShell>
     );
 }

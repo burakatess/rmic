@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import { PageHeader } from '@/components/ui';
+import { PageHeader, PageShell, KpiCard, KpiGrid, LoadingState } from '@/components/ui';
 import { useAuth } from '@/components/auth/AuthProvider';
 import MyWorkSection from '@/components/dashboard/MyWorkSection';
 import {
@@ -92,6 +93,17 @@ const getHeatmapColor = (row: number, col: number): string => {
     return 'bg-emerald-400 hover:bg-emerald-500 ring-emerald-200';
 };
 
+// ─── Ortak section kartı ─────────────────────────────────────────────────────
+
+function SectionCard({ title, children, className = '' }: { title: string; children: React.ReactNode; className?: string }) {
+    return (
+        <div className={`bg-white rounded-xl p-6 shadow-sm border border-slate-200 ${className}`}>
+            <h3 className="text-sm font-semibold text-slate-700 mb-4">{title}</h3>
+            {children}
+        </div>
+    );
+}
+
 // ─── Rol Bazlı Dashboard ──────────────────────────────────────────────────────
 
 function RoleDashboard({ roleName, firstName }: { roleName: string; firstName?: string }) {
@@ -115,42 +127,42 @@ function RoleDashboard({ roleName, firstName }: { roleName: string; firstName?: 
     };
 
     return (
-        <div className="space-y-8">
-            <PageHeader
-                title={`Hoş geldiniz${firstName ? `, ${firstName}` : ''}`}
-                description={`${roleLabels[roleName] ?? roleName} paneli — bu ayki işleriniz ve öncelikleriniz`}
-            />
+        <PageShell>
+            <div className="space-y-6">
+                <PageHeader
+                    title={`Hoş geldiniz${firstName ? `, ${firstName}` : ''}`}
+                    description={`${roleLabels[roleName] ?? roleName} paneli — bu ayki işleriniz ve öncelikleriniz`}
+                />
 
-            <MyWorkSection />
+                <MyWorkSection />
 
-            {showActionPerf && actionPerf && (
-                <div className="bg-white rounded-xl border border-slate-200 p-6">
-                    <h3 className="font-bold text-slate-800 mb-4">Aksiyon Performansı</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        {Object.entries(actionPerf).filter(([, v]) => typeof v === 'number').slice(0, 4).map(([k, v]) => (
-                            <div key={k} className="bg-slate-50 rounded-lg p-4">
-                                <p className="text-xs text-slate-500">{k}</p>
-                                <p className="text-2xl font-bold text-slate-800">{String(v)}</p>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
+                {showActionPerf && actionPerf && (
+                    <SectionCard title="Aksiyon Performansı">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            {Object.entries(actionPerf).filter(([, v]) => typeof v === 'number').slice(0, 4).map(([k, v]) => (
+                                <div key={k} className="bg-slate-50 rounded-lg p-4">
+                                    <p className="text-xs text-slate-500">{k}</p>
+                                    <p className="text-2xl font-bold tabular-nums text-slate-800">{String(v)}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </SectionCard>
+                )}
 
-            {showHeatmap && heatmapData.length > 0 && (
-                <div className="bg-white rounded-xl border border-slate-200 p-6">
-                    <h3 className="font-bold text-slate-800 mb-4">Risk Isı Haritası</h3>
-                    <div className="grid grid-cols-5 gap-1 max-w-md">
-                        {heatmapData.map((row, ri) => row.map((cell, ci) => (
-                            <div key={`${ri}-${ci}`}
-                                className={`aspect-square rounded flex items-center justify-center text-white text-sm font-bold ${getHeatmapColor(ri, ci)}`}>
-                                {cell.count > 0 ? cell.count : ''}
-                            </div>
-                        )))}
-                    </div>
-                </div>
-            )}
-        </div>
+                {showHeatmap && heatmapData.length > 0 && (
+                    <SectionCard title="Risk Isı Haritası">
+                        <div className="grid grid-cols-5 gap-1 max-w-md">
+                            {heatmapData.map((row, ri) => row.map((cell, ci) => (
+                                <div key={`${ri}-${ci}`}
+                                    className={`aspect-square rounded flex items-center justify-center text-white text-sm font-bold ${getHeatmapColor(ri, ci)}`}>
+                                    {cell.count > 0 ? cell.count : ''}
+                                </div>
+                            )))}
+                        </div>
+                    </SectionCard>
+                )}
+            </div>
+        </PageShell>
     );
 }
 
@@ -169,6 +181,7 @@ export default function DashboardPage() {
 }
 
 function AdminDashboard() {
+    const router = useRouter();
     const [data, setData] = useState<DashboardData | null>(null);
     const [trendData, setTrendData] = useState<TrendData[]>([]);
     const [heatmapData, setHeatmapData] = useState<HeatmapCell[][]>([]);
@@ -197,9 +210,9 @@ function AdminDashboard() {
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-full min-h-[400px]">
-                <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-            </div>
+            <PageShell>
+                <LoadingState message="Panel verileri yükleniyor..." />
+            </PageShell>
         );
     }
 
@@ -223,408 +236,363 @@ function AdminDashboard() {
     }) || [];
 
     return (
-        <div className="flex flex-col h-full bg-slate-50/50 pb-8">
-            <div className="px-8 pt-8">
-                <PageHeader
-                    title="GRC Yönetim Paneli"
-                    description="Organizasyonun güncel risk, kontrol ve bulgu durumu analizleri"
+        <PageShell>
+            <PageHeader
+                title="GRC Yönetim Paneli"
+                description="Organizasyonun güncel risk, kontrol ve bulgu durumu analizleri"
+            />
+
+            {/* Risk Dağılımı KPI'ları — tümü click-to-filter */}
+            <KpiGrid columns={4}>
+                <KpiCard
+                    title="Yüksek Riskler"
+                    value={data?.risksByScore?.high || 0}
+                    variant="critical"
+                    subtitle="Skor ≥ 15 olan riskler"
+                    onClick={() => router.push('/risks?score=high')}
+                    icon={
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                    }
                 />
+                <KpiCard
+                    title="Orta Riskler"
+                    value={data?.risksByScore?.medium || 0}
+                    variant="warning"
+                    subtitle="Skor 8-14 arası riskler"
+                    onClick={() => router.push('/risks?score=medium')}
+                    icon={
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    }
+                />
+                <KpiCard
+                    title="Düşük Riskler"
+                    value={data?.risksByScore?.low || 0}
+                    variant="success"
+                    subtitle="Skor < 8 olan riskler"
+                    onClick={() => router.push('/risks?score=low')}
+                    icon={
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    }
+                />
+                <KpiCard
+                    title="İştah Üzerinde"
+                    value={data?.summary?.risksAboveAppetite || 0}
+                    variant="violet"
+                    subtitle="Risk iştahını aşanlar"
+                    onClick={() => router.push('/risks?aboveAppetite=true')}
+                    icon={
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+                    }
+                />
+            </KpiGrid>
 
-                {/* Risk Distribution KPIs */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                    <Link href="/risks?score=high" className="group">
-                        <div className="bg-white rounded-xl p-5 border border-red-100 shadow-sm hover:shadow-md hover:border-red-300 transition-all">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-xs font-semibold text-red-600 uppercase tracking-wide">Yüksek Riskler</p>
-                                    <p className="text-3xl font-bold text-slate-800 mt-1">{data?.risksByScore?.high || 0}</p>
-                                </div>
-                                <div className="w-12 h-12 bg-red-50 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                                    <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                                </div>
-                            </div>
-                            <p className="text-xs text-slate-400 mt-3 font-medium">Skor ≥ 15 olan riskler</p>
+            {/* Kritik Konular KPI'ları */}
+            <KpiGrid columns={3} className="mb-6">
+                <KpiCard
+                    title="Açık Kritik Bulgular"
+                    value={data?.summary?.criticalFindings || 0}
+                    variant="critical"
+                    subtitle={`Kritik + Yüksek: ${data?.summary?.criticalHighFindings ?? 0}`}
+                    onClick={() => router.push('/findings?severity=CRITICAL')}
+                    icon={
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                    }
+                />
+                <KpiCard
+                    title="Gecikmiş Aksiyonlar"
+                    value={data?.summary?.overdueActions || 0}
+                    variant="high"
+                    subtitle="Filtreli aksiyon listesi"
+                    onClick={() => router.push('/actions?status=OVERDUE')}
+                    icon={
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    }
+                />
+                <KpiCard
+                    title="Toplam Kontrol Sayısı"
+                    value={data?.summary?.totalControls || 0}
+                    variant="primary"
+                    subtitle="Kontrol envanteri"
+                    onClick={() => router.push('/controls')}
+                    icon={
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+                    }
+                />
+            </KpiGrid>
+
+            {/* Charts Row 1 - Trend & Heat Map */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                {/* Risk Trend Chart */}
+                <SectionCard title="Risk Trendi (Son 12 Ay)">
+                    <div className="h-72">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={trendData}>
+                                <defs>
+                                    <linearGradient id="colorHigh" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor={COLORS.high} stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor={COLORS.high} stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="colorMedium" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor={COLORS.medium} stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor={COLORS.medium} stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="colorLow" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor={COLORS.low} stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor={COLORS.low} stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                                <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                                <YAxis tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                                />
+                                <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '20px' }} />
+                                <Area type="monotone" dataKey="high" name="Yüksek" stackId="1" stroke={COLORS.high} fill="url(#colorHigh)" strokeWidth={2} />
+                                <Area type="monotone" dataKey="medium" name="Orta" stackId="1" stroke={COLORS.medium} fill="url(#colorMedium)" strokeWidth={2} />
+                                <Area type="monotone" dataKey="low" name="Düşük" stackId="1" stroke={COLORS.low} fill="url(#colorLow)" strokeWidth={2} />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </div>
+                </SectionCard>
+
+                {/* Risk Heat Map */}
+                <SectionCard title="Risk Isı Haritası (Olasılık × Etki)">
+                    <div className="flex gap-4 h-72">
+                        {/* Y Axis Label */}
+                        <div className="flex flex-col justify-between text-xs font-medium text-slate-400 py-1 pb-6">
+                            <span>5</span>
+                            <span>4</span>
+                            <span>3</span>
+                            <span>2</span>
+                            <span>1</span>
                         </div>
-                    </Link>
 
-                    <Link href="/risks?score=medium" className="group">
-                        <div className="bg-white rounded-xl p-5 border border-amber-100 shadow-sm hover:shadow-md hover:border-amber-300 transition-all">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Orta Riskler</p>
-                                    <p className="text-3xl font-bold text-slate-800 mt-1">{data?.risksByScore?.medium || 0}</p>
-                                </div>
-                                <div className="w-12 h-12 bg-amber-50 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                                    <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                </div>
+                        {/* Heat Map Grid */}
+                        <div className="flex-1 flex flex-col">
+                            <div className="grid grid-cols-5 gap-1.5 flex-1">
+                                {heatmapData.map((row, rowIndex) =>
+                                    row.map((cell, colIndex) => (
+                                        <div
+                                            key={`${rowIndex}-${colIndex}`}
+                                            className={`rounded-lg flex items-center justify-center text-white font-bold text-base cursor-pointer transition-all hover:ring-2 ring-offset-2 ${getHeatmapColor(rowIndex, colIndex)} ${cell.count === 0 && 'opacity-60 saturate-50'}`}
+                                            onMouseEnter={() => setHoveredCell({ row: rowIndex, col: colIndex })}
+                                            onMouseLeave={() => setHoveredCell(null)}
+                                        >
+                                            {cell.count > 0 ? cell.count : ''}
+                                        </div>
+                                    ))
+                                )}
                             </div>
-                            <p className="text-xs text-slate-400 mt-3 font-medium">Skor 8-14 arası riskler</p>
+                            {/* X Axis Labels */}
+                            <div className="grid grid-cols-5 gap-1.5 mt-3">
+                                {[1, 2, 3, 4, 5].map(i => (
+                                    <div key={i} className="text-center text-xs font-medium text-slate-400">{i}</div>
+                                ))}
+                            </div>
+                            <div className="text-center text-[10px] font-semibold text-slate-400 uppercase tracking-widest mt-1">Etki Derecesi →</div>
                         </div>
-                    </Link>
 
-                    <Link href="/risks?score=low" className="group">
-                        <div className="bg-white rounded-xl p-5 border border-emerald-100 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Düşük Riskler</p>
-                                    <p className="text-3xl font-bold text-slate-800 mt-1">{data?.risksByScore?.low || 0}</p>
-                                </div>
-                                <div className="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                                    <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                </div>
-                            </div>
-                            <p className="text-xs text-slate-400 mt-3 font-medium">Skor &lt; 8 olan riskler</p>
-                        </div>
-                    </Link>
-
-                    <Link href="/risks?aboveAppetite=true" className="group">
-                        <div className="bg-white rounded-xl p-5 border border-violet-100 shadow-sm hover:shadow-md hover:border-violet-300 transition-all">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-xs font-semibold text-violet-600 uppercase tracking-wide">İştah Üzerinde</p>
-                                    <p className="text-3xl font-bold text-slate-800 mt-1">{data?.summary?.risksAboveAppetite || 0}</p>
-                                </div>
-                                <div className="w-12 h-12 bg-violet-50 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                                    <svg className="w-6 h-6 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-                                </div>
-                            </div>
-                            <p className="text-xs text-slate-400 mt-3 font-medium">Risk iştahını aşanlar</p>
-                        </div>
-                    </Link>
-                </div>
-
-                {/* Critical Issues Row */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                    <Link href="/findings?severity=CRITICAL" className="group relative overflow-hidden bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all">
-                        <div className="absolute top-0 right-0 w-32 h-32 bg-red-50 rounded-bl-full -mr-16 -mt-16 transition-transform group-hover:scale-110" />
-                        <div className="relative p-6">
-                            <div className="flex justify-between items-start">
-                                <p className="text-sm font-semibold text-slate-600">Açık Kritik Bulgular</p>
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-red-50 text-red-600 px-2 py-1 rounded">
-                                    Kritik + Yüksek: {data?.summary?.criticalHighFindings ?? 0}
-                                </span>
-                            </div>
-                            <div className="flex items-end gap-3 mt-2">
-                                <p className="text-4xl font-bold text-red-600">{data?.summary?.criticalFindings || 0}</p>
-                            </div>
-                            <p className="text-xs text-slate-400 mt-2 font-medium">Bulgular listesine gitmek için tıklayın →</p>
-                        </div>
-                    </Link>
-
-                    <Link href="/actions?status=OVERDUE" className="group relative overflow-hidden bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all">
-                        <div className="absolute top-0 right-0 w-32 h-32 bg-orange-50 rounded-bl-full -mr-16 -mt-16 transition-transform group-hover:scale-110" />
-                        <div className="relative p-6">
-                            <div className="flex justify-between items-start">
-                                <p className="text-sm font-semibold text-slate-600">Gecikmiş Aksiyonlar</p>
-                            </div>
-                            <div className="flex items-end gap-3 mt-2">
-                                <p className="text-4xl font-bold text-orange-600">{data?.summary?.overdueActions || 0}</p>
-                            </div>
-                            <p className="text-xs text-slate-400 mt-2 font-medium">Filtreli aksiyon listesi için tıklayın →</p>
-                        </div>
-                    </Link>
-
-                    <Link href="/controls" className="group relative overflow-hidden bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all">
-                        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-bl-full -mr-16 -mt-16 transition-transform group-hover:scale-110" />
-                        <div className="relative p-6">
-                            <div className="flex justify-between items-start">
-                                <p className="text-sm font-semibold text-slate-600">Toplam Kontrol Sayısı</p>
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded">
-                                    ~ Sabit
-                                </span>
-                            </div>
-                            <div className="flex items-end gap-3 mt-2">
-                                <p className="text-4xl font-bold text-blue-600">{data?.summary?.totalControls || 0}</p>
-                            </div>
-                            <p className="text-xs text-slate-400 mt-2 font-medium">Kontrol envanterine gitmek için tıklayın →</p>
-                        </div>
-                    </Link>
-                </div>
-
-                {/* Charts Row 1 - Trend & Heat Map */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                    {/* Risk Trend Chart */}
-                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-                        <h3 className="text-base font-bold text-slate-800 mb-6">Risk Trendi (Son 12 Ay)</h3>
-                        <div className="h-72">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={trendData}>
-                                    <defs>
-                                        <linearGradient id="colorHigh" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor={COLORS.high} stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor={COLORS.high} stopOpacity={0} />
-                                        </linearGradient>
-                                        <linearGradient id="colorMedium" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor={COLORS.medium} stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor={COLORS.medium} stopOpacity={0} />
-                                        </linearGradient>
-                                        <linearGradient id="colorLow" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor={COLORS.low} stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor={COLORS.low} stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                                    <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                                    <YAxis tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                                    <Tooltip
-                                        contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
-                                    />
-                                    <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '20px' }} />
-                                    <Area type="monotone" dataKey="high" name="Yüksek" stackId="1" stroke={COLORS.high} fill="url(#colorHigh)" strokeWidth={2} />
-                                    <Area type="monotone" dataKey="medium" name="Orta" stackId="1" stroke={COLORS.medium} fill="url(#colorMedium)" strokeWidth={2} />
-                                    <Area type="monotone" dataKey="low" name="Düşük" stackId="1" stroke={COLORS.low} fill="url(#colorLow)" strokeWidth={2} />
-                                </AreaChart>
-                            </ResponsiveContainer>
+                        {/* Y Axis Title */}
+                        <div className="flex items-center">
+                            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest transform -rotate-90 whitespace-nowrap">Olasılık →</span>
                         </div>
                     </div>
 
-                    {/* Risk Heat Map */}
-                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-                        <h3 className="text-base font-bold text-slate-800 mb-6">Risk Isı Haritası (Olasılık × Etki)</h3>
-                        <div className="flex gap-4 h-72">
-                            {/* Y Axis Label */}
-                            <div className="flex flex-col justify-between text-xs font-medium text-slate-400 py-1 pb-6">
-                                <span>5</span>
-                                <span>4</span>
-                                <span>3</span>
-                                <span>2</span>
-                                <span>1</span>
+                    {/* Hover Tooltip for Heatmap */}
+                    {hoveredCell && heatmapData[hoveredCell.row]?.[hoveredCell.col]?.risks?.length > 0 && (
+                        <div className="absolute bg-white border border-slate-200 shadow-xl rounded-xl p-4 mt-2 z-10 min-w-[250px] animate-in fade-in slide-in-from-bottom-2">
+                            <div className="flex items-center gap-2 mb-3">
+                                <div className={`w-3 h-3 rounded-full ${getHeatmapColor(hoveredCell.row, hoveredCell.col)}`} />
+                                <p className="text-sm font-bold text-slate-800">
+                                    Skor: {(5 - hoveredCell.row) * (hoveredCell.col + 1)} <span className="text-slate-400 font-normal">(O: {5 - hoveredCell.row}, E: {hoveredCell.col + 1})</span>
+                                </p>
                             </div>
-
-                            {/* Heat Map Grid */}
-                            <div className="flex-1 flex flex-col">
-                                <div className="grid grid-cols-5 gap-1.5 flex-1">
-                                    {heatmapData.map((row, rowIndex) =>
-                                        row.map((cell, colIndex) => (
-                                            <div
-                                                key={`${rowIndex}-${colIndex}`}
-                                                className={`rounded-lg flex items-center justify-center text-white font-bold text-base cursor-pointer transition-all hover:ring-2 ring-offset-2 ${getHeatmapColor(rowIndex, colIndex)} ${cell.count === 0 && 'opacity-60 saturate-50'}`}
-                                                onMouseEnter={() => setHoveredCell({ row: rowIndex, col: colIndex })}
-                                                onMouseLeave={() => setHoveredCell(null)}
-                                            >
-                                                {cell.count > 0 ? cell.count : ''}
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
-                                {/* X Axis Labels */}
-                                <div className="grid grid-cols-5 gap-1.5 mt-3">
-                                    {[1, 2, 3, 4, 5].map(i => (
-                                        <div key={i} className="text-center text-xs font-medium text-slate-400">{i}</div>
-                                    ))}
-                                </div>
-                                <div className="text-center text-[10px] font-semibold text-slate-400 uppercase tracking-widest mt-1">Etki Derecesi →</div>
-                            </div>
-
-                            {/* Y Axis Title */}
-                            <div className="flex items-center">
-                                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest transform -rotate-90 whitespace-nowrap">Olasılık →</span>
+                            <div className="space-y-2">
+                                {heatmapData[hoveredCell.row][hoveredCell.col].risks.slice(0, 5).map(risk => (
+                                    <Link key={risk.id} href={`/risks/${risk.id}`} className="block text-xs font-medium text-slate-600 hover:text-blue-600 truncate">
+                                        <span className="text-slate-400 mr-2">{risk.riskId}</span>
+                                        {risk.name}
+                                    </Link>
+                                ))}
+                                {heatmapData[hoveredCell.row][hoveredCell.col].risks.length > 5 && (
+                                    <p className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block mt-2">
+                                        +{heatmapData[hoveredCell.row][hoveredCell.col].risks.length - 5} risk daha
+                                    </p>
+                                )}
                             </div>
                         </div>
+                    )}
+                </SectionCard>
+            </div>
 
-                        {/* Hover Tooltip for Heatmap */}
-                        {hoveredCell && heatmapData[hoveredCell.row]?.[hoveredCell.col]?.risks?.length > 0 && (
-                            <div className="absolute bg-white border border-slate-200 shadow-xl rounded-xl p-4 mt-2 z-10 min-w-[250px] animate-in fade-in slide-in-from-bottom-2">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <div className={`w-3 h-3 rounded-full ${getHeatmapColor(hoveredCell.row, hoveredCell.col)}`} />
-                                    <p className="text-sm font-bold text-slate-800">
-                                        Skor: {(5 - hoveredCell.row) * (hoveredCell.col + 1)} <span className="text-slate-400 font-normal">(O: {5 - hoveredCell.row}, E: {hoveredCell.col + 1})</span>
-                                    </p>
-                                </div>
-                                <div className="space-y-2">
-                                    {heatmapData[hoveredCell.row][hoveredCell.col].risks.slice(0, 5).map(risk => (
-                                        <Link key={risk.id} href={`/risks/${risk.id}`} className="block text-xs font-medium text-slate-600 hover:text-blue-600 truncate">
-                                            <span className="text-slate-400 mr-2">{risk.riskId}</span>
-                                            {risk.name}
-                                        </Link>
-                                    ))}
-                                    {heatmapData[hoveredCell.row][hoveredCell.col].risks.length > 5 && (
-                                        <p className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block mt-2">
-                                            +{heatmapData[hoveredCell.row][hoveredCell.col].risks.length - 5} risk daha
-                                        </p>
-                                    )}
-                                </div>
+            {/* Charts Row 2 - Pie Charts & Avg Trend */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                <SectionCard title="Risk Dağılımı">
+                    <div className="h-60">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                                <Pie
+                                    data={pieData}
+                                    cx="50%" cy="50%"
+                                    innerRadius={65} outerRadius={85}
+                                    paddingAngle={5}
+                                    dataKey="value"
+                                    label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                                    labelLine={false}
+                                >
+                                    {pieData.map((_, index) => <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />)}
+                                </Pie>
+                                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
+                            </PieChart>
+                        </ResponsiveContainer>
+                    </div>
+                </SectionCard>
+
+                <SectionCard title="Kontrol Etkinliği">
+                    <div className="h-60">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                                <Pie
+                                    data={controlData}
+                                    cx="50%" cy="50%"
+                                    innerRadius={65} outerRadius={85}
+                                    paddingAngle={5}
+                                    dataKey="value"
+                                    label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                                    labelLine={false}
+                                >
+                                    {controlData.map((_, index) => <Cell key={`cell-${index}`} fill={CONTROL_COLORS[index % CONTROL_COLORS.length]} />)}
+                                </Pie>
+                                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
+                            </PieChart>
+                        </ResponsiveContainer>
+                    </div>
+                </SectionCard>
+
+                <SectionCard title="Ort. Risk Skoru Trendi">
+                    <div className="h-60">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={trendData}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                                <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                                <YAxis domain={[0, 25]} tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
+                                <Line type="monotone" dataKey="avgScore" name="Ort. Skor" stroke={COLORS.primary} strokeWidth={3} dot={{ fill: COLORS.primary, strokeWidth: 2, r: 4 }} activeDot={{ r: 6, fill: COLORS.primary }} />
+                                {/* Not: Sabit "Risk İştahı" referans çizgisi kaldırıldı — sistemde
+                                    organizasyon geneli tek bir eşik değeri (skaler) tutulmuyor,
+                                    yalnızca risk bazlı isAboveAppetite bayrağı var. Yanıltıcı sabit
+                                    veri göstermek yerine çizgi kaldırıldı; "İştah Üzerinde" KPI kartı
+                                    (yukarıda) gerçek veriye dayalı eşdeğer bilgiyi zaten sağlıyor. */}
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
+                </SectionCard>
+            </div>
+
+            {/* Durum Dağılımları */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                <SectionCard title="Kontrol Testi Durum Dağılımı">
+                    <div className="space-y-2">
+                        {(data?.controlTestStatusDistribution ?? []).map(d => (
+                            <div key={d.status} className="flex items-center justify-between text-sm">
+                                <span className="text-slate-600">{CONTROL_TEST_STATUS_LABELS[d.status] ?? d.status}</span>
+                                <span className="font-bold tabular-nums text-slate-800">{d._count}</span>
                             </div>
+                        ))}
+                        {(!data?.controlTestStatusDistribution || data.controlTestStatusDistribution.length === 0) && (
+                            <p className="text-xs text-slate-400">Veri yok</p>
                         )}
                     </div>
-                </div>
+                </SectionCard>
 
-                {/* Charts Row 2 - Pie Charts & Avg Trend */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-                        <h3 className="text-base font-bold text-slate-800 mb-6">Risk Dağılımı</h3>
-                        <div className="h-60">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={pieData}
-                                        cx="50%" cy="50%"
-                                        innerRadius={65} outerRadius={85}
-                                        paddingAngle={5}
-                                        dataKey="value"
-                                        label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
-                                        labelLine={false}
-                                    >
-                                        {pieData.map((_, index) => <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />)}
-                                    </Pie>
-                                    <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
-                                </PieChart>
-                            </ResponsiveContainer>
-                        </div>
+                <SectionCard title="Mutabakat Workflow Durumu">
+                    <div className="space-y-2">
+                        {(data?.findingWorkflowStatusDistribution ?? []).map(d => (
+                            <div key={d.workflowStatus} className="flex items-center justify-between text-sm">
+                                <span className="text-slate-600">{WORKFLOW_STATUS_LABELS[d.workflowStatus] ?? d.workflowStatus}</span>
+                                <span className="font-bold tabular-nums text-slate-800">{d._count}</span>
+                            </div>
+                        ))}
+                        {(!data?.findingWorkflowStatusDistribution || data.findingWorkflowStatusDistribution.length === 0) && (
+                            <p className="text-xs text-slate-400">Veri yok</p>
+                        )}
                     </div>
+                </SectionCard>
 
-                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-                        <h3 className="text-base font-bold text-slate-800 mb-6">Kontrol Etkinliği</h3>
-                        <div className="h-60">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={controlData}
-                                        cx="50%" cy="50%"
-                                        innerRadius={65} outerRadius={85}
-                                        paddingAngle={5}
-                                        dataKey="value"
-                                        label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
-                                        labelLine={false}
-                                    >
-                                        {controlData.map((_, index) => <Cell key={`cell-${index}`} fill={CONTROL_COLORS[index % CONTROL_COLORS.length]} />)}
-                                    </Pie>
-                                    <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
-                                </PieChart>
-                            </ResponsiveContainer>
-                        </div>
+                <SectionCard title="Takip Çalışması Sonuç Dağılımı">
+                    <div className="space-y-2">
+                        {(data?.followUpResultDistribution ?? []).map(d => (
+                            <div key={d.result} className="flex items-center justify-between text-sm">
+                                <span className="text-slate-600">{FOLLOWUP_RESULT_LABELS[d.result] ?? d.result}</span>
+                                <span className="font-bold tabular-nums text-slate-800">{d._count}</span>
+                            </div>
+                        ))}
+                        {(!data?.followUpResultDistribution || data.followUpResultDistribution.length === 0) && (
+                            <p className="text-xs text-slate-400">Veri yok</p>
+                        )}
                     </div>
-
-                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-                        <h3 className="text-base font-bold text-slate-800 mb-6">Ort. Risk Skoru Trendi</h3>
-                        <div className="h-60">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={trendData}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                                    <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                                    <YAxis domain={[0, 25]} tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                                    <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
-                                    <Line type="monotone" dataKey="avgScore" name="Ort. Skor" stroke={COLORS.primary} strokeWidth={3} dot={{ fill: COLORS.primary, strokeWidth: 2, r: 4 }} activeDot={{ r: 6, fill: COLORS.primary }} />
-                                    {/* Not: Sabit "Risk İştahı" referans çizgisi kaldırıldı — sistemde
-                                        organizasyon geneli tek bir eşik değeri (skaler) tutulmuyor,
-                                        yalnızca risk bazlı isAboveAppetite bayrağı var. Yanıltıcı sabit
-                                        veri göstermek yerine çizgi kaldırıldı; "İştah Üzerinde" KPI kartı
-                                        (yukarıda) gerçek veriye dayalı eşdeğer bilgiyi zaten sağlıyor. */}
-                                </LineChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Durum Dağılımları */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-                        <h3 className="text-sm font-bold text-slate-800 mb-4">Kontrol Testi Durum Dağılımı</h3>
-                        <div className="space-y-2">
-                            {(data?.controlTestStatusDistribution ?? []).map(d => (
-                                <div key={d.status} className="flex items-center justify-between text-sm">
-                                    <span className="text-slate-600">{CONTROL_TEST_STATUS_LABELS[d.status] ?? d.status}</span>
-                                    <span className="font-bold text-slate-800">{d._count}</span>
-                                </div>
-                            ))}
-                            {(!data?.controlTestStatusDistribution || data.controlTestStatusDistribution.length === 0) && (
-                                <p className="text-xs text-slate-400">Veri yok</p>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-                        <h3 className="text-sm font-bold text-slate-800 mb-4">Mutabakat Workflow Durumu</h3>
-                        <div className="space-y-2">
-                            {(data?.findingWorkflowStatusDistribution ?? []).map(d => (
-                                <div key={d.workflowStatus} className="flex items-center justify-between text-sm">
-                                    <span className="text-slate-600">{WORKFLOW_STATUS_LABELS[d.workflowStatus] ?? d.workflowStatus}</span>
-                                    <span className="font-bold text-slate-800">{d._count}</span>
-                                </div>
-                            ))}
-                            {(!data?.findingWorkflowStatusDistribution || data.findingWorkflowStatusDistribution.length === 0) && (
-                                <p className="text-xs text-slate-400">Veri yok</p>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-                        <h3 className="text-sm font-bold text-slate-800 mb-4">Takip Çalışması Sonuç Dağılımı</h3>
-                        <div className="space-y-2">
-                            {(data?.followUpResultDistribution ?? []).map(d => (
-                                <div key={d.result} className="flex items-center justify-between text-sm">
-                                    <span className="text-slate-600">{FOLLOWUP_RESULT_LABELS[d.result] ?? d.result}</span>
-                                    <span className="font-bold text-slate-800">{d._count}</span>
-                                </div>
-                            ))}
-                            {(!data?.followUpResultDistribution || data.followUpResultDistribution.length === 0) && (
-                                <p className="text-xs text-slate-400">Veri yok</p>
-                            )}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Direktörlük Bazlı Dağılımlar */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-                        <h3 className="text-sm font-bold text-slate-800 mb-4">Direktörlük Bazlı Açık Bulgular</h3>
-                        <div className="space-y-2">
-                            {(data?.findingsByDirectorate ?? []).map(d => (
-                                <div key={d.directorateId ?? 'none'} className="flex items-center justify-between text-sm">
-                                    <span className="text-slate-600">{d.directorateName}</span>
-                                    <span className="font-bold text-slate-800">{d.count}</span>
-                                </div>
-                            ))}
-                            {(!data?.findingsByDirectorate || data.findingsByDirectorate.length === 0) && (
-                                <p className="text-xs text-slate-400">Açık bulgu yok</p>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-                        <h3 className="text-sm font-bold text-slate-800 mb-4">Direktörlük Bazlı Gecikmiş Aksiyonlar</h3>
-                        <div className="space-y-2">
-                            {(data?.overdueActionsByDirectorate ?? []).map(d => (
-                                <div key={d.directorateId ?? 'none'} className="flex items-center justify-between text-sm">
-                                    <span className="text-slate-600">{d.directorateName}</span>
-                                    <span className="font-bold text-red-600">{d.count}</span>
-                                </div>
-                            ))}
-                            {(!data?.overdueActionsByDirectorate || data.overdueActionsByDirectorate.length === 0) && (
-                                <p className="text-xs text-slate-400">Gecikmiş aksiyon yok</p>
-                            )}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Quick Actions Footer */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <Link href="/risks/new" className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all group">
-                        <div className="p-3 bg-blue-50 text-blue-600 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                        </div>
-                        <span className="font-semibold text-slate-700">Yeni Risk</span>
-                    </Link>
-                    <Link href="/controls/new" className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 hover:border-emerald-300 hover:shadow-md transition-all group">
-                        <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                        </div>
-                        <span className="font-semibold text-slate-700">Yeni Kontrol</span>
-                    </Link>
-                    <Link href="/findings/new" className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-md transition-all group">
-                        <div className="p-3 bg-violet-50 text-violet-600 rounded-lg group-hover:bg-violet-600 group-hover:text-white transition-colors">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                        </div>
-                        <span className="font-semibold text-slate-700">Yeni Bulgu</span>
-                    </Link>
-                    <Link href="/reports" className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 hover:border-slate-400 hover:shadow-md transition-all group">
-                        <div className="p-3 bg-slate-100 text-slate-600 rounded-lg group-hover:bg-slate-700 group-hover:text-white transition-colors">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                        </div>
-                        <span className="font-semibold text-slate-700">Raporlar</span>
-                    </Link>
-                </div>
+                </SectionCard>
             </div>
-        </div>
+
+            {/* Direktörlük Bazlı Dağılımlar */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <SectionCard title="Direktörlük Bazlı Açık Bulgular">
+                    <div className="space-y-2">
+                        {(data?.findingsByDirectorate ?? []).map(d => (
+                            <div key={d.directorateId ?? 'none'} className="flex items-center justify-between text-sm">
+                                <span className="text-slate-600">{d.directorateName}</span>
+                                <span className="font-bold tabular-nums text-slate-800">{d.count}</span>
+                            </div>
+                        ))}
+                        {(!data?.findingsByDirectorate || data.findingsByDirectorate.length === 0) && (
+                            <p className="text-xs text-slate-400">Açık bulgu yok</p>
+                        )}
+                    </div>
+                </SectionCard>
+
+                <SectionCard title="Direktörlük Bazlı Gecikmiş Aksiyonlar">
+                    <div className="space-y-2">
+                        {(data?.overdueActionsByDirectorate ?? []).map(d => (
+                            <div key={d.directorateId ?? 'none'} className="flex items-center justify-between text-sm">
+                                <span className="text-slate-600">{d.directorateName}</span>
+                                <span className="font-bold tabular-nums text-red-600">{d.count}</span>
+                            </div>
+                        ))}
+                        {(!data?.overdueActionsByDirectorate || data.overdueActionsByDirectorate.length === 0) && (
+                            <p className="text-xs text-slate-400">Gecikmiş aksiyon yok</p>
+                        )}
+                    </div>
+                </SectionCard>
+            </div>
+
+            {/* Quick Actions Footer */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Link href="/risks/new" className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all group">
+                    <div className="p-3 bg-blue-50 text-blue-600 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                    </div>
+                    <span className="font-semibold text-slate-700">Yeni Risk</span>
+                </Link>
+                <Link href="/controls/new" className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-emerald-300 hover:shadow-md transition-all group">
+                    <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                    </div>
+                    <span className="font-semibold text-slate-700">Yeni Kontrol</span>
+                </Link>
+                <Link href="/findings/new" className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-violet-300 hover:shadow-md transition-all group">
+                    <div className="p-3 bg-violet-50 text-violet-600 rounded-lg group-hover:bg-violet-600 group-hover:text-white transition-colors">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                    </div>
+                    <span className="font-semibold text-slate-700">Yeni Bulgu</span>
+                </Link>
+                <Link href="/reports" className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-slate-400 hover:shadow-md transition-all group">
+                    <div className="p-3 bg-slate-100 text-slate-600 rounded-lg group-hover:bg-slate-700 group-hover:text-white transition-colors">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    </div>
+                    <span className="font-semibold text-slate-700">Raporlar</span>
+                </Link>
+            </div>
+        </PageShell>
     );
 }

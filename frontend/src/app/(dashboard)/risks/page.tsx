@@ -1,10 +1,14 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
-import { PageHeader, DataTable, FilterBar, StatusBadge, Button, Modal, Input, Textarea } from '@/components/ui';
-import type { ColumnDef } from '@/components/ui';
+import {
+    PageHeader, PageShell, DataTable, StatusBadge, Button, Modal,
+    KpiCard, KpiGrid, QuickFilterBar, AdvancedFilterPanel, ActiveFilterChips, SavedViewMenu,
+} from '@/components/ui';
+import type { ColumnDef, ActiveFilterChip, QuickFilterItem, AdvancedFilterField } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/components/auth';
 
@@ -79,6 +83,12 @@ const statusConfig: Record<string, { label: string; variant: BV }> = {
 
 const fmt = (d?: string) => d ? new Date(d).toLocaleDateString('tr-TR') : '—';
 
+const FlagIcon = ({ className = 'w-3.5 h-3.5' }: { className?: string }) => (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2z" />
+    </svg>
+);
+
 function SeviyePill({ seviye }: { seviye?: string }) {
     if (!seviye) return <span className="text-xs text-slate-400">—</span>;
     const cfg = seviyelConfig[seviye];
@@ -91,7 +101,7 @@ function ScoreCell({ puan, seviye }: { puan?: number; seviye?: string }) {
     const cfg = seviye ? seviyelConfig[seviye] : undefined;
     return (
         <div className="text-center">
-            <div className={`font-bold text-sm ${cfg ? (cfg.variant === 'critical' ? 'text-red-600' : cfg.variant === 'high' ? 'text-orange-600' : cfg.variant === 'warning' ? 'text-amber-600' : 'text-emerald-600') : 'text-slate-600'}`}>
+            <div className={`font-bold text-sm tabular-nums ${cfg ? (cfg.variant === 'critical' ? 'text-red-600' : cfg.variant === 'high' ? 'text-orange-600' : cfg.variant === 'warning' ? 'text-amber-600' : 'text-emerald-600') : 'text-slate-600'}`}>
                 {puan.toFixed(1)}
             </div>
             {seviye && <SeviyePill seviye={seviye} />}
@@ -302,7 +312,9 @@ function RiskFormModal({ open, onClose, onSaved, editing, users, categories }: {
                         </div>
                         <div className="flex items-center gap-2 pt-1">
                             <input type="checkbox" id="flagIT" checked={form.flagForIT} onChange={e => setForm(p => ({ ...p, flagForIT: e.target.checked }))} className="w-4 h-4 accent-blue-600" />
-                            <label htmlFor="flagIT" className="text-sm font-medium text-slate-700">🚩 Flag 4 IT</label>
+                            <label htmlFor="flagIT" className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                                <FlagIcon className="w-3.5 h-3.5 text-red-500" /> Flag 4 IT
+                            </label>
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-slate-600 mb-1">Risk İşleme</label>
@@ -386,9 +398,10 @@ function RiskFormModal({ open, onClose, onSaved, editing, users, categories }: {
 }
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
-export default function RiskInventoryPage() {
-    const { hasPermission } = useAuth();
-    const { success, error: showError } = useToast();
+function RiskInventoryContent() {
+    const { hasPermission, user } = useAuth();
+    const { error: showError } = useToast();
+    const searchParams = useSearchParams();
 
     const [risks, setRisks] = useState<Risk[]>([]);
     const [users, setUsers] = useState<any[]>([]);
@@ -397,11 +410,21 @@ export default function RiskInventoryPage() {
     const [search, setSearch] = useState('');
     const [filters, setFilters] = useState<Record<string, string>>({});
     const [colFilters, setColFilters] = useState<Record<string, string>>({});
+    const [quickFilter, setQuickFilter] = useState<string | null>(null);
     const [page, setPage] = useState(1);
     const pageSize = 20;
 
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<Risk | null>(null);
+
+    // Dashboard KPI linkleri (?score=high|medium|low) quick filter olarak uygulanır
+    useEffect(() => {
+        const score = searchParams.get('score');
+        if (score === 'high' || score === 'medium' || score === 'low') {
+            setQuickFilter(`score-${score}`);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -423,6 +446,17 @@ export default function RiskInventoryPage() {
 
     useEffect(() => { load(); }, [load]);
 
+    // Quick filter predicate'leri (dashboard skor eşikleriyle aynı: ≥15 / 8-14 / <8)
+    const quickFilterFns: Record<string, (r: Risk) => boolean> = useMemo(() => ({
+        'benim': (r) => r.owner?.id === user?.id,
+        'acik': (r) => r.status !== 'CLOSED',
+        'kritik': (r) => r.dogalRiskSeviyesi === 'KRİTİK' || r.kalintiRiskSeviyesi === 'KRİTİK',
+        'it': (r) => r.flagForIT,
+        'score-high': (r) => (r.dogalRiskPuani ?? 0) >= 15,
+        'score-medium': (r) => (r.dogalRiskPuani ?? 0) >= 8 && (r.dogalRiskPuani ?? 0) < 15,
+        'score-low': (r) => (r.dogalRiskPuani ?? 0) > 0 && (r.dogalRiskPuani ?? 0) < 8,
+    }), [user?.id]);
+
     const baseFiltered = useMemo(() => risks.filter(r => {
         if (search) {
             const q = search.toLowerCase();
@@ -432,13 +466,15 @@ export default function RiskInventoryPage() {
         if (filters.seviye && filters.seviye !== 'all' && r.dogalRiskSeviyesi !== filters.seviye) return false;
         if (filters.isleme && filters.isleme !== 'all' && r.riskIsleme !== filters.isleme) return false;
         if (filters.flagIT && filters.flagIT === 'evet' && !r.flagForIT) return false;
+        if (quickFilter && quickFilterFns[quickFilter] && !quickFilterFns[quickFilter](r)) return false;
         return true;
-    }), [risks, search, filters]);
+    }), [risks, search, filters, quickFilter, quickFilterFns]);
 
     // KPIs
     const kritik = risks.filter(r => r.dogalRiskSeviyesi === 'KRİTİK' || r.kalintiRiskSeviyesi === 'KRİTİK').length;
     const yuksek = risks.filter(r => r.dogalRiskSeviyesi === 'YÜKSEK' || r.kalintiRiskSeviyesi === 'YÜKSEK').length;
     const acik = risks.filter(r => r.status !== 'CLOSED').length;
+    const itCount = risks.filter(r => r.flagForIT).length;
 
     const columns: ColumnDef<Risk>[] = useMemo(() => [
         {
@@ -490,7 +526,7 @@ export default function RiskInventoryPage() {
         },
         {
             key: 'flagForIT', header: 'IT', defaultWidth: 60,
-            render: (r) => r.flagForIT ? <span className="text-base">🚩</span> : <span className="text-slate-300 text-xs">—</span>,
+            render: (r) => r.flagForIT ? <FlagIcon className="w-4 h-4 text-red-500" /> : <span className="text-slate-300 text-xs">—</span>,
         },
         {
             key: 'dogalRisk', header: 'Doğal Risk', defaultWidth: 100,
@@ -538,7 +574,7 @@ export default function RiskInventoryPage() {
             render: (r) => (
                 <div className="flex items-center gap-1">
                     <button onClick={() => { setEditing(r); setModalOpen(true); }}
-                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Düzenle">
+                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer" title="Düzenle" aria-label="Düzenle">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                     </button>
                 </div>
@@ -556,105 +592,163 @@ export default function RiskInventoryPage() {
 
     const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page]);
 
-    const filterConfigs = useMemo(() => [
+    // ── Quick filter chip'leri (canlı sayaçlarla) ──
+    const quickFilterItems: QuickFilterItem[] = useMemo(() => [
+        { key: 'benim', label: 'Benim Kayıtlarım', count: risks.filter(quickFilterFns['benim']).length },
+        { key: 'acik', label: 'Açık', count: acik },
+        { key: 'kritik', label: 'Kritik', count: kritik },
+        { key: 'it', label: 'IT Riski', count: itCount },
+    ], [risks, quickFilterFns, acik, kritik, itCount]);
+
+    const quickFilterLabels: Record<string, string> = {
+        'benim': 'Benim Kayıtlarım', 'acik': 'Açık', 'kritik': 'Kritik', 'it': 'IT Riski',
+        'score-high': 'Yüksek Skor (≥15)', 'score-medium': 'Orta Skor (8-14)', 'score-low': 'Düşük Skor (<8)',
+    };
+
+    // ── Gelişmiş filtre alanları ──
+    const advancedFields: AdvancedFilterField[] = useMemo(() => [
         {
-            key: 'status', label: 'Statü',
+            type: 'select', key: 'status', label: 'Statü',
             value: filters.status || '',
-            onChange: (v: string) => { setFilters(p => ({ ...p, status: v })); setPage(1); },
+            onChange: (v) => { setFilters(p => ({ ...p, status: v })); setPage(1); },
             options: Object.entries(statusConfig).map(([k, v]) => ({ value: k, label: v.label })),
         },
         {
-            key: 'seviye', label: 'Risk Seviyesi',
+            type: 'select', key: 'seviye', label: 'Risk Seviyesi',
             value: filters.seviye || '',
-            onChange: (v: string) => { setFilters(p => ({ ...p, seviye: v })); setPage(1); },
+            onChange: (v) => { setFilters(p => ({ ...p, seviye: v })); setPage(1); },
             options: Object.keys(seviyelConfig).map(k => ({ value: k, label: seviyelConfig[k].label })),
         },
         {
-            key: 'isleme', label: 'Risk İşleme',
+            type: 'select', key: 'isleme', label: 'Risk İşleme',
             value: filters.isleme || '',
-            onChange: (v: string) => { setFilters(p => ({ ...p, isleme: v })); setPage(1); },
+            onChange: (v) => { setFilters(p => ({ ...p, isleme: v })); setPage(1); },
             options: Object.keys(islemeConfig).map(k => ({ value: k, label: islemeConfig[k].label })),
         },
         {
-            key: 'flagIT', label: 'Flag 4 IT',
+            type: 'select', key: 'flagIT', label: 'Flag 4 IT',
             value: filters.flagIT || '',
-            onChange: (v: string) => { setFilters(p => ({ ...p, flagIT: v })); setPage(1); },
-            options: [{ value: 'evet', label: '🚩 IT Riski' }],
+            onChange: (v) => { setFilters(p => ({ ...p, flagIT: v })); setPage(1); },
+            options: [{ value: 'evet', label: 'IT Riski' }],
         },
     ], [filters]);
 
+    // ── Aktif filtre chip'leri ──
+    const filterLabels: Record<string, string> = { status: 'Statü', seviye: 'Seviye', isleme: 'İşleme', flagIT: 'IT' };
+    const filterValueLabel = (key: string, value: string): string => {
+        if (key === 'status') return statusConfig[value]?.label ?? value;
+        if (key === 'seviye') return seviyelConfig[value]?.label ?? value;
+        if (key === 'isleme') return islemeConfig[value]?.label ?? value;
+        if (key === 'flagIT') return 'IT Riski';
+        return value;
+    };
+    const activeChips: ActiveFilterChip[] = useMemo(() => {
+        const chips: ActiveFilterChip[] = [];
+        if (search) chips.push({ key: 'search', label: 'Arama', value: search, onRemove: () => { setSearch(''); setPage(1); } });
+        if (quickFilter) chips.push({
+            key: 'quick', label: 'Hızlı Filtre', value: quickFilterLabels[quickFilter] ?? quickFilter,
+            onRemove: () => { setQuickFilter(null); setPage(1); },
+        });
+        Object.entries(filters).forEach(([k, v]) => {
+            if (v && v !== 'all') chips.push({
+                key: k, label: filterLabels[k] ?? k, value: filterValueLabel(k, v),
+                onRemove: () => { setFilters(p => ({ ...p, [k]: '' })); setPage(1); },
+            });
+        });
+        return chips;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [search, filters, quickFilter]);
+
+    const clearAll = () => { setSearch(''); setFilters({}); setQuickFilter(null); setColFilters({}); setPage(1); };
+
     return (
-        <div className="flex flex-col h-full bg-slate-50/50">
-            <div className="px-8 pt-8">
-                <PageHeader
-                    title="Risk Envanteri"
-                    description="Kurumsal risk kaydı — tüm riskler, etki analizleri ve skorlar"
-                    breadcrumbs={[{ label: 'Risk Yönetimi' }, { label: 'Risk Envanteri' }]}
-                    actions={
-                        hasPermission('risk:create') ? (
-                            <Button variant="primary"
-                                onClick={() => { setEditing(null); setModalOpen(true); }}
-                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}
-                            >
-                                Yeni Risk
-                            </Button>
-                        ) : undefined
-                    }
-                />
+        <PageShell>
+            <PageHeader
+                title="Risk Envanteri"
+                description="Kurumsal risk kaydı — tüm riskler, etki analizleri ve skorlar"
+                breadcrumbs={[{ label: 'Risk Yönetimi' }, { label: 'Risk Envanteri' }]}
+                actions={
+                    hasPermission('risk:create') ? (
+                        <Button variant="primary"
+                            onClick={() => { setEditing(null); setModalOpen(true); }}
+                            icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}
+                        >
+                            Yeni Risk
+                        </Button>
+                    ) : undefined
+                }
+            />
 
-                {/* KPIs */}
-                <div className="grid grid-cols-5 gap-4 mb-6">
-                    <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
-                        <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Toplam Risk</p>
-                        <p className="text-2xl font-bold text-slate-800 mt-1">{risks.length}</p>
-                    </div>
-                    <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
-                        <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Açık</p>
-                        <p className="text-2xl font-bold text-slate-700 mt-1">{acik}</p>
-                    </div>
-                    <div className="bg-white rounded-xl p-4 shadow-sm border border-red-200">
-                        <p className="text-xs font-medium text-red-600 uppercase tracking-wide">Kritik</p>
-                        <p className="text-2xl font-bold text-red-700 mt-1">{kritik}</p>
-                    </div>
-                    <div className="bg-white rounded-xl p-4 shadow-sm border border-orange-200">
-                        <p className="text-xs font-medium text-orange-600 uppercase tracking-wide">Yüksek</p>
-                        <p className="text-2xl font-bold text-orange-700 mt-1">{yuksek}</p>
-                    </div>
-                    <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-200">
-                        <p className="text-xs font-medium text-blue-600 uppercase tracking-wide">IT Riski 🚩</p>
-                        <p className="text-2xl font-bold text-blue-700 mt-1">{risks.filter(r => r.flagForIT).length}</p>
-                    </div>
-                </div>
+            {/* KPI'lar — tümü click-to-filter */}
+            <KpiGrid columns={5}>
+                <KpiCard title="Toplam Risk" value={risks.length} variant="default"
+                    active={!quickFilter && activeChips.length === 0}
+                    onClick={clearAll} />
+                <KpiCard title="Açık" value={acik} variant="info"
+                    active={quickFilter === 'acik'}
+                    onClick={() => { setQuickFilter(quickFilter === 'acik' ? null : 'acik'); setPage(1); }} />
+                <KpiCard title="Kritik" value={kritik} variant="critical"
+                    active={quickFilter === 'kritik'}
+                    onClick={() => { setQuickFilter(quickFilter === 'kritik' ? null : 'kritik'); setPage(1); }} />
+                <KpiCard title="Yüksek" value={yuksek} variant="high"
+                    active={filters.seviye === 'YÜKSEK'}
+                    onClick={() => { setFilters(p => ({ ...p, seviye: p.seviye === 'YÜKSEK' ? '' : 'YÜKSEK' })); setPage(1); }} />
+                <KpiCard title="IT Riski" value={itCount} variant="primary"
+                    active={quickFilter === 'it'}
+                    icon={<FlagIcon className="w-4 h-4" />}
+                    onClick={() => { setQuickFilter(quickFilter === 'it' ? null : 'it'); setPage(1); }} />
+            </KpiGrid>
 
-                {/* Filters */}
-                <div className="mb-4 bg-white border border-slate-200 rounded-xl shadow-sm p-3">
-                    <FilterBar
-                        searchValue={search}
-                        onSearchChange={(v) => { setSearch(v); setPage(1); }}
-                        searchPlaceholder="Risk ID, tanım, GMY veya süreç ara..."
-                        filters={filterConfigs}
-                        onClearAll={() => { setSearch(''); setFilters({}); setPage(1); }}
+            {/* Hızlı filtreler */}
+            <QuickFilterBar
+                items={quickFilterItems}
+                active={quickFilter}
+                onChange={(k) => { setQuickFilter(k); setPage(1); }}
+            />
+
+            {/* Gelişmiş filtre paneli */}
+            <AdvancedFilterPanel
+                searchValue={search}
+                onSearchChange={(v) => { setSearch(v); setPage(1); }}
+                searchPlaceholder="Risk ID, tanım, GMY veya süreç ara..."
+                fields={advancedFields}
+                activeCount={Object.values(filters).filter(v => v && v !== 'all').length}
+                onClearAll={clearAll}
+            />
+
+            {/* Aktif filtre chip'leri */}
+            <ActiveFilterChips chips={activeChips} onClearAll={clearAll} />
+
+            <DataTable
+                columns={columns}
+                data={paginated}
+                rowKey={(r) => r.id}
+                loading={loading}
+                totalCount={filtered.length}
+                page={page}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                storageKey="risk-inventory-table"
+                emptyTitle="Risk bulunamadı"
+                emptyDescription="Filtrelerinizi değiştirin veya yeni bir risk kaydı oluşturun."
+                columnFilters={colFilters}
+                onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
+                stickyFirstColumn
+                onRefresh={load}
+                toolbar={
+                    <SavedViewMenu
+                        storageKey="risk-inventory-table"
+                        getPayload={() => ({ search, filters, quickFilter, columnFilters: colFilters })}
+                        onApply={(p) => {
+                            setSearch(typeof p.search === 'string' ? p.search : '');
+                            setFilters((p.filters as Record<string, string>) || {});
+                            setQuickFilter(typeof p.quickFilter === 'string' ? p.quickFilter : null);
+                            setColFilters((p.columnFilters as Record<string, string>) || {});
+                            setPage(1);
+                        }}
                     />
-                </div>
-            </div>
-
-            <div className="px-8 pb-8 flex-1 overflow-auto">
-                <DataTable
-                    columns={columns}
-                    data={paginated}
-                    rowKey={(r) => r.id}
-                    loading={loading}
-                    totalCount={filtered.length}
-                    page={page}
-                    pageSize={pageSize}
-                    onPageChange={setPage}
-                    storageKey="risk-inventory-table"
-                    emptyTitle="Risk bulunamadı"
-                    emptyDescription="Filtrelerinizi değiştirin veya yeni bir risk kaydı oluşturun."
-                    columnFilters={colFilters}
-                    onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
-                />
-            </div>
+                }
+            />
 
             <RiskFormModal
                 open={modalOpen}
@@ -664,6 +758,14 @@ export default function RiskInventoryPage() {
                 users={users}
                 categories={categories}
             />
-        </div>
+        </PageShell>
+    );
+}
+
+export default function RiskInventoryPage() {
+    return (
+        <Suspense fallback={<PageShell><div className="py-24" /></PageShell>}>
+            <RiskInventoryContent />
+        </Suspense>
     );
 }

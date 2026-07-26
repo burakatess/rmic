@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
+import { PageShell, PageHeader, Button, Modal, LoadingState } from '@/components/ui';
 
 interface Regulation {
     id: string;
@@ -66,78 +67,80 @@ export default function CompliancePage() {
     };
 
     const getComplianceColor = (score: number) => {
-        if (score >= 80) return 'text-green-600 bg-green-100';
-        if (score >= 60) return 'text-yellow-600 bg-yellow-100';
-        return 'text-red-600 bg-red-100';
+        if (score >= 80) return 'text-emerald-700 bg-emerald-50 border-emerald-200';
+        if (score >= 60) return 'text-amber-700 bg-amber-50 border-amber-200';
+        return 'text-red-700 bg-red-50 border-red-200';
     };
 
     return (
-        <div className="space-y-6">
-            {/* Page Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Uyum Yönetimi</h1>
-                    <p className="text-gray-500 mt-1">Regülasyonları ve uyum durumunu yönetin</p>
-                </div>
-                <div className="flex items-center gap-3">
-                    <Link
-                        href="/compliance/regulations/library"
-                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-indigo-200 text-indigo-700 font-medium rounded-xl hover:bg-indigo-50 transition-all shadow-sm"
-                    >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                        </svg>
-                        Kütüphane
-                    </Link>
-                    <button
-                        onClick={() => setShowModal(true)}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white font-medium rounded-xl hover:from-indigo-600 hover:to-indigo-700 transition-all shadow-sm"
-                    >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                        Yeni Regülasyon
-                    </button>
-                </div>
-            </div>
+        <PageShell>
+            <PageHeader
+                title="Uyum Yönetimi"
+                description="Regülasyonları ve uyum durumunu yönetin"
+                breadcrumbs={[{ label: 'Uyum' }, { label: 'Mevzuatlar' }]}
+                actions={
+                    <>
+                        <Link
+                            href="/compliance/regulations/library"
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 active:bg-slate-100 transition-all duration-150 ease-in-out"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                            </svg>
+                            Kütüphane
+                        </Link>
+                        <Button
+                            variant="primary"
+                            onClick={() => setShowModal(true)}
+                            icon={
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                </svg>
+                            }
+                        >
+                            Yeni Regülasyon
+                        </Button>
+                    </>
+                }
+            />
 
             {loading ? (
-                <div className="flex items-center justify-center h-64">
-                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
-                </div>
+                <LoadingState message="Uyum verileri yükleniyor..." />
             ) : (
-                <>
+                <div className="space-y-6">
                     {/* Compliance Overview */}
-                    <div className="bg-gradient-to-br from-indigo-900 to-indigo-800 rounded-3xl p-8 text-white">
-                        <h2 className="text-xl font-semibold mb-6">Uyum Genel Görünümü</h2>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+                        <div className="px-6 py-4 border-b border-slate-100">
+                            <h2 className="text-sm font-semibold text-slate-800">Uyum Genel Görünümü</h2>
+                        </div>
+                        <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {overview.map((item) => (
-                                <div key={item.id} className="bg-white/10 backdrop-blur rounded-2xl p-5">
+                                <div key={item.id} className="rounded-xl border border-slate-200 p-5 hover:shadow-sm transition-shadow">
                                     <div className="flex items-center justify-between mb-3">
-                                        <span className="font-mono text-sm text-indigo-200">{item.code}</span>
-                                        <span className={`px-2 py-1 rounded-lg text-xs font-medium ${getComplianceColor(item.overallCompliance || 0)}`}>
+                                        <span className="font-mono text-sm text-slate-500">{item.code}</span>
+                                        <span className={`px-2 py-1 rounded-lg text-xs font-semibold border ${getComplianceColor(item.overallCompliance || 0)}`}>
                                             %{item.overallCompliance?.toFixed(0) || '0'}
                                         </span>
                                     </div>
-                                    <h3 className="font-semibold text-white mb-4 text-sm">{item.name}</h3>
+                                    <h3 className="font-semibold text-slate-800 mb-4 text-sm">{item.name}</h3>
                                     <div className="space-y-2">
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-indigo-200">Risk Kapsamı</span>
-                                            <span>%{item.riskCoverage?.toFixed(0) || '0'}</span>
+                                            <span className="text-slate-500">Risk Kapsamı</span>
+                                            <span className="text-slate-700 font-medium tabular-nums">%{item.riskCoverage?.toFixed(0) || '0'}</span>
                                         </div>
-                                        <div className="w-full bg-white/20 rounded-full h-1.5">
+                                        <div className="w-full bg-slate-100 rounded-full h-1.5">
                                             <div
-                                                className="bg-white h-1.5 rounded-full transition-all"
+                                                className="bg-blue-600 h-1.5 rounded-full transition-all"
                                                 style={{ width: `${Math.min(item.riskCoverage || 0, 100)}%` }}
                                             ></div>
                                         </div>
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-indigo-200">Kontrol Etkinliği</span>
-                                            <span>%{item.controlEffectiveness?.toFixed(0) || '0'}</span>
+                                            <span className="text-slate-500">Kontrol Etkinliği</span>
+                                            <span className="text-slate-700 font-medium tabular-nums">%{item.controlEffectiveness?.toFixed(0) || '0'}</span>
                                         </div>
-                                        <div className="w-full bg-white/20 rounded-full h-1.5">
+                                        <div className="w-full bg-slate-100 rounded-full h-1.5">
                                             <div
-                                                className="bg-white h-1.5 rounded-full transition-all"
+                                                className="bg-blue-600 h-1.5 rounded-full transition-all"
                                                 style={{ width: `${Math.min(item.controlEffectiveness || 0, 100)}%` }}
                                             ></div>
                                         </div>
@@ -148,26 +151,26 @@ export default function CompliancePage() {
                     </div>
 
                     {/* Regulations List */}
-                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                        <div className="px-6 py-4 border-b border-gray-100">
-                            <h3 className="font-semibold text-gray-900">Regülasyon Envanteri</h3>
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                        <div className="px-6 py-4 border-b border-slate-100">
+                            <h3 className="text-sm font-semibold text-slate-800">Regülasyon Envanteri</h3>
                         </div>
-                        <div className="divide-y divide-gray-100">
+                        <div className="divide-y divide-slate-100">
                             {regulations.map((reg) => (
                                 <Link key={reg.id} href={`/compliance/regulations/${reg.id}`}>
-                                    <div className="px-6 py-4 hover:bg-gray-50 transition-colors cursor-pointer">
+                                    <div className="px-6 py-4 hover:bg-slate-50 transition-colors cursor-pointer">
                                         <div className="flex items-center justify-between">
                                             <div>
                                                 <div className="flex items-center gap-3 mb-1">
-                                                    <span className="font-mono text-sm text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">{reg.code}</span>
-                                                    <span className="font-medium text-gray-900">{reg.name}</span>
+                                                    <span className="font-mono text-sm text-blue-700 bg-blue-50 px-2 py-0.5 rounded">{reg.code}</span>
+                                                    <span className="font-medium text-slate-800">{reg.name}</span>
                                                 </div>
-                                                <p className="text-sm text-gray-500">{reg.description}</p>
+                                                <p className="text-sm text-slate-500">{reg.description}</p>
                                             </div>
-                                            <div className="flex items-center gap-6 text-sm text-gray-500">
+                                            <div className="flex items-center gap-6 text-sm text-slate-500">
                                                 <span>{reg._count?.risks || 0} risk</span>
                                                 <span>{reg._count?.controls || 0} kontrol</span>
-                                                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                                 </svg>
                                             </div>
@@ -177,57 +180,52 @@ export default function CompliancePage() {
                             ))}
                         </div>
                     </div>
-                </>
+                </div>
             )}
 
             {/* Create Modal */}
-            {showModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-                    <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-2xl">
-                        <h2 className="text-xl font-semibold text-gray-900 mb-4">Yeni Regülasyon</h2>
-                        <form onSubmit={handleCreate} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Kod</label>
-                                <input
-                                    type="text"
-                                    required
-                                    value={formData.code}
-                                    onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                    placeholder="Örn: BDDK"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Ad</label>
-                                <input
-                                    type="text"
-                                    required
-                                    value={formData.name}
-                                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Açıklama</label>
-                                <textarea
-                                    value={formData.description}
-                                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                                    rows={3}
-                                />
-                            </div>
-                            <div className="flex justify-end gap-3 pt-4">
-                                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:text-gray-800">
-                                    İptal
-                                </button>
-                                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
-                                    Oluştur
-                                </button>
-                            </div>
-                        </form>
+            <Modal open={showModal} onClose={() => setShowModal(false)} title="Yeni Regülasyon" size="sm">
+                <form onSubmit={handleCreate} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Kod</label>
+                        <input
+                            type="text"
+                            required
+                            value={formData.code}
+                            onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="Örn: BDDK"
+                        />
                     </div>
-                </div>
-            )}
-        </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Ad</label>
+                        <input
+                            type="text"
+                            required
+                            value={formData.name}
+                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Açıklama</label>
+                        <textarea
+                            value={formData.description}
+                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                            rows={3}
+                        />
+                    </div>
+                    <div className="flex justify-end gap-3 pt-2">
+                        <Button type="button" variant="secondary" onClick={() => setShowModal(false)}>
+                            İptal
+                        </Button>
+                        <Button type="submit" variant="primary">
+                            Oluştur
+                        </Button>
+                    </div>
+                </form>
+            </Modal>
+        </PageShell>
     );
 }

@@ -216,14 +216,37 @@ export default function Sidebar() {
             {/* Logo */}
             <div className="relative flex h-16 items-center justify-center border-b border-slate-800/80 bg-[#0b0f19]">
                 <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                        <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    <div className="relative">
+                        <div className="absolute inset-0 rounded-[10px] blur-md opacity-60" style={{background: 'linear-gradient(135deg, #4f46e5, #7c3aed)'}} />
+                        <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" className="relative">
+                            <defs>
+                                <linearGradient id="sb-logo-bg" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+                                    <stop stopColor="#4f46e5" />
+                                    <stop offset="1" stopColor="#7c3aed" />
+                                </linearGradient>
+                                <linearGradient id="sb-logo-border" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+                                    <stop stopColor="#818cf8" stopOpacity="0.7" />
+                                    <stop offset="1" stopColor="#a78bfa" stopOpacity="0.4" />
+                                </linearGradient>
+                                <linearGradient id="sb-top-shine" x1="0" y1="0" x2="0" y2="1">
+                                    <stop stopColor="white" stopOpacity="0.18" />
+                                    <stop offset="1" stopColor="white" stopOpacity="0" />
+                                </linearGradient>
+                            </defs>
+                            <rect width="36" height="36" rx="10" fill="url(#sb-logo-bg)" />
+                            <rect x="0.75" y="0.75" width="34.5" height="34.5" rx="9.25" stroke="url(#sb-logo-border)" strokeWidth="1" fill="none" />
+                            <rect width="36" height="18" rx="10" fill="url(#sb-top-shine)" />
+                            <path d="M18 5.5L28 11V19.5C28 24.5 23.6 29 18 30C12.4 29 8 24.5 8 19.5V11L18 5.5Z"
+                                fill="white" fillOpacity="0.06" stroke="white" strokeWidth="1" strokeOpacity="0.15" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M18 10L24 13.5V19C24 22.2 21.3 25 18 25.5C14.7 25 12 22.2 12 19V13.5L18 10Z"
+                                fill="white" fillOpacity="0.14" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M15 19L17.2 21.2L21.5 16" stroke="white" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                     </div>
-                    <span className="text-[17px] font-semibold tracking-tight text-white">
-                        Burak GRC
-                    </span>
+                    <div className="flex flex-col">
+                        <span className="text-[16px] font-bold tracking-tight text-white leading-none">RMIC</span>
+                        <span className="text-[10px] font-semibold tracking-[0.15em] text-indigo-400 uppercase leading-none mt-1">GRC Platform</span>
+                    </div>
                 </div>
             </div>
 
