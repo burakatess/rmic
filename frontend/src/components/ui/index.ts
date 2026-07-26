@@ -5,7 +5,6 @@
 
 // Core
 export { Button } from './Button';
-export { Card, CardHeader, CardBody } from './Card';
 export { StatusBadge, getSeverityVariant, getStatusVariant } from './StatusBadge';
 export { Input, Textarea, Select } from './Input';
 
@@ -32,7 +31,6 @@ export type { ActiveFilterChip } from './ActiveFilterChips';
 // Data Display
 export { DataTable } from './DataTable';
 export type { ColumnDef, ColumnFilter, TableDensity } from './DataTable';
-export { ResizableTable } from './ResizableTable';
 export { FileUpload } from './FileUpload';
 export type { AttachmentMeta } from './FileUpload';
 export { SavedViewMenu, loadSavedViews } from './SavedViewMenu';
