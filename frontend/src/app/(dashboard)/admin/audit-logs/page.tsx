@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
-import { PageHeader, DataTable, StatusBadge } from '@/components/ui';
+import { PageShell, PageHeader, DataTable, StatusBadge, Button, Modal } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/components/auth/AuthProvider';
@@ -154,7 +154,7 @@ export default function AuditLogsPage() {
         },
         {
             key: 'entityType', header: 'Kayıt Tipi', defaultWidth: 130,
-            render: (l) => <span className="text-xs font-mono text-indigo-600">{l.entityType}</span>,
+            render: (l) => <span className="text-xs font-mono text-blue-600">{l.entityType}</span>,
         },
         {
             key: 'entityId', header: 'Kayıt ID', defaultWidth: 200,
@@ -168,24 +168,30 @@ export default function AuditLogsPage() {
 
     if (!isAdmin) {
         return (
-            <div className="flex flex-col items-center justify-center h-96 text-slate-400">
-                <svg className="w-12 h-12 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
-                <p className="font-medium">Bu sayfa yalnızca Sistem Yöneticisi rolüne açıktır</p>
-            </div>
+            <PageShell>
+                <div className="flex flex-col items-center justify-center h-96 text-slate-400">
+                    <svg className="w-12 h-12 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                    <p className="font-medium">Bu sayfa yalnızca Sistem Yöneticisi rolüne açıktır</p>
+                </div>
+            </PageShell>
         );
     }
 
     return (
-        <div className="space-y-6">
-            <PageHeader title="Denetim İzleri" description="Sistem aktivite kayıtları ve SIEM dışa aktarımı" />
+        <PageShell>
+            <PageHeader
+                title="Denetim İzleri"
+                description="Sistem aktivite kayıtları ve SIEM dışa aktarımı"
+                breadcrumbs={[{ label: 'Sistem Yönetimi' }, { label: 'Denetim İzleri' }]}
+            />
 
             {/* Filtreler */}
-            <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-3 items-end">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-6 flex flex-wrap gap-3 items-end">
                 <div>
                     <label className="block text-xs font-medium text-slate-500 mb-1">İşlem</label>
-                    <select value={action} onChange={e => setAction(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm">
+                    <select value={action} onChange={e => setAction(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100">
                         <option value="">Tümü</option>
                         {Object.entries(ACTION_LABELS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                     </select>
@@ -193,43 +199,44 @@ export default function AuditLogsPage() {
                 <div>
                     <label className="block text-xs font-medium text-slate-500 mb-1">Kayıt Tipi</label>
                     <input type="text" value={entityType} onChange={e => setEntityType(e.target.value)} placeholder="Finding, Control..."
-                        className="px-3 py-2 border border-slate-200 rounded-lg text-sm w-40" />
+                        className="px-3 py-2 border border-slate-200 rounded-lg text-sm w-40 focus:outline-none focus-visible:ring-2 ring-blue-100" />
                 </div>
                 <div>
                     <label className="block text-xs font-medium text-slate-500 mb-1">Başlangıç</label>
-                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100" />
                 </div>
                 <div>
                     <label className="block text-xs font-medium text-slate-500 mb-1">Bitiş</label>
-                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100" />
                 </div>
                 <div>
                     <label className="block text-xs font-medium text-slate-500 mb-1">Limit</label>
-                    <select value={limit} onChange={e => setLimit(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm">
+                    <select value={limit} onChange={e => setLimit(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100">
                         {['100', '200', '500', '1000'].map(l => <option key={l} value={l}>{l}</option>)}
                     </select>
                 </div>
-                <button onClick={loadLogs} disabled={loading}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60">
+                <Button onClick={loadLogs} loading={loading}>
                     {loading ? 'Yükleniyor...' : 'Filtrele'}
-                </button>
+                </Button>
             </div>
 
             {/* Tablo */}
-            <DataTable
-                columns={columns}
-                data={logs}
-                rowKey={(l) => l.id}
-                onRowClick={(l) => setDetail(l)}
-                loading={loading}
-                emptyTitle="Denetim izi bulunamadı"
-                storageKey="audit-logs-table"
-            />
+            <div className="mb-6">
+                <DataTable
+                    columns={columns}
+                    data={logs}
+                    rowKey={(l) => l.id}
+                    onRowClick={(l) => setDetail(l)}
+                    loading={loading}
+                    emptyTitle="Denetim izi bulunamadı"
+                    storageKey="audit-logs-table"
+                />
+            </div>
 
             {/* SIEM Dışa Aktarım */}
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="px-6 py-4 border-b border-slate-100">
-                    <h3 className="font-bold text-slate-900">SIEM Dışa Aktarım</h3>
+                    <h3 className="text-sm font-semibold text-slate-700">SIEM Dışa Aktarım</h3>
                     <p className="text-xs text-slate-500 mt-0.5">QRadar, Splunk, ArcSight gibi SIEM platformlarına uygun formatta dışa aktarın</p>
                 </div>
                 <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -239,13 +246,12 @@ export default function AuditLogsPage() {
                         <p className="text-xs text-slate-500 mb-3">Yukarıdaki filtreler indirmeye de uygulanır.</p>
                         <div className="flex gap-3">
                             <select value={siemFormat} onChange={e => setSiemFormat(e.target.value)}
-                                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm">
+                                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100">
                                 {SIEM_FORMATS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
                             </select>
-                            <button onClick={handleExport} disabled={exporting}
-                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60">
+                            <Button variant="success" onClick={handleExport} loading={exporting}>
                                 {exporting ? 'İndiriliyor...' : 'İndir'}
-                            </button>
+                            </Button>
                         </div>
                     </div>
 
@@ -258,13 +264,13 @@ export default function AuditLogsPage() {
                                     <label className="block text-xs font-medium text-slate-500 mb-1">Syslog Sunucu</label>
                                     <input type="text" value={siemConfig.syslogHost} placeholder="siem.sirket.local"
                                         onChange={e => setSiemConfig(c => ({ ...c, syslogHost: e.target.value }))}
-                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100" />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-500 mb-1">Port</label>
                                     <input type="number" value={siemConfig.syslogPort}
                                         onChange={e => setSiemConfig(c => ({ ...c, syslogPort: parseInt(e.target.value) || 514 }))}
-                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100" />
                                 </div>
                             </div>
                             <div className="flex items-center gap-4">
@@ -272,7 +278,7 @@ export default function AuditLogsPage() {
                                     <label className="block text-xs font-medium text-slate-500 mb-1">Format</label>
                                     <select value={siemConfig.format}
                                         onChange={e => setSiemConfig(c => ({ ...c, format: e.target.value }))}
-                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm">
+                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100">
                                         <option value="CEF">CEF</option>
                                         <option value="LEEF">LEEF</option>
                                         <option value="JSON">JSON</option>
@@ -281,53 +287,44 @@ export default function AuditLogsPage() {
                                 <label className="flex items-center gap-2 mt-5 text-sm text-slate-700 cursor-pointer">
                                     <input type="checkbox" checked={siemConfig.enabled}
                                         onChange={e => setSiemConfig(c => ({ ...c, enabled: e.target.checked }))}
-                                        className="w-4 h-4 text-indigo-600 rounded" />
+                                        className="w-4 h-4 text-blue-600 rounded" />
                                     Aktif
                                 </label>
                             </div>
-                            <button type="submit" disabled={savingConfig}
-                                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60">
+                            <Button type="submit" variant="secondary" loading={savingConfig}>
                                 {savingConfig ? 'Kaydediliyor...' : 'Yapılandırmayı Kaydet'}
-                            </button>
+                            </Button>
                         </div>
                     </form>
                 </div>
             </div>
 
             {/* Detay Modal */}
-            {detail && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDetail(null)}>
-                    <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-                        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white">
-                            <h3 className="font-bold text-slate-900">Denetim İzi Detayı</h3>
-                            <button onClick={() => setDetail(null)} className="text-slate-400 hover:text-slate-600">
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
+            <Modal open={!!detail} onClose={() => setDetail(null)} title="Denetim İzi Detayı" size="lg">
+                {detail && (
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div><p className="text-xs text-slate-400">Tarih</p><p className="font-mono">{fmt(detail.createdAt)}</p></div>
+                            <div><p className="text-xs text-slate-400">Kullanıcı</p><p>{detail.user ? `${detail.user.firstName} ${detail.user.lastName}` : 'Sistem'}</p></div>
+                            <div><p className="text-xs text-slate-400">İşlem</p><p>{ACTION_LABELS[detail.action]?.label ?? detail.action}</p></div>
+                            <div><p className="text-xs text-slate-400">Kayıt</p><p className="font-mono text-xs">{detail.entityType} / {detail.entityId}</p></div>
+                            {detail.ipAddress && <div><p className="text-xs text-slate-400">IP</p><p className="font-mono text-xs">{detail.ipAddress}</p></div>}
                         </div>
-                        <div className="p-6 space-y-4">
-                            <div className="grid grid-cols-2 gap-4 text-sm">
-                                <div><p className="text-xs text-slate-400">Tarih</p><p className="font-mono">{fmt(detail.createdAt)}</p></div>
-                                <div><p className="text-xs text-slate-400">Kullanıcı</p><p>{detail.user ? `${detail.user.firstName} ${detail.user.lastName}` : 'Sistem'}</p></div>
-                                <div><p className="text-xs text-slate-400">İşlem</p><p>{ACTION_LABELS[detail.action]?.label ?? detail.action}</p></div>
-                                <div><p className="text-xs text-slate-400">Kayıt</p><p className="font-mono text-xs">{detail.entityType} / {detail.entityId}</p></div>
-                                {detail.ipAddress && <div><p className="text-xs text-slate-400">IP</p><p className="font-mono text-xs">{detail.ipAddress}</p></div>}
+                        {detail.oldValue != null && (
+                            <div>
+                                <p className="text-xs font-bold text-slate-500 mb-1">Eski Değer</p>
+                                <pre className="bg-rose-50 border border-rose-100 rounded-lg p-3 text-[11px] overflow-x-auto max-h-48">{JSON.stringify(detail.oldValue, null, 2)}</pre>
                             </div>
-                            {detail.oldValue != null && (
-                                <div>
-                                    <p className="text-xs font-bold text-slate-500 mb-1">Eski Değer</p>
-                                    <pre className="bg-rose-50 border border-rose-100 rounded-lg p-3 text-[11px] overflow-x-auto max-h-48">{JSON.stringify(detail.oldValue, null, 2)}</pre>
-                                </div>
-                            )}
-                            {detail.newValue != null && (
-                                <div>
-                                    <p className="text-xs font-bold text-slate-500 mb-1">Yeni Değer</p>
-                                    <pre className="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-[11px] overflow-x-auto max-h-48">{JSON.stringify(detail.newValue, null, 2)}</pre>
-                                </div>
-                            )}
-                        </div>
+                        )}
+                        {detail.newValue != null && (
+                            <div>
+                                <p className="text-xs font-bold text-slate-500 mb-1">Yeni Değer</p>
+                                <pre className="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-[11px] overflow-x-auto max-h-48">{JSON.stringify(detail.newValue, null, 2)}</pre>
+                            </div>
+                        )}
                     </div>
-                </div>
-            )}
-        </div>
+                )}
+            </Modal>
+        </PageShell>
     );
 }
