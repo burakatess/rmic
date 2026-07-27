@@ -85,6 +85,12 @@ export class RisksController {
         return this.risksService.treat(id, treatRiskDto, userId);
     }
 
+    @Post(':id/approve-treatment')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    async approveTreatment(@Param('id') id: string, @CurrentUser('id') userId: string) {
+        return this.risksService.approveTreatment(id, userId);
+    }
+
     @Get(':id/history')
     async getHistory(@Param('id') id: string) {
         return this.risksService.getHistory(id);

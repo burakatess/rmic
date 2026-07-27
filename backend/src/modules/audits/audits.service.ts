@@ -19,7 +19,20 @@ export class AuditsService {
         const [plans, total] = await Promise.all([
             this.prisma.auditPlan.findMany({
                 where,
-                include: { _count: { select: { executions: true } } },
+                include: {
+                    _count: { select: { executions: true } },
+                    executions: {
+                        select: {
+                            findings: {
+                                select: {
+                                    id: true,
+                                    status: true,
+                                    actions: { select: { status: true } },
+                                },
+                            },
+                        },
+                    },
+                },
                 skip,
                 take: limit,
                 orderBy: { createdAt: 'desc' },
@@ -27,20 +40,51 @@ export class AuditsService {
             this.prisma.auditPlan.count({ where }),
         ]);
 
-        return { data: plans, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+        const data = plans.map((p) => this.withPlanDerivedFields(p));
+
+        return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+    }
+
+    /** Bulgu/aksiyon sayıları executions ilişkisinden türetilir — planda ayrıca saklanmaz. */
+    private withPlanDerivedFields(plan: any) {
+        const findings = (plan.executions || []).flatMap((e: any) => e.findings || []);
+        const totalFindings = findings.length;
+        const openFindings = findings.filter((f: any) => f.status !== 'CLOSED').length;
+        const actions = findings.flatMap((f: any) => f.actions || []);
+        let actionStatus: 'NO_ACTIONS' | 'IN_PROGRESS' | 'COMPLETED' = 'NO_ACTIONS';
+        if (actions.length > 0) {
+            actionStatus = actions.every((a: any) => a.status === 'KAPATILDI' || a.status === 'CLOSED')
+                ? 'COMPLETED'
+                : 'IN_PROGRESS';
+        }
+        const { executions, ...rest } = plan;
+        return { ...rest, totalFindings, openFindings, actionStatus };
     }
 
     async createPlan(data: any, userId: string) {
-        const planId = `AP-${data.year}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-        const plan = await this.prisma.auditPlan.create({ data: { ...data, planId } });
+        const auditCode = `AP-${data.year}-${(await this.nextPlanSequence(data.year)).toString().padStart(3, '0')}`;
+        const { auditCode: _ignored, ...rest } = data;
+        const plan = await this.prisma.auditPlan.create({ data: { ...rest, planId: auditCode } });
         await this.prisma.auditLog.create({
             data: { userId, action: 'CREATE', entityType: 'AuditPlan', entityId: plan.id, newValue: plan },
         });
         return plan;
     }
 
+    private async nextPlanSequence(year: number): Promise<number> {
+        const prefix = `AP-${year}-`;
+        const last = await this.prisma.auditPlan.findFirst({
+            where: { planId: { startsWith: prefix } },
+            orderBy: { planId: 'desc' },
+        });
+        if (!last) return 1;
+        const n = parseInt(last.planId.split('-')[2], 10);
+        return isNaN(n) ? 1 : n + 1;
+    }
+
     async updatePlan(id: string, data: any, userId: string) {
-        const plan = await this.prisma.auditPlan.update({ where: { id }, data });
+        const { auditCode, totalFindings, openFindings, actionStatus, ...rest } = data;
+        const plan = await this.prisma.auditPlan.update({ where: { id }, data: rest });
         await this.prisma.auditLog.create({
             data: { userId, action: 'UPDATE', entityType: 'AuditPlan', entityId: id, newValue: plan },
         });
@@ -49,8 +93,47 @@ export class AuditsService {
 
     // ─── Audit Executions ────────────────────────────────────────────────────
 
+    async findAllExecutions(query: any) {
+        const { status, auditPlanId } = query;
+        const page = parseInt(query.page, 10) || 1;
+        const limit = parseInt(query.limit, 10) || 50;
+        const skip = (page - 1) * limit;
+        const where: any = {};
+        if (status) where.status = status;
+        if (auditPlanId) where.auditPlanId = auditPlanId;
+
+        const [executions, total] = await Promise.all([
+            this.prisma.auditExecution.findMany({
+                where,
+                include: {
+                    auditPlan: { select: { id: true, planId: true, name: true } },
+                    _count: { select: { findings: true } },
+                },
+                skip,
+                take: limit,
+                orderBy: { createdAt: 'desc' },
+            }),
+            this.prisma.auditExecution.count({ where }),
+        ]);
+
+        return { data: executions, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+    }
+
+    private async nextExecutionSequence(year: number): Promise<number> {
+        const prefix = `AE-${year}-`;
+        const last = await this.prisma.auditExecution.findFirst({
+            where: { executionId: { startsWith: prefix } },
+            orderBy: { executionId: 'desc' },
+        });
+        if (!last?.executionId) return 1;
+        const n = parseInt(last.executionId.split('-')[2], 10);
+        return isNaN(n) ? 1 : n + 1;
+    }
+
     async createExecution(data: any, userId: string) {
-        const execution = await this.prisma.auditExecution.create({ data });
+        const year = new Date(data.startDate || Date.now()).getFullYear();
+        const executionId = `AE-${year}-${(await this.nextExecutionSequence(year)).toString().padStart(3, '0')}`;
+        const execution = await this.prisma.auditExecution.create({ data: { ...data, executionId } });
         await this.prisma.auditLog.create({
             data: { userId, action: 'CREATE', entityType: 'AuditExecution', entityId: execution.id, newValue: execution },
         });
@@ -58,7 +141,8 @@ export class AuditsService {
     }
 
     async updateExecution(id: string, data: any, userId: string) {
-        const execution = await this.prisma.auditExecution.update({ where: { id }, data });
+        const { executionId, ...rest } = data;
+        const execution = await this.prisma.auditExecution.update({ where: { id }, data: rest });
         await this.prisma.auditLog.create({
             data: { userId, action: 'UPDATE', entityType: 'AuditExecution', entityId: id, newValue: execution },
         });

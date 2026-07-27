@@ -36,6 +36,11 @@ export class AuditsController {
 
     // ─── Audit Executions ────────────────────────────────────────────────────
 
+    @Get('audit-executions')
+    async findAllExecutions(@Query() query: any) {
+        return this.auditsService.findAllExecutions(query);
+    }
+
     @Post('audit-executions')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async createExecution(@Body() data: any, @CurrentUser('id') userId: string) {

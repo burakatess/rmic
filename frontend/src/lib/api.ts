@@ -314,6 +314,10 @@ class ApiClient {
         return this.request(`/risks/${id}/treat`, { method: 'POST', body: data });
     }
 
+    async approveRiskTreatment(id: string) {
+        return this.request(`/risks/${id}/approve-treatment`, { method: 'POST' });
+    }
+
     async getRiskCategories() {
         return this.request('/risks/categories');
     }
@@ -398,6 +402,14 @@ class ApiClient {
         return this.request(`/actions/${id}`, { method: 'DELETE' });
     }
 
+    async createStandaloneAction(data: unknown) {
+        return this.request('/actions', { method: 'POST', body: data });
+    }
+
+    async getActionsForRisk(riskId: string) {
+        return this.request<any[]>(`/risks/${riskId}/actions`);
+    }
+
     // Relations endpoints
     async getRiskRelations(id: string) {
         return this.request(`/risks/${id}/relations`);
@@ -465,6 +477,46 @@ class ApiClient {
 
     async deleteRiskAction(id: string) {
         return this.request(`/risk-actions/${id}`, { method: 'DELETE' });
+    }
+
+    // Audit Plans & Executions
+    async getAuditPlans(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request<any>(`/audit-plans${query}`);
+    }
+
+    async createAuditPlan(data: unknown) {
+        return this.request('/audit-plans', { method: 'POST', body: data });
+    }
+
+    async updateAuditPlan(id: string, data: unknown) {
+        return this.request(`/audit-plans/${id}`, { method: 'PUT', body: data });
+    }
+
+    async getAuditExecutions(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request<any>(`/audit-executions${query}`);
+    }
+
+    async createAuditExecution(data: unknown) {
+        return this.request('/audit-executions', { method: 'POST', body: data });
+    }
+
+    async updateAuditExecution(id: string, data: unknown) {
+        return this.request(`/audit-executions/${id}`, { method: 'PUT', body: data });
+    }
+
+    // Compliance
+    async getRegulations() {
+        return this.request<any[]>('/regulations');
+    }
+
+    async getRegulationArticles(regulationId: string) {
+        return this.request<any[]>(`/regulations/${regulationId}/articles`);
+    }
+
+    async getComplianceOverview() {
+        return this.request<any[]>('/compliance/overview');
     }
 
     // Reports

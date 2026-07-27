@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { PageShell, PageHeader, KpiCard, KpiGrid, QuickFilterBar, DataTable } from '@/components/ui';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { PageShell, PageHeader, KpiCard, KpiGrid, QuickFilterBar, DataTable, ErrorState } from '@/components/ui';
 import type { ColumnDef, QuickFilterItem } from '@/components/ui';
+import { api } from '@/lib/api';
 
 interface Regulation {
     id: string;
@@ -20,32 +21,6 @@ interface MappingItem {
     controls: { id: string; controlId: string; name: string }[];
 }
 
-const DEMO_REGULATIONS: Regulation[] = [
-    { id: '1', code: 'BDDK', name: 'BDDK Düzenlemeleri', articleCount: 12 },
-    { id: '2', code: 'KVKK', name: 'Kişisel Verilerin Korunması Kanunu', articleCount: 8 },
-    { id: '3', code: 'ISO27001', name: 'ISO 27001 Bilgi Güvenliği', articleCount: 15 },
-];
-
-const DEMO_MAPPINGS: MappingItem[] = [
-    { regulationId: '1', regulationCode: 'BDDK', articleCode: 'M.5.1', articleTitle: 'Bilgi Sistemleri Güvenliği', risks: [{ id: '1', riskId: 'R-2024-0001', name: 'Siber Saldırı Riski' }], controls: [{ id: '1', controlId: 'C-2024-0001', name: 'Güvenlik Duvarı Yönetimi' }] },
-    { regulationId: '1', regulationCode: 'BDDK', articleCode: 'M.5.2', articleTitle: 'Erişim Kontrolü', risks: [{ id: '4', riskId: 'R-2024-0004', name: 'Veri Sızıntısı Riski' }], controls: [{ id: '2', controlId: 'C-2024-0002', name: 'Erişim Yetkilendirme Kontrolü' }] },
-    { regulationId: '2', regulationCode: 'KVKK', articleCode: 'M.12', articleTitle: 'Veri Güvenliği', risks: [{ id: '4', riskId: 'R-2024-0004', name: 'Veri Sızıntısı Riski' }], controls: [] },
-    { regulationId: '3', regulationCode: 'ISO27001', articleCode: 'A.12.3', articleTitle: 'Yedekleme', risks: [{ id: '3', riskId: 'R-2024-0003', name: 'Operasyonel Kesinti Riski' }], controls: [{ id: '3', controlId: 'C-2024-0003', name: 'Yedekleme Doğrulama' }] },
-];
-
-const DEMO_RISKS = [
-    { id: '1', riskId: 'R-2024-0001', name: 'Siber Saldırı Riski' },
-    { id: '2', riskId: 'R-2024-0002', name: 'Regülasyon Uyumsuzluk Riski' },
-    { id: '3', riskId: 'R-2024-0003', name: 'Operasyonel Kesinti Riski' },
-    { id: '4', riskId: 'R-2024-0004', name: 'Veri Sızıntısı Riski' },
-];
-
-const DEMO_CONTROLS = [
-    { id: '1', controlId: 'C-2024-0001', name: 'Güvenlik Duvarı Yönetimi' },
-    { id: '2', controlId: 'C-2024-0002', name: 'Erişim Yetkilendirme Kontrolü' },
-    { id: '3', controlId: 'C-2024-0003', name: 'Yedekleme Doğrulama' },
-];
-
 // Kapsam durumu: renk tek başına sinyal olmasın diye etiket + title birlikte kullanılır
 function getCoverage(riskCount: number, controlCount: number): { dot: string; label: string; title: string } {
     if (riskCount > 0 && controlCount > 0) return { dot: 'bg-emerald-500', label: 'Tam', title: 'Tam Kapsam (Risk + Kontrol)' };
@@ -54,17 +29,48 @@ function getCoverage(riskCount: number, controlCount: number): { dot: string; la
 }
 
 export default function ComplianceMappingPage() {
-    const [regulations] = useState<Regulation[]>(DEMO_REGULATIONS);
+    const [regulations, setRegulations] = useState<Regulation[]>([]);
     const [mappings, setMappings] = useState<MappingItem[]>([]);
     const [selectedRegulation, setSelectedRegulation] = useState<string>('');
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
-    useEffect(() => {
-        setTimeout(() => {
-            setMappings(DEMO_MAPPINGS);
+    const load = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const regs: any[] = await api.getRegulations();
+            const regulationList: Regulation[] = regs.map(r => ({
+                id: r.id, code: r.code, name: r.name, articleCount: r._count?.articles ?? 0,
+            }));
+            setRegulations(regulationList);
+
+            const articlesByReg = await Promise.all(
+                regulationList.map(r => api.getRegulationArticles(r.id).then((articles: any[]) => ({ reg: r, articles })))
+            );
+
+            const items: MappingItem[] = [];
+            for (const { reg, articles } of articlesByReg) {
+                for (const a of articles) {
+                    items.push({
+                        regulationId: reg.id,
+                        regulationCode: reg.code,
+                        articleCode: a.articleCode,
+                        articleTitle: a.title,
+                        risks: (a.risks || []).map((rr: any) => ({ id: rr.risk.id, riskId: rr.risk.riskId, name: rr.risk.name })),
+                        controls: (a.controls || []).map((cc: any) => ({ id: cc.control.id, controlId: cc.control.controlId, name: cc.control.name })),
+                    });
+                }
+            }
+            setMappings(items);
+        } catch {
+            setError('Uyum eşleştirme verileri yüklenemedi.');
+        } finally {
             setLoading(false);
-        }, 500);
+        }
     }, []);
+
+    useEffect(() => { load(); }, [load]);
 
     const filteredMappings = selectedRegulation
         ? mappings.filter(m => m.regulationId === selectedRegulation)
@@ -139,6 +145,15 @@ export default function ComplianceMappingPage() {
             },
         },
     ], []);
+
+    if (error && mappings.length === 0 && !loading) {
+        return (
+            <PageShell>
+                <PageHeader title="Uyum Eşleştirme" description="Regülasyon maddeleri ile risk ve kontrolleri ilişkilendirin" breadcrumbs={[{ label: 'Uyum' }, { label: 'Eşleştirme' }]} />
+                <ErrorState description={error} onRetry={load} />
+            </PageShell>
+        );
+    }
 
     return (
         <PageShell>

@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import {
     PageShell, PageHeader, DataTable, StatusBadge, Button,
-    KpiCard, KpiGrid, AdvancedFilterPanel, ActiveFilterChips, SavedViewMenu,
+    KpiCard, KpiGrid, AdvancedFilterPanel, ActiveFilterChips, SavedViewMenu, ErrorState,
 } from '@/components/ui';
 import type { ColumnDef, AdvancedFilterField, ActiveFilterChip } from '@/components/ui';
+import { api } from '@/lib/api';
 
 interface AuditPlan {
     id: string;
@@ -16,11 +17,11 @@ interface AuditPlan {
     auditTeam: string;
     teamLeader: string;
     teamSize: number;
-    plannedStartDate: string;
-    plannedEndDate: string;
-    status: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+    plannedStartDate: string | null;
+    plannedEndDate: string | null;
+    status: 'DRAFT' | 'APPROVED' | 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
     phase: 'PLANNING' | 'FIELDWORK' | 'REPORTING' | 'CLOSED';
-    rationale: 'PERIODIC' | 'REGULATORY' | 'MANAGEMENT_REQUEST' | 'RISK_BASED';
+    rationale: 'PERIODIC' | 'REGULATORY' | 'MANAGEMENT_REQUEST' | 'RISK_BASED' | null;
     priority: 'LOW' | 'MEDIUM' | 'HIGH';
     plannedManDays: number;
     actualManDays: number;
@@ -33,18 +34,40 @@ interface AuditPlan {
     actionStatus: 'NO_ACTIONS' | 'IN_PROGRESS' | 'COMPLETED';
 }
 
-const DEMO_AUDITS: AuditPlan[] = [
-    { id: '1', auditCode: 'AP-2024-001', auditName: 'Bilgi Güvenliği Denetimi', auditedUnit: 'Bilgi Teknolojileri', auditTeam: 'BT Denetim Ekibi', teamLeader: 'Ahmet Yılmaz', teamSize: 3, plannedStartDate: '2024-01-15', plannedEndDate: '2024-02-15', status: 'COMPLETED', phase: 'CLOSED', rationale: 'PERIODIC', priority: 'HIGH', plannedManDays: 30, actualManDays: 35, scheduleVariance: 5, delayStatus: 'DELAYED', draftReportDate: '2024-02-25', finalReportDate: '2024-03-05', totalFindings: 12, openFindings: 3, actionStatus: 'IN_PROGRESS' },
-    { id: '2', auditCode: 'AP-2024-002', auditName: 'Kredi Süreçleri Denetimi', auditedUnit: 'Kredi Tahsis', auditTeam: 'Finansal Denetim Ekibi', teamLeader: 'Fatma Öz', teamSize: 2, plannedStartDate: '2024-03-01', plannedEndDate: '2024-04-15', status: 'IN_PROGRESS', phase: 'FIELDWORK', rationale: 'REGULATORY', priority: 'HIGH', plannedManDays: 45, actualManDays: 28, scheduleVariance: 0, delayStatus: 'ON_TRACK', draftReportDate: null, finalReportDate: null, totalFindings: 5, openFindings: 5, actionStatus: 'NO_ACTIONS' },
-    { id: '3', auditCode: 'AP-2024-003', auditName: 'MASAK Uyum Denetimi', auditedUnit: 'Uyum Birimi', auditTeam: 'Uyum Denetim Ekibi', teamLeader: 'Zeynep Şen', teamSize: 3, plannedStartDate: '2024-04-01', plannedEndDate: '2024-05-15', status: 'PLANNED', phase: 'PLANNING', rationale: 'REGULATORY', priority: 'HIGH', plannedManDays: 40, actualManDays: 0, scheduleVariance: 0, delayStatus: 'ON_TRACK', draftReportDate: null, finalReportDate: null, totalFindings: 0, openFindings: 0, actionStatus: 'NO_ACTIONS' },
-    { id: '4', auditCode: 'AP-2024-004', auditName: 'Şube Operasyonları Denetimi', auditedUnit: 'Şube Ağı', auditTeam: 'Operasyonel Denetim Ekibi', teamLeader: 'Murat Kaya', teamSize: 2, plannedStartDate: '2024-02-01', plannedEndDate: '2024-03-15', status: 'COMPLETED', phase: 'CLOSED', rationale: 'PERIODIC', priority: 'MEDIUM', plannedManDays: 35, actualManDays: 40, scheduleVariance: 5, delayStatus: 'DELAYED', draftReportDate: '2024-03-25', finalReportDate: '2024-04-05', totalFindings: 8, openFindings: 0, actionStatus: 'COMPLETED' },
-    { id: '5', auditCode: 'AP-2024-005', auditName: 'İnsan Kaynakları Süreç Denetimi', auditedUnit: 'İnsan Kaynakları', auditTeam: 'HR Denetim Ekibi', teamLeader: 'Deniz Yıldız', teamSize: 1, plannedStartDate: '2024-05-01', plannedEndDate: '2024-06-15', status: 'PLANNED', phase: 'PLANNING', rationale: 'MANAGEMENT_REQUEST', priority: 'MEDIUM', plannedManDays: 30, actualManDays: 0, scheduleVariance: 0, delayStatus: 'AT_RISK', draftReportDate: null, finalReportDate: null, totalFindings: 0, openFindings: 0, actionStatus: 'NO_ACTIONS' },
-    { id: '6', auditCode: 'AP-2024-006', auditName: 'Satın Alma Süreçleri Denetimi', auditedUnit: 'Satın Alma', auditTeam: 'Operasyonel Denetim Ekibi', teamLeader: 'Murat Kaya', teamSize: 2, plannedStartDate: '2024-06-01', plannedEndDate: '2024-07-15', status: 'PLANNED', phase: 'PLANNING', rationale: 'RISK_BASED', priority: 'LOW', plannedManDays: 25, actualManDays: 0, scheduleVariance: 0, delayStatus: 'ON_TRACK', draftReportDate: null, finalReportDate: null, totalFindings: 0, openFindings: 0, actionStatus: 'NO_ACTIONS' },
-];
+function mapPlan(p: any): AuditPlan {
+    const plannedManDays = p.plannedManDays ?? 0;
+    const actualManDays = p.actualManDays ?? 0;
+    return {
+        id: p.id,
+        auditCode: p.planId,
+        auditName: p.name,
+        auditedUnit: p.auditedUnit || '—',
+        auditTeam: p.auditTeam || '—',
+        teamLeader: p.teamLeader || '—',
+        teamSize: p.teamSize ?? 0,
+        plannedStartDate: p.plannedStartDate,
+        plannedEndDate: p.plannedEndDate,
+        status: p.status,
+        phase: p.phase,
+        rationale: p.rationale,
+        priority: p.priority,
+        plannedManDays,
+        actualManDays,
+        scheduleVariance: actualManDays > 0 ? actualManDays - plannedManDays : 0,
+        delayStatus: p.delayStatus,
+        draftReportDate: p.draftReportDate,
+        finalReportDate: p.finalReportDate,
+        totalFindings: p.totalFindings ?? 0,
+        openFindings: p.openFindings ?? 0,
+        actionStatus: p.actionStatus ?? 'NO_ACTIONS',
+    };
+}
 
 type BadgeVariant = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'success' | 'warning' | 'neutral' | 'primary';
 
 const STATUS_CFG: Record<string, { label: string; variant: BadgeVariant }> = {
+    DRAFT: { label: 'Taslak', variant: 'neutral' },
+    APPROVED: { label: 'Onaylandı', variant: 'info' },
     PLANNED: { label: 'Planlandı', variant: 'info' },
     IN_PROGRESS: { label: 'Devam Ediyor', variant: 'warning' },
     COMPLETED: { label: 'Tamamlandı', variant: 'success' },
@@ -79,11 +102,28 @@ const fmt = (d: string | null) => {
 };
 
 export default function AuditPlanPage() {
-    const [audits] = useState<AuditPlan[]>(DEMO_AUDITS);
+    const [audits, setAudits] = useState<AuditPlan[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
     const [page, setPage] = useState(1);
     const pageSize = 15;
+
+    const loadAudits = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const res: any = await api.getAuditPlans({ limit: 500 });
+            setAudits((res.data || []).map(mapPlan));
+        } catch {
+            setError('Denetim planları yüklenemedi.');
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { loadAudits(); }, [loadAudits]);
 
     const setFilter = (key: string, value: string) => {
         setActiveFilters(p => ({ ...p, [key]: value }));
@@ -200,7 +240,7 @@ export default function AuditPlanPage() {
         },
         {
             key: 'rationale', header: 'Gerekçe', defaultWidth: 130,
-            render: (a) => <span className="text-xs text-slate-500">{RATIONALE_LABEL[a.rationale]}</span>,
+            render: (a) => <span className="text-xs text-slate-500">{a.rationale ? RATIONALE_LABEL[a.rationale] : '—'}</span>,
         },
         {
             key: 'actions', header: 'İşlemler', defaultWidth: 90,
@@ -247,6 +287,19 @@ export default function AuditPlanPage() {
     }, [searchQuery, activeFilters]);
 
     const activeFilterCount = Object.values(activeFilters).filter(v => v && v !== 'all').length;
+
+    if (error && audits.length === 0 && !loading) {
+        return (
+            <PageShell>
+                <PageHeader
+                    title="Denetim Planı"
+                    description="İç denetim faaliyetlerini planlayın ve takip edin"
+                    breadcrumbs={[{ label: 'Denetim & İnceleme' }, { label: 'Denetim Planı' }]}
+                />
+                <ErrorState description={error} onRetry={loadAudits} />
+            </PageShell>
+        );
+    }
 
     return (
         <PageShell>
@@ -302,6 +355,7 @@ export default function AuditPlanPage() {
                 page={page}
                 pageSize={pageSize}
                 onPageChange={setPage}
+                loading={loading}
                 storageKey="audit-plans-table"
                 emptyTitle="Denetim planı bulunamadı"
                 emptyDescription="Filtrelerinizi değiştirin veya yeni bir denetim planı oluşturun."

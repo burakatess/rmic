@@ -91,6 +91,8 @@ export class ComplianceService {
                 crossRefsTo: {
                     include: { source: { include: { regulation: { select: { id: true, code: true, name: true } } } } },
                 },
+                risks: { include: { risk: { select: { id: true, riskId: true, name: true } } } },
+                controls: { include: { control: { select: { id: true, controlId: true, name: true } } } },
             },
         });
     }

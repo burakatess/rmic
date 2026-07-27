@@ -558,6 +558,22 @@ model AuditPlan {
   riskIds    String[]
   controlIds String[]
 
+  // Planlama detayları (Design System v2 / audits-plans UI)
+  auditedUnit       String?
+  auditTeam         String?
+  teamLeader        String?
+  teamSize          Int?
+  plannedStartDate  DateTime?
+  plannedEndDate    DateTime?
+  phase             AuditPlanPhase      @default(PLANNING)
+  rationale         AuditPlanRationale?
+  priority          AuditPlanPriority   @default(MEDIUM)
+  plannedManDays    Int?
+  actualManDays     Int?
+  delayStatus       AuditDelayStatus    @default(ON_TRACK)
+  draftReportDate   DateTime?
+  finalReportDate   DateTime?
+
   // Relations
   executions AuditExecution[]
 
@@ -570,12 +586,15 @@ model AuditPlan {
 
 model AuditExecution {
   id          String               @id @default(cuid())
+  executionId String?              @unique // AE-2024-001
   auditPlan   AuditPlan            @relation(fields: [auditPlanId], references: [id])
   auditPlanId String
   startDate   DateTime
   endDate     DateTime?
   auditor     String
   status      AuditExecutionStatus @default(IN_PROGRESS)
+  progress    Int                  @default(0) // 0-100
+  workpapers  Int                  @default(0)
 
   // Test results stored as JSON
   controlTests Json? // [{controlId, result, evidence, notes}]
@@ -688,14 +707,44 @@ enum PeriodType {
 enum AuditPlanStatus {
   DRAFT
   APPROVED
-  IN_PROGRESS
-  COMPLETED
-}
-
-enum AuditExecutionStatus {
+  PLANNED
   IN_PROGRESS
   COMPLETED
   CANCELLED
+}
+
+enum AuditExecutionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  REVIEW
+  COMPLETED
+  CANCELLED
+}
+
+enum AuditPlanPhase {
+  PLANNING
+  FIELDWORK
+  REPORTING
+  CLOSED
+}
+
+enum AuditPlanRationale {
+  PERIODIC
+  REGULATORY
+  MANAGEMENT_REQUEST
+  RISK_BASED
+}
+
+enum AuditPlanPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AuditDelayStatus {
+  ON_TRACK
+  AT_RISK
+  DELAYED
 }
 
 enum FindingSeverity {

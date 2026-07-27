@@ -1,14 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { PageHeader, StatusBadge, Button } from '@/components/ui';
+import { PageHeader, StatusBadge, Button, ErrorState } from '@/components/ui';
+import { api } from '@/lib/api';
 
 interface AuditExecution {
     id: string;
     executionId: string;
     planName: string;
-    status: 'NOT_STARTED' | 'IN_PROGRESS' | 'REVIEW' | 'COMPLETED';
+    status: 'NOT_STARTED' | 'IN_PROGRESS' | 'REVIEW' | 'COMPLETED' | 'CANCELLED';
     startDate: string;
     auditor: string;
     progress: number;
@@ -16,33 +17,67 @@ interface AuditExecution {
     workpapers: number;
 }
 
-const DEMO_EXECUTIONS: AuditExecution[] = [
-    { id: '1', executionId: 'AE-2024-001', planName: 'BT Güvenlik Denetimi', status: 'IN_PROGRESS', startDate: '2024-10-15', auditor: 'Dış Denetim A.Ş.', progress: 65, findingsCount: 4, workpapers: 12 },
-    { id: '2', executionId: 'AE-2024-002', planName: 'Operasyonel Risk Denetimi', status: 'COMPLETED', startDate: '2024-06-01', auditor: 'Dış Denetim B.Ş.', progress: 100, findingsCount: 8, workpapers: 25 },
-];
-
-type BadgeVariant = 'neutral' | 'warning' | 'info' | 'success';
+type BadgeVariant = 'neutral' | 'warning' | 'info' | 'success' | 'critical';
 
 const statusLabels: Record<string, { label: string; variant: BadgeVariant }> = {
     NOT_STARTED: { label: 'Başlamadı', variant: 'neutral' },
     IN_PROGRESS: { label: 'Devam Ediyor', variant: 'warning' },
     REVIEW: { label: 'İncelemede', variant: 'info' },
     COMPLETED: { label: 'Tamamlandı', variant: 'success' },
+    CANCELLED: { label: 'İptal', variant: 'critical' },
 };
+
+function mapExecution(e: any): AuditExecution {
+    return {
+        id: e.id,
+        executionId: e.executionId || '—',
+        planName: e.auditPlan?.name || '—',
+        status: e.status,
+        startDate: e.startDate,
+        auditor: e.auditor,
+        progress: e.progress ?? 0,
+        findingsCount: e._count?.findings ?? 0,
+        workpapers: e.workpapers ?? 0,
+    };
+}
 
 export default function AuditExecutionsPage() {
     const [executions, setExecutions] = useState<AuditExecution[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [selectedExecution, setSelectedExecution] = useState<AuditExecution | null>(null);
 
-    useEffect(() => {
-        setTimeout(() => {
-            setExecutions(DEMO_EXECUTIONS);
+    const load = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const res: any = await api.getAuditExecutions({ limit: 200 });
+            setExecutions((res.data || []).map(mapExecution));
+        } catch {
+            setError('Denetim uygulamaları yüklenemedi.');
+        } finally {
             setLoading(false);
-        }, 500);
+        }
     }, []);
 
+    useEffect(() => { load(); }, [load]);
+
     const totalFindings = executions.reduce((sum, e) => sum + e.findingsCount, 0);
+
+    if (error && executions.length === 0 && !loading) {
+        return (
+            <div className="flex flex-col h-full bg-slate-50/50">
+                <div className="px-8 pt-8">
+                    <PageHeader
+                        title="Denetim Uygulama"
+                        description="Aktif denetimleri yönetin ve takip edin"
+                        breadcrumbs={[{ label: 'Denetim & İnceleme' }, { label: 'Denetim Uygulama' }]}
+                    />
+                    <ErrorState description={error} onRetry={load} />
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="flex flex-col h-full bg-slate-50/50">
@@ -78,6 +113,10 @@ export default function AuditExecutionsPage() {
                 {loading ? (
                     <div className="flex justify-center py-12">
                         <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                ) : executions.length === 0 ? (
+                    <div className="bg-white rounded-2xl p-12 shadow-sm border border-slate-200 text-center">
+                        <p className="text-sm text-slate-500">Henüz kayıtlı denetim uygulaması yok.</p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -156,9 +195,6 @@ export default function AuditExecutionsPage() {
                                         + Yeni Bulgu Ekle
                                     </Button>
                                 </Link>
-                                <Button variant="outline" className="w-full justify-center">
-                                    Çalışma Dosyası Yükle
-                                </Button>
                             </div>
 
                             {/* Stats */}
