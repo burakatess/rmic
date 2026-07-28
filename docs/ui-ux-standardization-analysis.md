@@ -1,5 +1,11 @@
 # RMIC UI/UX Standardization Analysis — Enterprise Design System v2
 
+> **GÜNCELLEME NOTU (Faz 16, 2026-07-28):** Bu dokümanda "Legacy/Gen-1" olarak işaretlenen
+> `admin/users`, `admin/roles`, `admin/parameters`, `admin/integrations`, `compliance/regulations`,
+> `compliance/regulations/library` sayfaları artık tamamı Design System v2'ye taşınmış durumda
+> (`PageShell`/`PageHeader`/`DataTable`, `alert()` yok, gerçek backend verisi). Bu doküman aşağıdaki
+> envanter tablosu için artık güncel değil — kod tabanının fiilî durumunu esas alın.
+
 > Sprint hedefi: Yeni özellik değil, mevcut frontend'in tek bir kurumsal tasarım dili altında standartlaştırılması.
 > **Kesin kural:** Backend, Prisma, API contract, DTO, controller, service, iş kuralları, ID formatları değişmeyecek.
 >
