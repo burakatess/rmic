@@ -11,3 +11,6 @@ node_modules
 
 # Yüklenen dosyalar
 uploads/
+
+# Baseline'lama öncesi arşivlenen, artık geçersiz migration geçmişi (bkz. Faz 15)
+prisma/migrations_archived_*/
