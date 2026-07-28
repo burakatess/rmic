@@ -217,16 +217,16 @@ export default function Sidebar() {
             <div className="relative flex h-16 items-center justify-center border-b border-slate-800/80 bg-[#0b0f19]">
                 <div className="flex items-center gap-3">
                     <div className="relative">
-                        <div className="absolute inset-0 rounded-[10px] blur-md opacity-60" style={{background: 'linear-gradient(135deg, #4f46e5, #7c3aed)'}} />
+                        <div className="absolute inset-0 rounded-[10px] blur-md opacity-60" style={{background: 'linear-gradient(135deg, #2563eb, #1d4ed8)'}} />
                         <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" className="relative">
                             <defs>
                                 <linearGradient id="sb-logo-bg" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
-                                    <stop stopColor="#4f46e5" />
-                                    <stop offset="1" stopColor="#7c3aed" />
+                                    <stop stopColor="#2563eb" />
+                                    <stop offset="1" stopColor="#1d4ed8" />
                                 </linearGradient>
                                 <linearGradient id="sb-logo-border" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
-                                    <stop stopColor="#818cf8" stopOpacity="0.7" />
-                                    <stop offset="1" stopColor="#a78bfa" stopOpacity="0.4" />
+                                    <stop stopColor="#60a5fa" stopOpacity="0.7" />
+                                    <stop offset="1" stopColor="#3b82f6" stopOpacity="0.4" />
                                 </linearGradient>
                                 <linearGradient id="sb-top-shine" x1="0" y1="0" x2="0" y2="1">
                                     <stop stopColor="white" stopOpacity="0.18" />
@@ -245,7 +245,7 @@ export default function Sidebar() {
                     </div>
                     <div className="flex flex-col">
                         <span className="text-[16px] font-bold tracking-tight text-white leading-none">RMIC</span>
-                        <span className="text-[10px] font-semibold tracking-[0.15em] text-indigo-400 uppercase leading-none mt-1">GRC Platform</span>
+                        <span className="text-[10px] font-semibold tracking-[0.15em] text-blue-400 uppercase leading-none mt-1">GRC Platform</span>
                     </div>
                 </div>
             </div>

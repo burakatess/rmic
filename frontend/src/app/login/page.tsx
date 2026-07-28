@@ -44,16 +44,16 @@ export default function LoginPage() {
                 {/* Logo & Title */}
                 <div className="text-center mb-10">
                     <div className="inline-flex items-center justify-center mb-6 relative">
-                        <div className="absolute inset-0 rounded-[20px] blur-2xl opacity-70" style={{background: 'linear-gradient(135deg, #4f46e5, #7c3aed)'}} />
+                        <div className="absolute inset-0 rounded-[20px] blur-2xl opacity-70" style={{background: 'linear-gradient(135deg, #2563eb, #1d4ed8)'}} />
                         <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg" className="relative">
                             <defs>
                                 <linearGradient id="login-logo-bg" x1="0" y1="0" x2="72" y2="72" gradientUnits="userSpaceOnUse">
-                                    <stop stopColor="#4f46e5" />
-                                    <stop offset="1" stopColor="#7c3aed" />
+                                    <stop stopColor="#2563eb" />
+                                    <stop offset="1" stopColor="#1d4ed8" />
                                 </linearGradient>
                                 <linearGradient id="login-logo-border" x1="0" y1="0" x2="72" y2="72" gradientUnits="userSpaceOnUse">
-                                    <stop stopColor="#818cf8" stopOpacity="0.8" />
-                                    <stop offset="1" stopColor="#a78bfa" stopOpacity="0.3" />
+                                    <stop stopColor="#60a5fa" stopOpacity="0.8" />
+                                    <stop offset="1" stopColor="#3b82f6" stopOpacity="0.3" />
                                 </linearGradient>
                                 <linearGradient id="login-top-shine" x1="0" y1="0" x2="0" y2="1">
                                     <stop stopColor="white" stopOpacity="0.16" />
@@ -70,7 +70,7 @@ export default function LoginPage() {
                             <path d="M30 37L34.5 41.5L43 31" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                     </div>
-                    <h1 className="text-3xl font-bold text-white tracking-tight">RMIC <span className="text-indigo-400 font-medium">GRC</span></h1>
+                    <h1 className="text-3xl font-bold text-white tracking-tight">RMIC <span className="text-blue-400 font-medium">GRC</span></h1>
                     <p className="text-base text-slate-400 mt-2">
                         Kurumsal Risk ve Uyum Platformu
                     </p>
