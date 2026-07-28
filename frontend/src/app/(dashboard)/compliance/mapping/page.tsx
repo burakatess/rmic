@@ -17,6 +17,7 @@ interface MappingItem {
     regulationCode: string;
     articleCode: string;
     articleTitle: string;
+    articleDescription: string;
     risks: { id: string; riskId: string; name: string }[];
     controls: { id: string; controlId: string; name: string }[];
 }
@@ -57,6 +58,7 @@ export default function ComplianceMappingPage() {
                         regulationCode: reg.code,
                         articleCode: a.articleCode,
                         articleTitle: a.title,
+                        articleDescription: a.description || '',
                         risks: (a.risks || []).map((rr: any) => ({ id: rr.risk.id, riskId: rr.risk.riskId, name: rr.risk.name })),
                         controls: (a.controls || []).map((cc: any) => ({ id: cc.control.id, controlId: cc.control.controlId, name: cc.control.name })),
                     });
@@ -96,12 +98,17 @@ export default function ComplianceMappingPage() {
             ),
         },
         {
-            key: 'article', header: 'Madde', defaultWidth: 200,
+            key: 'articleCode', header: 'Madde', defaultWidth: 130,
             render: (m) => (
-                <div>
-                    <p className="text-xs font-medium text-slate-800">{m.articleCode}</p>
-                    <p className="text-xs text-slate-500">{m.articleTitle}</p>
-                </div>
+                <p className="text-xs font-semibold text-slate-800" title={m.articleTitle}>{m.articleCode}</p>
+            ),
+        },
+        {
+            key: 'articleDescription', header: 'Açıklama', defaultWidth: 320,
+            render: (m) => (
+                <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed" title={m.articleDescription}>
+                    {m.articleDescription || '—'}
+                </p>
             ),
         },
         {
