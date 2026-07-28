@@ -45,8 +45,32 @@ export class AuditsService {
         return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
     }
 
+    async findPlanById(id: string) {
+        const plan = await this.prisma.auditPlan.findUnique({
+            where: { id },
+            include: {
+                _count: { select: { executions: true } },
+                executions: {
+                    include: {
+                        _count: { select: { findings: true } },
+                        findings: {
+                            select: {
+                                id: true,
+                                status: true,
+                                actions: { select: { status: true } },
+                            },
+                        },
+                    },
+                    orderBy: { createdAt: 'desc' },
+                },
+            },
+        });
+        if (!plan) throw new NotFoundException(`Denetim planı bulunamadı: ${id}`);
+        return this.withPlanDerivedFields(plan, true);
+    }
+
     /** Bulgu/aksiyon sayıları executions ilişkisinden türetilir — planda ayrıca saklanmaz. */
-    private withPlanDerivedFields(plan: any) {
+    private withPlanDerivedFields(plan: any, includeExecutions = false) {
         const findings = (plan.executions || []).flatMap((e: any) => e.findings || []);
         const totalFindings = findings.length;
         const openFindings = findings.filter((f: any) => f.status !== 'CLOSED').length;
@@ -58,7 +82,14 @@ export class AuditsService {
                 : 'IN_PROGRESS';
         }
         const { executions, ...rest } = plan;
-        return { ...rest, totalFindings, openFindings, actionStatus };
+        const executionsSummary = includeExecutions
+            ? (executions || []).map((e: any) => ({
+                id: e.id, executionId: e.executionId, startDate: e.startDate, endDate: e.endDate,
+                auditor: e.auditor, status: e.status, progress: e.progress, workpapers: e.workpapers,
+                findingsCount: e._count?.findings ?? 0,
+            }))
+            : undefined;
+        return { ...rest, totalFindings, openFindings, actionStatus, ...(includeExecutions ? { executions: executionsSummary } : {}) };
     }
 
     async createPlan(data: any, userId: string) {
@@ -152,7 +183,7 @@ export class AuditsService {
     // ─── Findings ────────────────────────────────────────────────────────────
 
     async findAllFindings(query: any) {
-        const { search, riskId, controlId, severity, status, findingType, sortBy, sortOrder } = query;
+        const { search, riskId, controlId, severity, status, findingType, auditPlanId, sortBy, sortOrder } = query;
         const page = parseInt(query.page, 10) || 1;
         const limit = parseInt(query.limit, 10) || 50;
         const skip = (page - 1) * limit;
@@ -171,6 +202,7 @@ export class AuditsService {
         if (severity) where.severity = severity;
         if (status) where.status = status;
         if (findingType) where.findingType = findingType;
+        if (auditPlanId) where.auditExecution = { auditPlanId };
 
         const [findings, total] = await Promise.all([
             this.prisma.finding.findMany({

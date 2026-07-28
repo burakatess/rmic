@@ -485,6 +485,10 @@ class ApiClient {
         return this.request<any>(`/audit-plans${query}`);
     }
 
+    async getAuditPlan(id: string) {
+        return this.request<any>(`/audit-plans/${id}`);
+    }
+
     async createAuditPlan(data: unknown) {
         return this.request('/audit-plans', { method: 'POST', body: data });
     }
