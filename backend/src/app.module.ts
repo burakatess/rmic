@@ -21,6 +21,7 @@ import { UploadsModule } from './modules/uploads/uploads.module';
 import { RiskProposalsModule } from './modules/risk-proposals/risk-proposals.module';
 import { JwtAuthGuard } from './common/guards';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 @Module({
   imports: [
@@ -64,6 +65,11 @@ import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter'
     {
       provide: APP_FILTER,
       useClass: PrismaExceptionFilter,
+    },
+    // Kalan tüm hatalar için son çare + Sentry raporlama — bkz. common/filters/all-exceptions.filter.ts
+    {
+      provide: APP_FILTER,
+      useClass: AllExceptionsFilter,
     },
   ],
 })

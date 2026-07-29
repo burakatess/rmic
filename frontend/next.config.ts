@@ -7,6 +7,17 @@ const isProd = process.env.NODE_ENV === 'production';
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 const apiOrigin = new URL(apiUrl).origin;
 
+// Self-hosted Sentry DSN tanımlıysa, tarayıcının hata event'lerini gönderebilmesi
+// için ingest origin'i CSP connect-src'e eklenir — aksi halde CSP sessizce engeller.
+let sentryOrigin: string | null = null;
+if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+  try {
+    sentryOrigin = new URL(process.env.NEXT_PUBLIC_SENTRY_DSN).origin;
+  } catch {
+    sentryOrigin = null;
+  }
+}
+
 // Recharts SVG/inline stilleri ve Next.js'in kendi inline script'leri için
 // 'unsafe-inline' gerekiyor; dış kaynaklardan script/style yüklenmiyor.
 const csp = [
@@ -15,7 +26,7 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  `connect-src 'self' ${apiOrigin}`,
+  `connect-src 'self' ${apiOrigin}${sentryOrigin ? ` ${sentryOrigin}` : ''}`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
