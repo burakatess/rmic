@@ -288,6 +288,11 @@ class ApiClient {
         return this.request('/reports/dashboard');
     }
 
+    // Notifications
+    async getNotifications() {
+        return this.request<any[]>('/notifications');
+    }
+
     // Risks
     async getRisks(params?: Record<string, string | number>) {
         const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';

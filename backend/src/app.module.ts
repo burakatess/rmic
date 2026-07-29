@@ -19,6 +19,7 @@ import { RiskControlsModule } from './modules/risk-controls/risk-controls.module
 import { RiskActionsModule } from './modules/risk-actions/risk-actions.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { RiskProposalsModule } from './modules/risk-proposals/risk-proposals.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { JwtAuthGuard } from './common/guards';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -40,6 +41,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     AuditsModule,
     ActionsModule,
     ReportsModule,
+    NotificationsModule,
     ComplianceModule,
     AdminModule,
     RiskEntryModule,
