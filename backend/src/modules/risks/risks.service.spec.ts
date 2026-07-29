@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { RiskStatus } from './dto';
 import { RisksService } from './risks.service';
 import { PrismaService } from '../../prisma';
@@ -81,6 +81,9 @@ describe('RisksService', () => {
             },
             auditLog: {
                 create: jest.fn(),
+            },
+            user: {
+                findUnique: jest.fn(),
             },
         };
 
@@ -221,6 +224,82 @@ describe('RisksService', () => {
 
             await expect(service.delete('non-existent', 'user-1')).rejects.toThrow(
                 NotFoundException,
+            );
+        });
+    });
+
+    describe('treat', () => {
+        it('IDENTIFIED statüsündeki riski tedaviye almaya izin vermez (önce değerlendirilmeli)', async () => {
+            prisma.risk.findUnique.mockResolvedValue({ ...mockRisk, status: RiskStatus.IDENTIFIED });
+
+            await expect(
+                service.treat('risk-1', { treatmentDecision: 'MITIGATE' } as any, 'user-1'),
+            ).rejects.toThrow('Risk must be assessed before treatment');
+            expect(prisma.risk.update).not.toHaveBeenCalled();
+        });
+
+        it('ACCEPT kararında statüyü ACCEPTED yapar', async () => {
+            prisma.risk.findUnique.mockResolvedValue({ ...mockRisk, status: RiskStatus.ASSESSED });
+            prisma.risk.update.mockResolvedValue({ ...mockRisk, status: 'ACCEPTED', version: 2 });
+            prisma.riskHistory.create.mockResolvedValue({});
+            prisma.auditLog.create.mockResolvedValue({});
+
+            await service.treat('risk-1', { treatmentDecision: 'ACCEPT' } as any, 'user-1');
+
+            expect(prisma.risk.update).toHaveBeenCalledWith(
+                expect.objectContaining({ data: expect.objectContaining({ status: 'ACCEPTED', treatmentDecision: 'ACCEPT' }) }),
+            );
+        });
+
+        it('MITIGATE gibi ACCEPT dışı kararlarda statüyü TREATED yapar', async () => {
+            prisma.risk.findUnique.mockResolvedValue({ ...mockRisk, status: RiskStatus.ASSESSED });
+            prisma.risk.update.mockResolvedValue({ ...mockRisk, status: 'TREATED', version: 2 });
+            prisma.riskHistory.create.mockResolvedValue({});
+            prisma.auditLog.create.mockResolvedValue({});
+
+            await service.treat('risk-1', { treatmentDecision: 'MITIGATE' } as any, 'user-1');
+
+            expect(prisma.risk.update).toHaveBeenCalledWith(
+                expect.objectContaining({ data: expect.objectContaining({ status: 'TREATED' }) }),
+            );
+        });
+    });
+
+    describe('approveTreatment', () => {
+        it('tedavi kararı olmayan riski onaylamaya izin vermez', async () => {
+            prisma.risk.findUnique.mockResolvedValue({ ...mockRisk, treatmentDecision: null });
+
+            await expect(service.approveTreatment('risk-1', 'user-1')).rejects.toThrow(BadRequestException);
+            expect(prisma.risk.update).not.toHaveBeenCalled();
+        });
+
+        it('onaylayan kullanıcının ad-soyadını treatmentApprovedBy olarak yazar (userId değil)', async () => {
+            prisma.risk.findUnique.mockResolvedValue({ ...mockRisk, treatmentDecision: 'MITIGATE' });
+            prisma.user.findUnique.mockResolvedValue({ firstName: 'Ahmet', lastName: 'Yılmaz' });
+            prisma.risk.update.mockResolvedValue({ ...mockRisk, version: 2 });
+            prisma.riskHistory.create.mockResolvedValue({});
+            prisma.auditLog.create.mockResolvedValue({});
+
+            await service.approveTreatment('risk-1', 'user-1');
+
+            expect(prisma.risk.update).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    data: expect.objectContaining({ treatmentApproval: true, treatmentApprovedBy: 'Ahmet Yılmaz' }),
+                }),
+            );
+        });
+
+        it('kullanıcı bulunamazsa userId\'yi fallback olarak kullanır', async () => {
+            prisma.risk.findUnique.mockResolvedValue({ ...mockRisk, treatmentDecision: 'MITIGATE' });
+            prisma.user.findUnique.mockResolvedValue(null);
+            prisma.risk.update.mockResolvedValue({ ...mockRisk, version: 2 });
+            prisma.riskHistory.create.mockResolvedValue({});
+            prisma.auditLog.create.mockResolvedValue({});
+
+            await service.approveTreatment('risk-1', 'user-1');
+
+            expect(prisma.risk.update).toHaveBeenCalledWith(
+                expect.objectContaining({ data: expect.objectContaining({ treatmentApprovedBy: 'user-1' }) }),
             );
         });
     });
