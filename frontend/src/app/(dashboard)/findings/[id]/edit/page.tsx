@@ -250,13 +250,16 @@ export default function FindingEditPage() {
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">İlgili GMY</label>
-                                <input
-                                    type="text"
+                                <select
                                     value={formData.gmy}
                                     onChange={e => setFormData({ ...formData, gmy: e.target.value })}
-                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none"
-                                    placeholder="Örn: BT GMY..."
-                                />
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/10 outline-none"
+                                >
+                                    <option value="">Seçiniz...</option>
+                                    {directorates.map(d => (
+                                        <option key={d.id} value={d.name}>{d.name}</option>
+                                    ))}
+                                </select>
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">İlgili Direktörlük</label>
@@ -276,13 +279,16 @@ export default function FindingEditPage() {
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">İletişim Kişisi</label>
-                                <input
-                                    type="text"
+                                <select
                                     value={formData.responsiblePerson}
                                     onChange={e => setFormData({ ...formData, responsiblePerson: e.target.value })}
-                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none"
-                                    placeholder="İsim Soyisim..."
-                                />
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/10 outline-none"
+                                >
+                                    <option value="">Seçiniz...</option>
+                                    {users.map(u => (
+                                        <option key={u.id} value={`${u.firstName} ${u.lastName}`.trim()}>{`${u.firstName} ${u.lastName}`.trim()}</option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
                     </div>

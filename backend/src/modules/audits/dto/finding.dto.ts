@@ -3,6 +3,7 @@ import {
     MaxLength, ValidateNested, IsArray, ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { EmptyToUndefined } from '../../../common/decorators';
 
 // Şema seviyesinde FindingSeverity hâlâ 4 değer taşıyor (geriye dönük uyumluluk —
 // eski kayıtlar MEDIUM/LOW olabilir), ancak İş kuralı: yeni bulgularda yalnızca
@@ -77,9 +78,9 @@ export class CreateFindingDto {
     @IsOptional() @IsString() internalControlAssessment?: string;
     @IsOptional() @IsString() currentStatusDetail?: string;
     @IsOptional() @IsString() birimCevabi?: string;
-    @IsOptional() @IsDateString() targetResolutionDate?: string;
-    @IsOptional() @IsDateString() closedDate?: string;
-    @IsOptional() @IsDateString() testDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() targetResolutionDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() closedDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() testDate?: string;
     // Legacy/dead alan — Finding modelinde skaler karşılığı yok, backend yok sayar.
     @IsOptional() @IsString() attachment?: string;
     @IsOptional() @IsString() assigneeId?: string;
@@ -114,9 +115,9 @@ export class UpdateFindingDto {
     @IsOptional() @IsString() birimCevabi?: string;
     // targetResolutionDate DTO'da yer alır (frontend eski payload'ları kırılmasın diye)
     // ama servis katmanında İSTEMCİDEN gelen değer HER ZAMAN yok sayılır (Madde 4).
-    @IsOptional() @IsDateString() targetResolutionDate?: string;
-    @IsOptional() @IsDateString() closedDate?: string;
-    @IsOptional() @IsDateString() testDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() targetResolutionDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() closedDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() testDate?: string;
     @IsOptional() @IsString() attachment?: string;
     @IsOptional() @IsString() assigneeId?: string;
     @IsOptional() @IsBoolean() sendEmail?: boolean;
