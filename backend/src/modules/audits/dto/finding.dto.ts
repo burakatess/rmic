@@ -1,8 +1,18 @@
 import {
-    IsString, IsNotEmpty, IsOptional, IsEnum, IsBoolean, IsDateString,
+    IsString, IsNotEmpty, IsOptional, IsEnum, IsBoolean, IsDateString, IsIn,
     MaxLength, ValidateNested, IsArray, ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { EmptyToUndefined } from '../../../common/decorators';
+
+// Şema seviyesinde FindingSeverity hâlâ 4 değer taşıyor (geriye dönük uyumluluk —
+// eski kayıtlar MEDIUM/LOW olabilir), ancak İş kuralı: yeni bulgularda yalnızca
+// KZ (CRITICAL) / KD (HIGH) seçilebilir. Kısıtlama burada @IsIn ile uygulanıyor;
+// enum'dan MEDIUM/LOW SİLİNMEDİ (mevcut veriyi bozmamak için) — bkz. rapor.
+export const CREATABLE_SEVERITIES = ['CRITICAL', 'HIGH'] as const;
+// FindingStatus şeması 6 değer taşıyor (OPEN/PENDING_REVIEW/VERIFIED legacy) — iş
+// kuralı: yeni/güncellenen bulgularda yalnızca bu 3 değer seçilebilir.
+export const SELECTABLE_STATUSES = ['IN_PROGRESS', 'PARTIALLY_CLOSED', 'CLOSED'] as const;
 
 export enum FindingSeverity { CRITICAL = 'CRITICAL', HIGH = 'HIGH', MEDIUM = 'MEDIUM', LOW = 'LOW' }
 export enum FindingType {
@@ -61,15 +71,16 @@ export class CreateFindingDto {
     @IsOptional() @IsString() @MaxLength(500) summary?: string;
     @IsOptional() @IsString() gmy?: string;
     @IsOptional() @IsString() relatedDepartment?: string;
+    @IsOptional() @IsString() directorateId?: string;
     @IsOptional() @IsString() responsiblePerson?: string;
-    @IsOptional() @IsEnum(FindingStatus) status?: FindingStatus;
-    @IsOptional() @IsEnum(FindingSeverity) severity?: FindingSeverity;
+    @IsOptional() @IsIn(SELECTABLE_STATUSES) status?: string;
+    @IsOptional() @IsIn(CREATABLE_SEVERITIES) severity?: string;
     @IsOptional() @IsString() internalControlAssessment?: string;
     @IsOptional() @IsString() currentStatusDetail?: string;
     @IsOptional() @IsString() birimCevabi?: string;
-    @IsOptional() @IsDateString() targetResolutionDate?: string;
-    @IsOptional() @IsDateString() closedDate?: string;
-    @IsOptional() @IsDateString() testDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() targetResolutionDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() closedDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() testDate?: string;
     // Legacy/dead alan — Finding modelinde skaler karşılığı yok, backend yok sayar.
     @IsOptional() @IsString() attachment?: string;
     @IsOptional() @IsString() assigneeId?: string;
@@ -95,20 +106,24 @@ export class UpdateFindingDto {
     @IsOptional() @IsString() @MaxLength(500) summary?: string;
     @IsOptional() @IsString() gmy?: string;
     @IsOptional() @IsString() relatedDepartment?: string;
+    @IsOptional() @IsString() directorateId?: string;
     @IsOptional() @IsString() responsiblePerson?: string;
-    @IsOptional() @IsEnum(FindingStatus) status?: FindingStatus;
-    @IsOptional() @IsEnum(FindingSeverity) severity?: FindingSeverity;
+    @IsOptional() @IsIn(SELECTABLE_STATUSES) status?: string;
+    @IsOptional() @IsIn(CREATABLE_SEVERITIES) severity?: string;
     @IsOptional() @IsString() internalControlAssessment?: string;
     @IsOptional() @IsString() currentStatusDetail?: string;
     @IsOptional() @IsString() birimCevabi?: string;
-    @IsOptional() @IsDateString() targetResolutionDate?: string;
-    @IsOptional() @IsDateString() closedDate?: string;
-    @IsOptional() @IsDateString() testDate?: string;
+    // targetResolutionDate DTO'da yer alır (frontend eski payload'ları kırılmasın diye)
+    // ama servis katmanında İSTEMCİDEN gelen değer HER ZAMAN yok sayılır (Madde 4).
+    @IsOptional() @EmptyToUndefined() @IsDateString() targetResolutionDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() closedDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() testDate?: string;
     @IsOptional() @IsString() attachment?: string;
     @IsOptional() @IsString() assigneeId?: string;
     @IsOptional() @IsBoolean() sendEmail?: boolean;
     @IsOptional() @IsString() riskId?: string;
     @IsOptional() @IsEnum(FindingSource) source?: FindingSource;
+    @IsOptional() @IsString() impact?: string;
     @IsOptional() @IsString() affectedSystem?: string;
     @IsOptional() @IsString() recommendation?: string;
     @IsOptional() @IsString() managementResponse?: string;

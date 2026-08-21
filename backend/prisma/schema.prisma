@@ -426,10 +426,25 @@ model ControlTest {
   status        ControlTestStatus  @default(BEKLIYOR)
   findingStatus FindingTestStatus?  // Tamamlanınca dolar
 
-  // Approval Workflow
+  // İkinci Kontrolcü Onay Akışı — TAMAMLANDI = onaya gönderildi (bkz. enum yorumu)
   approvedAt      DateTime?
   approvedById    String?
-  rejectionReason String?
+  rejectionReason String?   // Geri gönderme gerekçesi (zorunlu)
+  returnedById    String?   // Geri gönderen ikinci kontrolcü
+  returnedAt      DateTime?
+
+  // Final onaydan sonra iptal — yalnızca SYSTEM_ADMIN
+  cancelledAt    DateTime?
+  cancelledById  String?
+  cancelReason   String?
+
+  // Devam eden açık bulguya "referans" ile ilerletme (Madde 6) — basit tek-referans
+  // ilişki: bir test en fazla bir açık bulguyu referans alabilir. Çoklu referans
+  // ihtiyacı doğarsa ayrı bir ilişki tablosuna (ControlTestFindingReference)
+  // geçilebilir; şu an için en basit/güvenli çözüm tercih edildi.
+  referencedFinding   Finding? @relation("ControlTestFindingReference", fields: [referencedFindingId], references: [id])
+  referencedFindingId String?
+  referenceReason     String?  @db.Text
 
   // Tarihler
   completedAt DateTime?
@@ -448,13 +463,18 @@ model ControlTest {
   @@index([plannedDate])
   @@index([directorateId])
   @@index([assigneeId])
+  @@index([secondControllerId])
+  @@index([referencedFindingId])
 }
 
 enum ControlTestStatus {
-  BEKLIYOR       // Henüz başlanmadı
-  DEVAM_EDIYOR   // Test yürütülüyor
-  TAMAMLANDI     // Test bitti, onay bekliyor
-  ONAYLANDI      // 2. kontrolcü onayladı
+  BEKLIYOR          // Henüz başlanmadı
+  DEVAM_EDIYOR      // Test yürütülüyor
+  TAMAMLANDI        // Test bitti, 2. kontrolcü onayına gönderildi (ONAYA_GONDERILDI ile eşdeğer —
+                     // ayrı bir statü eklenmedi, mevcut TAMAMLANDI zaten bu anlamı taşıyordu)
+  GERI_GONDERILDI   // 2. kontrolcü düzeltme için geri gönderdi
+  ONAYLANDI         // 2. kontrolcü onayladı — final
+  IPTAL             // Final onaydan sonra SYSTEM_ADMIN tarafından iptal edildi
 }
 
 enum FindingTestStatus {
@@ -538,6 +558,22 @@ model AuditPlan {
   riskIds    String[]
   controlIds String[]
 
+  // Planlama detayları (Design System v2 / audits-plans UI)
+  auditedUnit       String?
+  auditTeam         String?
+  teamLeader        String?
+  teamSize          Int?
+  plannedStartDate  DateTime?
+  plannedEndDate    DateTime?
+  phase             AuditPlanPhase      @default(PLANNING)
+  rationale         AuditPlanRationale?
+  priority          AuditPlanPriority   @default(MEDIUM)
+  plannedManDays    Int?
+  actualManDays     Int?
+  delayStatus       AuditDelayStatus    @default(ON_TRACK)
+  draftReportDate   DateTime?
+  finalReportDate   DateTime?
+
   // Relations
   executions AuditExecution[]
 
@@ -550,12 +586,15 @@ model AuditPlan {
 
 model AuditExecution {
   id          String               @id @default(cuid())
+  executionId String?              @unique // AE-2024-001
   auditPlan   AuditPlan            @relation(fields: [auditPlanId], references: [id])
   auditPlanId String
   startDate   DateTime
   endDate     DateTime?
   auditor     String
   status      AuditExecutionStatus @default(IN_PROGRESS)
+  progress    Int                  @default(0) // 0-100
+  workpapers  Int                  @default(0)
 
   // Test results stored as JSON
   controlTests Json? // [{controlId, result, evidence, notes}]
@@ -633,6 +672,8 @@ model Finding {
   attachments   FindingAttachment[]
   statusLogs    FindingStatusLog[]
   riskProposals RiskProposal[]        @relation("FindingRiskProposals")
+  // Bu bulguyu "referans" alarak ilerletilmiş sonraki kontrol testleri (Madde 6)
+  referencingTests ControlTest[]      @relation("ControlTestFindingReference")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -666,14 +707,44 @@ enum PeriodType {
 enum AuditPlanStatus {
   DRAFT
   APPROVED
-  IN_PROGRESS
-  COMPLETED
-}
-
-enum AuditExecutionStatus {
+  PLANNED
   IN_PROGRESS
   COMPLETED
   CANCELLED
+}
+
+enum AuditExecutionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  REVIEW
+  COMPLETED
+  CANCELLED
+}
+
+enum AuditPlanPhase {
+  PLANNING
+  FIELDWORK
+  REPORTING
+  CLOSED
+}
+
+enum AuditPlanRationale {
+  PERIODIC
+  REGULATORY
+  MANAGEMENT_REQUEST
+  RISK_BASED
+}
+
+enum AuditPlanPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AuditDelayStatus {
+  ON_TRACK
+  AT_RISK
+  DELAYED
 }
 
 enum FindingSeverity {

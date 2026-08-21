@@ -1,18 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { PageHeader, Button, StatusBadge, Modal, Input, Textarea } from '@/components/ui';
+import { PageHeader, Button, StatusBadge, Modal, Input, Textarea, Select, LoadingState, ErrorState } from '@/components/ui';
+import { api } from '@/lib/api';
 
 // Types
-interface Action {
+interface ActionItem {
     id: string;
     actionId: string;
     description: string;
     owner: string;
-    status: 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' | 'OVERDUE';
+    status: string;
     dueDate: string;
-    progress: number;
 }
 
 interface Risk {
@@ -30,57 +30,9 @@ interface Risk {
     treatmentApproval: boolean;
     treatmentApprovedBy: string | null;
     treatmentApprovedAt: string | null;
-    actions: Action[];
 }
 
-// Demo Data
-const DEMO_RISKS: Risk[] = [
-    {
-        id: '1', riskId: 'R-2024-0001', name: 'Siber Saldırı Riski',
-        description: 'Kurum sistemlerine yönelik siber saldırılar sonucu veri kaybı veya sistem kesintisi yaşanması riski.',
-        owner: 'Ahmet Yılmaz', ownerDepartment: 'BT Güvenlik', category: 'BT Riski',
-        inherentScore: 20, residualScore: 8, riskAppetite: 10,
-        treatmentDecision: 'MITIGATE', treatmentApproval: true, treatmentApprovedBy: 'Risk Komitesi', treatmentApprovedAt: '2024-11-20',
-        actions: [
-            { id: '1', actionId: 'A-2024-0001', description: 'Güvenlik duvarı kurallarının güncellenmesi', owner: 'Ali Demir', status: 'COMPLETED', dueDate: '2024-12-01', progress: 100 },
-            { id: '2', actionId: 'A-2024-0002', description: 'Sızma testi yaptırılması', owner: 'Ayşe Kaya', status: 'IN_PROGRESS', dueDate: '2024-12-31', progress: 60 },
-        ]
-    },
-    {
-        id: '2', riskId: 'R-2024-0002', name: 'Regülasyon Uyumsuzluk Riski',
-        description: 'BDDK ve KVKK regülasyonlarına uyumsuzluk nedeniyle yaptırım uygulanması riski.',
-        owner: 'Fatma Demir', ownerDepartment: 'Uyum Birimi', category: 'Uyum Riski',
-        inherentScore: 15, residualScore: 8, riskAppetite: 8,
-        treatmentDecision: null, treatmentApproval: false, treatmentApprovedBy: null, treatmentApprovedAt: null,
-        actions: []
-    },
-    {
-        id: '3', riskId: 'R-2024-0003', name: 'Operasyonel Hata Riski',
-        description: 'Manuel süreçlerde insan hatası nedeniyle müşteri mağduriyeti veya finansal kayıp oluşması riski.',
-        owner: 'Mehmet Kaya', ownerDepartment: 'Operasyon', category: 'Operasyonel Risk',
-        inherentScore: 12, residualScore: 6, riskAppetite: 8,
-        treatmentDecision: 'ACCEPT', treatmentApproval: false, treatmentApprovedBy: null, treatmentApprovedAt: null,
-        actions: []
-    },
-    {
-        id: '4', riskId: 'R-2024-0004', name: 'Veri Sızıntısı Riski',
-        description: 'Müşteri verilerinin izinsiz olarak üçüncü taraflarla paylaşılması veya sızdırılması riski.',
-        owner: 'Ayşe Çelik', ownerDepartment: 'BT Güvenlik', category: 'BT Riski',
-        inherentScore: 15, residualScore: 4, riskAppetite: 6,
-        treatmentDecision: 'MITIGATE', treatmentApproval: true, treatmentApprovedBy: 'Risk Komitesi', treatmentApprovedAt: '2024-10-15',
-        actions: [
-            { id: '3', actionId: 'A-2024-0003', description: 'DLP çözümü implementasyonu', owner: 'Zeynep Arslan', status: 'IN_PROGRESS', dueDate: '2025-01-31', progress: 40 },
-        ]
-    },
-    {
-        id: '5', riskId: 'R-2024-0005', name: 'Kritik Sistem Kesintisi Riski',
-        description: 'Kritik bankacılık sistemlerinde yaşanacak kesintiler nedeniyle hizmet aksaması riski.',
-        owner: 'Ali Öztürk', ownerDepartment: 'BT Operasyon', category: 'BT Riski',
-        inherentScore: 10, residualScore: 4, riskAppetite: 5,
-        treatmentDecision: 'TRANSFER', treatmentApproval: false, treatmentApprovedBy: null, treatmentApprovedAt: null,
-        actions: []
-    },
-];
+interface UserOption { id: string; firstName: string; lastName: string }
 
 const TREATMENT_OPTIONS = [
     { value: 'MITIGATE', label: 'Azalt', description: 'Kontroller ile riski kabul edilebilir seviyeye düşür', icon: '↓', color: 'bg-blue-50 border-blue-200 text-blue-700' },
@@ -90,22 +42,78 @@ const TREATMENT_OPTIONS = [
 ];
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; label: string }> = {
-    NOT_STARTED: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Başlamadı' },
-    IN_PROGRESS: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Devam Ediyor' },
-    COMPLETED: { bg: 'bg-green-100', text: 'text-green-700', label: 'Tamamlandı' },
-    OVERDUE: { bg: 'bg-red-100', text: 'text-red-700', label: 'Gecikmiş' },
+    BEKLIYOR: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Bekliyor' },
+    DEVAM_EDIYOR: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Devam Ediyor' },
+    TAMAMLANDI: { bg: 'bg-green-100', text: 'text-green-700', label: 'Tamamlandı' },
+    KAPATILDI: { bg: 'bg-green-100', text: 'text-green-700', label: 'Kapatıldı' },
+    YETERSIZ: { bg: 'bg-red-100', text: 'text-red-700', label: 'Yetersiz' },
 };
 
+function mapRisk(r: any): Risk {
+    return {
+        id: r.id,
+        riskId: r.riskId,
+        name: r.name,
+        description: r.description,
+        owner: r.owner ? `${r.owner.firstName} ${r.owner.lastName}` : '—',
+        ownerDepartment: r.owner?.department || '—',
+        category: r.category?.name || '—',
+        inherentScore: r.inherentRiskScore ?? 0,
+        residualScore: r.residualRiskScore ?? r.inherentRiskScore ?? 0,
+        riskAppetite: r.riskAppetite ?? 0,
+        treatmentDecision: r.treatmentDecision || null,
+        treatmentApproval: !!r.treatmentApproval,
+        treatmentApprovedBy: r.treatmentApprovedBy || null,
+        treatmentApprovedAt: r.treatmentApprovedAt || null,
+    };
+}
+
 export default function RiskTreatmentPage() {
-    const [risks, setRisks] = useState<Risk[]>(DEMO_RISKS);
+    const [risks, setRisks] = useState<Risk[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [selectedRiskId, setSelectedRiskId] = useState<string | null>(null);
     const [filter, setFilter] = useState<'all' | 'pending' | 'mitigate' | 'above'>('all');
     const [showActionModal, setShowActionModal] = useState(false);
-    const [newAction, setNewAction] = useState({ description: '', owner: '', dueDate: '' });
+    const [users, setUsers] = useState<UserOption[]>([]);
+    const [newAction, setNewAction] = useState({ description: '', ownerId: '', dueDate: '' });
+    const [actions, setActions] = useState<ActionItem[]>([]);
+    const [actionsLoading, setActionsLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
 
-    const selectedRisk = risks.find(r => r.id === selectedRiskId);
+    const loadRisks = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const res: any = await api.getRisks({ limit: 200 });
+            setRisks((res.data || []).map(mapRisk));
+        } catch {
+            setError('Riskler yüklenemedi.');
+        } finally {
+            setLoading(false);
+        }
+    }, []);
 
-    // Filter risks
+    useEffect(() => {
+        loadRisks();
+        api.getUsers().then((u: any) => setUsers(u || [])).catch(() => setUsers([]));
+    }, [loadRisks]);
+
+    const selectedRisk = risks.find(r => r.id === selectedRiskId) || null;
+
+    useEffect(() => {
+        if (!selectedRiskId) { setActions([]); return; }
+        setActionsLoading(true);
+        api.getActionsForRisk(selectedRiskId)
+            .then((list: any) => setActions((list || []).map((a: any) => ({
+                id: a.id, actionId: a.actionId, description: a.description,
+                owner: a.owner ? `${a.owner.firstName} ${a.owner.lastName}` : '—',
+                status: a.status, dueDate: a.dueDate,
+            }))))
+            .catch(() => setActions([]))
+            .finally(() => setActionsLoading(false));
+    }, [selectedRiskId]);
+
     const filteredRisks = risks.filter(risk => {
         if (filter === 'pending') return !risk.treatmentDecision;
         if (filter === 'mitigate') return risk.treatmentDecision === 'MITIGATE';
@@ -116,55 +124,59 @@ export default function RiskTreatmentPage() {
     const pendingCount = risks.filter(r => !r.treatmentDecision).length;
     const aboveAppetiteCount = risks.filter(r => r.residualScore > r.riskAppetite).length;
 
-    const handleSelectRisk = (riskId: string) => {
-        setSelectedRiskId(riskId);
-    };
-
-    const handleTreatmentDecision = (decision: typeof TREATMENT_OPTIONS[0]['value']) => {
+    const handleTreatmentDecision = async (decision: string) => {
         if (!selectedRiskId) return;
-        setRisks(prev => prev.map(r => {
-            if (r.id === selectedRiskId) {
-                return { ...r, treatmentDecision: decision as Risk['treatmentDecision'] };
-            }
-            return r;
-        }));
+        setSaving(true);
+        try {
+            const updated: any = await api.treatRisk(selectedRiskId, { treatmentDecision: decision });
+            setRisks(prev => prev.map(r => r.id === selectedRiskId ? mapRisk(updated) : r));
+        } catch (e: any) {
+            setError(e?.body?.message || 'Tedavi kararı kaydedilemedi.');
+        } finally {
+            setSaving(false);
+        }
     };
 
-    const handleApproval = () => {
+    const handleApproval = async () => {
         if (!selectedRiskId) return;
-        setRisks(prev => prev.map(r => {
-            if (r.id === selectedRiskId) {
-                return {
-                    ...r,
-                    treatmentApproval: true,
-                    treatmentApprovedBy: 'Risk Komitesi',
-                    treatmentApprovedAt: new Date().toISOString().split('T')[0],
-                };
-            }
-            return r;
-        }));
+        setSaving(true);
+        try {
+            const updated: any = await api.approveRiskTreatment(selectedRiskId);
+            setRisks(prev => prev.map(r => r.id === selectedRiskId ? mapRisk(updated) : r));
+        } catch (e: any) {
+            setError(e?.body?.message || 'Onay kaydedilemedi.');
+        } finally {
+            setSaving(false);
+        }
     };
 
-    const handleAddAction = () => {
-        if (!selectedRiskId || !newAction.description) return;
-        const action: Action = {
-            id: Date.now().toString(),
-            actionId: `A-2024-${String(Date.now()).slice(-4)}`,
-            description: newAction.description,
-            owner: newAction.owner || 'Belirtilmedi',
-            status: 'NOT_STARTED',
-            dueDate: newAction.dueDate || '2025-01-31',
-            progress: 0,
-        };
-        setRisks(prev => prev.map(r => {
-            if (r.id === selectedRiskId) {
-                return { ...r, actions: [...r.actions, action] };
-            }
-            return r;
-        }));
-        setShowActionModal(false);
-        setNewAction({ description: '', owner: '', dueDate: '' });
+    const handleAddAction = async () => {
+        if (!selectedRiskId || !newAction.description || !newAction.ownerId || !newAction.dueDate) return;
+        setSaving(true);
+        try {
+            await api.createStandaloneAction({
+                description: newAction.description,
+                ownerId: newAction.ownerId,
+                riskId: selectedRiskId,
+                dueDate: newAction.dueDate,
+            });
+            const list: any = await api.getActionsForRisk(selectedRiskId);
+            setActions((list || []).map((a: any) => ({
+                id: a.id, actionId: a.actionId, description: a.description,
+                owner: a.owner ? `${a.owner.firstName} ${a.owner.lastName}` : '—',
+                status: a.status, dueDate: a.dueDate,
+            })));
+            setShowActionModal(false);
+            setNewAction({ description: '', ownerId: '', dueDate: '' });
+        } catch (e: any) {
+            setError(e?.body?.message || 'Aksiyon eklenemedi.');
+        } finally {
+            setSaving(false);
+        }
     };
+
+    if (loading) return <LoadingState />;
+    if (error && risks.length === 0) return <ErrorState description={error} onRetry={loadRisks} />;
 
     return (
         <div className="flex flex-col h-full">
@@ -207,10 +219,13 @@ export default function RiskTreatmentPage() {
 
                 {/* Risk List */}
                 <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
+                    {filteredRisks.length === 0 && (
+                        <p className="px-4 py-6 text-sm text-gray-400 text-center">Bu filtreye uyan risk bulunamadı.</p>
+                    )}
                     {filteredRisks.map(risk => (
                         <button
                             key={risk.id}
-                            onClick={() => handleSelectRisk(risk.id)}
+                            onClick={() => setSelectedRiskId(risk.id)}
                             className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors ${selectedRiskId === risk.id ? 'bg-blue-50 border-l-4 border-l-blue-600' : ''
                                 }`}
                         >
@@ -303,8 +318,9 @@ export default function RiskTreatmentPage() {
                                 {TREATMENT_OPTIONS.map(option => (
                                     <button
                                         key={option.value}
+                                        disabled={saving}
                                         onClick={() => handleTreatmentDecision(option.value)}
-                                        className={`p-4 rounded-lg border-2 text-left transition-all ${selectedRisk.treatmentDecision === option.value
+                                        className={`p-4 rounded-lg border-2 text-left transition-all disabled:opacity-50 ${selectedRisk.treatmentDecision === option.value
                                             ? `${option.color} border-current ring-2 ring-offset-2 ring-current`
                                             : 'border-gray-200 hover:border-gray-300'
                                             }`}
@@ -327,18 +343,14 @@ export default function RiskTreatmentPage() {
                                         <h3 className="text-sm font-semibold text-gray-900">Onay Durumu</h3>
                                         {selectedRisk.treatmentApproval ? (
                                             <p className="text-xs text-gray-500 mt-1">
-                                                {selectedRisk.treatmentApprovedBy} tarafından {selectedRisk.treatmentApprovedAt} tarihinde onaylandı.
+                                                {selectedRisk.treatmentApprovedBy} tarafından {selectedRisk.treatmentApprovedAt ? new Date(selectedRisk.treatmentApprovedAt).toLocaleDateString('tr-TR') : ''} tarihinde onaylandı.
                                             </p>
                                         ) : (
                                             <p className="text-xs text-amber-600 mt-1">Onay bekleniyor</p>
                                         )}
                                     </div>
                                     {!selectedRisk.treatmentApproval && (
-                                        <Button
-                                            variant="success"
-                                            size="sm"
-                                            onClick={handleApproval}
-                                        >
+                                        <Button variant="success" size="sm" disabled={saving} onClick={handleApproval}>
                                             Onayla
                                         </Button>
                                     )}
@@ -365,9 +377,11 @@ export default function RiskTreatmentPage() {
                                     </Button>
                                 </div>
 
-                                {selectedRisk.actions.length > 0 ? (
+                                {actionsLoading ? (
+                                    <p className="text-sm text-gray-400">Yükleniyor...</p>
+                                ) : actions.length > 0 ? (
                                     <div className="space-y-3">
-                                        {selectedRisk.actions.map(action => (
+                                        {actions.map(action => (
                                             <div key={action.id} className="p-3 bg-gray-50 rounded-lg">
                                                 <div className="flex items-start justify-between">
                                                     <div>
@@ -375,24 +389,15 @@ export default function RiskTreatmentPage() {
                                                             <Link href={`/actions/${action.id}`} className="text-sm font-medium text-blue-700 hover:underline">
                                                                 {action.actionId}
                                                             </Link>
-                                                            <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${STATUS_COLORS[action.status].bg} ${STATUS_COLORS[action.status].text}`}>
-                                                                {STATUS_COLORS[action.status].label}
+                                                            <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${STATUS_COLORS[action.status]?.bg ?? 'bg-gray-100'} ${STATUS_COLORS[action.status]?.text ?? 'text-gray-600'}`}>
+                                                                {STATUS_COLORS[action.status]?.label ?? action.status}
                                                             </span>
                                                         </div>
                                                         <p className="text-sm text-gray-700 mt-1">{action.description}</p>
                                                         <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
                                                             <span>Sorumlu: {action.owner}</span>
                                                             <span>•</span>
-                                                            <span>Hedef: {action.dueDate}</span>
-                                                        </div>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <span className="text-sm font-semibold text-gray-900">{action.progress}%</span>
-                                                        <div className="w-16 h-1.5 bg-gray-200 rounded-full mt-1">
-                                                            <div
-                                                                className="h-full bg-blue-600 rounded-full"
-                                                                style={{ width: `${action.progress}%` }}
-                                                            ></div>
+                                                            <span>Hedef: {action.dueDate ? new Date(action.dueDate).toLocaleDateString('tr-TR') : '—'}</span>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -428,7 +433,7 @@ export default function RiskTreatmentPage() {
                                     </div>
                                     <div>
                                         <span className="text-gray-400">Aksiyon:</span>
-                                        <span className="ml-1 font-medium text-gray-900">{selectedRisk.actions.length} adet</span>
+                                        <span className="ml-1 font-medium text-gray-900">{actions.length} adet</span>
                                     </div>
                                 </div>
                             </div>
@@ -445,7 +450,7 @@ export default function RiskTreatmentPage() {
                 footer={
                     <div className="flex justify-end gap-3 w-full">
                         <Button variant="ghost" onClick={() => setShowActionModal(false)}>İptal</Button>
-                        <Button variant="primary" onClick={handleAddAction}>Aksiyon Ekle</Button>
+                        <Button variant="primary" disabled={saving} onClick={handleAddAction}>Aksiyon Ekle</Button>
                     </div>
                 }
             >
@@ -457,15 +462,15 @@ export default function RiskTreatmentPage() {
                         placeholder="Yapılacak işlemi açıklayın..."
                         rows={3}
                     />
-                    <Input
-                        label="Sorumlu"
-                        value={newAction.owner}
-                        onChange={(e) => setNewAction({ ...newAction, owner: e.target.value })}
-                        placeholder="Ad Soyad"
+                    <Select
+                        label="Sorumlu *"
+                        value={newAction.ownerId}
+                        onChange={(e) => setNewAction({ ...newAction, ownerId: e.target.value })}
+                        options={[{ value: '', label: 'Seçiniz...' }, ...users.map(u => ({ value: u.id, label: `${u.firstName} ${u.lastName}` }))]}
                     />
                     <Input
                         type="date"
-                        label="Hedef Tarih"
+                        label="Hedef Tarih *"
                         value={newAction.dueDate}
                         onChange={(e) => setNewAction({ ...newAction, dueDate: e.target.value })}
                     />

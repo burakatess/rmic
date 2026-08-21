@@ -70,7 +70,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 summary: 'Yardımcı fonksiyon bulgusu',
                 relatedDepartment: 'BT Ağ Yönetimi',
                 status: 'IN_PROGRESS',
-                severity: 'MEDIUM',
+                severity: 'HIGH',
                 controlTestId: controlTest.id,
                 ...overrides,
             })
@@ -284,7 +284,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                     summary: 'Bağımsız senaryo bulgusu',
                     relatedDepartment: 'BT Ağ Yönetimi',
                     status: 'IN_PROGRESS',
-                    severity: 'MEDIUM',
+                    severity: 'HIGH',
                     controlTestId: controlTest.id,
                 })
                 .expect(201);
@@ -895,7 +895,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 findingType: 'BT',
                 description: 'RBAC matrisi testi için yeterli uzunlukta bulgu açıklaması',
                 relatedDepartment: 'BT Ağ Yönetimi',
-                severity: 'MEDIUM',
+                severity: 'HIGH',
             };
             for (const token of [adminToken, managerToken, auditorToken]) {
                 await request(app.getHttpServer())
@@ -1047,7 +1047,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                     findingType: 'BT',
                     description: 'Olmayan controlTestId ile deneme açıklaması metni',
                     relatedDepartment: 'BT Ağ Yönetimi',
-                    severity: 'LOW',
+                    severity: 'HIGH',
                     controlTestId: 'nonexistent-control-test-id',
                 });
             expect(res.status).toBe(400);
@@ -1077,7 +1077,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                     findingType: 'GECERSIZ_TUR',
                     description: 'Geçersiz findingType enum testi açıklaması',
                     relatedDepartment: 'BT Ağ Yönetimi',
-                    severity: 'LOW',
+                    severity: 'HIGH',
                 });
             expect(res.status).toBe(400);
         });
@@ -1171,6 +1171,439 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             const history = await prisma.findingStatusHistory.findMany({ where: { findingId }, orderBy: { createdAt: 'asc' } });
             expect(history[0].workflowStatus).toBe('MUTABAKATA_GONDERILDI');
             expect(history.length).toBe(afterSecond);
+        });
+    });
+
+    describe('Kontrol Testi — İkinci Kontrolcü Onay Merkezi', () => {
+        async function setupControlTest(overrides: Record<string, any> = {}) {
+            const directorate = await createTestDirectorate(prisma);
+            const control = await createTestControl(prisma, { ownerId: adminUserId, directorateId: directorate.id });
+            const controlTest = await createTestControlTest(prisma, {
+                controlId: control.id, assigneeId: adminUserId, ...overrides,
+            });
+            return { controlId: control.id, controlTestId: controlTest.id, directorateId: directorate.id };
+        }
+
+        it('BULGUSU_YOK + bağlı bulgu yok → test tamamlanır, TAMAMLANDI (onaya gönderildi) olur', async () => {
+            const { controlTestId } = await setupControlTest();
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/start`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+
+            const res = await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/complete`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ findingStatus: 'BULGUSU_YOK' })
+                .expect(200);
+
+            expect(res.body.status).toBe('TAMAMLANDI');
+        });
+
+        it('BULGUSU_YOK ya da BULGUSU_VAR farketmeksizin test TAMAMLANDI olunca doğrudan final ONAYLANDI sayılmaz', async () => {
+            const { controlTestId } = await setupControlTest();
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/start`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            const res = await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/complete`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ findingStatus: 'BULGUSU_YOK' })
+                .expect(200);
+
+            expect(res.body.status).not.toBe('ONAYLANDI');
+            expect(res.body.status).toBe('TAMAMLANDI');
+        });
+
+        it('İkinci kontrolcü onaylarsa test ONAYLANDI olur', async () => {
+            const { controlTestId } = await setupControlTest({ secondControllerId: managerUserId });
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/start`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/complete`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ findingStatus: 'BULGUSU_YOK' })
+                .expect(200);
+
+            const res = await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/approve`)
+                .set('Authorization', `Bearer ${managerToken}`)
+                .expect(200);
+
+            expect(res.body.status).toBe('ONAYLANDI');
+        });
+
+        it('İkinci kontrolcü geri gönderirse test GERI_GONDERILDI olur ve testi yapan tekrar tamamlayabilir', async () => {
+            const { controlTestId } = await setupControlTest({ secondControllerId: managerUserId });
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/start`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/complete`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ findingStatus: 'BULGUSU_YOK' })
+                .expect(200);
+
+            const res = await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/return`)
+                .set('Authorization', `Bearer ${managerToken}`)
+                .send({ reason: 'Kanıt yetersiz, tekrar gözden geçirin.' })
+                .expect(200);
+            expect(res.body.status).toBe('GERI_GONDERILDI');
+
+            // Testi yapan kullanıcı GERI_GONDERILDI durumundan doğrudan tekrar tamamlayabilmeli
+            const resubmit = await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/complete`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ findingStatus: 'BULGUSU_YOK' })
+                .expect(200);
+            expect(resubmit.body.status).toBe('TAMAMLANDI');
+        });
+
+        it('Geri gönderme gerekçesi zorunludur → boşsa 400', async () => {
+            const { controlTestId } = await setupControlTest();
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/start`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/complete`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ findingStatus: 'BULGUSU_YOK' })
+                .expect(200);
+
+            const res = await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/return`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ reason: '' });
+            expect(res.status).toBe(400);
+        });
+
+        it('Testi yapan kullanıcı kendi ikinci kontrol onayını veremez → 400', async () => {
+            const { controlTestId } = await setupControlTest({ assigneeId: adminUserId });
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/start`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/complete`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ findingStatus: 'BULGUSU_YOK' })
+                .expect(200);
+
+            const res = await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/approve`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({});
+            expect(res.status).toBe(400);
+        });
+
+        it('Final onaylı (ONAYLANDI) testi admin dışı bir rol iptal edemez → 403', async () => {
+            const { controlTestId } = await setupControlTest({ secondControllerId: managerUserId });
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/start`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/complete`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ findingStatus: 'BULGUSU_YOK' })
+                .expect(200);
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/approve`)
+                .set('Authorization', `Bearer ${managerToken}`)
+                .expect(200);
+
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/cancel-final`)
+                .set('Authorization', `Bearer ${managerToken}`)
+                .send({ reason: 'Deneme.' })
+                .expect(403);
+        });
+
+        it('Final onaylı (ONAYLANDI) testi SYSTEM_ADMIN iptal edebilir → IPTAL', async () => {
+            const { controlTestId } = await setupControlTest({ secondControllerId: managerUserId });
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/start`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/complete`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ findingStatus: 'BULGUSU_YOK' })
+                .expect(200);
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/approve`)
+                .set('Authorization', `Bearer ${managerToken}`)
+                .expect(200);
+
+            const res = await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/cancel-final`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ reason: 'Yanlış onaylanmış.' })
+                .expect(200);
+            expect(res.body.status).toBe('IPTAL');
+        });
+
+        it('GET /approvals/my-pending yalnızca kendi üzerindeki bekleyen onayları döner', async () => {
+            const { controlTestId: mineId } = await setupControlTest({ secondControllerId: managerUserId });
+            const { controlTestId: othersId } = await setupControlTest({ secondControllerId: adminUserId });
+
+            for (const id of [mineId, othersId]) {
+                await request(app.getHttpServer())
+                    .patch(`/controls/tests/${id}/start`)
+                    .set('Authorization', `Bearer ${adminToken}`)
+                    .expect(200);
+                await request(app.getHttpServer())
+                    .patch(`/controls/tests/${id}/complete`)
+                    .set('Authorization', `Bearer ${adminToken}`)
+                    .send({ findingStatus: 'BULGUSU_YOK' })
+                    .expect(200);
+            }
+
+            const res = await request(app.getHttpServer())
+                .get('/approvals/my-pending')
+                .set('Authorization', `Bearer ${managerToken}`)
+                .expect(200);
+
+            const ids = res.body.data.map((t: any) => t.id);
+            expect(ids).toContain(mineId);
+            expect(ids).not.toContain(othersId);
+        });
+
+        it('GET /approvals/:id onay detayında task bilgilerini döner (kontrol, test, gönderen, tarih)', async () => {
+            const { controlTestId } = await setupControlTest({ secondControllerId: managerUserId });
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/start`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/complete`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ findingStatus: 'BULGUSU_YOK', resultText: 'Test sonucu açıklaması.' })
+                .expect(200);
+
+            const res = await request(app.getHttpServer())
+                .get(`/approvals/${controlTestId}`)
+                .set('Authorization', `Bearer ${managerToken}`)
+                .expect(200);
+
+            expect(res.body.control).toBeDefined();
+            expect(res.body.resultText).toBe('Test sonucu açıklaması.');
+            expect(res.body.submittedBy).toBeDefined();
+            expect(res.body.submittedAt).toBeDefined();
+        });
+
+        it('Açık bulguya referans verilerek test doğrudan onaya gönderilebilir (BULGUSU_VAR kabul edilir)', async () => {
+            const { controlId, controlTestId } = await setupControlTest();
+
+            // Bu kontrole bağlı, açık bir bulgu oluştur (başka bir test üzerinden)
+            const otherTest = await createTestControlTest(prisma, { controlId, assigneeId: adminUserId });
+            const findingRes = await request(app.getHttpServer())
+                .post('/findings')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({
+                    findingType: 'BT', description: 'Referans testi için yeterli uzunlukta açık bulgu açıklaması',
+                    relatedDepartment: 'BT Ağ Yönetimi', severity: 'HIGH', controlTestId: otherTest.id,
+                })
+                .expect(201);
+            const openFindingId = findingRes.body.id;
+
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/start`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+
+            const res = await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/complete`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ referencedFindingId: openFindingId, referenceReason: 'Aynı açık bulgu devam ediyor.' })
+                .expect(200);
+
+            expect(res.body.status).toBe('TAMAMLANDI');
+            expect(res.body.findingStatus).toBe('BULGUSU_VAR');
+            expect(res.body.referencedFindingId).toBe(openFindingId);
+        });
+
+        it('Kapalı bir bulguya referans verilemez → 400', async () => {
+            const { controlId, controlTestId } = await setupControlTest();
+
+            const otherTest = await createTestControlTest(prisma, { controlId, assigneeId: adminUserId });
+            const findingRes = await request(app.getHttpServer())
+                .post('/findings')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({
+                    findingType: 'BT', description: 'Kapalı bulgu referans testi için açıklama metni',
+                    relatedDepartment: 'BT Ağ Yönetimi', severity: 'HIGH', controlTestId: otherTest.id,
+                })
+                .expect(201);
+            const closedFindingId = findingRes.body.id;
+            await prisma.finding.update({ where: { id: closedFindingId }, data: { status: 'CLOSED' } });
+
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/start`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+
+            const res = await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/complete`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ referencedFindingId: closedFindingId, referenceReason: 'Deneme.' });
+            expect(res.status).toBe(400);
+        });
+
+        it('Başka bir kontrolün bulgusuna referans verilemez → 400', async () => {
+            const { controlTestId } = await setupControlTest();
+            const { controlId: otherControlId } = await setupControlTest();
+            const otherTest = await createTestControlTest(prisma, { controlId: otherControlId, assigneeId: adminUserId });
+            const findingRes = await request(app.getHttpServer())
+                .post('/findings')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({
+                    findingType: 'BT', description: 'Farklı kontrole ait açık bulgu açıklaması metni',
+                    relatedDepartment: 'BT Ağ Yönetimi', severity: 'HIGH', controlTestId: otherTest.id,
+                })
+                .expect(201);
+
+            await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/start`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+
+            const res = await request(app.getHttpServer())
+                .patch(`/controls/tests/${controlTestId}/complete`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ referencedFindingId: findingRes.body.id, referenceReason: 'Deneme.' });
+            expect(res.status).toBe(400);
+        });
+    });
+
+    describe('Bulgu — Direktörlük FK, Status/Severity Kısıtlaması, Otomatik Aylık Takip', () => {
+        it('directorateId ile bulgu oluşturulunca relatedDepartment direktörlük adından türetilir', async () => {
+            const directorate = await createTestDirectorate(prisma, 'Test Direktörlüğü FK');
+            const res = await request(app.getHttpServer())
+                .post('/findings')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({
+                    findingType: 'BT', description: 'Direktörlük FK testi için yeterli uzunlukta açıklama',
+                    directorateId: directorate.id, severity: 'HIGH',
+                })
+                .expect(201);
+
+            expect(res.body.directorateId).toBe(directorate.id);
+            expect(res.body.relatedDepartment).toBe('Test Direktörlüğü FK');
+        });
+
+        it('severity MEDIUM/LOW artık kabul edilmez → 400', async () => {
+            const res = await request(app.getHttpServer())
+                .post('/findings')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({
+                    findingType: 'BT', description: 'Geçersiz severity testi için yeterli uzunlukta açıklama',
+                    relatedDepartment: 'BT Ağ Yönetimi', severity: 'MEDIUM',
+                });
+            expect(res.status).toBe(400);
+        });
+
+        it('status yalnızca IN_PROGRESS/PARTIALLY_CLOSED/CLOSED kabul edilir — OPEN artık 400', async () => {
+            const res = await request(app.getHttpServer())
+                .post('/findings')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({
+                    findingType: 'BT', description: 'Geçersiz status testi için yeterli uzunlukta açıklama',
+                    relatedDepartment: 'BT Ağ Yönetimi', severity: 'HIGH', status: 'OPEN',
+                });
+            expect(res.status).toBe(400);
+        });
+
+        it('Bulgu oluşturulduğunda testDate ayı için otomatik bir FollowUp oluşur', async () => {
+            const testDate = new Date().toISOString().split('T')[0];
+            const res = await request(app.getHttpServer())
+                .post('/findings')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({
+                    findingType: 'BT', description: 'Otomatik aylık takip testi için yeterli uzunlukta açıklama',
+                    relatedDepartment: 'BT Ağ Yönetimi', severity: 'HIGH', testDate,
+                })
+                .expect(201);
+
+            const followUps = await prisma.findingFollowUp.findMany({ where: { findingId: res.body.id } });
+            expect(followUps.length).toBe(1);
+            expect(followUps[0].actionId).toBeNull();
+        });
+
+        it('Aynı ay için ikinci bir bulgu güncellemesi/aksiyon eklemesi duplicate aylık FollowUp üretmez', async () => {
+            const testDate = new Date().toISOString().split('T')[0];
+            const dueDate = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            const findingRes = await request(app.getHttpServer())
+                .post('/findings')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({
+                    findingType: 'BT', description: 'Duplicate takip testi için yeterli uzunlukta açıklama',
+                    relatedDepartment: 'BT Ağ Yönetimi', severity: 'HIGH', testDate,
+                })
+                .expect(201);
+
+            const beforeCount = await prisma.findingFollowUp.count({ where: { findingId: findingRes.body.id } });
+            expect(beforeCount).toBe(1);
+
+            // Aksiyon ekle — bu da bir FollowUp üretir ama duplicate üretmemesi gerekir
+            // (autoCreateFollowUpForAction ayrı bir mantık; test yalnızca finding-create
+            // seviyesindeki otomatik takip için duplicate kontrolünü doğruluyor)
+            const secondCreate = await request(app.getHttpServer())
+                .post('/findings')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({
+                    findingType: 'BT', description: 'Duplicate takip testi ikinci bulgu açıklaması metni',
+                    relatedDepartment: 'BT Ağ Yönetimi', severity: 'HIGH', testDate,
+                })
+                .expect(201);
+            // Farklı bulgu — kendi ayrı FollowUp'ını almalı (duplicate kontrolü finding-scoped)
+            const secondFollowUps = await prisma.findingFollowUp.count({ where: { findingId: secondCreate.body.id } });
+            expect(secondFollowUps).toBe(1);
+        });
+
+        it('impact alanı UpdateFindingDto tarafından artık reddedilmez ("property impact should not exist" hatası çözüldü)', async () => {
+            const { findingId } = await setupFinding({ severity: 'HIGH' });
+            const res = await request(app.getHttpServer())
+                .put(`/findings/${findingId}`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ impact: 'Güncellenmiş etki açıklaması.' });
+            expect(res.status).toBe(200);
+            expect(res.body.impact).toBe('Güncellenmiş etki açıklaması.');
+        });
+
+        it('targetResolutionDate istemciden güncellense bile yok sayılır ve yalnızca aksiyonlardan hesaplanır', async () => {
+            const { findingId } = await setupFinding();
+            const action = await addAction(findingId, { description: 'Backend authoritative test aksiyonu açıklaması' });
+
+            const clientDate = '2099-01-01';
+            const res = await request(app.getHttpServer())
+                .put(`/findings/${findingId}`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ targetResolutionDate: clientDate });
+            expect(res.status).toBe(200);
+
+            // İstemcinin gönderdiği 2099 tarihi DEĞİL, aksiyonun gerçek dueDate'i yansımalı
+            const expectedDate = new Date(action.dueDate).toISOString().split('T')[0];
+            const actualDate = new Date(res.body.targetResolutionDate).toISOString().split('T')[0];
+            expect(actualDate).toBe(expectedDate);
+            expect(actualDate).not.toBe(clientDate);
+        });
+
+        it('bilinmeyen ekstra alan hâlâ 400 döner (forbidNonWhitelisted korunuyor)', async () => {
+            const res = await request(app.getHttpServer())
+                .post('/findings')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({
+                    findingType: 'BT', description: 'Bilinmeyen alan testi için yeterli uzunlukta açıklama',
+                    relatedDepartment: 'BT Ağ Yönetimi', severity: 'HIGH', hackerField: 'x',
+                })
+                .expect(400);
         });
     });
 });

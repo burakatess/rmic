@@ -1,17 +1,21 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import { StatusBadge, Button } from '@/components/ui';
+import {
+    DetailShell, DetailHeader, DetailSection, Tabs, Timeline,
+    StatusBadge, Button, LoadingState, EmptyState, FileUpload,
+} from '@/components/ui';
+import type { TimelineItem, TimelineVariant, AttachmentMeta } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import AddActionModal from '@/components/modals/AddActionModal';
 import { FindingFollowUpModal } from '@/components/modals/FindingFollowUpModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Attachment { id: string; originalName: string; mimeType: string; sizeBytes: number; createdAt: string }
+interface Attachment { id: string; fileName?: string; originalName: string; mimeType: string; sizeBytes: number; createdAt: string }
 interface LinkedRisk { id: string; riskId: string; name: string; status: string; residualRiskScore?: number; inherentRiskScore?: number; owner?: { firstName: string; lastName: string } }
 interface LinkedControl { id: string; controlId: string; name: string; directorate?: string; frequency?: string; status?: string; effectivenessStatus?: string }
 interface Action {
@@ -59,27 +63,27 @@ const findingTypeConfig: Record<string, { label: string; variant: BV }> = {
     IB: { label: 'İş Birimleri', variant: 'info' },
 };
 
-const severityConfig: Record<string, { label: string; sublabel: string; variant: BV; ring: string }> = {
-    CRITICAL: { label: 'KZ', sublabel: 'Kontrol Zayıflığı',            variant: 'critical', ring: 'ring-red-300 bg-red-50 text-red-800' },
-    HIGH:     { label: 'KD', sublabel: 'Kayda Değer Kontrol Eksikliği', variant: 'high',     ring: 'ring-orange-300 bg-orange-50 text-orange-800' },
-    MEDIUM:   { label: 'ÖK', sublabel: 'Önemli Kontrol Eksikliği',      variant: 'medium',   ring: 'ring-yellow-300 bg-yellow-50 text-yellow-800' },
-    LOW:      { label: 'Düşük', sublabel: 'Düşük Önem',                 variant: 'low',      ring: 'ring-green-300 bg-green-50 text-green-800' },
+const severityConfig: Record<string, { label: string; sublabel: string; variant: BV }> = {
+    CRITICAL: { label: 'KZ', sublabel: 'Kontrol Zayıflığı', variant: 'critical' },
+    HIGH:     { label: 'KD', sublabel: 'Kayda Değer Kontrol Eksikliği', variant: 'high' },
+    MEDIUM:   { label: 'ÖK', sublabel: 'Önemli Kontrol Eksikliği', variant: 'medium' },
+    LOW:      { label: 'Düşük', sublabel: 'Düşük Önem', variant: 'low' },
 };
 
 const resolutionConfig: Record<string, { label: string; variant: BV }> = {
-    DEVAM_EDIYOR:          { label: 'Devam Ediyor',        variant: 'warning' },
-    KISMEN_KAPATILDI:      { label: 'Kısmen Kapatıldı',    variant: 'info' },
-    KAPATILDI:             { label: 'Kapatıldı',           variant: 'success' },
-    ERTELENDI:             { label: 'Ertelendi',           variant: 'neutral' },
+    DEVAM_EDIYOR:          { label: 'Devam Ediyor',         variant: 'info' },
+    KISMEN_KAPATILDI:      { label: 'Kısmen Kapatıldı',     variant: 'warning' },
+    KAPATILDI:             { label: 'Kapatıldı',            variant: 'success' },
+    ERTELENDI:             { label: 'Ertelendi',            variant: 'neutral' },
     YENI_AKSIYON_GEREKLI:  { label: 'Yeni Aksiyon Gerekli', variant: 'high' },
 };
 
-const workflowConfig: Record<string, { label: string; step: number }> = {
-    TASLAK:                        { label: 'Taslak',                  step: 1 },
-    MUTABAKATA_GONDERILDI:         { label: 'Mutabakata Gönderildi',   step: 2 },
-    IC_KONTROL_ONAYINA_GONDERILDI: { label: 'İKS Onayında',           step: 3 },
-    MUTABAKAT_YAPILDI:             { label: 'Mutabakat Yapıldı',       step: 4 },
-    IPTAL:                         { label: 'İptal',                   step: 0 },
+const workflowConfig: Record<string, { label: string; variant: BV }> = {
+    TASLAK:                        { label: 'Taslak',                variant: 'neutral' },
+    MUTABAKATA_GONDERILDI:         { label: 'Mutabakata Gönderildi', variant: 'warning' },
+    IC_KONTROL_ONAYINA_GONDERILDI: { label: 'İKS Onayında',          variant: 'warning' },
+    MUTABAKAT_YAPILDI:             { label: 'Mutabakat Yapıldı',     variant: 'success' },
+    IPTAL:                         { label: 'İptal',                 variant: 'neutral' },
 };
 
 const actionStatusConfig: Record<string, { label: string; variant: BV }> = {
@@ -97,24 +101,24 @@ const followUpStatusConfig: Record<string, { label: string; variant: BV }> = {
     ONAYLANDI:    { label: 'Onaylandı',    variant: 'success' },
 };
 
-const operationLabels: Record<string, { label: string; color: string }> = {
-    FINDING_CREATED:     { label: 'Bulgu Oluşturuldu',          color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-    FINDING_UPDATED:     { label: 'Bulgu Güncellendi',          color: 'bg-blue-100 text-blue-700 border-blue-200' },
-    STATUS_CHANGED:      { label: 'Durum Değişti',              color: 'bg-violet-100 text-violet-700 border-violet-200' },
-    ACTION_ADDED:        { label: 'Aksiyon Eklendi',            color: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
-    ACTION_UPDATED:      { label: 'Aksiyon Güncellendi',        color: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
-    ACTION_CLOSED:       { label: 'Aksiyon Kapatıldı',          color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-    FOLLOWUP_OPENED:     { label: 'Takip Açıldı',              color: 'bg-amber-100 text-amber-700 border-amber-200' },
-    FOLLOWUP_COMPLETED:  { label: 'Takip Sonuçlandırıldı',     color: 'bg-teal-100 text-teal-700 border-teal-200' },
-    TEST_DATE_CHANGED:   { label: 'Test Tarihi Değişti',        color: 'bg-sky-100 text-sky-700 border-sky-200' },
-    TARGET_DATE_CHANGED: { label: 'Hedef Tarih Değişti',        color: 'bg-sky-100 text-sky-700 border-sky-200' },
-    FILE_UPLOADED:       { label: 'Dosya Yüklendi',             color: 'bg-slate-100 text-slate-700 border-slate-200' },
-    FILE_DELETED:        { label: 'Dosya Silindi',              color: 'bg-red-100 text-red-700 border-red-200' },
-    FINDING_CLOSED:      { label: 'Bulgu Kapatıldı',            color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-    FINDING_REOPENED:    { label: 'Bulgu Yeniden Açıldı',       color: 'bg-orange-100 text-orange-700 border-orange-200' },
-    WORKFLOW_CHANGE:     { label: 'Akış Değişikliği',           color: 'bg-violet-100 text-violet-700 border-violet-200' },
-    RESOLUTION_CHANGED:  { label: 'Çözüm Durumu Güncellendi',  color: 'bg-amber-100 text-amber-700 border-amber-200' },
-    ACTION_CREATED:      { label: 'Aksiyon Oluşturuldu',        color: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
+const operationLabels: Record<string, { label: string; variant: TimelineVariant }> = {
+    FINDING_CREATED:     { label: 'Bulgu Oluşturuldu',         variant: 'success' },
+    FINDING_UPDATED:     { label: 'Bulgu Güncellendi',         variant: 'info' },
+    STATUS_CHANGED:      { label: 'Durum Değişti',             variant: 'info' },
+    ACTION_ADDED:        { label: 'Aksiyon Eklendi',           variant: 'info' },
+    ACTION_UPDATED:      { label: 'Aksiyon Güncellendi',       variant: 'info' },
+    ACTION_CLOSED:       { label: 'Aksiyon Kapatıldı',         variant: 'success' },
+    FOLLOWUP_OPENED:     { label: 'Takip Açıldı',              variant: 'info' },
+    FOLLOWUP_COMPLETED:  { label: 'Takip Sonuçlandırıldı',     variant: 'success' },
+    TEST_DATE_CHANGED:   { label: 'Test Tarihi Değişti',       variant: 'info' },
+    TARGET_DATE_CHANGED: { label: 'Hedef Tarih Değişti',       variant: 'info' },
+    FILE_UPLOADED:       { label: 'Dosya Yüklendi',            variant: 'info' },
+    FILE_DELETED:        { label: 'Dosya Silindi',             variant: 'critical' },
+    FINDING_CLOSED:      { label: 'Bulgu Kapatıldı',           variant: 'success' },
+    FINDING_REOPENED:    { label: 'Bulgu Yeniden Açıldı',      variant: 'warning' },
+    WORKFLOW_CHANGE:     { label: 'Akış Değişikliği',          variant: 'info' },
+    RESOLUTION_CHANGED:  { label: 'Çözüm Durumu Güncellendi',  variant: 'info' },
+    ACTION_CREATED:      { label: 'Aksiyon Oluşturuldu',       variant: 'info' },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -136,16 +140,13 @@ const getDaysLeft = (d: string | null) => {
     return Math.ceil((new Date(d).getTime() - Date.now()) / 86400000);
 };
 
-const formatBytes = (b: number) => b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`;
-
-const mimeIcon = (mime: string) => {
-    if (mime.includes('pdf')) return '📄';
-    if (mime.includes('word') || mime.includes('docx')) return '📝';
-    if (mime.includes('excel') || mime.includes('xlsx') || mime.includes('spreadsheet')) return '📊';
-    if (mime.includes('image')) return '🖼️';
-    if (mime.includes('zip') || mime.includes('rar')) return '📦';
-    return '📎';
-};
+const toAttachmentMeta = (a: Attachment): AttachmentMeta => ({
+    id: a.id,
+    fileName: a.fileName || '',
+    originalName: a.originalName,
+    mimeType: a.mimeType,
+    sizeBytes: a.sizeBytes,
+});
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -158,188 +159,14 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
     );
 }
 
-function Card({ title, icon, children, action }: { title: string; icon?: string; children: React.ReactNode; action?: React.ReactNode }) {
-    return (
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/50">
-                <div className="flex items-center gap-2">
-                    {icon && <span>{icon}</span>}
-                    <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
-                </div>
-                {action}
-            </div>
-            <div className="p-5">{children}</div>
-        </div>
-    );
-}
-
-// Compact workflow pill — top right
-function WorkflowPill({ status, onAction }: { status: string; onAction: (a: string) => void }) {
-    const [open, setOpen] = useState(false);
-    const ref = useRef<HTMLDivElement>(null);
-    const cfg = workflowConfig[status] || workflowConfig['TASLAK'];
-    const isCancelled = status === 'IPTAL';
-    const isDone = status === 'MUTABAKAT_YAPILDI';
-    const currentStep = cfg.step;
-
-    useEffect(() => {
-        const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, []);
-
-    const steps = [
-        { key: 'TASLAK', label: 'Taslak', step: 1 },
-        { key: 'MUTABAKATA_GONDERILDI', label: 'Mutabakata Gönderildi', step: 2 },
-        { key: 'IC_KONTROL_ONAYINA_GONDERILDI', label: 'İKS Onayında', step: 3 },
-        { key: 'MUTABAKAT_YAPILDI', label: 'Mutabakat Yapıldı', step: 4 },
-    ];
-
-    return (
-        <div className="relative" ref={ref}>
-            <button
-                onClick={() => setOpen(!open)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all ${
-                    isCancelled ? 'bg-red-50 border-red-200 text-red-700' :
-                    isDone      ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :
-                                  'bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100'
-                }`}
-            >
-                <span className={`w-2 h-2 rounded-full ${isCancelled ? 'bg-red-500' : isDone ? 'bg-emerald-500' : 'bg-violet-500 animate-pulse'}`} />
-                {cfg.label}
-                {!isCancelled && !isDone && <svg className="w-3 h-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>}
-            </button>
-
-            {open && !isCancelled && (
-                <div className="absolute right-0 top-9 z-30 bg-white border border-slate-200 rounded-xl shadow-xl w-72 overflow-hidden">
-                    {/* Step progress */}
-                    <div className="p-4 border-b border-slate-100 bg-slate-50">
-                        <div className="flex items-center gap-1">
-                            {steps.map((s, i) => (
-                                <div key={s.key} className="flex items-center flex-1 last:flex-none">
-                                    <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold border transition-all ${
-                                        currentStep > s.step ? 'bg-emerald-500 border-emerald-500 text-white' :
-                                        currentStep === s.step ? 'bg-violet-600 border-violet-600 text-white' :
-                                                                  'bg-white border-slate-300 text-slate-400'
-                                    }`}>
-                                        {currentStep > s.step ? '✓' : s.step}
-                                    </div>
-                                    {i < steps.length - 1 && <div className={`flex-1 h-px mx-0.5 ${currentStep > s.step ? 'bg-emerald-400' : 'bg-slate-200'}`} />}
-                                </div>
-                            ))}
-                        </div>
-                        <p className="text-[10px] text-slate-500 mt-2 font-medium">Adım {currentStep}/4 — {cfg.label}</p>
-                    </div>
-                    {/* Actions */}
-                    <div className="p-2 space-y-1">
-                        {status === 'TASLAK' && (
-                            <button onClick={() => { onAction('mutabakata-gonder'); setOpen(false); }}
-                                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-violet-50 text-violet-700 font-medium flex items-center gap-2">
-                                📤 Mutabakata Gönder
-                            </button>
-                        )}
-                        {status === 'MUTABAKATA_GONDERILDI' && (
-                            <button onClick={() => { onAction('ic-kontrol-onayina-gonder'); setOpen(false); }}
-                                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-violet-50 text-violet-700 font-medium flex items-center gap-2">
-                                ✅ İKS Onayına Gönder
-                            </button>
-                        )}
-                        {status === 'IC_KONTROL_ONAYINA_GONDERILDI' && (
-                            <>
-                                <button onClick={() => { onAction('mutabakat-onayla'); setOpen(false); }}
-                                    className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-emerald-50 text-emerald-700 font-medium flex items-center gap-2">
-                                    ✅ Mutabakatı Onayla
-                                </button>
-                                <button onClick={() => { onAction('mutabakat-geri-gonder'); setOpen(false); }}
-                                    className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-amber-50 text-amber-700 font-medium flex items-center gap-2">
-                                    ↩ Birime Geri Gönder
-                                </button>
-                            </>
-                        )}
-                        {status === 'MUTABAKAT_YAPILDI' && (
-                            <p className="px-3 py-2 text-xs text-emerald-600 font-medium">✅ Mutabakat tamamlandı</p>
-                        )}
-                        <div className="border-t border-slate-100 mt-1 pt-1">
-                            <button onClick={() => { onAction('iptal-et'); setOpen(false); }}
-                                className="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-red-50 text-red-500 flex items-center gap-2">
-                                ✕ İptal Et
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-}
-
-// Attachment list widget
-function AttachmentList({ attachments, onRemove, onAdd, findingId, entityId, entityType }: {
-    attachments: Attachment[];
-    onRemove?: (id: string) => void;
-    onAdd?: () => void;
-    findingId: string;
-    entityId?: string;
-    entityType: 'finding' | 'action' | 'followup';
-}) {
-    const fileInputRef = useRef<HTMLInputElement>(null);
-    const { success, error: showError } = useToast();
-
-    const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = e.target.files;
-        if (!files || files.length === 0) return;
-        for (const file of Array.from(files)) {
-            const allowed = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                'image/png', 'image/jpeg', 'application/zip', 'application/x-zip-compressed'];
-            if (!allowed.includes(file.type)) { showError('Desteklenmeyen Format', `${file.name} — yalnızca PDF, DOCX, XLSX, PNG, JPG, ZIP desteklenir.`); continue; }
-            const meta = { fileName: `${Date.now()}-${file.name}`, originalName: file.name, mimeType: file.type, sizeBytes: file.size };
-            try {
-                if (entityType === 'finding') await api.addFindingAttachment(findingId, meta);
-                else if (entityType === 'action' && entityId) await api.addActionAttachment(findingId, entityId, meta);
-                else if (entityType === 'followup' && entityId) await api.addFollowUpAttachment(findingId, entityId, meta);
-                success('Eklendi', `${file.name} dosya kaydı oluşturuldu.`);
-                onAdd?.();
-            } catch { showError('Hata', `${file.name} eklenemedi.`); }
-        }
-        if (fileInputRef.current) fileInputRef.current.value = '';
-    };
-
-    return (
-        <div className="space-y-2">
-            {attachments.length === 0 && <p className="text-xs text-slate-400 italic">Henüz ek yok</p>}
-            {attachments.map(att => (
-                <div key={att.id} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-base">{mimeIcon(att.mimeType)}</span>
-                        <div className="min-w-0">
-                            <p className="text-xs font-medium text-slate-700 truncate">{att.originalName}</p>
-                            <p className="text-[10px] text-slate-400">{formatBytes(att.sizeBytes)} · {fmt(att.createdAt)}</p>
-                        </div>
-                    </div>
-                    {onRemove && (
-                        <button onClick={() => onRemove(att.id)} className="ml-2 p-1 text-slate-400 hover:text-red-500 transition-colors flex-shrink-0">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                        </button>
-                    )}
-                </div>
-            ))}
-            <div>
-                <input ref={fileInputRef} type="file" multiple accept=".pdf,.docx,.doc,.xlsx,.xls,.png,.jpg,.jpeg,.zip" onChange={handleFile} className="hidden" />
-                <button onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-1.5 text-xs text-violet-600 hover:text-violet-800 font-medium px-2 py-1.5 rounded-lg hover:bg-violet-50 transition-colors border border-dashed border-violet-300 w-full justify-center">
-                    + Dosya Ekle
-                </button>
-            </div>
-        </div>
-    );
-}
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 type Tab = 'detay' | 'aksiyonlar' | 'takip' | 'riskler' | 'ekler' | 'tarihce';
+const TAB_KEYS: Tab[] = ['detay', 'aksiyonlar', 'takip', 'riskler', 'ekler', 'tarihce'];
 
 export default function FindingDetailPage() {
     const { id } = useParams<{ id: string }>();
+    const router = useRouter();
     const { success, error: showError } = useToast();
 
     const [finding, setFinding] = useState<Finding | null>(null);
@@ -360,6 +187,12 @@ export default function FindingDetailPage() {
     // Status log inline add
     const [logText, setLogText] = useState('');
     const [logSaving, setLogSaving] = useState(false);
+
+    // ?tab= deep-link (örn. /findings/:id?tab=takip)
+    useEffect(() => {
+        const t = new URLSearchParams(window.location.search).get('tab');
+        if (t && TAB_KEYS.includes(t as Tab)) setActiveTab(t as Tab);
+    }, []);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -402,6 +235,34 @@ export default function FindingDetailPage() {
         finally { setLogSaving(false); }
     };
 
+    // Attachment upload/remove — finding / action / followup (aynı API çağrıları)
+    const uploadFindingAttachment = async (meta: AttachmentMeta) => {
+        if (!finding) return;
+        try {
+            await api.addFindingAttachment(finding.id, meta);
+            success('Eklendi', `${meta.originalName} dosya kaydı oluşturuldu.`);
+            load();
+        } catch { showError('Hata', `${meta.originalName} eklenemedi.`); }
+    };
+
+    const uploadActionAttachment = async (actionId: string, meta: AttachmentMeta) => {
+        if (!finding) return;
+        try {
+            await api.addActionAttachment(finding.id, actionId, meta);
+            success('Eklendi', `${meta.originalName} dosya kaydı oluşturuldu.`);
+            load();
+        } catch { showError('Hata', `${meta.originalName} eklenemedi.`); }
+    };
+
+    const uploadFollowUpAttachment = async (fuId: string, meta: AttachmentMeta) => {
+        if (!finding) return;
+        try {
+            await api.addFollowUpAttachment(finding.id, fuId, meta);
+            success('Eklendi', `${meta.originalName} dosya kaydı oluşturuldu.`);
+            load();
+        } catch { showError('Hata', `${meta.originalName} eklenemedi.`); }
+    };
+
     const removeFindingAttachment = async (attId: string) => {
         if (!finding) return;
         try { await api.removeFindingAttachment(finding.id, attId); success('Silindi', ''); load(); }
@@ -420,115 +281,195 @@ export default function FindingDetailPage() {
         catch { showError('Hata', 'Dosya silinemedi.'); }
     };
 
-    if (loading) return (
-        <div className="flex items-center justify-center h-64">
-            <div className="flex flex-col items-center gap-3 text-slate-400">
-                <div className="w-8 h-8 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin" />
-                <span className="text-sm">Yükleniyor…</span>
-            </div>
-        </div>
-    );
+    if (loading) {
+        return (
+            <DetailShell>
+                <LoadingState message="Bulgu detayı yükleniyor..." />
+            </DetailShell>
+        );
+    }
 
-    if (!finding) return <div className="flex items-center justify-center h-64 text-slate-400 text-sm">Bulgu bulunamadı.</div>;
+    if (!finding) {
+        return (
+            <DetailShell>
+                <EmptyState
+                    title="Bulgu bulunamadı"
+                    description="Aradığınız bulgu kaydı mevcut değil veya erişim yetkiniz yok."
+                    actionLabel="Bulgu Envanterine Dön"
+                    onAction={() => router.push('/findings')}
+                />
+            </DetailShell>
+        );
+    }
 
     const typeCfg = findingTypeConfig[finding.findingType || ''];
-    const sevCfg = severityConfig[finding.severity] || { label: finding.severity, sublabel: '', variant: 'neutral' as BV, ring: 'ring-slate-200 bg-slate-50 text-slate-700' };
+    const sevCfg = severityConfig[finding.severity] || { label: finding.severity, sublabel: '', variant: 'neutral' as BV };
     const resCfg = resolutionConfig[finding.resolutionStatus] || resolutionConfig['DEVAM_EDIYOR'];
+    const wfCfg = workflowConfig[finding.workflowStatus] || workflowConfig['TASLAK'];
     const daysLeft = getDaysLeft(finding.targetResolutionDate);
     const isOverdue = finding.resolutionStatus !== 'KAPATILDI' && daysLeft !== null && daysLeft < 0;
     const isApproaching = finding.resolutionStatus !== 'KAPATILDI' && daysLeft !== null && daysLeft >= 0 && daysLeft <= 14;
 
-    const tabs: { id: Tab; label: string; count?: number }[] = [
-        { id: 'detay',      label: 'Bulgu Detayı' },
-        { id: 'aksiyonlar', label: 'Aksiyonlar',          count: finding._count?.actions },
-        { id: 'takip',      label: 'Takip Çalışmaları',   count: finding._count?.followUps },
-        { id: 'riskler',    label: 'İlişkili Riskler',    count: finding._count?.linkedRisks },
-        { id: 'ekler',      label: 'Ekler',               count: finding._count?.attachments },
-        { id: 'tarihce',    label: 'Tarihçe',             count: auditTrail.length },
+    const tabs = [
+        { key: 'detay',      label: 'Bulgu Detayı' },
+        { key: 'aksiyonlar', label: 'Aksiyonlar',        count: finding._count?.actions },
+        { key: 'takip',      label: 'Takip Çalışmaları', count: finding._count?.followUps },
+        { key: 'riskler',    label: 'İlişkili Riskler',  count: finding._count?.linkedRisks },
+        { key: 'ekler',      label: 'Ekler',             count: finding._count?.attachments },
+        { key: 'tarihce',    label: 'Tarihçe',           count: auditTrail.length },
     ];
 
-    return (
-        <div className="min-h-full bg-slate-50/60">
-
-            {/* ── Sticky Header ──────────────────────────────────────────────── */}
-            <div className="bg-white border-b border-slate-200 sticky top-0 z-20 shadow-sm">
-                <div className="px-8 py-4">
-                    {/* Breadcrumb */}
-                    <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-3">
-                        <Link href="/findings" className="hover:text-violet-600">Bulgu Envanteri</Link>
-                        <span>/</span>
-                        <span className="text-slate-700 font-semibold font-mono">{finding.findingId}</span>
-                    </div>
-
-                    <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-start gap-3 min-w-0">
-                            {/* Severity badge */}
-                            <div className={`flex-shrink-0 w-11 h-11 rounded-xl flex flex-col items-center justify-center ring-2 ${sevCfg.ring}`}>
-                                <span className="text-sm font-black leading-none">{sevCfg.label}</span>
-                            </div>
-                            <div className="min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap mb-1">
-                                    <span className="font-mono text-xs font-bold text-violet-700 bg-violet-50 border border-violet-200 px-2 py-0.5 rounded-md">{finding.findingId}</span>
-                                    {typeCfg && <StatusBadge variant={typeCfg.variant}>{typeCfg.label}</StatusBadge>}
-                                    <StatusBadge variant={resCfg.variant} dot>{resCfg.label}</StatusBadge>
-                                    {isOverdue && <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-bold rounded-full border border-red-200 animate-pulse">⚠ {Math.abs(daysLeft!)} gün gecikmiş</span>}
-                                    {isApproaching && <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-bold rounded-full border border-amber-200">⏰ {daysLeft} gün kaldı</span>}
-                                </div>
-                                <h1 className="text-base font-bold text-slate-900 truncate max-w-2xl leading-tight">
-                                    {finding.summary || finding.description}
-                                </h1>
-                                <div className="flex items-center gap-3 text-xs text-slate-400 mt-0.5 flex-wrap">
-                                    {finding.relatedDepartment && <span>📍 {finding.relatedDepartment}</span>}
-                                    {finding.gmy && <span>👤 {finding.gmy}</span>}
-                                    {finding.iletisimKisisi && <span>📞 {finding.iletisimKisisi}</span>}
-                                    {finding.targetResolutionDate && (
-                                        <span className={isOverdue ? 'text-red-500 font-semibold' : ''}>
-                                            🎯 {fmt(finding.targetResolutionDate)}
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                            <WorkflowPill status={finding.workflowStatus} onAction={setWorkflowAction} />
-                            <Link href={`/findings/${id}/edit`}>
-                                <Button variant="secondary" size="sm">✏️ Düzenle</Button>
-                            </Link>
-                        </div>
-                    </div>
-
-                    {/* Tabs */}
-                    <div className="flex items-center gap-0 mt-3 -mb-4 border-b border-transparent">
-                        {tabs.map(tab => (
-                            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                                className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border-b-2 transition-all ${
-                                    activeTab === tab.id ? 'border-violet-600 text-violet-700' : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
-                                }`}
-                            >
-                                {tab.label}
-                                {tab.count !== undefined && (
-                                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${activeTab === tab.id ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-500'}`}>
-                                        {tab.count}
-                                    </span>
-                                )}
-                            </button>
-                        ))}
-                    </div>
+    const timelineItems: TimelineItem[] = auditTrail.map(entry => {
+        const op = entry.operation || entry.changeType;
+        const opCfg = op ? operationLabels[op] : null;
+        return {
+            id: entry.id,
+            title: opCfg?.label || op || 'İşlem',
+            date: fmtDatetime(entry.entryDate),
+            user: entry.evaluator || entry.userId || undefined,
+            variant: opCfg?.variant || 'info',
+            description: (
+                <div className="space-y-1.5">
+                    {entry.workflowStatus && (
+                        <p>
+                            {entry.previousWorkflowStatus && (
+                                <span className="text-slate-400">{workflowConfig[entry.previousWorkflowStatus]?.label || entry.previousWorkflowStatus} → </span>
+                            )}
+                            <span className="font-semibold text-slate-700">{workflowConfig[entry.workflowStatus]?.label || entry.workflowStatus}</span>
+                        </p>
+                    )}
+                    {(entry.resolutionStatus || entry.result) && (
+                        <p className="flex items-center gap-1.5 flex-wrap">
+                            {entry.resolutionStatus && (
+                                <StatusBadge variant={resolutionConfig[entry.resolutionStatus]?.variant || 'neutral'} dot>
+                                    {resolutionConfig[entry.resolutionStatus]?.label || entry.resolutionStatus}
+                                </StatusBadge>
+                            )}
+                            {entry.result && (
+                                <StatusBadge variant={entry.result === 'YETERLI' ? 'success' : 'critical'}>
+                                    {entry.result === 'YETERLI' ? 'Yeterli' : 'Yetersiz'}
+                                </StatusBadge>
+                            )}
+                        </p>
+                    )}
+                    {entry.explanation && <p className="leading-relaxed">{entry.explanation}</p>}
+                    {entry.fieldName && (
+                        <p className="text-[10px]">
+                            <span className="font-semibold">{entry.fieldName}:</span>{' '}
+                            {entry.oldValue != null && <span className="line-through text-red-400">{JSON.stringify(entry.oldValue)}</span>}{' '}
+                            {entry.newValue != null && <span className="text-emerald-600 font-medium">→ {JSON.stringify(entry.newValue)}</span>}
+                        </p>
+                    )}
                 </div>
-            </div>
+            ),
+        };
+    });
+
+    return (
+        <DetailShell>
+
+            {/* ── Header ─────────────────────────────────────────────────────── */}
+            <DetailHeader
+                sticky
+                breadcrumbs={[
+                    { label: 'Bulgu Yönetimi' },
+                    { label: 'Bulgu Envanteri', href: '/findings' },
+                    { label: finding.findingId },
+                ]}
+                entityId={finding.findingId}
+                title={finding.summary || finding.description}
+                badges={
+                    <>
+                        <StatusBadge variant={sevCfg.variant}>{sevCfg.label}</StatusBadge>
+                        {typeCfg && <StatusBadge variant={typeCfg.variant}>{typeCfg.label}</StatusBadge>}
+                        <StatusBadge variant={wfCfg.variant} dot>{wfCfg.label}</StatusBadge>
+                        <StatusBadge variant={resCfg.variant} dot>{resCfg.label}</StatusBadge>
+                        {isOverdue && <StatusBadge variant="critical" dot>{Math.abs(daysLeft!)} gün gecikmiş</StatusBadge>}
+                        {isApproaching && <StatusBadge variant="warning" dot>{daysLeft} gün kaldı</StatusBadge>}
+                    </>
+                }
+                meta={
+                    <>
+                        {finding.relatedDepartment && <span>Direktörlük: {finding.relatedDepartment}</span>}
+                        {finding.gmy && <span>GMY: {finding.gmy}</span>}
+                        {finding.iletisimKisisi && <span>İletişim: {finding.iletisimKisisi}</span>}
+                        {finding.targetResolutionDate && (
+                            <span className={isOverdue ? 'text-red-500 font-semibold' : ''}>
+                                Hedef: {fmt(finding.targetResolutionDate)}
+                            </span>
+                        )}
+                    </>
+                }
+                actions={
+                    <>
+                        {finding.workflowStatus === 'TASLAK' && (
+                            <Button variant="primary" size="sm" onClick={() => setWorkflowAction('mutabakata-gonder')}
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>}
+                            >
+                                Mutabakata Gönder
+                            </Button>
+                        )}
+                        {finding.workflowStatus === 'MUTABAKATA_GONDERILDI' && (
+                            <Button variant="primary" size="sm" onClick={() => setWorkflowAction('ic-kontrol-onayina-gonder')}
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+                            >
+                                İKS Onayına Gönder
+                            </Button>
+                        )}
+                        {finding.workflowStatus === 'IC_KONTROL_ONAYINA_GONDERILDI' && (
+                            <>
+                                <Button variant="success" size="sm" onClick={() => setWorkflowAction('mutabakat-onayla')}
+                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                                >
+                                    Mutabakatı Onayla
+                                </Button>
+                                <Button variant="outline" size="sm" onClick={() => setWorkflowAction('mutabakat-geri-gonder')}
+                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>}
+                                >
+                                    Birime Geri Gönder
+                                </Button>
+                            </>
+                        )}
+                        {finding.workflowStatus !== 'IPTAL' && finding.workflowStatus !== 'MUTABAKAT_YAPILDI' && (
+                            <Button variant="ghost" size="sm" onClick={() => setWorkflowAction('iptal-et')} className="text-red-500 hover:bg-red-50">
+                                İptal Et
+                            </Button>
+                        )}
+                        {finding.workflowStatus === 'MUTABAKAT_YAPILDI' && (
+                            <Button variant="ghost" size="sm" onClick={() => setWorkflowAction('iptal-et')} className="text-red-500 hover:bg-red-50">
+                                İptal Et
+                            </Button>
+                        )}
+                        <Link href={`/findings/${id}/edit`}>
+                            <Button variant="secondary" size="sm"
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>}
+                            >
+                                Düzenle
+                            </Button>
+                        </Link>
+                    </>
+                }
+            />
+
+            {/* ── Tabs ───────────────────────────────────────────────────────── */}
+            <Tabs
+                tabs={tabs}
+                activeTab={activeTab}
+                onChange={(key) => setActiveTab(key as Tab)}
+                className="mb-6"
+            />
 
             {/* ── Content ────────────────────────────────────────────────────── */}
-            <div className="px-8 py-6 space-y-5">
+            <div className="space-y-5">
 
                 {/* ═══════ DETAY TAB ═══════ */}
                 {activeTab === 'detay' && (
                     <div className="space-y-5">
-                        {/* Bulgu Metni / Özeti — üstte prominence card */}
-                        <div className="bg-white border-l-4 border-violet-500 rounded-xl shadow-sm p-6">
+                        {/* Bulgu Metni / Özeti */}
+                        <DetailSection title="Bulgu Özeti & Metni">
                             {finding.summary && (
                                 <div className="mb-4">
-                                    <p className="text-[10px] font-bold text-violet-500 uppercase tracking-widest mb-1.5">Bulgu Özeti</p>
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Bulgu Özeti</p>
                                     <p className="text-base font-semibold text-slate-900 leading-snug">{finding.summary}</p>
                                 </div>
                             )}
@@ -538,18 +479,18 @@ export default function FindingDetailPage() {
                             </div>
                             {finding.recommendation && (
                                 <div className="mt-4 pt-4 border-t border-slate-100">
-                                    <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-1.5">💡 Öneri / Düzeltici Faaliyet</p>
+                                    <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-1.5">Öneri / Düzeltici Faaliyet</p>
                                     <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{finding.recommendation}</p>
                                 </div>
                             )}
-                        </div>
+                        </DetailSection>
 
                         <div className="grid grid-cols-3 gap-5">
                             <div className="col-span-2 space-y-5">
                                 {/* Kimlik Bilgileri */}
-                                <Card title="Kimlik & Sınıflandırma" icon="🏷️">
+                                <DetailSection title="Kimlik & Sınıflandırma">
                                     <div className="grid grid-cols-2 gap-x-8 gap-y-4">
-                                        <InfoRow label="Bulgu No" value={<span className="font-mono font-bold text-violet-700">{finding.findingId}</span>} />
+                                        <InfoRow label="Bulgu No" value={<span className="font-mono font-bold text-blue-700">{finding.findingId}</span>} />
                                         <InfoRow label="Bulgu Türü" value={typeCfg ? <StatusBadge variant={typeCfg.variant}>{typeCfg.label}</StatusBadge> : finding.findingType} />
                                         <InfoRow label="Önem Derecesi" value={
                                             <span className="flex items-center gap-2">
@@ -559,10 +500,10 @@ export default function FindingDetailPage() {
                                         } />
                                         <InfoRow label="Çözüm Durumu" value={<StatusBadge variant={resCfg.variant} dot>{resCfg.label}</StatusBadge>} />
                                     </div>
-                                </Card>
+                                </DetailSection>
 
                                 {/* Sorumluluk */}
-                                <Card title="Sorumluluk & Organizasyon" icon="🏢">
+                                <DetailSection title="Sorumluluk & Organizasyon">
                                     <div className="grid grid-cols-2 gap-x-8 gap-y-4">
                                         <InfoRow label="İlgili Direktörlük" value={finding.relatedDepartment} />
                                         <InfoRow label="İlgili GMY" value={finding.gmy} />
@@ -576,33 +517,32 @@ export default function FindingDetailPage() {
                                             } />
                                         )}
                                     </div>
-                                </Card>
+                                </DetailSection>
 
                                 {/* Tarihler */}
-                                <Card title="Tarihler" icon="📅">
+                                <DetailSection title="Tarihler">
                                     <div className="grid grid-cols-3 gap-x-8 gap-y-4">
                                         <InfoRow label="Bulgu Test Tarihi" value={fmt(finding.testDate)} />
                                         <InfoRow label="Hedef Tamamlanma" value={
                                             <span className={isOverdue ? 'text-red-600 font-semibold' : isApproaching ? 'text-amber-600 font-semibold' : ''}>
                                                 {fmt(finding.targetResolutionDate)}
-                                                {isOverdue && ' ⚠'}{isApproaching && ' ⏰'}
                                             </span>
                                         } />
                                         {finding.closedDate && <InfoRow label="Kapanma Tarihi" value={<span className="text-emerald-700 font-semibold">{fmt(finding.closedDate)}</span>} />}
                                         <InfoRow label="Kayıt Tarihi" value={fmt(finding.createdAt)} />
                                         <InfoRow label="Son Güncelleme" value={fmt(finding.updatedAt)} />
                                     </div>
-                                </Card>
+                                </DetailSection>
                             </div>
 
                             <div className="space-y-5">
                                 {/* Güncel Durum Log */}
-                                <Card title="Bulgunun Güncel Durumu" icon="📊">
+                                <DetailSection title="Bulgunun Güncel Durumu">
                                     <div className="space-y-3">
                                         {finding.statusLogs.length === 0 && <p className="text-xs text-slate-400 italic">Henüz güncelleme yok</p>}
                                         <div className="space-y-2 max-h-48 overflow-y-auto">
                                             {finding.statusLogs.map(log => (
-                                                <div key={log.id} className="text-xs border-l-2 border-violet-200 pl-3 py-1">
+                                                <div key={log.id} className="text-xs border-l-2 border-blue-200 pl-3 py-1">
                                                     <p className="text-[10px] text-slate-400 font-mono mb-0.5">{fmtDatetime(log.entryDate)} {log.authorName && `— ${log.authorName}`}</p>
                                                     <p className="text-slate-700 leading-relaxed">{log.text}</p>
                                                 </div>
@@ -614,14 +554,14 @@ export default function FindingDetailPage() {
                                                 onChange={e => setLogText(e.target.value)}
                                                 rows={2}
                                                 placeholder="Güncel durum notu ekle…"
-                                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-violet-300 outline-none resize-none"
+                                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-300 outline-none resize-none"
                                             />
                                             <Button size="sm" variant="primary" onClick={addLog} disabled={logSaving || !logText.trim()} className="w-full">
-                                                {logSaving ? '…' : '+ Not Ekle'}
+                                                {logSaving ? 'Kaydediliyor…' : 'Not Ekle'}
                                             </Button>
                                         </div>
                                     </div>
-                                </Card>
+                                </DetailSection>
 
                                 {/* Birim Cevabı & İKS Değerlendirmesi */}
                                 {finding.birimCevabi && (
@@ -631,8 +571,8 @@ export default function FindingDetailPage() {
                                     </div>
                                 )}
                                 {finding.internalControlAssessment && (
-                                    <div className="bg-violet-50 border border-violet-200 rounded-xl p-4">
-                                        <p className="text-[10px] font-bold text-violet-600 uppercase tracking-widest mb-2">İç Kontrol Değerlendirmesi</p>
+                                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                                        <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2">İç Kontrol Değerlendirmesi</p>
                                         <p className="text-xs text-slate-700 leading-relaxed">{finding.internalControlAssessment}</p>
                                     </div>
                                 )}
@@ -646,7 +586,7 @@ export default function FindingDetailPage() {
                     <div className="space-y-4">
                         <div className="flex items-start justify-between">
                             <div>
-                                <h2 className="text-base font-semibold text-slate-800">Düzeltici Aksiyonlar</h2>
+                                <h2 className="text-sm font-semibold text-slate-700">Düzeltici Aksiyonlar</h2>
                                 <p className="text-xs text-slate-500 mt-0.5">Aksiyon tamamlanma tarihine göre sistem otomatik Takip Çalışması oluşturur. Bulgunun hedef tarihi, en ileri aksiyona göre hesaplanır.</p>
                             </div>
                             <Button variant="primary" size="sm" onClick={() => setAddActionOpen(true)}
@@ -655,11 +595,14 @@ export default function FindingDetailPage() {
                         </div>
 
                         {finding.actions.length === 0 ? (
-                            <div className="bg-white border border-dashed border-slate-200 rounded-xl p-10 text-center">
-                                <div className="text-3xl mb-2">⚡</div>
-                                <p className="text-sm font-medium text-slate-600">Henüz aksiyon yok</p>
-                                <p className="text-xs text-slate-400 mt-1 mb-3">Düzeltici bir aksiyon tanımlayın</p>
-                                <Button variant="primary" size="sm" onClick={() => setAddActionOpen(true)}>+ Aksiyon Ekle</Button>
+                            <div className="bg-white border border-dashed border-slate-200 rounded-xl">
+                                <EmptyState
+                                    title="Henüz aksiyon yok"
+                                    description="Düzeltici bir aksiyon tanımlayın"
+                                    icon={<svg className="w-12 h-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
+                                    actionLabel="Aksiyon Ekle"
+                                    onAction={() => setAddActionOpen(true)}
+                                />
                             </div>
                         ) : (
                             <div className="space-y-3">
@@ -670,8 +613,8 @@ export default function FindingDetailPage() {
                                     return (
                                         <div key={action.id} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
                                             <div className="flex items-start gap-4 p-5">
-                                                <div className="flex-shrink-0 w-10 h-10 bg-indigo-50 border border-indigo-200 rounded-lg flex items-center justify-center">
-                                                    <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <div className="flex-shrink-0 w-10 h-10 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-center">
+                                                    <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                                                     </svg>
                                                 </div>
@@ -683,41 +626,36 @@ export default function FindingDetailPage() {
                                                             {aOverdue && <StatusBadge variant="critical" dot>Gecikmiş</StatusBadge>}
                                                         </div>
                                                         {action.status !== 'KAPATILDI' && (
-                                                            <button
+                                                            <Button variant="secondary" size="xs"
                                                                 onClick={() => {
                                                                     setEditAction(action);
                                                                     setAddActionOpen(true);
                                                                 }}
-                                                                className="text-xs text-indigo-600 hover:text-indigo-800 font-bold bg-indigo-50 hover:bg-indigo-100/80 px-2.5 py-1 rounded transition-colors flex items-center gap-1 shadow-sm border border-indigo-200/50"
+                                                                icon={<svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>}
                                                             >
-                                                                ✏️ Düzenle
-                                                            </button>
+                                                                Düzenle
+                                                            </Button>
                                                         )}
                                                     </div>
                                                     <p className="text-sm text-slate-800 leading-relaxed mb-3">{action.description}</p>
                                                     <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">
-                                                        {action.owner && <span>👤 {action.owner.firstName} {action.owner.lastName}</span>}
-                                                        {action.responsibleDepartment && <span>🏢 {action.responsibleDepartment}</span>}
-                                                        <span className={aOverdue ? 'text-red-600 font-semibold' : ''}>🎯 {fmt(action.dueDate)}</span>
-                                                        {action.completedAt && <span className="text-emerald-600">✅ Kapandı: {fmt(action.completedAt)}</span>}
+                                                        {action.owner && <span>Sorumlu: {action.owner.firstName} {action.owner.lastName}</span>}
+                                                        {action.responsibleDepartment && <span>Birim: {action.responsibleDepartment}</span>}
+                                                        <span className={aOverdue ? 'text-red-600 font-semibold' : ''}>Hedef: {fmt(action.dueDate)}</span>
+                                                        {action.completedAt && <span className="text-emerald-600">Kapandı: {fmt(action.completedAt)}</span>}
                                                     </div>
                                                     {action.notes && <p className="text-xs text-slate-500 mt-2 bg-slate-50 rounded-lg p-2 border border-slate-100">{action.notes}</p>}
                                                 </div>
                                             </div>
                                             {/* Action attachments */}
-                                            {(action.attachments && action.attachments.length > 0 || true) && (
-                                                <div className="px-5 pb-4 border-t border-slate-100 pt-3">
-                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Ekler</p>
-                                                    <AttachmentList
-                                                        attachments={action.attachments || []}
-                                                        findingId={finding.id}
-                                                        entityId={action.id}
-                                                        entityType="action"
-                                                        onRemove={(attId) => removeActionAttachment(action.id, attId)}
-                                                        onAdd={() => load()}
-                                                    />
-                                                </div>
-                                            )}
+                                            <div className="px-5 pb-4 border-t border-slate-100 pt-3">
+                                                <FileUpload
+                                                    compact
+                                                    attachments={(action.attachments || []).map(toAttachmentMeta)}
+                                                    onUpload={(meta) => uploadActionAttachment(action.id, meta)}
+                                                    onRemove={(att) => { if (att.id) removeActionAttachment(action.id, att.id); }}
+                                                />
+                                            </div>
                                             {/* Linked follow-ups */}
                                             {relFU.length > 0 && (
                                                 <div className="px-5 pb-4 border-t border-slate-100 pt-3">
@@ -728,8 +666,8 @@ export default function FindingDetailPage() {
                                                             return (
                                                                 <button key={fu.id}
                                                                     onClick={() => { setSelectedFollowUp(fu); setFollowUpOpen(true); setActiveTab('takip'); }}
-                                                                    className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 hover:bg-violet-50 border border-slate-200 hover:border-violet-300 rounded-lg text-xs transition-all">
-                                                                    <span className="font-mono text-violet-700 font-semibold">{fu.followUpId}</span>
+                                                                    className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-lg text-xs transition-all">
+                                                                    <span className="font-mono text-blue-700 font-semibold">{fu.followUpId}</span>
                                                                     <StatusBadge variant={fuCfg.variant}>{fuCfg.label}</StatusBadge>
                                                                 </button>
                                                             );
@@ -750,19 +688,23 @@ export default function FindingDetailPage() {
                     <div className="space-y-4">
                         <div className="flex items-start justify-between">
                             <div>
-                                <h2 className="text-base font-semibold text-slate-800">Bulgu Takip Çalışmaları</h2>
+                                <h2 className="text-sm font-semibold text-slate-700">Bulgu Takip Çalışmaları</h2>
                                 <p className="text-xs text-slate-500 mt-0.5">Aksiyonlar oluşturulunca otomatik açılır. Takip sonucu ana bulguda güncellenir (append-only log).</p>
                             </div>
-                            <Button variant="secondary" size="sm" onClick={() => { setSelectedFollowUp(null); setFollowUpOpen(true); }}>
-                                + Manuel Takip
+                            <Button variant="secondary" size="sm" onClick={() => { setSelectedFollowUp(null); setFollowUpOpen(true); }}
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}
+                            >
+                                Manuel Takip
                             </Button>
                         </div>
 
                         {finding.followUps.length === 0 ? (
-                            <div className="bg-white border border-dashed border-slate-200 rounded-xl p-10 text-center">
-                                <div className="text-3xl mb-2">🔍</div>
-                                <p className="text-sm font-medium text-slate-600">Henüz takip çalışması yok</p>
-                                <p className="text-xs text-slate-400 mt-1">Aksiyon eklediğinizde otomatik oluşturulur</p>
+                            <div className="bg-white border border-dashed border-slate-200 rounded-xl">
+                                <EmptyState
+                                    title="Henüz takip çalışması yok"
+                                    description="Aksiyon eklediğinizde otomatik oluşturulur"
+                                    icon={<svg className="w-12 h-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>}
+                                />
                             </div>
                         ) : (
                             <div className="space-y-4">
@@ -775,15 +717,15 @@ export default function FindingDetailPage() {
                                             <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50 border-b border-slate-100">
                                                 <div>
                                                     <div className="flex items-center gap-2 flex-wrap">
-                                                        <Link href={`/follow-ups/${fu.id}`} className="font-mono text-sm font-bold text-violet-700 hover:underline">{fu.followUpId}</Link>
+                                                        <Link href={`/follow-ups/${fu.id}`} className="font-mono text-sm font-bold text-blue-700 hover:underline">{fu.followUpId}</Link>
                                                         <StatusBadge variant={fuCfg.variant}>{fuCfg.label}</StatusBadge>
                                                         {resOutCfg && <StatusBadge variant={resOutCfg.variant} dot>{resOutCfg.label}</StatusBadge>}
-                                                        {fu.newActionRequired && <StatusBadge variant="high">⚡ Yeni Aksiyon Gerekli</StatusBadge>}
+                                                        {fu.newActionRequired && <StatusBadge variant="high">Yeni Aksiyon Gerekli</StatusBadge>}
                                                     </div>
                                                     <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
-                                                        {linkedAction && <Link href={`/actions/${linkedAction.id}`} className="text-orange-600 font-medium hover:underline">⚡ {linkedAction.actionId}</Link>}
-                                                        {fu.plannedDate && <span>📅 Planlanan: {fmt(fu.plannedDate)}</span>}
-                                                        {fu.newFollowUpDate && <span className="text-amber-600">↩ Yeni: {fmt(fu.newFollowUpDate)}</span>}
+                                                        {linkedAction && <Link href={`/actions/${linkedAction.id}`} className="text-orange-600 font-medium hover:underline">{linkedAction.actionId}</Link>}
+                                                        {fu.plannedDate && <span>Planlanan: {fmt(fu.plannedDate)}</span>}
+                                                        {fu.newFollowUpDate && <span className="text-amber-600">Yeni: {fmt(fu.newFollowUpDate)}</span>}
                                                         <span>{fmtDatetime(fu.createdAt)}</span>
                                                     </div>
                                                 </div>
@@ -805,8 +747,8 @@ export default function FindingDetailPage() {
                                                     )}
                                                     {fu.internalControlAssessment && (
                                                         <div>
-                                                            <p className="text-[10px] font-bold text-violet-600 uppercase tracking-widest mb-1">İKS Değerlendirmesi</p>
-                                                            <p className="text-xs text-slate-700 bg-violet-50 border border-violet-100 rounded-lg p-3">{fu.internalControlAssessment}</p>
+                                                            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-1">İKS Değerlendirmesi</p>
+                                                            <p className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3">{fu.internalControlAssessment}</p>
                                                         </div>
                                                     )}
                                                 </div>
@@ -820,17 +762,12 @@ export default function FindingDetailPage() {
                                                 )}
                                                 {/* FollowUp attachments */}
                                                 {(fu.attachments || []).length > 0 && (
-                                                    <div>
-                                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Ekler</p>
-                                                        <AttachmentList
-                                                            attachments={fu.attachments || []}
-                                                            findingId={finding.id}
-                                                            entityId={fu.id}
-                                                            entityType="followup"
-                                                            onRemove={(attId) => removeFollowUpAttachment(fu.id, attId)}
-                                                            onAdd={() => load()}
-                                                        />
-                                                    </div>
+                                                    <FileUpload
+                                                        compact
+                                                        attachments={(fu.attachments || []).map(toAttachmentMeta)}
+                                                        onUpload={(meta) => uploadFollowUpAttachment(fu.id, meta)}
+                                                        onRemove={(att) => { if (att.id) removeFollowUpAttachment(fu.id, att.id); }}
+                                                    />
                                                 )}
                                             </div>
                                         </div>
@@ -844,18 +781,21 @@ export default function FindingDetailPage() {
                 {/* ═══════ RİSKLER TAB ═══════ */}
                 {activeTab === 'riskler' && (
                     <div className="space-y-4">
-                        <h2 className="text-base font-semibold text-slate-800">İlişkili Riskler ({finding.linkedRisks.length})</h2>
+                        <h2 className="text-sm font-semibold text-slate-700">İlişkili Riskler ({finding.linkedRisks.length})</h2>
                         {finding.linkedRisks.length === 0 ? (
-                            <div className="bg-white border border-dashed border-slate-200 rounded-xl p-10 text-center">
-                                <p className="text-sm text-slate-400">Bu bulgu herhangi bir riskle ilişkilendirilmemiş.</p>
+                            <div className="bg-white border border-dashed border-slate-200 rounded-xl">
+                                <EmptyState
+                                    title="İlişkili risk yok"
+                                    description="Bu bulgu herhangi bir riskle ilişkilendirilmemiş."
+                                />
                             </div>
                         ) : (
                             <div className="grid grid-cols-2 gap-4">
                                 {finding.linkedRisks.map(r => (
                                     <Link key={r.id} href={`/risks/${r.id}`}
-                                        className="bg-white border border-slate-200 rounded-xl p-4 hover:border-violet-300 hover:shadow-md transition-all group">
+                                        className="bg-white border border-slate-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-md transition-all group">
                                         <div className="flex items-start justify-between mb-2">
-                                            <span className="font-mono text-sm font-bold text-violet-700 group-hover:text-violet-900">{r.riskId}</span>
+                                            <span className="font-mono text-sm font-bold text-blue-700 group-hover:text-blue-900">{r.riskId}</span>
                                             {r.residualRiskScore != null && (
                                                 <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${r.residualRiskScore >= 15 ? 'bg-red-100 text-red-700' : r.residualRiskScore >= 8 ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
                                                     Skor: {r.residualRiskScore}
@@ -863,7 +803,7 @@ export default function FindingDetailPage() {
                                             )}
                                         </div>
                                         <p className="text-sm text-slate-700 font-medium">{r.name}</p>
-                                        {r.owner && <p className="text-xs text-slate-400 mt-1">👤 {r.owner.firstName} {r.owner.lastName}</p>}
+                                        {r.owner && <p className="text-xs text-slate-400 mt-1">Sahip: {r.owner.firstName} {r.owner.lastName}</p>}
                                     </Link>
                                 ))}
                             </div>
@@ -873,89 +813,22 @@ export default function FindingDetailPage() {
 
                 {/* ═══════ EKLER TAB ═══════ */}
                 {activeTab === 'ekler' && (
-                    <div className="space-y-4">
-                        <h2 className="text-base font-semibold text-slate-800">Bulgu Ekleri</h2>
-                        <div className="bg-white border border-slate-200 rounded-xl p-5">
-                            <AttachmentList
-                                attachments={finding.attachments}
-                                findingId={finding.id}
-                                entityType="finding"
-                                onRemove={removeFindingAttachment}
-                                onAdd={() => load()}
-                            />
-                        </div>
-                    </div>
+                    <DetailSection title="Bulgu Ekleri">
+                        <FileUpload
+                            attachments={finding.attachments.map(toAttachmentMeta)}
+                            onUpload={uploadFindingAttachment}
+                            onRemove={(att) => { if (att.id) removeFindingAttachment(att.id); }}
+                            label=""
+                        />
+                    </DetailSection>
                 )}
 
                 {/* ═══════ TARİHÇE TAB ═══════ */}
                 {activeTab === 'tarihce' && (
-                    <div className="space-y-4">
-                        <h2 className="text-base font-semibold text-slate-800">Denetim İzi (Audit Trail)</h2>
-                        <p className="text-xs text-slate-500">Bulgu üzerindeki tüm işlemler kronolojik olarak kaydedilmektedir.</p>
-                        {auditTrail.length === 0 ? (
-                            <div className="bg-white border border-dashed border-slate-200 rounded-xl p-10 text-center">
-                                <p className="text-sm text-slate-400">Henüz kayıt yok.</p>
-                            </div>
-                        ) : (
-                            <div className="relative">
-                                <div className="absolute left-5 top-0 bottom-0 w-px bg-slate-200" />
-                                <div className="space-y-3">
-                                    {auditTrail.map(entry => {
-                                        const op = entry.operation || entry.changeType;
-                                        const opCfg = op ? operationLabels[op] : null;
-                                        return (
-                                            <div key={entry.id} className="flex gap-4">
-                                                <div className="relative flex-shrink-0 ml-3.5">
-                                                    <div className={`w-3 h-3 rounded-full mt-1.5 border-2 border-white ring-2 ring-slate-200 ${opCfg ? 'bg-violet-500' : 'bg-slate-400'}`} />
-                                                </div>
-                                                <div className="flex-1 pb-3">
-                                                    <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-                                                        <div className="flex items-start justify-between gap-2 mb-2">
-                                                            <div className="flex items-center gap-2 flex-wrap">
-                                                                {opCfg ? (
-                                                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${opCfg.color}`}>{opCfg.label}</span>
-                                                                ) : op && (
-                                                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-slate-100 text-slate-600 border-slate-200">{op}</span>
-                                                                )}
-                                                                {entry.workflowStatus && (
-                                                                    <span className="text-xs text-slate-500">
-                                                                        {entry.previousWorkflowStatus && <span className="text-slate-400">{workflowConfig[entry.previousWorkflowStatus]?.label || entry.previousWorkflowStatus} → </span>}
-                                                                        <span className="font-semibold text-violet-700">{workflowConfig[entry.workflowStatus]?.label || entry.workflowStatus}</span>
-                                                                    </span>
-                                                                )}
-                                                                {entry.resolutionStatus && (
-                                                                    <StatusBadge variant={resolutionConfig[entry.resolutionStatus]?.variant || 'neutral'} dot>
-                                                                        {resolutionConfig[entry.resolutionStatus]?.label || entry.resolutionStatus}
-                                                                    </StatusBadge>
-                                                                )}
-                                                                {entry.result && (
-                                                                    <StatusBadge variant={entry.result === 'YETERLI' ? 'success' : 'critical'}>
-                                                                        {entry.result === 'YETERLI' ? 'Yeterli' : 'Yetersiz'}
-                                                                    </StatusBadge>
-                                                                )}
-                                                            </div>
-                                                            <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">{fmtDatetime(entry.entryDate)}</span>
-                                                        </div>
-                                                        {entry.explanation && <p className="text-xs text-slate-700 leading-relaxed">{entry.explanation}</p>}
-                                                        {entry.fieldName && (
-                                                            <div className="mt-2 flex items-center gap-2 text-[10px] text-slate-500">
-                                                                <span className="font-semibold">{entry.fieldName}:</span>
-                                                                {entry.oldValue != null && <span className="line-through text-red-400">{JSON.stringify(entry.oldValue)}</span>}
-                                                                {entry.newValue != null && <span className="text-emerald-600 font-medium">→ {JSON.stringify(entry.newValue)}</span>}
-                                                            </div>
-                                                        )}
-                                                        {(entry.evaluator || entry.userId) && (
-                                                            <p className="text-[10px] text-slate-400 mt-1.5">👤 {entry.evaluator || entry.userId}</p>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                    <DetailSection title="Denetim İzi (Audit Trail)">
+                        <p className="text-xs text-slate-500 mb-5">Bulgu üzerindeki tüm işlemler kronolojik olarak kaydedilmektedir.</p>
+                        <Timeline items={timelineItems} emptyText="Henüz kayıt yok." />
+                    </DetailSection>
                 )}
             </div>
 
@@ -965,11 +838,11 @@ export default function FindingDetailPage() {
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
                         <div className="px-6 py-5 border-b border-slate-100">
                             <h3 className="text-base font-semibold text-slate-900">
-                                {workflowAction === 'mutabakata-gonder'         && '📤 Mutabakata Gönder'}
-                                {workflowAction === 'ic-kontrol-onayina-gonder' && '✅ İKS Onayına Gönder'}
-                                {workflowAction === 'mutabakat-onayla'          && '✅ Mutabakatı Onayla'}
-                                {workflowAction === 'mutabakat-geri-gonder'     && '↩ Birime Geri Gönder'}
-                                {workflowAction === 'iptal-et'                  && '✕ Bulguyu İptal Et'}
+                                {workflowAction === 'mutabakata-gonder'         && 'Mutabakata Gönder'}
+                                {workflowAction === 'ic-kontrol-onayina-gonder' && 'İKS Onayına Gönder'}
+                                {workflowAction === 'mutabakat-onayla'          && 'Mutabakatı Onayla'}
+                                {workflowAction === 'mutabakat-geri-gonder'     && 'Birime Geri Gönder'}
+                                {workflowAction === 'iptal-et'                  && 'Bulguyu İptal Et'}
                             </h3>
                         </div>
                         <div className="p-6 space-y-4">
@@ -982,7 +855,7 @@ export default function FindingDetailPage() {
                                         {workflowAction === 'ic-kontrol-onayina-gonder' ? 'Birim Cevabı' : 'İç Kontrol Değerlendirmesi'}
                                     </label>
                                     <textarea value={workflowInput} onChange={e => setWorkflowInput(e.target.value)} rows={4}
-                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-300 outline-none resize-none"
+                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-300 outline-none resize-none"
                                         placeholder="Metni girin…" />
                                 </div>
                             )}
@@ -1036,6 +909,6 @@ export default function FindingDetailPage() {
                     onSuccess={() => load()}
                 />
             )}
-        </div>
+        </DetailShell>
     );
 }

@@ -19,7 +19,20 @@ export class AuditsService {
         const [plans, total] = await Promise.all([
             this.prisma.auditPlan.findMany({
                 where,
-                include: { _count: { select: { executions: true } } },
+                include: {
+                    _count: { select: { executions: true } },
+                    executions: {
+                        select: {
+                            findings: {
+                                select: {
+                                    id: true,
+                                    status: true,
+                                    actions: { select: { status: true } },
+                                },
+                            },
+                        },
+                    },
+                },
                 skip,
                 take: limit,
                 orderBy: { createdAt: 'desc' },
@@ -27,20 +40,82 @@ export class AuditsService {
             this.prisma.auditPlan.count({ where }),
         ]);
 
-        return { data: plans, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+        const data = plans.map((p) => this.withPlanDerivedFields(p));
+
+        return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+    }
+
+    async findPlanById(id: string) {
+        const plan = await this.prisma.auditPlan.findUnique({
+            where: { id },
+            include: {
+                _count: { select: { executions: true } },
+                executions: {
+                    include: {
+                        _count: { select: { findings: true } },
+                        findings: {
+                            select: {
+                                id: true,
+                                status: true,
+                                actions: { select: { status: true } },
+                            },
+                        },
+                    },
+                    orderBy: { createdAt: 'desc' },
+                },
+            },
+        });
+        if (!plan) throw new NotFoundException(`Denetim planı bulunamadı: ${id}`);
+        return this.withPlanDerivedFields(plan, true);
+    }
+
+    /** Bulgu/aksiyon sayıları executions ilişkisinden türetilir — planda ayrıca saklanmaz. */
+    private withPlanDerivedFields(plan: any, includeExecutions = false) {
+        const findings = (plan.executions || []).flatMap((e: any) => e.findings || []);
+        const totalFindings = findings.length;
+        const openFindings = findings.filter((f: any) => f.status !== 'CLOSED').length;
+        const actions = findings.flatMap((f: any) => f.actions || []);
+        let actionStatus: 'NO_ACTIONS' | 'IN_PROGRESS' | 'COMPLETED' = 'NO_ACTIONS';
+        if (actions.length > 0) {
+            actionStatus = actions.every((a: any) => a.status === 'KAPATILDI' || a.status === 'CLOSED')
+                ? 'COMPLETED'
+                : 'IN_PROGRESS';
+        }
+        const { executions, ...rest } = plan;
+        const executionsSummary = includeExecutions
+            ? (executions || []).map((e: any) => ({
+                id: e.id, executionId: e.executionId, startDate: e.startDate, endDate: e.endDate,
+                auditor: e.auditor, status: e.status, progress: e.progress, workpapers: e.workpapers,
+                findingsCount: e._count?.findings ?? 0,
+            }))
+            : undefined;
+        return { ...rest, totalFindings, openFindings, actionStatus, ...(includeExecutions ? { executions: executionsSummary } : {}) };
     }
 
     async createPlan(data: any, userId: string) {
-        const planId = `AP-${data.year}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-        const plan = await this.prisma.auditPlan.create({ data: { ...data, planId } });
+        const auditCode = `AP-${data.year}-${(await this.nextPlanSequence(data.year)).toString().padStart(3, '0')}`;
+        const { auditCode: _ignored, ...rest } = data;
+        const plan = await this.prisma.auditPlan.create({ data: { ...rest, planId: auditCode } });
         await this.prisma.auditLog.create({
             data: { userId, action: 'CREATE', entityType: 'AuditPlan', entityId: plan.id, newValue: plan },
         });
         return plan;
     }
 
+    private async nextPlanSequence(year: number): Promise<number> {
+        const prefix = `AP-${year}-`;
+        const last = await this.prisma.auditPlan.findFirst({
+            where: { planId: { startsWith: prefix } },
+            orderBy: { planId: 'desc' },
+        });
+        if (!last) return 1;
+        const n = parseInt(last.planId.split('-')[2], 10);
+        return isNaN(n) ? 1 : n + 1;
+    }
+
     async updatePlan(id: string, data: any, userId: string) {
-        const plan = await this.prisma.auditPlan.update({ where: { id }, data });
+        const { auditCode, totalFindings, openFindings, actionStatus, ...rest } = data;
+        const plan = await this.prisma.auditPlan.update({ where: { id }, data: rest });
         await this.prisma.auditLog.create({
             data: { userId, action: 'UPDATE', entityType: 'AuditPlan', entityId: id, newValue: plan },
         });
@@ -49,8 +124,47 @@ export class AuditsService {
 
     // ─── Audit Executions ────────────────────────────────────────────────────
 
+    async findAllExecutions(query: any) {
+        const { status, auditPlanId } = query;
+        const page = parseInt(query.page, 10) || 1;
+        const limit = parseInt(query.limit, 10) || 50;
+        const skip = (page - 1) * limit;
+        const where: any = {};
+        if (status) where.status = status;
+        if (auditPlanId) where.auditPlanId = auditPlanId;
+
+        const [executions, total] = await Promise.all([
+            this.prisma.auditExecution.findMany({
+                where,
+                include: {
+                    auditPlan: { select: { id: true, planId: true, name: true } },
+                    _count: { select: { findings: true } },
+                },
+                skip,
+                take: limit,
+                orderBy: { createdAt: 'desc' },
+            }),
+            this.prisma.auditExecution.count({ where }),
+        ]);
+
+        return { data: executions, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+    }
+
+    private async nextExecutionSequence(year: number): Promise<number> {
+        const prefix = `AE-${year}-`;
+        const last = await this.prisma.auditExecution.findFirst({
+            where: { executionId: { startsWith: prefix } },
+            orderBy: { executionId: 'desc' },
+        });
+        if (!last?.executionId) return 1;
+        const n = parseInt(last.executionId.split('-')[2], 10);
+        return isNaN(n) ? 1 : n + 1;
+    }
+
     async createExecution(data: any, userId: string) {
-        const execution = await this.prisma.auditExecution.create({ data });
+        const year = new Date(data.startDate || Date.now()).getFullYear();
+        const executionId = `AE-${year}-${(await this.nextExecutionSequence(year)).toString().padStart(3, '0')}`;
+        const execution = await this.prisma.auditExecution.create({ data: { ...data, executionId } });
         await this.prisma.auditLog.create({
             data: { userId, action: 'CREATE', entityType: 'AuditExecution', entityId: execution.id, newValue: execution },
         });
@@ -58,7 +172,8 @@ export class AuditsService {
     }
 
     async updateExecution(id: string, data: any, userId: string) {
-        const execution = await this.prisma.auditExecution.update({ where: { id }, data });
+        const { executionId, ...rest } = data;
+        const execution = await this.prisma.auditExecution.update({ where: { id }, data: rest });
         await this.prisma.auditLog.create({
             data: { userId, action: 'UPDATE', entityType: 'AuditExecution', entityId: id, newValue: execution },
         });
@@ -68,7 +183,7 @@ export class AuditsService {
     // ─── Findings ────────────────────────────────────────────────────────────
 
     async findAllFindings(query: any) {
-        const { search, riskId, controlId, severity, status, findingType, sortBy, sortOrder } = query;
+        const { search, riskId, controlId, severity, status, findingType, auditPlanId, sortBy, sortOrder } = query;
         const page = parseInt(query.page, 10) || 1;
         const limit = parseInt(query.limit, 10) || 50;
         const skip = (page - 1) * limit;
@@ -87,6 +202,7 @@ export class AuditsService {
         if (severity) where.severity = severity;
         if (status) where.status = status;
         if (findingType) where.findingType = findingType;
+        if (auditPlanId) where.auditExecution = { auditPlanId };
 
         const [findings, total] = await Promise.all([
             this.prisma.finding.findMany({
@@ -109,7 +225,7 @@ export class AuditsService {
 
     async createFinding(data: any, userId: string) {
         const {
-            risk, control, riskId, controlId, testRecordId, controlTestId,
+            risk, control, riskId, controlId, testRecordId, controlTestId, directorateId,
             source, affectedSystem, recommendation, managementResponse,
             targetResolutionDate, closedDate, relatedDepartment, responsiblePerson,
             findingType, summary, gmy, internalControlAssessment, currentStatusDetail,
@@ -127,7 +243,7 @@ export class AuditsService {
             if (!testExists) throw new BadRequestException('Geçersiz kontrol testi kaydı');
         }
 
-        // riskId / controlId / assigneeId FK doğrulaması — Prisma FK 500 yerine okunur 400
+        // riskId / controlId / assigneeId / directorateId FK doğrulaması — Prisma FK 500 yerine okunur 400
         if (riskId) {
             const riskExists = await this.prisma.risk.findUnique({ where: { id: riskId }, select: { id: true } });
             if (!riskExists) throw new BadRequestException('Geçersiz risk: seçilen risk bulunamadı');
@@ -139,6 +255,13 @@ export class AuditsService {
         if (assigneeId) {
             const assigneeExists = await this.prisma.user.findUnique({ where: { id: assigneeId }, select: { id: true } });
             if (!assigneeExists) throw new BadRequestException('Geçersiz kullanıcı: seçilen sorumlu bulunamadı');
+        }
+        let resolvedRelatedDepartment = relatedDepartment || null;
+        if (directorateId) {
+            const dir = await this.prisma.directorate.findUnique({ where: { id: directorateId }, select: { id: true, name: true } });
+            if (!dir) throw new BadRequestException('Geçersiz direktörlük: seçilen direktörlük bulunamadı');
+            // relatedDepartment (legacy serbest metin) direktörlük adından türetilir — FK esastır (Madde 3).
+            resolvedRelatedDepartment = dir.name;
         }
         if (actions && Array.isArray(actions)) {
             for (const act of actions) {
@@ -153,18 +276,21 @@ export class AuditsService {
             ...rest,
             impact: (rest.impact && String(rest.impact).trim()) || 'Kontrol testi veya iç denetim sırasında sapma tespit edilmiştir.',
             controlTestId: resolvedTestId,
+            directorateId: directorateId || null,
             source: source || 'INTERNAL_AUDIT',
             affectedSystem: affectedSystem || null,
             recommendation: recommendation || null,
             managementResponse: managementResponse || null,
             birimCevabi: birimCevabi || null,
-            targetResolutionDate: targetResolutionDate ? new Date(targetResolutionDate) : null,
+            // targetResolutionDate İSTEMCİDEN yazılmaz — aksiyonlar eklendikten sonra
+            // recalculateFindingTargetDate() ile hesaplanır (Madde 4).
+            targetResolutionDate: null,
             closedDate: closedDate ? new Date(closedDate) : null,
-            relatedDepartment: relatedDepartment || null,
+            relatedDepartment: resolvedRelatedDepartment,
             responsiblePerson: responsiblePerson || null,
             riskId: riskId || null,
             controlId: controlId || null,
-            
+
             findingType: findingType || null,
             summary: summary || null,
             gmy: gmy || null,
@@ -254,6 +380,12 @@ export class AuditsService {
             await this.recalculateFindingTargetDate(finding.id);
         }
 
+        // Madde 7: testDate'in bulunduğu ay için otomatik bir FollowUp oluştur
+        // (aksiyona bağlı olmak zorunda değil — actionId nullable).
+        if (finding.testDate) {
+            await this.autoCreateMonthlyFollowUp(finding.id, finding.testDate, userId);
+        }
+
         await this.prisma.auditLog.create({
             data: { userId, action: 'CREATE', entityType: 'Finding', entityId: finding.id, newValue: finding },
         });
@@ -261,9 +393,43 @@ export class AuditsService {
         return finding;
     }
 
+    /** Ayın son gününü döner (basit kural — repo'da hazır "son iş günü" helper'ı bu modülde yok). */
+    private lastDayOfMonth(year: number, month: number): Date {
+        return new Date(year, month + 1, 0);
+    }
+
+    /**
+     * Madde 7: Bulgunun testDate'inin bulunduğu ay için otomatik bir FindingFollowUp
+     * oluşturur — aynı ay için zaten bir FollowUp varsa duplicate üretmez.
+     */
+    private async autoCreateMonthlyFollowUp(findingId: string, testDate: Date, userId: string) {
+        const year = testDate.getFullYear();
+        const month = testDate.getMonth();
+        const monthStart = new Date(year, month, 1);
+        const monthEnd = new Date(year, month + 1, 1);
+
+        const existing = await this.prisma.findingFollowUp.findFirst({
+            where: { findingId, plannedDate: { gte: monthStart, lt: monthEnd } },
+        });
+        if (existing) return existing;
+
+        const plannedDate = this.lastDayOfMonth(year, month);
+        const followUpId = await this.generateFollowUpId();
+
+        const followUp = await this.prisma.findingFollowUp.create({
+            data: { followUpId, findingId, status: 'BEKLIYOR', plannedDate },
+        });
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'CREATE', entityType: 'FindingFollowUp', entityId: followUp.id, newValue: { auto: true, reason: 'testDate ayı için otomatik takip' } },
+        });
+
+        return followUp;
+    }
+
     async updateFinding(id: string, data: any, userId: string) {
         const {
-            risk, control, riskId, controlId, testRecordId,
+            risk, control, riskId, controlId, testRecordId, directorateId,
             source, affectedSystem, recommendation, managementResponse,
             targetResolutionDate, closedDate, relatedDepartment, responsiblePerson,
             findingType, summary, gmy, internalControlAssessment, currentStatusDetail,
@@ -272,6 +438,18 @@ export class AuditsService {
             ...rest
         } = data;
 
+        // targetResolutionDate İSTEMCİDEN ASLA yazılmaz — tek otorite bağlı aksiyonların
+        // dueDate'lerinden hesaplanan recalculateFindingTargetDate()'tir (Madde 4).
+        void targetResolutionDate;
+
+        let resolvedRelatedDepartment = relatedDepartment !== undefined ? (relatedDepartment || null) : undefined;
+        if (directorateId) {
+            const dir = await this.prisma.directorate.findUnique({ where: { id: directorateId }, select: { id: true, name: true } });
+            if (!dir) throw new BadRequestException('Geçersiz direktörlük: seçilen direktörlük bulunamadı');
+            // relatedDepartment (legacy serbest metin) direktörlük adından türetilir — FK esastır.
+            resolvedRelatedDepartment = dir.name;
+        }
+
         const findingData: any = {
             ...rest,
             source: source || undefined,
@@ -279,12 +457,12 @@ export class AuditsService {
             recommendation: recommendation !== undefined ? (recommendation || null) : undefined,
             managementResponse: managementResponse !== undefined ? (managementResponse || null) : undefined,
             birimCevabi: birimCevabi !== undefined ? (birimCevabi || null) : undefined,
-            targetResolutionDate: targetResolutionDate !== undefined ? (targetResolutionDate ? new Date(targetResolutionDate) : null) : undefined,
-            relatedDepartment: relatedDepartment !== undefined ? (relatedDepartment || null) : undefined,
+            relatedDepartment: resolvedRelatedDepartment,
+            directorateId: directorateId !== undefined ? (directorateId || null) : undefined,
             responsiblePerson: responsiblePerson !== undefined ? (responsiblePerson || null) : undefined,
             riskId: riskId !== undefined ? (riskId || null) : undefined,
             controlId: controlId !== undefined ? (controlId || null) : undefined,
-            
+
             findingType: findingType !== undefined ? (findingType || null) : undefined,
             summary: summary !== undefined ? (summary || null) : undefined,
             gmy: gmy !== undefined ? (gmy || null) : undefined,

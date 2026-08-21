@@ -3,10 +3,13 @@
 /* ============================================
    QUARESMA — GRC Design System Tokens
    Enterprise Banking Grade Design System
+   Design System v2: renk tokenları Tailwind @theme
+   üzerinden utility olarak da üretilir
+   (bg-primary-600, text-critical vb.)
    ============================================ */
 
-/* === COLOR TOKENS === */
-:root {
+/* === COLOR TOKENS (Tailwind v4 theme) === */
+@theme {
   /* Primary - Corporate Blue */
   --color-primary-50: #eff6ff;
   --color-primary-100: #dbeafe;
@@ -19,7 +22,7 @@
   --color-primary-800: #1e40af;
   --color-primary-900: #1e3a8a;
 
-  /* Neutral - Slate */
+  /* Neutral - Slate (nötr paleti slate'e sabitlenir) */
   --color-neutral-50: #f8fafc;
   --color-neutral-100: #f1f5f9;
   --color-neutral-200: #e2e8f0;
@@ -54,7 +57,14 @@
   --color-error-bg: #fef2f2;
   --color-info: #2563eb;
   --color-info-bg: #eff6ff;
+}
 
+/* Font: next/font (--font-inter) değişkenine bağlanır */
+@theme inline {
+  --font-sans: var(--font-inter), 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+:root {
   /* Sidebar */
   --sidebar-bg: #0b0f19;
   --sidebar-width: 16rem;
@@ -65,7 +75,6 @@
   --header-bg: #ffffff;
 
   /* === TYPOGRAPHY === */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
   --text-xs: 0.75rem;

@@ -257,6 +257,20 @@ class ApiClient {
         return this.request(`/controls/tests/${testId}/return`, { method: 'PATCH', body: { reason } });
     }
 
+    async cancelControlTest(testId: string, reason: string) {
+        return this.request(`/controls/tests/${testId}/cancel-final`, { method: 'PATCH', body: { reason } });
+    }
+
+    // Merkezi Onaylar
+    async getMyPendingApprovals(params?: Record<string, string>) {
+        const query = params ? '?' + new URLSearchParams(params).toString() : '';
+        return this.request(`/approvals/my-pending${query}`);
+    }
+
+    async getApprovalDetail(id: string) {
+        return this.request(`/approvals/${id}`);
+    }
+
     async generateControlTests(controlId: string) {
         return this.request(`/controls/${controlId}/generate-tests`, { method: 'POST' });
     }
@@ -272,6 +286,11 @@ class ApiClient {
     // Dashboard
     async getDashboard() {
         return this.request('/reports/dashboard');
+    }
+
+    // Notifications
+    async getNotifications() {
+        return this.request<any[]>('/notifications');
     }
 
     // Risks
@@ -298,6 +317,10 @@ class ApiClient {
 
     async treatRisk(id: string, data: unknown) {
         return this.request(`/risks/${id}/treat`, { method: 'POST', body: data });
+    }
+
+    async approveRiskTreatment(id: string) {
+        return this.request(`/risks/${id}/approve-treatment`, { method: 'POST' });
     }
 
     async getRiskCategories() {
@@ -384,6 +407,14 @@ class ApiClient {
         return this.request(`/actions/${id}`, { method: 'DELETE' });
     }
 
+    async createStandaloneAction(data: unknown) {
+        return this.request('/actions', { method: 'POST', body: data });
+    }
+
+    async getActionsForRisk(riskId: string) {
+        return this.request<any[]>(`/risks/${riskId}/actions`);
+    }
+
     // Relations endpoints
     async getRiskRelations(id: string) {
         return this.request(`/risks/${id}/relations`);
@@ -451,6 +482,50 @@ class ApiClient {
 
     async deleteRiskAction(id: string) {
         return this.request(`/risk-actions/${id}`, { method: 'DELETE' });
+    }
+
+    // Audit Plans & Executions
+    async getAuditPlans(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request<any>(`/audit-plans${query}`);
+    }
+
+    async getAuditPlan(id: string) {
+        return this.request<any>(`/audit-plans/${id}`);
+    }
+
+    async createAuditPlan(data: unknown) {
+        return this.request('/audit-plans', { method: 'POST', body: data });
+    }
+
+    async updateAuditPlan(id: string, data: unknown) {
+        return this.request(`/audit-plans/${id}`, { method: 'PUT', body: data });
+    }
+
+    async getAuditExecutions(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request<any>(`/audit-executions${query}`);
+    }
+
+    async createAuditExecution(data: unknown) {
+        return this.request('/audit-executions', { method: 'POST', body: data });
+    }
+
+    async updateAuditExecution(id: string, data: unknown) {
+        return this.request(`/audit-executions/${id}`, { method: 'PUT', body: data });
+    }
+
+    // Compliance
+    async getRegulations() {
+        return this.request<any[]>('/regulations');
+    }
+
+    async getRegulationArticles(regulationId: string) {
+        return this.request<any[]>(`/regulations/${regulationId}/articles`);
+    }
+
+    async getComplianceOverview() {
+        return this.request<any[]>('/compliance/overview');
     }
 
     // Reports

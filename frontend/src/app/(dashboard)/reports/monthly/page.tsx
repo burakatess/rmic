@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '@/lib/api';
-import { PageHeader, Button, StatusBadge } from '@/components/ui';
+import { PageShell, PageHeader, Button, KpiCard as SharedKpiCard, type KpiVariant } from '@/components/ui';
 import {
     PieChart, Pie, Cell, BarChart, Bar, LineChart, Line,
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -94,34 +94,23 @@ const dayDiff = (d: string) =>
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+const KPI_COLOR_TO_VARIANT: Record<'red' | 'amber' | 'green' | 'indigo' | 'slate', KpiVariant> = {
+    red: 'critical', amber: 'warning', green: 'success', indigo: 'primary', slate: 'default',
+};
+
 function KpiCard({ label, value, sub, color }: {
     label: string; value: number; sub?: string; color: 'red' | 'amber' | 'green' | 'indigo' | 'slate';
 }) {
-    const colors = {
-        red: 'bg-red-50 border-red-200 text-red-700',
-        amber: 'bg-amber-50 border-amber-200 text-amber-700',
-        green: 'bg-emerald-50 border-emerald-200 text-emerald-700',
-        indigo: 'bg-indigo-50 border-indigo-200 text-indigo-700',
-        slate: 'bg-slate-50 border-slate-200 text-slate-700',
-    };
-    const numColors = {
-        red: 'text-red-600', amber: 'text-amber-600', green: 'text-emerald-600',
-        indigo: 'text-indigo-600', slate: 'text-slate-700',
-    };
     return (
-        <div className={`rounded-xl border p-5 ${colors[color]}`}>
-            <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">{label}</p>
-            <p className={`text-3xl font-bold ${numColors[color]}`}>{value}</p>
-            {sub && <p className="text-xs mt-1 opacity-60">{sub}</p>}
-        </div>
+        <SharedKpiCard title={label} value={value} subtitle={sub} variant={KPI_COLOR_TO_VARIANT[color]} />
     );
 }
 
 function SectionTitle({ icon, title, count }: { icon: React.ReactNode; title: string; count?: number }) {
     return (
         <div className="flex items-center gap-3 mb-4 mt-8">
-            <div className="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center text-indigo-600">{icon}</div>
-            <h2 className="text-base font-bold text-slate-800">{title}</h2>
+            <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600">{icon}</div>
+            <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
             {count !== undefined && (
                 <span className="ml-1 px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-full">{count}</span>
             )}
@@ -135,12 +124,12 @@ function SimpleTable({ headers, rows, emptyText = 'Kayıt bulunamadı.' }: {
     emptyText?: string;
 }) {
     return (
-        <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+            <table className="grc-table">
                 <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
+                    <tr>
                         {headers.map(h => (
-                            <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wide">{h}</th>
+                            <th key={h}>{h}</th>
                         ))}
                     </tr>
                 </thead>
@@ -149,9 +138,9 @@ function SimpleTable({ headers, rows, emptyText = 'Kayıt bulunamadı.' }: {
                         <tr><td colSpan={headers.length} className="px-4 py-8 text-center text-slate-400 text-sm">{emptyText}</td></tr>
                     ) : (
                         rows.map((row, i) => (
-                            <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+                            <tr key={i}>
                                 {row.map((cell, j) => (
-                                    <td key={j} className="px-4 py-3 text-slate-700 border-b border-slate-100 last:border-0">{cell}</td>
+                                    <td key={j} className="text-slate-700">{cell}</td>
                                 ))}
                             </tr>
                         ))
@@ -318,29 +307,27 @@ export default function MonthlyReportPage() {
     , [report]);
 
     return (
-        <div className="flex flex-col min-h-full bg-slate-50/50 pb-12">
-            {/* Header */}
-            <div className="px-8 pt-8 print:px-4 print:pt-4">
-                <PageHeader
-                    title="Aylık Yönetim Raporu"
-                    description="Bulgu, aksiyon ve takip çalışmalarının yönetim özeti"
-                />
-            </div>
+        <PageShell className="print:px-4 print:pt-4 print:pb-0">
+            <PageHeader
+                title="Aylık Yönetim Raporu"
+                description="Bulgu, aksiyon ve takip çalışmalarının yönetim özeti"
+                breadcrumbs={[{ label: 'Raporlama & Analitik', href: '/reports' }, { label: 'Aylık Yönetim Raporu' }]}
+            />
 
             {/* Filters */}
-            <div className="mx-8 mt-4 bg-white rounded-xl border border-slate-200 shadow-sm p-5 print:hidden">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 print:hidden">
                 {/* Mode toggle */}
                 <div className="flex items-center gap-2 mb-4">
                     <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide mr-1">Periyot:</span>
                     <button
                         onClick={() => setMode('month')}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === 'month' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${mode === 'month' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                     >
                         Ay Seçimi
                     </button>
                     <button
                         onClick={() => setMode('range')}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === 'range' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${mode === 'range' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                     >
                         Tarih Aralığı
                     </button>
@@ -351,13 +338,13 @@ export default function MonthlyReportPage() {
                         <>
                             <div>
                                 <label className="block text-xs font-semibold text-slate-500 mb-1">Yıl</label>
-                                <select value={year} onChange={e => setYear(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                <select value={year} onChange={e => setYear(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:outline-none focus-visible:ring-2 ring-blue-100">
                                     {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
                                 </select>
                             </div>
                             <div>
                                 <label className="block text-xs font-semibold text-slate-500 mb-1">Ay</label>
-                                <select value={month} onChange={e => setMonth(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                <select value={month} onChange={e => setMonth(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:outline-none focus-visible:ring-2 ring-blue-100">
                                     {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                                 </select>
                             </div>
@@ -366,55 +353,51 @@ export default function MonthlyReportPage() {
                         <>
                             <div>
                                 <label className="block text-xs font-semibold text-slate-500 mb-1">Başlangıç</label>
-                                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:outline-none focus-visible:ring-2 ring-blue-100" />
                             </div>
                             <div>
                                 <label className="block text-xs font-semibold text-slate-500 mb-1">Bitiş</label>
-                                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:outline-none focus-visible:ring-2 ring-blue-100" />
                             </div>
                         </>
                     )}
 
                     <div>
                         <label className="block text-xs font-semibold text-slate-500 mb-1">Direktörlük</label>
-                        <select value={directorateId} onChange={e => setDirectorateId(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[180px]">
+                        <select value={directorateId} onChange={e => setDirectorateId(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:outline-none focus-visible:ring-2 ring-blue-100 min-w-[180px]">
                             <option value="">Tüm Direktörlükler</option>
                             {directorates.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                         </select>
                     </div>
 
-                    <button
-                        onClick={handleLoad}
-                        disabled={loading}
-                        className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                    >
+                    <Button onClick={handleLoad} loading={loading}>
                         {loading ? 'Yükleniyor...' : 'Raporu Oluştur'}
-                    </button>
+                    </Button>
 
                     {report && (
                         <div className="flex gap-2 ml-auto">
-                            <button
+                            <Button
+                                variant="secondary"
                                 onClick={handleDownloadWord}
-                                disabled={downloadingWord}
-                                className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                                loading={downloadingWord}
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
                             >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                 {downloadingWord ? 'İndiriliyor...' : 'Word'}
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                                variant="success"
                                 onClick={handleExcel}
-                                className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 transition-colors"
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
                             >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                 Excel
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                                variant="outline"
                                 onClick={() => window.print()}
-                                className="flex items-center gap-1.5 px-4 py-2 bg-slate-600 text-white rounded-lg text-sm font-semibold hover:bg-slate-700 transition-colors"
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>}
                             >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                                 Yazdır / PDF
-                            </button>
+                            </Button>
                         </div>
                     )}
                 </div>
@@ -424,9 +407,9 @@ export default function MonthlyReportPage() {
 
             {/* Empty state */}
             {!report && !loading && (
-                <div className="mx-8 mt-8 bg-white rounded-xl border border-slate-200 p-16 text-center">
-                    <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                        <svg className="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                <div className="mt-6 bg-white rounded-xl border border-slate-200 p-16 text-center">
+                    <div className="w-16 h-16 bg-blue-50 rounded-xl flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                     </div>
                     <p className="text-slate-600 font-medium">Filtre seçip "Raporu Oluştur" butonuna tıklayın.</p>
                 </div>
@@ -434,11 +417,11 @@ export default function MonthlyReportPage() {
 
             {/* Report content */}
             {report && (
-                <div className="mx-8 mt-6 space-y-6 print:mx-0 print:mt-0">
+                <div className="mt-6 space-y-6 print:mx-0 print:mt-0">
                     {/* Print header */}
                     <div className="hidden print:block text-center mb-6">
                         <h1 className="text-2xl font-bold text-slate-900">AYLIK YÖNETİM RAPORU</h1>
-                        <p className="text-lg text-indigo-700 font-semibold mt-1">{report.period.label}</p>
+                        <p className="text-lg text-blue-700 font-semibold mt-1">{report.period.label}</p>
                         {report.directorate && <p className="text-slate-600">{report.directorate.name}</p>}
                         <p className="text-sm text-slate-400 mt-1">Oluşturulma: {new Date().toLocaleDateString('tr-TR')}</p>
                     </div>
@@ -455,22 +438,10 @@ export default function MonthlyReportPage() {
 
                     {/* Additional KPIs row */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="bg-white rounded-xl border border-slate-200 p-4">
-                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Toplam Açık Bulgu</p>
-                            <p className="text-2xl font-bold text-slate-800 mt-1">{report.summary.totalOpenFindings}</p>
-                        </div>
-                        <div className="bg-white rounded-xl border border-slate-200 p-4">
-                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Kritik Açık Bulgu</p>
-                            <p className="text-2xl font-bold text-red-600 mt-1">{report.summary.criticalOpen}</p>
-                        </div>
-                        <div className="bg-white rounded-xl border border-slate-200 p-4">
-                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Tamamlanan Takip</p>
-                            <p className="text-2xl font-bold text-emerald-600 mt-1">{report.summary.followUpsCompleted}</p>
-                        </div>
-                        <div className="bg-white rounded-xl border border-slate-200 p-4">
-                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Direktörlük</p>
-                            <p className="text-base font-bold text-slate-700 mt-1">{report.directorate?.name ?? 'Tüm Direktörlükler'}</p>
-                        </div>
+                        <SharedKpiCard title="Toplam Açık Bulgu" value={report.summary.totalOpenFindings} variant="default" />
+                        <SharedKpiCard title="Kritik Açık Bulgu" value={report.summary.criticalOpen} variant="critical" />
+                        <SharedKpiCard title="Tamamlanan Takip" value={report.summary.followUpsCompleted} variant="success" />
+                        <SharedKpiCard title="Direktörlük" value={report.directorate?.name ?? 'Tüm Direktörlükler'} variant="default" />
                     </div>
 
                     {/* Charts */}
@@ -551,7 +522,7 @@ export default function MonthlyReportPage() {
                     <SimpleTable
                         headers={['Bulgu No', 'Özet', 'Önem', 'Direktörlük', 'Hedef Tarih', 'Çözüm Durumu']}
                         rows={report.newFindings.map(f => [
-                            <span key="id" className="font-mono text-xs font-bold text-indigo-700">{f.findingId}</span>,
+                            <span key="id" className="font-mono text-xs font-bold text-blue-700">{f.findingId}</span>,
                             <span key="s" className="text-xs">{f.summary || f.description?.substring(0, 80) || '—'}</span>,
                             <span key="sev" className={`inline-flex px-2 py-0.5 rounded text-xs font-bold ${f.severity === 'CRITICAL' ? 'bg-red-100 text-red-700' : f.severity === 'HIGH' ? 'bg-orange-100 text-orange-700' : f.severity === 'MEDIUM' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
                                 {SEVERITY_LABELS[f.severity] || f.severity}
@@ -571,7 +542,7 @@ export default function MonthlyReportPage() {
                     <SimpleTable
                         headers={['Aksiyon No', 'Bağlı Bulgu', 'Sorumlu', 'Vade Tarihi', 'Gecikme', 'Durum']}
                         rows={report.overdueActions.map(a => [
-                            <span key="id" className="font-mono text-xs font-bold text-indigo-700">{a.actionId}</span>,
+                            <span key="id" className="font-mono text-xs font-bold text-blue-700">{a.actionId}</span>,
                             <span key="f" className="font-mono text-xs text-slate-500">{a.finding?.findingId || '—'}</span>,
                             `${a.owner?.firstName || ''} ${a.owner?.lastName || ''}`.trim() || '—',
                             <span key="d" className="text-red-600 font-semibold text-xs">{fmt(a.dueDate)}</span>,
@@ -590,7 +561,7 @@ export default function MonthlyReportPage() {
                     <SimpleTable
                         headers={['Aksiyon No', 'Bağlı Bulgu', 'Sorumlu', 'Vade Tarihi', 'Direktörlük', 'Durum']}
                         rows={report.approachingActions.map(a => [
-                            <span key="id" className="font-mono text-xs font-bold text-indigo-700">{a.actionId}</span>,
+                            <span key="id" className="font-mono text-xs font-bold text-blue-700">{a.actionId}</span>,
                             <span key="f" className="font-mono text-xs text-slate-500">{a.finding?.findingId || '—'}</span>,
                             `${a.owner?.firstName || ''} ${a.owner?.lastName || ''}`.trim() || '—',
                             <span key="d" className="text-amber-600 font-semibold text-xs">{fmt(a.dueDate)}</span>,
@@ -609,7 +580,7 @@ export default function MonthlyReportPage() {
                     <SimpleTable
                         headers={['Takip No', 'Bağlı Bulgu', 'Planlanan Tarih', 'Sonuç', 'Onay Durumu']}
                         rows={report.followUps.map(f => [
-                            <span key="id" className="font-mono text-xs font-bold text-indigo-700">{f.followUpId}</span>,
+                            <span key="id" className="font-mono text-xs font-bold text-blue-700">{f.followUpId}</span>,
                             <span key="fn" className="font-mono text-xs text-slate-500">{f.finding?.findingId || '—'}</span>,
                             fmt(f.plannedDate),
                             f.result ? (
@@ -637,7 +608,7 @@ export default function MonthlyReportPage() {
                     <SimpleTable
                         headers={['Bulgu No', 'Özet', 'Önem', 'Direktörlük', 'Kapanış Tarihi', 'Karar']}
                         rows={report.closedFindings.map(f => [
-                            <span key="id" className="font-mono text-xs font-bold text-indigo-700">{f.findingId}</span>,
+                            <span key="id" className="font-mono text-xs font-bold text-blue-700">{f.findingId}</span>,
                             <span key="s" className="text-xs">{f.summary || f.description?.substring(0, 80) || '—'}</span>,
                             <span key="sev" className={`inline-flex px-2 py-0.5 rounded text-xs font-bold ${f.severity === 'CRITICAL' ? 'bg-red-100 text-red-700' : f.severity === 'HIGH' ? 'bg-orange-100 text-orange-700' : f.severity === 'MEDIUM' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
                                 {SEVERITY_LABELS[f.severity] || f.severity}
@@ -658,7 +629,7 @@ export default function MonthlyReportPage() {
                     <SimpleTable
                         headers={['Bulgu No', 'Özet', 'Önem', 'Direktörlük', 'Hedef Tarih', 'Sorumlu']}
                         rows={report.postponedFindings.map(f => [
-                            <span key="id" className="font-mono text-xs font-bold text-indigo-700">{f.findingId}</span>,
+                            <span key="id" className="font-mono text-xs font-bold text-blue-700">{f.findingId}</span>,
                             <span key="s" className="text-xs">{f.summary || f.description?.substring(0, 80) || '—'}</span>,
                             <span key="sev" className={`inline-flex px-2 py-0.5 rounded text-xs font-bold ${f.severity === 'CRITICAL' ? 'bg-red-100 text-red-700' : f.severity === 'HIGH' ? 'bg-orange-100 text-orange-700' : f.severity === 'MEDIUM' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
                                 {SEVERITY_LABELS[f.severity] || f.severity}
@@ -679,6 +650,6 @@ export default function MonthlyReportPage() {
                     .print\\:mx-0 { margin-left: 0 !important; margin-right: 0 !important; }
                 }
             `}</style>
-        </div>
+        </PageShell>
     );
 }

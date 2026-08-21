@@ -43,12 +43,34 @@ export default function LoginPage() {
             <div className="w-full max-w-md animate-fadeInDown">
                 {/* Logo & Title */}
                 <div className="text-center mb-10">
-                    <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-800 rounded-2xl mb-6 shadow-xl border border-blue-700/50">
-                        <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    <div className="inline-flex items-center justify-center mb-6 relative">
+                        <div className="absolute inset-0 rounded-[20px] blur-2xl opacity-70" style={{background: 'linear-gradient(135deg, #2563eb, #1d4ed8)'}} />
+                        <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg" className="relative">
+                            <defs>
+                                <linearGradient id="login-logo-bg" x1="0" y1="0" x2="72" y2="72" gradientUnits="userSpaceOnUse">
+                                    <stop stopColor="#2563eb" />
+                                    <stop offset="1" stopColor="#1d4ed8" />
+                                </linearGradient>
+                                <linearGradient id="login-logo-border" x1="0" y1="0" x2="72" y2="72" gradientUnits="userSpaceOnUse">
+                                    <stop stopColor="#60a5fa" stopOpacity="0.8" />
+                                    <stop offset="1" stopColor="#3b82f6" stopOpacity="0.3" />
+                                </linearGradient>
+                                <linearGradient id="login-top-shine" x1="0" y1="0" x2="0" y2="1">
+                                    <stop stopColor="white" stopOpacity="0.16" />
+                                    <stop offset="1" stopColor="white" stopOpacity="0" />
+                                </linearGradient>
+                            </defs>
+                            <rect width="72" height="72" rx="20" fill="url(#login-logo-bg)" />
+                            <rect x="1" y="1" width="70" height="70" rx="19" stroke="url(#login-logo-border)" strokeWidth="1.5" fill="none" />
+                            <rect width="72" height="36" rx="20" fill="url(#login-top-shine)" />
+                            <path d="M36 11L56 21V39C56 49 46.8 58.2 36 60C25.2 58.2 16 49 16 39V21L36 11Z"
+                                fill="white" fillOpacity="0.06" stroke="white" strokeWidth="1.25" strokeOpacity="0.15" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M36 20L48 27V37C48 43.5 42.5 49.5 36 51C29.5 49.5 24 43.5 24 37V27L36 20Z"
+                                fill="white" fillOpacity="0.13" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M30 37L34.5 41.5L43 31" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                     </div>
-                    <h1 className="text-3xl font-semibold text-white tracking-tight">Burak GRC</h1>
+                    <h1 className="text-3xl font-bold text-white tracking-tight">RMIC <span className="text-blue-400 font-medium">GRC</span></h1>
                     <p className="text-base text-slate-400 mt-2">
                         Kurumsal Risk ve Uyum Platformu
                     </p>

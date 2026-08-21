@@ -22,6 +22,11 @@ export class AuditsController {
         return this.auditsService.findAllPlans(query);
     }
 
+    @Get('audit-plans/:id')
+    async findPlanById(@Param('id') id: string) {
+        return this.auditsService.findPlanById(id);
+    }
+
     @Post('audit-plans')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async createPlan(@Body() data: any, @CurrentUser('id') userId: string) {
@@ -35,6 +40,11 @@ export class AuditsController {
     }
 
     // ─── Audit Executions ────────────────────────────────────────────────────
+
+    @Get('audit-executions')
+    async findAllExecutions(@Query() query: any) {
+        return this.auditsService.findAllExecutions(query);
+    }
 
     @Post('audit-executions')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')

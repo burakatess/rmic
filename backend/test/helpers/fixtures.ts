@@ -82,7 +82,7 @@ export async function createTestControl(
 
 export async function createTestControlTest(
     prisma: PrismaClient,
-    opts: { controlId: string; assigneeId?: string },
+    opts: { controlId: string; assigneeId?: string; secondControllerId?: string; directorateId?: string; status?: string },
 ) {
     const suffix = Math.random().toString(36).slice(2, 8);
     return prisma.controlTest.create({
@@ -90,8 +90,10 @@ export async function createTestControlTest(
             testNo: `2026.KBT-E2E${suffix}`,
             controlId: opts.controlId,
             plannedDate: new Date(),
-            status: 'BEKLIYOR',
+            status: (opts.status as any) || 'BEKLIYOR',
             assigneeId: opts.assigneeId || null,
+            secondControllerId: opts.secondControllerId || null,
+            directorateId: opts.directorateId || null,
         },
     });
 }
