@@ -4,6 +4,32 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/auth';
+import { api } from '@/lib/api';
+
+interface NotificationItem {
+    id: string;
+    type: 'OVERDUE_ACTION' | 'UPCOMING_FOLLOWUP' | 'NEW_FINDING';
+    title: string;
+    message: string;
+    date: string;
+    link: string;
+}
+
+const NOTIF_STYLE: Record<string, { border: string }> = {
+    OVERDUE_ACTION: { border: 'border-red-500' },
+    UPCOMING_FOLLOWUP: { border: 'border-yellow-500' },
+    NEW_FINDING: { border: 'border-blue-500' },
+};
+
+function timeAgo(dateStr: string): string {
+    const diffMs = Date.now() - new Date(dateStr).getTime();
+    const diffMin = Math.round(diffMs / 60000);
+    if (diffMin < 60) return diffMin <= 0 ? 'az önce' : `${diffMin} dakika önce`;
+    const diffHour = Math.round(diffMin / 60);
+    if (diffHour < 24) return `${diffHour} saat önce`;
+    const diffDay = Math.round(diffHour / 24);
+    return `${diffDay} gün önce`;
+}
 
 
 interface SearchResult {
@@ -30,6 +56,23 @@ export default function Header() {
     const { user } = useAuth();
     const [showDropdown, setShowDropdown] = useState(false);
     const [showNotifications, setShowNotifications] = useState(false);
+    const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+    const notifRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!user) return;
+        api.getNotifications().then((data) => setNotifications(data || [])).catch(() => setNotifications([]));
+    }, [user]);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+                setShowNotifications(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     // Search state
     const [searchQuery, setSearchQuery] = useState('');
@@ -187,7 +230,7 @@ export default function Header() {
                     </div>
 
                     {/* Notifications */}
-                    <div className="relative">
+                    <div className="relative" ref={notifRef}>
                         <button
                             onClick={() => setShowNotifications(!showNotifications)}
                             className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
@@ -195,7 +238,9 @@ export default function Header() {
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                             </svg>
-                            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+                            {notifications.length > 0 && (
+                                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+                            )}
                         </button>
 
                         {showNotifications && (
@@ -203,24 +248,23 @@ export default function Header() {
                                 <div className="px-4 py-2 border-b border-gray-100">
                                     <h3 className="font-semibold text-gray-800">Bildirimler</h3>
                                 </div>
-                                <div className="max-h-64 overflow-y-auto">
-                                    <div className="px-4 py-3 hover:bg-gray-50 border-l-4 border-red-500">
-                                        <p className="text-sm font-medium text-gray-800">3 adet gecikmiş aksiyon</p>
-                                        <p className="text-xs text-gray-500 mt-1">5 dakika önce</p>
-                                    </div>
-                                    <div className="px-4 py-3 hover:bg-gray-50 border-l-4 border-yellow-500">
-                                        <p className="text-sm font-medium text-gray-800">Yeni bulgu oluşturuldu</p>
-                                        <p className="text-xs text-gray-500 mt-1">1 saat önce</p>
-                                    </div>
-                                    <div className="px-4 py-3 hover:bg-gray-50 border-l-4 border-blue-500">
-                                        <p className="text-sm font-medium text-gray-800">Risk değerlendirmesi tamamlandı</p>
-                                        <p className="text-xs text-gray-500 mt-1">2 saat önce</p>
-                                    </div>
-                                </div>
-                                <div className="px-4 py-2 border-t border-gray-100">
-                                    <button className="text-sm text-blue-600 hover:text-blue-800 font-medium">
-                                        Tümünü görüntüle
-                                    </button>
+                                <div className="max-h-72 overflow-y-auto">
+                                    {notifications.length === 0 ? (
+                                        <p className="px-4 py-6 text-sm text-gray-400 text-center">Yeni bildiriminiz yok.</p>
+                                    ) : (
+                                        notifications.map((n) => (
+                                            <Link
+                                                key={n.id}
+                                                href={n.link}
+                                                onClick={() => setShowNotifications(false)}
+                                                className={`block px-4 py-3 hover:bg-gray-50 border-l-4 ${NOTIF_STYLE[n.type]?.border ?? 'border-gray-300'}`}
+                                            >
+                                                <p className="text-sm font-medium text-gray-800">{n.title}</p>
+                                                <p className="text-xs text-gray-500 mt-0.5 truncate">{n.message}</p>
+                                                <p className="text-xs text-gray-400 mt-1">{timeAgo(n.date)}</p>
+                                            </Link>
+                                        ))
+                                    )}
                                 </div>
                             </div>
                         )}

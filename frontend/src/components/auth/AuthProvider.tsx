@@ -38,7 +38,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Public routes that don't require auth
-const PUBLIC_ROUTES = ['/login'];
+const PUBLIC_ROUTES = ['/login', '/kvkk-aydinlatma-metni'];
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);

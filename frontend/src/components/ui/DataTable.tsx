@@ -37,6 +37,20 @@ export interface ColumnDef<T> {
 
 type SortDirection = 'asc' | 'desc' | null;
 
+export type TableDensity = 'comfortable' | 'compact' | 'ultra';
+
+const densityCellPadding: Record<TableDensity, string> = {
+  comfortable: 'px-3 py-3',
+  compact: 'px-3 py-2',
+  ultra: 'px-2 py-1',
+};
+
+const densityLabels: Record<TableDensity, string> = {
+  comfortable: 'Rahat',
+  compact: 'Sıkışık',
+  ultra: 'Çok Sıkışık',
+};
+
 interface DataTableProps<T> {
   columns: ColumnDef<T>[];
   data: T[];
@@ -67,6 +81,17 @@ interface DataTableProps<T> {
   // Column filters (controlled by parent)
   columnFilters?: Record<string, string>;
   onColumnFilterChange?: (key: string, value: string) => void;
+  // === Design System v2 ===
+  /** Üst şeridin sol tarafına özel içerik (örn. SavedViewMenu, bulk aksiyonlar) */
+  toolbar?: React.ReactNode;
+  /** Yenile butonu gösterir */
+  onRefresh?: () => void;
+  /** Export butonu gösterir (ilk aşamada placeholder olabilir) */
+  onExport?: () => void;
+  /** Satır yoğunluğu kontrolü (storageKey ile kalıcı) */
+  showDensityControl?: boolean;
+  /** İlk kolon (ve checkbox) yatay scroll'da sabit kalır */
+  stickyFirstColumn?: boolean;
 }
 
 export function DataTable<T>({
@@ -96,7 +121,41 @@ export function DataTable<T>({
   loading = false,
   columnFilters = {},
   onColumnFilterChange,
+  toolbar,
+  onRefresh,
+  onExport,
+  showDensityControl = true,
+  stickyFirstColumn = false,
 }: DataTableProps<T>) {
+  // ── Yoğunluk (Design System v2) ──
+  const getInitialDensity = useCallback((): TableDensity => {
+    if (storageKey && typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`table-density-${storageKey}`);
+      if (saved === 'comfortable' || saved === 'compact' || saved === 'ultra') return saved;
+    }
+    return 'comfortable';
+  }, [storageKey]);
+
+  const [density, setDensity] = useState<TableDensity>(getInitialDensity);
+  const [densityOpen, setDensityOpen] = useState(false);
+  const densityRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (storageKey && typeof window !== 'undefined') {
+      localStorage.setItem(`table-density-${storageKey}`, density);
+    }
+  }, [density, storageKey]);
+
+  useEffect(() => {
+    if (!densityOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (densityRef.current && !densityRef.current.contains(e.target as Node)) setDensityOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [densityOpen]);
+
+  const cellPad = densityCellPadding[density];
   // Column widths
   const getInitialWidths = useCallback(() => {
     if (storageKey && typeof window !== 'undefined') {
@@ -216,11 +275,70 @@ export function DataTable<T>({
 
   const activeFilterCount = Object.values(columnFilters).filter(v => v && v !== '').length;
 
+  const showToolbarStrip = hasHideable || !!toolbar || !!onRefresh || !!onExport || showDensityControl;
+
   return (
     <div className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden ${className}`}>
-      {/* Kolon seçici */}
-      {hasHideable && (
-        <div className="flex items-center justify-end px-3 py-1.5 border-b border-slate-100 bg-slate-50/50">
+      {/* Toolbar şeridi: özel içerik + yenile + export + yoğunluk + kolonlar */}
+      {showToolbarStrip && (
+        <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 border-b border-slate-100 bg-slate-50/50">
+          {toolbar && <div className="flex items-center gap-2 min-w-0">{toolbar}</div>}
+          <div className="ml-auto flex items-center gap-1">
+            {onRefresh && (
+              <button
+                onClick={onRefresh}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Yenile
+              </button>
+            )}
+            {onExport && (
+              <button
+                onClick={onExport}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Dışa Aktar
+              </button>
+            )}
+            {showDensityControl && (
+              <div className="relative" ref={densityRef}>
+                <button
+                  onClick={() => setDensityOpen(o => !o)}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                  </svg>
+                  Yoğunluk
+                </button>
+                {densityOpen && (
+                  <div className="absolute right-0 top-full mt-1 z-30 w-40 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5">
+                    {(Object.keys(densityLabels) as TableDensity[]).map(d => (
+                      <button
+                        key={d}
+                        onClick={() => { setDensity(d); setDensityOpen(false); }}
+                        className={`w-full flex items-center justify-between px-3 py-1.5 text-xs transition-colors cursor-pointer
+                          ${density === d ? 'text-blue-700 font-semibold bg-blue-50' : 'text-slate-700 hover:bg-slate-50'}`}
+                      >
+                        {densityLabels[d]}
+                        {density === d && (
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {hasHideable && (
           <div className="relative" ref={pickerRef}>
             <button
               onClick={() => setPickerOpen(o => !o)}
@@ -256,6 +374,8 @@ export function DataTable<T>({
               </div>
             )}
           </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -284,7 +404,7 @@ export function DataTable<T>({
             {/* Main header row */}
             <tr>
               {showCheckbox && (
-                <th className="px-3 py-3 text-center w-10 bg-slate-50/80">
+                <th className={`px-3 py-3 text-center w-10 ${stickyFirstColumn ? 'sticky left-0 z-20 bg-slate-50' : 'bg-slate-50/80'}`}>
                   <input
                     type="checkbox"
                     checked={isAllSelected}
@@ -297,7 +417,8 @@ export function DataTable<T>({
                 <th
                   key={col.key}
                   className={`px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider
-                    relative select-none bg-slate-50/80
+                    relative select-none
+                    ${stickyFirstColumn && idx === 0 ? `sticky ${showCheckbox ? 'left-10' : 'left-0'} z-20 bg-slate-50` : 'bg-slate-50/80'}
                     ${col.sortable ? 'cursor-pointer hover:text-slate-700' : ''}
                     ${col.headerClassName || ''}`}
                   style={{ width: columnWidths[col.key], minWidth: col.minWidth || 60 }}
@@ -328,14 +449,14 @@ export function DataTable<T>({
             {/* Column filter row */}
             {hasActiveColFilters && (
               <tr className="bg-slate-100/80 border-b border-slate-200">
-                {showCheckbox && <th className="px-2 py-1.5 bg-slate-100/80 w-10" />}
-                {visibleColumns.map((col) => {
+                {showCheckbox && <th className={`px-2 py-1.5 w-10 ${stickyFirstColumn ? 'sticky left-0 z-20 bg-slate-100' : 'bg-slate-100/80'}`} />}
+                {visibleColumns.map((col, idx) => {
                   const filterVal = columnFilters[col.key] || '';
                   const isActive = filterVal !== '';
                   return (
                     <th
                       key={col.key}
-                      className="px-2 py-1.5 bg-slate-100/80"
+                      className={`px-2 py-1.5 ${stickyFirstColumn && idx === 0 ? `sticky ${showCheckbox ? 'left-10' : 'left-0'} z-20 bg-slate-100` : 'bg-slate-100/80'}`}
                       style={{ width: columnWidths[col.key], minWidth: col.minWidth || 60 }}
                     >
                       {col.filter ? (
@@ -398,9 +519,9 @@ export function DataTable<T>({
               // Skeleton loading
               Array.from({ length: 5 }).map((_, i) => (
                 <tr key={`skeleton-${i}`}>
-                  {showCheckbox && <td className="px-3 py-3"><div className="w-4 h-4 bg-slate-100 rounded animate-shimmer" /></td>}
+                  {showCheckbox && <td className={cellPad}><div className="w-4 h-4 bg-slate-100 rounded animate-shimmer" /></td>}
                   {visibleColumns.map((col) => (
-                    <td key={col.key} className="px-3 py-3">
+                    <td key={col.key} className={cellPad}>
                       <div className="h-4 bg-slate-100 rounded animate-shimmer" style={{ width: `${60 + Math.random() * 40}%` }} />
                     </td>
                   ))}
@@ -432,7 +553,10 @@ export function DataTable<T>({
                     onClick={() => onRowClick?.(item)}
                   >
                     {showCheckbox && (
-                      <td className="px-3 py-3 text-center" onClick={e => e.stopPropagation()}>
+                      <td
+                        className={`${cellPad} text-center ${stickyFirstColumn ? `sticky left-0 z-[1] ${isSelected ? 'bg-blue-50' : 'bg-white group-hover:bg-slate-50'}` : ''}`}
+                        onClick={e => e.stopPropagation()}
+                      >
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -441,10 +565,12 @@ export function DataTable<T>({
                         />
                       </td>
                     )}
-                    {visibleColumns.map((col) => (
+                    {visibleColumns.map((col, colIdx) => (
                       <td
                         key={col.key}
-                        className={`px-3 py-3 ${col.cellClassName || ''}`}
+                        className={`${cellPad}
+                          ${stickyFirstColumn && colIdx === 0 ? `sticky ${showCheckbox ? 'left-10' : 'left-0'} z-[1] ${isSelected ? 'bg-blue-50' : 'bg-white group-hover:bg-slate-50'}` : ''}
+                          ${col.cellClassName || ''}`}
                         style={{ width: columnWidths[col.key], maxWidth: columnWidths[col.key] }}
                       >
                         <div className="truncate">{col.render(item, idx)}</div>

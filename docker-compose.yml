@@ -23,6 +23,10 @@ services:
     restart: unless-stopped
     ports:
       - "3001:3001"
+    # backend/.env — AI_* (AI_ENABLED, AI_API_KEY, AI_*_MODEL) ve varsa diğer
+    # gizli değerler buradan gelir. environment: altındaki anahtarlar bunu ezer.
+    env_file:
+      - ./backend/.env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/grc_db?schema=public
       JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
@@ -32,6 +36,8 @@ services:
       PORT: 3001
       NODE_ENV: production
       FRONTEND_URL: http://localhost:3000
+      # Roller + izinleri (ai:* dahil) her açılışta idempotent seed'le.
+      RUN_SEED_SYSTEM: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,11 +46,15 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* derleme anında gömülür; tarayıcı "backend" host'unu
+        # çözemez, bu yüzden host üzerinden erişilebilen adresi veriyoruz.
+        NEXT_PUBLIC_API_URL: http://localhost:3001/api
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://backend:3001/api
+      NEXT_PUBLIC_API_URL: http://localhost:3001/api
     depends_on:
       - backend
 

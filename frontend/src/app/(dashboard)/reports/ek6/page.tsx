@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 import api from '@/lib/api';
-import { PageHeader, Button, EmptyState } from '@/components/ui';
+import { PageShell, PageHeader, Button, EmptyState } from '@/components/ui';
 
 interface EK6Row {
     siraNo: number;
@@ -102,9 +102,9 @@ export default function EK6ReportPage() {
     };
 
     return (
-        <div className="flex flex-col h-full bg-slate-50/50 print:bg-white print:p-0">
+        <PageShell fullHeight className="print:bg-white print:p-0">
             {/* Header section (hidden in print) */}
-            <div className="px-8 pt-8 print:hidden">
+            <div className="print:hidden">
                 <PageHeader
                     title="EK-6 Rapor Eki"
                     description="Periyodik Kontroller (BT Birimleri)"
@@ -184,7 +184,7 @@ export default function EK6ReportPage() {
             </div>
 
             {/* Print & Preview Section */}
-            <div className="px-8 pb-8 flex-1 print:px-0 print:py-0">
+            <div className="flex-1 print:px-0 print:py-0">
                 {reportData ? (
                     <div ref={printRef} className="bg-white rounded-xl shadow-sm border border-slate-200 print:shadow-none print:border-none print:m-0">
                         <div className="p-8 text-center border-b border-slate-100 print:border-none print:pb-4">
@@ -195,7 +195,7 @@ export default function EK6ReportPage() {
                         </div>
                         
                         <div className="overflow-x-auto print:overflow-visible">
-                            <table className="w-full text-left border-collapse">
+                            <table className="grc-table w-full text-left border-collapse">
                                 <thead>
                                     <tr className="bg-slate-50 border-b border-slate-200 print:bg-gray-100">
                                         <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-16 text-center print:border print:border-gray-300">No</th>
@@ -252,6 +252,6 @@ export default function EK6ReportPage() {
                     </div>
                 ) : null}
             </div>
-        </div>
+        </PageShell>
     );
 }

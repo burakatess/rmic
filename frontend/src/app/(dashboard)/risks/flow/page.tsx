@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { ErrorState } from '@/components/ui';
+import { api } from '@/lib/api';
 
 // Types
 interface FlowItem {
@@ -15,64 +17,6 @@ interface FlowItem {
     owner: string;
     children?: FlowItem[];
 }
-
-// Demo Data - Hierarchical view
-const DEMO_FLOW: FlowItem[] = [
-    {
-        id: 'r1', type: 'RISK', code: 'R-2024-0001', name: 'Siber Saldırı Riski',
-        status: 'Tedavi Ediliyor', statusColor: 'text-blue-700 bg-blue-50', severity: 'HIGH', owner: 'Ahmet Yılmaz',
-        children: [
-            {
-                id: 'c1', type: 'CONTROL', code: 'C-2024-0001', name: 'Güvenlik Duvarı Yönetimi',
-                status: 'Etkin', statusColor: 'text-green-700 bg-green-50', owner: 'BT Güvenlik',
-                children: []
-            },
-            {
-                id: 'c2', type: 'CONTROL', code: 'C-2024-0002', name: 'Erişim Yetkilendirme Kontrolü',
-                status: 'Kısmen Etkin', statusColor: 'text-amber-700 bg-amber-50', owner: 'BT Operasyon',
-                children: [
-                    {
-                        id: 'f1', type: 'FINDING', code: 'F-2024-0001', name: 'Erişim yetki iptali gecikmeleri',
-                        status: 'Açık', statusColor: 'text-red-700 bg-red-50', severity: 'HIGH', owner: 'Denetim',
-                        children: [
-                            {
-                                id: 'a1', type: 'ACTION', code: 'A-2024-0001', name: 'İK entegrasyonu otomasyonu',
-                                status: 'Devam Ediyor', statusColor: 'text-blue-700 bg-blue-50', owner: 'Zeynep Çelik',
-                            }
-                        ]
-                    }
-                ]
-            },
-        ]
-    },
-    {
-        id: 'r2', type: 'RISK', code: 'R-2024-0002', name: 'Regülasyon Uyumsuzluk Riski',
-        status: 'Değerlendirme Bekliyor', statusColor: 'text-amber-700 bg-amber-50', severity: 'HIGH', owner: 'Fatma Demir',
-        children: [
-            {
-                id: 'c4', type: 'CONTROL', code: 'C-2024-0004', name: 'Uyum İzleme Kontrolü',
-                status: 'Kısmen Etkin', statusColor: 'text-amber-700 bg-amber-50', owner: 'Uyum Birimi',
-                children: []
-            },
-        ]
-    },
-    {
-        id: 'r3', type: 'RISK', code: 'R-2024-0004', name: 'Veri Sızıntısı Riski',
-        status: 'Tedavi Edildi', statusColor: 'text-green-700 bg-green-50', severity: 'HIGH', owner: 'Ayşe Çelik',
-        children: [
-            {
-                id: 'c3', type: 'CONTROL', code: 'C-2024-0003', name: 'Veri Şifreleme Kontrolü',
-                status: 'Etkin', statusColor: 'text-green-700 bg-green-50', owner: 'BT Geliştirme',
-                children: []
-            },
-            {
-                id: 'c6', type: 'CONTROL', code: 'C-2024-0006', name: 'Yedekleme ve Kurtarma Kontrolü',
-                status: 'Etkin', statusColor: 'text-green-700 bg-green-50', owner: 'BT Operasyon',
-                children: []
-            },
-        ]
-    },
-];
 
 const TYPE_CONFIG: Record<string, { label: string; bg: string; border: string; icon: string }> = {
     RISK: { label: 'Risk', bg: 'bg-red-50', border: 'border-red-200', icon: '⚠' },
@@ -88,31 +32,117 @@ const SEVERITY_COLORS: Record<string, string> = {
     LOW: 'bg-green-100 text-green-800 border-green-200',
 };
 
+const CONTROL_STATUS_COLOR: Record<string, string> = {
+    EFFECTIVE: 'text-green-700 bg-green-50',
+    PARTIALLY_EFFECTIVE: 'text-amber-700 bg-amber-50',
+    INEFFECTIVE: 'text-red-700 bg-red-50',
+};
+const CONTROL_STATUS_LABEL: Record<string, string> = {
+    EFFECTIVE: 'Etkin', PARTIALLY_EFFECTIVE: 'Kısmen Etkin', INEFFECTIVE: 'Etkisiz',
+};
+const FINDING_STATUS_COLOR: Record<string, string> = {
+    OPEN: 'text-red-700 bg-red-50', IN_PROGRESS: 'text-blue-700 bg-blue-50',
+    PARTIALLY_CLOSED: 'text-amber-700 bg-amber-50', CLOSED: 'text-green-700 bg-green-50',
+};
+const FINDING_STATUS_LABEL: Record<string, string> = {
+    OPEN: 'Açık', IN_PROGRESS: 'Devam Ediyor', PARTIALLY_CLOSED: 'Kısmen Kapalı', CLOSED: 'Kapalı',
+};
+const ACTION_STATUS_COLOR: Record<string, string> = {
+    BEKLIYOR: 'text-gray-700 bg-gray-100', DEVAM_EDIYOR: 'text-blue-700 bg-blue-50',
+    TAMAMLANDI: 'text-green-700 bg-green-50', KAPATILDI: 'text-green-700 bg-green-50', YETERSIZ: 'text-red-700 bg-red-50',
+};
+const ACTION_STATUS_LABEL: Record<string, string> = {
+    BEKLIYOR: 'Bekliyor', DEVAM_EDIYOR: 'Devam Ediyor', TAMAMLANDI: 'Tamamlandı', KAPATILDI: 'Kapatıldı', YETERSIZ: 'Yetersiz',
+};
+const RISK_STATUS_COLOR: Record<string, string> = {
+    IDENTIFIED: 'text-gray-700 bg-gray-100', ASSESSED: 'text-amber-700 bg-amber-50',
+    TREATED: 'text-blue-700 bg-blue-50', ACCEPTED: 'text-slate-700 bg-slate-100', CLOSED: 'text-green-700 bg-green-50',
+};
+const RISK_STATUS_LABEL: Record<string, string> = {
+    IDENTIFIED: 'Tanımlandı', ASSESSED: 'Değerlendirildi', TREATED: 'Tedavi Edildi', ACCEPTED: 'Kabul Edildi', CLOSED: 'Kapatıldı',
+};
+
+function buildFlowFromRelations(rel: any): FlowItem {
+    const findings: any[] = rel.findings || [];
+    const actions: any[] = rel.actions || [];
+
+    const actionNode = (a: any): FlowItem => ({
+        id: a.id, type: 'ACTION', code: a.actionId, name: a.description,
+        status: ACTION_STATUS_LABEL[a.status] || a.status,
+        statusColor: ACTION_STATUS_COLOR[a.status] || 'text-gray-700 bg-gray-100',
+        owner: a.owner ? `${a.owner.firstName} ${a.owner.lastName}` : '—',
+    });
+
+    const findingNode = (f: any): FlowItem => ({
+        id: f.id, type: 'FINDING', code: f.findingId, name: f.description,
+        status: FINDING_STATUS_LABEL[f.status] || f.status,
+        statusColor: FINDING_STATUS_COLOR[f.status] || 'text-gray-700 bg-gray-100',
+        severity: f.severity,
+        owner: '—',
+        children: actions.filter(a => a.findingId === f.id).map(actionNode),
+    });
+
+    const controlNode = (c: any): FlowItem => ({
+        id: c.id, type: 'CONTROL', code: c.controlId, name: c.name,
+        status: CONTROL_STATUS_LABEL[c.effectivenessStatus] || c.effectivenessStatus || '—',
+        statusColor: CONTROL_STATUS_COLOR[c.effectivenessStatus] || 'text-gray-700 bg-gray-100',
+        owner: '—',
+        children: findings.filter(f => f.controlId === c.id).map(findingNode),
+    });
+
+    const directFindings = findings.filter(f => !f.controlId).map(findingNode);
+    const directActions = actions.filter(a => !a.findingId && !findings.some(f => f.id === a.findingId)).map(actionNode);
+
+    return {
+        id: rel.risk.id, type: 'RISK', code: rel.risk.riskId, name: rel.risk.name,
+        status: RISK_STATUS_LABEL[rel.risk.status] || rel.risk.status,
+        statusColor: RISK_STATUS_COLOR[rel.risk.status] || 'text-gray-700 bg-gray-100',
+        owner: rel.risk.owner ? `${rel.risk.owner.firstName} ${rel.risk.owner.lastName}` : '—',
+        children: [...(rel.controls || []).map(controlNode), ...directFindings, ...directActions],
+    };
+}
+
 export default function RiskControlFlowPage() {
-    const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(['r1', 'c2', 'f1']));
+    const [flow, setFlow] = useState<FlowItem[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
     const [selectedItem, setSelectedItem] = useState<FlowItem | null>(null);
-    const [viewMode, setViewMode] = useState<'tree' | 'matrix'>('tree');
+
+    const load = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const res: any = await api.getRisks({ limit: 50 });
+            const risks: any[] = res.data || [];
+            const relations = await Promise.all(risks.map(r => api.getRiskRelations(r.id)));
+            const tree = relations.map(buildFlowFromRelations);
+            setFlow(tree);
+            setExpandedItems(new Set(tree.slice(0, 3).map(r => r.id)));
+        } catch {
+            setError('Akış verileri yüklenemedi.');
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
 
     const toggleExpand = (id: string) => {
         setExpandedItems(prev => {
             const next = new Set(prev);
-            if (next.has(id)) {
-                next.delete(id);
-            } else {
-                next.add(id);
-            }
+            if (next.has(id)) next.delete(id); else next.add(id);
             return next;
         });
     };
 
     const renderFlowItem = (item: FlowItem, depth: number = 0) => {
         const config = TYPE_CONFIG[item.type];
-        const hasChildren = item.children && item.children.length > 0;
+        const hasChildren = !!item.children && item.children.length > 0;
         const isExpanded = expandedItems.has(item.id);
 
         return (
             <div key={item.id} className="relative">
-                {/* Connection line */}
                 {depth > 0 && (
                     <div className="absolute left-0 top-0 bottom-0 w-px bg-gray-200" style={{ left: `${(depth - 1) * 24 + 12}px` }}></div>
                 )}
@@ -123,7 +153,6 @@ export default function RiskControlFlowPage() {
                     style={{ marginLeft: `${depth * 24}px` }}
                     onClick={() => setSelectedItem(item)}
                 >
-                    {/* Expand button */}
                     {hasChildren ? (
                         <button
                             onClick={(e) => { e.stopPropagation(); toggleExpand(item.id); }}
@@ -139,12 +168,10 @@ export default function RiskControlFlowPage() {
                         </div>
                     )}
 
-                    {/* Type badge */}
                     <div className={`flex-shrink-0 px-2 py-0.5 text-xs font-medium rounded ${config.bg} ${config.border} border`}>
                         {config.icon} {config.label}
                     </div>
 
-                    {/* Content */}
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                             <Link
@@ -168,7 +195,6 @@ export default function RiskControlFlowPage() {
                     </div>
                 </div>
 
-                {/* Children */}
                 {hasChildren && isExpanded && (
                     <div className="ml-2">
                         {item.children!.map(child => renderFlowItem(child, depth + 1))}
@@ -178,7 +204,6 @@ export default function RiskControlFlowPage() {
         );
     };
 
-    // Stats calculation
     const countByType = (items: FlowItem[]): Record<string, number> => {
         const counts: Record<string, number> = { RISK: 0, CONTROL: 0, FINDING: 0, ACTION: 0 };
         const traverse = (list: FlowItem[]) => {
@@ -190,7 +215,19 @@ export default function RiskControlFlowPage() {
         traverse(items);
         return counts;
     };
-    const stats = countByType(DEMO_FLOW);
+    const stats = countByType(flow);
+
+    if (error && flow.length === 0 && !loading) {
+        return (
+            <div className="space-y-6">
+                <div className="border-b border-gray-200 pb-4">
+                    <h1 className="text-2xl font-bold text-gray-900">Risk–Kontrol–Aksiyon Akışı</h1>
+                    <p className="text-gray-500 mt-1">Riskler, kontroller, bulgular ve aksiyonlar arasındaki ilişkileri görüntüleyin.</p>
+                </div>
+                <ErrorState description={error} onRetry={load} />
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">
@@ -211,21 +248,6 @@ export default function RiskControlFlowPage() {
                         <span className="text-sm font-semibold text-gray-900">{count}</span>
                     </div>
                 ))}
-                <div className="flex-1"></div>
-                <div className="flex items-center gap-1">
-                    <button
-                        onClick={() => setViewMode('tree')}
-                        className={`px-3 py-1 text-xs rounded ${viewMode === 'tree' ? 'bg-slate-700 text-white' : 'bg-gray-100 text-gray-600'}`}
-                    >
-                        Ağaç
-                    </button>
-                    <button
-                        onClick={() => setViewMode('matrix')}
-                        className={`px-3 py-1 text-xs rounded ${viewMode === 'matrix' ? 'bg-slate-700 text-white' : 'bg-gray-100 text-gray-600'}`}
-                    >
-                        Matris
-                    </button>
-                </div>
             </div>
 
             <div className="flex gap-6">
@@ -234,14 +256,20 @@ export default function RiskControlFlowPage() {
                     <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
                         <h2 className="text-sm font-semibold text-gray-900">Hiyerarşi Görünümü</h2>
                         <button
-                            onClick={() => setExpandedItems(new Set(DEMO_FLOW.map(r => r.id)))}
+                            onClick={() => setExpandedItems(new Set(flow.map(r => r.id)))}
                             className="text-xs text-blue-600 hover:underline"
                         >
                             Tümünü Aç
                         </button>
                     </div>
                     <div className="p-4 max-h-[600px] overflow-y-auto">
-                        {DEMO_FLOW.map(item => renderFlowItem(item))}
+                        {loading ? (
+                            <p className="text-sm text-gray-400 text-center py-8">Yükleniyor...</p>
+                        ) : flow.length === 0 ? (
+                            <p className="text-sm text-gray-400 text-center py-8">Gösterilecek risk bulunamadı.</p>
+                        ) : (
+                            flow.map(item => renderFlowItem(item))
+                        )}
                     </div>
                 </div>
 

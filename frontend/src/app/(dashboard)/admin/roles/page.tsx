@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import api from '@/lib/api';
+import { PageShell, PageHeader, Button, LoadingState, StatusBadge } from '@/components/ui';
+import { useToast } from '@/components/ui/Toast';
 
 interface Role {
     id: string;
@@ -120,6 +122,7 @@ const permissionCategories = [
 ];
 
 export default function RolesPage() {
+    const { success, error: showError } = useToast();
     const [roles, setRoles] = useState<Role[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedRole, setSelectedRole] = useState<Role | null>(null);
@@ -128,6 +131,7 @@ export default function RolesPage() {
 
     useEffect(() => {
         loadRoles();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const loadRoles = async () => {
@@ -200,10 +204,10 @@ export default function RolesPage() {
                 r.id === selectedRole.id ? { ...r, permissions: editedPermissions } : r
             ));
             setSelectedRole({ ...selectedRole, permissions: editedPermissions });
-            alert('Yetkiler başarıyla kaydedildi!');
+            success('Kaydedildi', 'Yetkiler başarıyla kaydedildi.');
         } catch (error) {
             console.error('Failed to save permissions:', error);
-            alert('Yetkiler kaydedilirken bir hata oluştu');
+            showError('Hata', 'Yetkiler kaydedilirken bir hata oluştu');
         } finally {
             setSaving(false);
         }
@@ -218,59 +222,53 @@ export default function RolesPage() {
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-slate-600"></div>
-            </div>
+            <PageShell>
+                <LoadingState message="Roller yükleniyor..." />
+            </PageShell>
         );
     }
 
     return (
-        <div className="space-y-6">
-            {/* Page Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Rol Yetkileri</h1>
-                    <p className="text-gray-500 mt-1">Rol bazlı erişim yetkilerini yönetin</p>
-                </div>
-                {hasChanges() && (
-                    <button
-                        onClick={handleSave}
-                        disabled={saving}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-medium rounded-xl hover:from-amber-600 hover:to-amber-700 transition-all shadow-sm disabled:opacity-50"
-                    >
-                        {saving ? (
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                        ) : (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                        )}
-                        Değişiklikleri Kaydet
-                    </button>
-                )}
-            </div>
+        <PageShell>
+            <PageHeader
+                title="Rol Yetkileri"
+                description="Rol bazlı erişim yetkilerini yönetin"
+                breadcrumbs={[{ label: 'Yönetim' }, { label: 'Roller' }]}
+                actions={
+                    hasChanges() ? (
+                        <Button
+                            variant="primary"
+                            onClick={handleSave}
+                            loading={saving}
+                            icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                        >
+                            Değişiklikleri Kaydet
+                        </Button>
+                    ) : undefined
+                }
+            />
 
             <div className="grid grid-cols-12 gap-6">
                 {/* Role List */}
                 <div className="col-span-12 md:col-span-3">
-                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                        <div className="p-4 border-b border-gray-100 bg-gray-50">
-                            <h3 className="font-semibold text-gray-700">Roller</h3>
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                        <div className="px-5 py-3.5 border-b border-slate-100">
+                            <h3 className="text-sm font-semibold text-slate-700">Roller</h3>
                         </div>
-                        <div className="divide-y divide-gray-100">
+                        <div className="divide-y divide-slate-100">
                             {roles.map((role) => (
                                 <button
                                     key={role.id}
                                     onClick={() => handleRoleSelect(role)}
-                                    className={`w-full p-4 text-left transition-colors ${selectedRole?.id === role.id
-                                            ? 'bg-amber-50 border-l-4 border-amber-500'
-                                            : 'hover:bg-gray-50 border-l-4 border-transparent'
+                                    className={`w-full p-4 text-left transition-colors cursor-pointer ${selectedRole?.id === role.id
+                                            ? 'bg-blue-50 border-l-4 border-blue-500'
+                                            : 'hover:bg-slate-50 border-l-4 border-transparent'
                                         }`}
                                 >
-                                    <p className="font-medium text-gray-900">
+                                    <p className="text-sm font-medium text-slate-800">
                                         {roleLabels[role.name] || role.name}
                                     </p>
-                                    <p className="text-sm text-gray-500 mt-1">
+                                    <p className="text-xs text-slate-500 mt-1">
                                         {role._count?.users || 0} kullanıcı
                                     </p>
                                 </button>
@@ -282,28 +280,26 @@ export default function RolesPage() {
                 {/* Permission Matrix */}
                 <div className="col-span-12 md:col-span-9">
                     {selectedRole ? (
-                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                            <div className="p-4 border-b border-gray-100 bg-gray-50">
-                                <div className="flex items-center justify-between">
+                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                            <div className="px-5 py-3.5 border-b border-slate-100">
+                                <div className="flex items-center justify-between gap-3">
                                     <div>
-                                        <h3 className="font-semibold text-gray-900">
+                                        <h3 className="text-sm font-semibold text-slate-700">
                                             {roleLabels[selectedRole.name] || selectedRole.name}
                                         </h3>
-                                        <p className="text-sm text-gray-500 mt-1">
+                                        <p className="text-xs text-slate-500 mt-1">
                                             {roleDescriptions[selectedRole.name] || selectedRole.description}
                                         </p>
                                     </div>
-                                    <span className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                                        {editedPermissions.length} yetki
-                                    </span>
+                                    <StatusBadge variant="info" size="md">{editedPermissions.length} yetki</StatusBadge>
                                 </div>
                             </div>
 
                             <div className="p-4 space-y-6">
                                 {permissionCategories.map((category) => (
-                                    <div key={category.key} className="border border-gray-200 rounded-xl overflow-hidden">
-                                        <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
-                                            <h4 className="font-medium text-gray-700">{category.name}</h4>
+                                    <div key={category.key} className="border border-slate-200 rounded-xl overflow-hidden">
+                                        <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+                                            <h4 className="text-sm font-semibold text-slate-700">{category.name}</h4>
                                         </div>
                                         <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-3">
                                             {category.permissions.map((perm) => {
@@ -313,20 +309,20 @@ export default function RolesPage() {
                                                     <button
                                                         key={perm.key}
                                                         onClick={() => togglePermission(perm.key)}
-                                                        className={`p-3 rounded-lg border-2 text-left transition-all ${isActive
+                                                        className={`p-3 rounded-lg border-2 text-left transition-all cursor-pointer ${isActive
                                                                 ? isWildcard
-                                                                    ? 'border-amber-500 bg-amber-50'
-                                                                    : 'border-green-500 bg-green-50'
-                                                                : 'border-gray-200 hover:border-gray-300'
+                                                                    ? 'border-amber-400 bg-amber-50'
+                                                                    : 'border-emerald-400 bg-emerald-50'
+                                                                : 'border-slate-200 hover:border-slate-300'
                                                             }`}
                                                         title={perm.description}
                                                     >
                                                         <div className="flex items-center gap-2">
-                                                            <div className={`w-5 h-5 rounded-md flex items-center justify-center ${isActive
+                                                            <div className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 ${isActive
                                                                     ? isWildcard
                                                                         ? 'bg-amber-500 text-white'
-                                                                        : 'bg-green-500 text-white'
-                                                                    : 'bg-gray-200'
+                                                                        : 'bg-emerald-500 text-white'
+                                                                    : 'bg-slate-200'
                                                                 }`}>
                                                                 {isActive && (
                                                                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -334,8 +330,7 @@ export default function RolesPage() {
                                                                     </svg>
                                                                 )}
                                                             </div>
-                                                            <span className={`text-sm font-medium ${isActive ? 'text-gray-900' : 'text-gray-600'
-                                                                }`}>
+                                                            <span className={`text-sm font-medium ${isActive ? 'text-slate-800' : 'text-slate-600'}`}>
                                                                 {perm.label}
                                                             </span>
                                                         </div>
@@ -348,12 +343,12 @@ export default function RolesPage() {
                             </div>
                         </div>
                     ) : (
-                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center">
-                            <p className="text-gray-500">Düzenlemek için bir rol seçin</p>
+                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center">
+                            <p className="text-sm text-slate-500">Düzenlemek için bir rol seçin</p>
                         </div>
                     )}
                 </div>
             </div>
-        </div>
+        </PageShell>
     );
 }

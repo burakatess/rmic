@@ -1,3 +1,9 @@
+import type {
+    AiAssessment, AiStatus, AiUsage, AiCockpit, AiQueryResult,
+    AiEvalSession, AiEvalSessionListItem,
+    KnowledgeDoc, KnowledgeDocKind,
+} from '@/types/ai';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 export class ApiError extends Error {
@@ -257,6 +263,20 @@ class ApiClient {
         return this.request(`/controls/tests/${testId}/return`, { method: 'PATCH', body: { reason } });
     }
 
+    async cancelControlTest(testId: string, reason: string) {
+        return this.request(`/controls/tests/${testId}/cancel-final`, { method: 'PATCH', body: { reason } });
+    }
+
+    // Merkezi Onaylar
+    async getMyPendingApprovals(params?: Record<string, string>) {
+        const query = params ? '?' + new URLSearchParams(params).toString() : '';
+        return this.request(`/approvals/my-pending${query}`);
+    }
+
+    async getApprovalDetail(id: string) {
+        return this.request(`/approvals/${id}`);
+    }
+
     async generateControlTests(controlId: string) {
         return this.request(`/controls/${controlId}/generate-tests`, { method: 'POST' });
     }
@@ -272,6 +292,11 @@ class ApiClient {
     // Dashboard
     async getDashboard() {
         return this.request('/reports/dashboard');
+    }
+
+    // Notifications
+    async getNotifications() {
+        return this.request<any[]>('/notifications');
     }
 
     // Risks
@@ -298,6 +323,10 @@ class ApiClient {
 
     async treatRisk(id: string, data: unknown) {
         return this.request(`/risks/${id}/treat`, { method: 'POST', body: data });
+    }
+
+    async approveRiskTreatment(id: string) {
+        return this.request(`/risks/${id}/approve-treatment`, { method: 'POST' });
     }
 
     async getRiskCategories() {
@@ -384,6 +413,14 @@ class ApiClient {
         return this.request(`/actions/${id}`, { method: 'DELETE' });
     }
 
+    async createStandaloneAction(data: unknown) {
+        return this.request('/actions', { method: 'POST', body: data });
+    }
+
+    async getActionsForRisk(riskId: string) {
+        return this.request<any[]>(`/risks/${riskId}/actions`);
+    }
+
     // Relations endpoints
     async getRiskRelations(id: string) {
         return this.request(`/risks/${id}/relations`);
@@ -451,6 +488,50 @@ class ApiClient {
 
     async deleteRiskAction(id: string) {
         return this.request(`/risk-actions/${id}`, { method: 'DELETE' });
+    }
+
+    // Audit Plans & Executions
+    async getAuditPlans(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request<any>(`/audit-plans${query}`);
+    }
+
+    async getAuditPlan(id: string) {
+        return this.request<any>(`/audit-plans/${id}`);
+    }
+
+    async createAuditPlan(data: unknown) {
+        return this.request('/audit-plans', { method: 'POST', body: data });
+    }
+
+    async updateAuditPlan(id: string, data: unknown) {
+        return this.request(`/audit-plans/${id}`, { method: 'PUT', body: data });
+    }
+
+    async getAuditExecutions(params?: Record<string, string | number>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request<any>(`/audit-executions${query}`);
+    }
+
+    async createAuditExecution(data: unknown) {
+        return this.request('/audit-executions', { method: 'POST', body: data });
+    }
+
+    async updateAuditExecution(id: string, data: unknown) {
+        return this.request(`/audit-executions/${id}`, { method: 'PUT', body: data });
+    }
+
+    // Compliance
+    async getRegulations() {
+        return this.request<any[]>('/regulations');
+    }
+
+    async getRegulationArticles(regulationId: string) {
+        return this.request<any[]>(`/regulations/${regulationId}/articles`);
+    }
+
+    async getComplianceOverview() {
+        return this.request<any[]>('/compliance/overview');
     }
 
     // Reports
@@ -732,6 +813,128 @@ class ApiClient {
     }
 
     // ── Risks (for selectors) — already defined as getRisks() above ──────────
+
+    // ── Yapay Zeka — Kontrol Testi Asistanı ─────────────────────────────────
+
+    async getAiStatus() {
+        return this.request<AiStatus>('/ai/status');
+    }
+
+    async getAiModels() {
+        return this.request<{ models: string[] }>('/ai/models');
+    }
+
+    async getAiUsage() {
+        return this.request<AiUsage>('/ai/usage');
+    }
+
+    async getAiCockpit() {
+        return this.request<AiCockpit>('/ai/cockpit');
+    }
+
+    async getTestAssessments(testId: string) {
+        return this.request<AiAssessment[]>(`/ai/control-tests/${testId}/assessments`);
+    }
+
+    async runAiStage(
+        testId: string,
+        stage: 'prep' | 'evidence-read' | 'assess' | 'result-draft' | 'finding-draft' | 'reviewer-check',
+        force = false,
+    ) {
+        return this.request<AiAssessment>(`/ai/control-tests/${testId}/${stage}`, {
+            method: 'POST',
+            body: { force },
+        });
+    }
+
+    async askAi(question: string) {
+        return this.request<AiQueryResult>('/ai/query', { method: 'POST', body: { question } });
+    }
+
+    async reviewAiAssessment(id: string, action: 'accept' | 'edit' | 'reject', editedOutput?: unknown) {
+        return this.request<AiAssessment>(`/ai/assessments/${id}/review`, {
+            method: 'POST',
+            body: { action, editedOutput },
+        });
+    }
+
+    // ── Kontrol & Kanıt Değerlendirme ──────────────────────────────────────
+    async searchRegulationArticles(q: string) {
+        return this.request<Array<{
+            id: string; articleCode: string; title: string;
+            regulation: { id: string; code: string; name: string };
+        }>>(`/articles/search?q=${encodeURIComponent(q)}`);
+    }
+
+    // ── Kurumsal Kaynak Kütüphanesi ────────────────────────────────────────
+    async searchKnowledgeDocs(q: string, kind?: KnowledgeDocKind) {
+        const qs = new URLSearchParams();
+        if (q) qs.set('q', q);
+        if (kind) qs.set('kind', kind);
+        return this.request<KnowledgeDoc[]>(`/knowledge-docs?${qs.toString()}`);
+    }
+
+    async getKnowledgeDoc(id: string) {
+        return this.request<KnowledgeDoc>(`/knowledge-docs/${id}`);
+    }
+
+    async createKnowledgeDoc(body: {
+        kind: KnowledgeDocKind; code: string; title: string; body: string;
+        category?: string; tags?: string[]; sourceRef?: string; effectiveDate?: string;
+    }) {
+        return this.request<KnowledgeDoc>('/knowledge-docs', { method: 'POST', body });
+    }
+
+    async updateKnowledgeDoc(id: string, body: Partial<{
+        kind: KnowledgeDocKind; code: string; title: string; body: string;
+        category: string; tags: string[]; sourceRef: string; effectiveDate: string; isActive: boolean;
+    }>) {
+        return this.request<KnowledgeDoc>(`/knowledge-docs/${id}`, { method: 'PATCH', body });
+    }
+
+    async deleteKnowledgeDoc(id: string) {
+        return this.request<{ ok: boolean }>(`/knowledge-docs/${id}`, { method: 'DELETE' });
+    }
+
+    async listAiEvalSessions() {
+        return this.request<AiEvalSessionListItem[]>('/ai/eval-sessions');
+    }
+
+    async createAiEvalSession(body: {
+        title?: string; controlRefId?: string | null; controlText?: string | null;
+        controlManualNote?: string | null; evidenceText?: string | null;
+        regulationArticleIds?: string[]; knowledgeDocIds?: string[];
+    }) {
+        return this.request<AiEvalSession>('/ai/eval-sessions', { method: 'POST', body });
+    }
+
+    async getAiEvalSession(id: string) {
+        return this.request<AiEvalSession>(`/ai/eval-sessions/${id}`);
+    }
+
+    async updateAiEvalSession(id: string, body: {
+        title?: string; controlRefId?: string | null; controlText?: string | null;
+        controlManualNote?: string | null; evidenceText?: string | null;
+        regulationArticleIds?: string[]; knowledgeDocIds?: string[];
+    }) {
+        return this.request<AiEvalSession>(`/ai/eval-sessions/${id}`, { method: 'PATCH', body });
+    }
+
+    async archiveAiEvalSession(id: string) {
+        return this.request<{ ok: boolean }>(`/ai/eval-sessions/${id}`, { method: 'DELETE' });
+    }
+
+    async addAiEvalAttachment(id: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
+        return this.request(`/ai/eval-sessions/${id}/attachments`, { method: 'POST', body: meta });
+    }
+
+    async removeAiEvalAttachment(id: string, attId: string) {
+        return this.request(`/ai/eval-sessions/${id}/attachments/${attId}`, { method: 'DELETE' });
+    }
+
+    async sendAiEvalMessage(id: string, text: string) {
+        return this.request<AiEvalSession>(`/ai/eval-sessions/${id}/messages`, { method: 'POST', body: { text } });
+    }
 }
 
 export const api = new ApiClient(API_BASE_URL);

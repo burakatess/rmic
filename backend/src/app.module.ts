@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './prisma';
+import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth';
 import { RisksModule } from './modules/risks/risks.module';
 import { ControlsModule } from './modules/controls/controls.module';
@@ -19,8 +20,12 @@ import { RiskControlsModule } from './modules/risk-controls/risk-controls.module
 import { RiskActionsModule } from './modules/risk-actions/risk-actions.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { RiskProposalsModule } from './modules/risk-proposals/risk-proposals.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { AiModule } from './modules/ai/ai.module';
+import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 import { JwtAuthGuard } from './common/guards';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 @Module({
   imports: [
@@ -33,12 +38,14 @@ import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter'
     // (login/register/refresh: 5 istek/60sn) çok daha sıkı sınırlanır.
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     PrismaModule,
+    HealthModule,
     AuthModule,
     RisksModule,
     ControlsModule,
     AuditsModule,
     ActionsModule,
     ReportsModule,
+    NotificationsModule,
     ComplianceModule,
     AdminModule,
     RiskEntryModule,
@@ -49,6 +56,8 @@ import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter'
     RiskActionsModule,
     UploadsModule,
     RiskProposalsModule,
+    AiModule,
+    KnowledgeModule,
   ],
   providers: [
     // Rate limit önce, sonra JWT auth
@@ -64,6 +73,11 @@ import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter'
     {
       provide: APP_FILTER,
       useClass: PrismaExceptionFilter,
+    },
+    // Kalan tüm hatalar için son çare + Sentry raporlama — bkz. common/filters/all-exceptions.filter.ts
+    {
+      provide: APP_FILTER,
+      useClass: AllExceptionsFilter,
     },
   ],
 })

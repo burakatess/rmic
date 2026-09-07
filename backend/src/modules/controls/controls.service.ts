@@ -441,6 +441,47 @@ export class ControlsService {
     async completeTest(testId: string, data: any, userId: string) {
         const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
         if (!test) throw new NotFoundException(`Test ${testId} not found`);
+        // İş kuralı: test yeniden başlatılmadan (DEVAM_EDIYOR) veya geri gönderilmiş
+        // (GERI_GONDERILDI) haldeyken tamamlanıp onaya gönderilebilir.
+        if (!['DEVAM_EDIYOR', 'GERI_GONDERILDI'].includes(test.status)) {
+            throw new BadRequestException(`Test tamamlanmak için DEVAM_EDIYOR veya GERI_GONDERILDI statüsünde olmalı. Mevcut: ${test.status}`);
+        }
+
+        // ── Madde 6: Açık bulguya referans ile ilerletme ────────────────────────
+        if (data.referencedFindingId) {
+            const ref = await this.prisma.finding.findUnique({ where: { id: data.referencedFindingId } });
+            if (!ref) throw new BadRequestException('Referans verilen bulgu bulunamadı.');
+            // Aynı kontrol zinciriyle ilişkili olmalı: doğrudan bu kontrole bağlı olsun
+            // ya da bu kontrolün başka bir testine bağlı olsun.
+            const relatedViaControl = ref.controlId === test.controlId;
+            const relatedViaTest = ref.controlTestId
+                ? (await this.prisma.controlTest.findUnique({ where: { id: ref.controlTestId }, select: { controlId: true } }))?.controlId === test.controlId
+                : false;
+            if (!relatedViaControl && !relatedViaTest) {
+                throw new BadRequestException('Referans verilen bulgu bu kontrolle ilişkili değil.');
+            }
+            if (ref.status === 'CLOSED') {
+                throw new BadRequestException('Kapalı bir bulguya referans verilemez.');
+            }
+
+            const updated = await this.prisma.controlTest.update({
+                where: { id: testId },
+                data: {
+                    status: 'TAMAMLANDI',
+                    completedAt: new Date(),
+                    findingStatus: 'BULGUSU_VAR',
+                    referencedFindingId: ref.id,
+                    referenceReason: data.referenceReason || null,
+                    resultText: data.resultText || `Devam eden açık bulgu (${ref.findingId}) referans alınarak ilerletildi.`,
+                },
+            });
+
+            await this.prisma.auditLog.create({
+                data: { userId, action: 'REFERENCE_FINDING', entityType: 'ControlTest', entityId: testId, newValue: { referencedFindingId: ref.id, findingId: ref.findingId } },
+            });
+
+            return updated;
+        }
 
         // İş kuralı: BULGUSU_VAR seçildiyse en az 1 bulgu kaydı olmalı
         const findingCount = await this.prisma.finding.count({ where: { controlTestId: testId } });
@@ -455,6 +496,8 @@ export class ControlsService {
             );
         }
 
+        // Test tamamlandığında BULGUSU_VAR/YOK farketmeksizin doğrudan final onaylı
+        // sayılmaz — TAMAMLANDI = 2. kontrolcü onayına gönderildi.
         const updated = await this.prisma.controlTest.update({
             where: { id: testId },
             data: {
@@ -478,6 +521,20 @@ export class ControlsService {
         const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
         if (!test) throw new NotFoundException(`Test ${testId} not found`);
         if (test.status !== 'TAMAMLANDI') throw new BadRequestException('Onaylamak için test TAMAMLANDI statüsünde olmalı.');
+
+        const approver = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: { select: { name: true } } } });
+        const isAdmin = approver?.role?.name === 'SYSTEM_ADMIN';
+
+        // İş kuralı: testi yapan kendi ikinci kontrol onayını veremez — maker/checker
+        // ayrımı SYSTEM_ADMIN için de istisnasız uygulanır (kullanıcı talebinde "eğer iş
+        // kuralı böyle değilse açıkça raporla" denmişti; en güvenli/tutarlı yorum budur).
+        if (test.assigneeId === userId) {
+            throw new BadRequestException('Testi yapan kullanıcı kendi ikinci kontrol onayını veremez.');
+        }
+        // İkinci kontrolcü atanmışsa yalnızca o kişi (veya admin) onaylayabilir.
+        if (test.secondControllerId && test.secondControllerId !== userId && !isAdmin) {
+            throw new BadRequestException('Bu test size atanmış bir onay değil.');
+        }
 
         const updated = await this.prisma.controlTest.update({
             where: { id: testId },
@@ -508,12 +565,27 @@ export class ControlsService {
     }
 
     async returnTest(testId: string, reason: string, userId: string) {
+        if (!reason || !reason.trim()) {
+            throw new BadRequestException('Geri gönderme gerekçesi zorunludur.');
+        }
         const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
         if (!test) throw new NotFoundException(`Test ${testId} not found`);
+        if (test.status !== 'TAMAMLANDI') throw new BadRequestException('Geri göndermek için test TAMAMLANDI (onay bekliyor) statüsünde olmalı.');
+
+        const approver = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: { select: { name: true } } } });
+        const isAdmin = approver?.role?.name === 'SYSTEM_ADMIN';
+        if (test.secondControllerId && test.secondControllerId !== userId && !isAdmin) {
+            throw new BadRequestException('Bu test size atanmış bir onay değil.');
+        }
 
         const updated = await this.prisma.controlTest.update({
             where: { id: testId },
-            data: { status: 'DEVAM_EDIYOR', rejectionReason: reason },
+            data: {
+                status: 'GERI_GONDERILDI',
+                rejectionReason: reason,
+                returnedById: userId,
+                returnedAt: new Date(),
+            },
         });
 
         await this.prisma.auditLog.create({
@@ -521,6 +593,87 @@ export class ControlsService {
         });
 
         return updated;
+    }
+
+    /** Final (ONAYLANDI) bir testi iptal eder — yalnızca SYSTEM_ADMIN çağırabilir (RBAC controller'da). */
+    async cancelFinalApproval(testId: string, reason: string, userId: string) {
+        const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
+        if (!test) throw new NotFoundException(`Test ${testId} not found`);
+        if (test.status !== 'ONAYLANDI') {
+            throw new BadRequestException('Yalnızca final onaylanmış (ONAYLANDI) testler iptal edilebilir.');
+        }
+
+        const updated = await this.prisma.controlTest.update({
+            where: { id: testId },
+            data: {
+                status: 'IPTAL',
+                cancelledAt: new Date(),
+                cancelledById: userId,
+                cancelReason: reason || null,
+            },
+        });
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'CANCEL_FINAL_APPROVAL', entityType: 'ControlTest', entityId: testId, newValue: { reason } },
+        });
+
+        return updated;
+    }
+
+    // ─── Merkezi Onay Sayfası ──────────────────────────────────────────────────
+
+    async getMyPendingApprovals(userId: string, query: any) {
+        const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: { select: { name: true } } } });
+        const isAdmin = user?.role?.name === 'SYSTEM_ADMIN';
+
+        const where: any = {
+            status: 'TAMAMLANDI',
+            OR: [
+                { secondControllerId: userId },
+                ...(isAdmin ? [{ secondControllerId: null }] : []),
+            ],
+        };
+        if (query.directorateId) where.directorateId = query.directorateId;
+        if (query.dateFrom || query.dateTo) {
+            where.completedAt = {};
+            if (query.dateFrom) where.completedAt.gte = new Date(query.dateFrom);
+            if (query.dateTo) where.completedAt.lte = new Date(query.dateTo);
+        }
+
+        const tests = await this.prisma.controlTest.findMany({
+            where,
+            include: {
+                control: { select: { id: true, controlId: true, name: true, type: true } },
+                directorate: { select: { id: true, name: true } },
+                findings: { select: { id: true, findingId: true, severity: true } },
+                attachments: true,
+            },
+            orderBy: { completedAt: 'asc' },
+        });
+
+        return {
+            data: tests.map(t => ({ ...t, type: 'CONTROL_TEST' as const })),
+        };
+    }
+
+    async getApprovalDetail(testId: string) {
+        const test = await this.prisma.controlTest.findUnique({
+            where: { id: testId },
+            include: {
+                control: { select: { id: true, controlId: true, name: true, type: true, gmy: true } },
+                directorate: { select: { id: true, name: true, code: true } },
+                findings: { select: { id: true, findingId: true, severity: true, resolutionStatus: true, summary: true } },
+                referencedFinding: { select: { id: true, findingId: true, status: true, summary: true } },
+                attachments: true,
+            },
+        });
+        if (!test) throw new NotFoundException(`Test ${testId} not found`);
+
+        const submittedBy = test.assigneeId
+            ? await this.prisma.user.findUnique({ where: { id: test.assigneeId }, select: { id: true, firstName: true, lastName: true, email: true } })
+            : null;
+
+        return { ...test, type: 'CONTROL_TEST' as const, submittedBy, submittedAt: test.completedAt };
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────────────

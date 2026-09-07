@@ -17,11 +17,24 @@ interface Control {
     linkedRisks?: Risk[];
 }
 
+interface Directorate {
+    id: string;
+    name: string;
+}
+
+interface UserOption {
+    id: string;
+    firstName: string;
+    lastName: string;
+}
+
 export default function NewFindingPage() {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
     const [risks, setRisks] = useState<Risk[]>([]);
     const [controls, setControls] = useState<Control[]>([]);
+    const [directorates, setDirectorates] = useState<Directorate[]>([]);
+    const [users, setUsers] = useState<UserOption[]>([]);
 
     const departmentOptions = [
         { value: 'IT', label: 'Bilgi Teknolojileri' },
@@ -52,6 +65,8 @@ export default function NewFindingPage() {
         targetResolutionDate: '',
         relatedDepartment: '',
         responsiblePerson: '',
+        gmy: '',
+        iletisimKisisi: '',
     });
 
 
@@ -91,6 +106,22 @@ export default function NewFindingPage() {
                 { id: '2', controlId: 'C-2024-0002', name: 'Erişim Yetkilendirme Kontrolü', linkedRisks: [] },
             ]);
         }
+
+        try {
+            const directorateData = await api.getDirectorates({ isActive: 'true' }) as any;
+            const directorateList = Array.isArray(directorateData) ? directorateData : (directorateData?.data || []);
+            setDirectorates(directorateList.map((d: any) => ({ id: String(d.id), name: String(d.name || '') })));
+        } catch (error) {
+            console.error('Failed to load directorates:', error);
+        }
+
+        try {
+            const userData = await api.getUsers() as any;
+            const userList = Array.isArray(userData) ? userData : (userData?.data || []);
+            setUsers(userList.map((u: any) => ({ id: String(u.id), firstName: String(u.firstName || ''), lastName: String(u.lastName || '') })));
+        } catch (error) {
+            console.error('Failed to load users:', error);
+        }
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -98,7 +129,11 @@ export default function NewFindingPage() {
         setLoading(true);
 
         try {
-            await api.createFinding(formData);
+            const payload = {
+                ...formData,
+                targetResolutionDate: formData.targetResolutionDate || undefined,
+            };
+            await api.createFinding(payload);
             router.push('/findings');
         } catch (error) {
             console.error('Failed to create finding:', error);
@@ -264,6 +299,35 @@ export default function NewFindingPage() {
                                     <option value="">Seçiniz</option>
                                     {personOptions.map(opt => (
                                         <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1.5">İlgili GMY</label>
+                                <select
+                                    value={formData.gmy}
+                                    onChange={(e) => setFormData({ ...formData, gmy: e.target.value })}
+                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+                                >
+                                    <option value="">Seçiniz</option>
+                                    {directorates.map(d => (
+                                        <option key={d.id} value={d.name}>{d.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1.5">İletişim Kişisi</label>
+                                <select
+                                    value={formData.iletisimKisisi}
+                                    onChange={(e) => setFormData({ ...formData, iletisimKisisi: e.target.value })}
+                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+                                >
+                                    <option value="">Seçiniz</option>
+                                    {users.map(u => (
+                                        <option key={u.id} value={`${u.firstName} ${u.lastName}`.trim()}>{`${u.firstName} ${u.lastName}`.trim()}</option>
                                     ))}
                                 </select>
                             </div>

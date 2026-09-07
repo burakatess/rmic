@@ -53,6 +53,24 @@ export class ControlsController {
         return this.controlsService.returnTest(testId, reason, userId);
     }
 
+    // Repo deseni: "submit-approval" ayrı bir iş kuralı değil, mevcut "complete" ile
+    // eşdeğer (test tamamlanınca zaten onaya düşüyor) — endpoint tekilliği için alias.
+    @Patch('tests/:testId/submit-approval')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    async submitApproval(@Param('testId') testId: string, @Body() data: any, @CurrentUser('id') userId: string) {
+        return this.controlsService.completeTest(testId, data, userId);
+    }
+
+    @Patch('tests/:testId/cancel-final')
+    @Roles('SYSTEM_ADMIN')
+    async cancelFinal(
+        @Param('testId') testId: string,
+        @Body('reason') reason: string,
+        @CurrentUser('id') userId: string,
+    ) {
+        return this.controlsService.cancelFinalApproval(testId, reason, userId);
+    }
+
     @Post('tests/:testId/attachments')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async addTestAttachment(

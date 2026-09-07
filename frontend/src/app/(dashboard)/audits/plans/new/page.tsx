@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { api } from '@/lib/api';
 
 // Demo data for dropdowns
 const AUDIT_TEAMS = [
@@ -31,8 +32,15 @@ const PRIORITY_OPTIONS = [
     { value: 'HIGH', label: 'Yüksek', color: 'bg-red-100 text-red-700 border-red-300' },
 ];
 
+const PERIOD_TYPE_MAP: Record<string, string> = {
+    Q1: 'QUARTERLY', Q2: 'QUARTERLY', Q3: 'QUARTERLY', Q4: 'QUARTERLY',
+    H1: 'SEMI_ANNUAL', H2: 'SEMI_ANNUAL', FULL: 'ANNUAL',
+};
+
 export default function NewAuditPlanPage() {
     const router = useRouter();
+    const [submitting, setSubmitting] = useState(false);
+    const [submitError, setSubmitError] = useState<string | null>(null);
 
     // Form state
     const [auditName, setAuditName] = useState('');
@@ -84,11 +92,34 @@ export default function NewAuditPlanPage() {
         return 0;
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        // In production, this would send to backend API
-        alert('Denetim planı oluşturuldu! (Demo modda API çağrısı yapılmadı)');
-        router.push('/audits/plans');
+        setSubmitError(null);
+        setSubmitting(true);
+        try {
+            await api.createAuditPlan({
+                name: auditName,
+                year: parseInt(year, 10),
+                periodType: PERIOD_TYPE_MAP[period] || 'ANNUAL',
+                objectives: objectives || '',
+                scope: scope || '',
+                status: 'PLANNED',
+                auditedUnit,
+                auditTeam: selectedTeam?.name || null,
+                teamLeader: teamLeader || null,
+                teamSize: teamLeader ? selectedMembers.length + 1 : selectedMembers.length,
+                rationale,
+                priority,
+                plannedStartDate: plannedStartDate ? new Date(plannedStartDate).toISOString() : null,
+                plannedEndDate: plannedEndDate ? new Date(plannedEndDate).toISOString() : null,
+                plannedManDays: plannedManDays ? parseInt(plannedManDays, 10) : calculateManDays() || null,
+            });
+            router.push('/audits/plans');
+        } catch (err: any) {
+            setSubmitError(err?.body?.message || 'Denetim planı oluşturulamadı.');
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     return (
@@ -391,6 +422,12 @@ export default function NewAuditPlanPage() {
                         </div>
                     )}
 
+                    {submitError && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">
+                            {submitError}
+                        </div>
+                    )}
+
                     {/* Actions */}
                     <div className="flex items-center justify-between pt-4 border-t border-gray-200">
                         <Link
@@ -401,16 +438,11 @@ export default function NewAuditPlanPage() {
                         </Link>
                         <div className="flex items-center gap-3">
                             <button
-                                type="button"
-                                className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-                            >
-                                Taslak Olarak Kaydet
-                            </button>
-                            <button
                                 type="submit"
-                                className="px-5 py-2.5 text-sm font-medium text-white bg-[#1e3a5f] rounded-lg hover:bg-[#152a45]"
+                                disabled={submitting}
+                                className="px-5 py-2.5 text-sm font-medium text-white bg-[#1e3a5f] rounded-lg hover:bg-[#152a45] disabled:opacity-50"
                             >
-                                Denetim Planını Oluştur
+                                {submitting ? 'Kaydediliyor...' : 'Denetim Planını Oluştur'}
                             </button>
                         </div>
                     </div>

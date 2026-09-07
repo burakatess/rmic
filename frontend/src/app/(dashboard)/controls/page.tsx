@@ -2,16 +2,24 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { useAuth } from '@/components/auth/AuthProvider';
 import {
+    PageShell,
     PageHeader,
     DataTable,
     StatusBadge,
     Button,
     ConfirmDialog,
+    KpiCard,
+    KpiGrid,
+    QuickFilterBar,
+    AdvancedFilterPanel,
+    ActiveFilterChips,
+    SavedViewMenu,
 } from '@/components/ui';
-import type { ColumnDef } from '@/components/ui';
+import type { ColumnDef, ActiveFilterChip, QuickFilterItem, AdvancedFilterField } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import ImportControlModal from '@/components/modals/ImportControlModal';
 
@@ -41,24 +49,6 @@ interface Control {
 
 type BadgeVariant = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'success' | 'warning' | 'neutral' | 'primary';
 
-const typeVariant: Record<string, BadgeVariant> = {
-    IT_GENERAL: 'info', IT_APPLICATION: 'info', BT: 'info',
-    OPERATIONAL: 'primary', COMPLIANCE: 'primary', FINANCIAL: 'primary', BT_DISI: 'primary',
-};
-const typeLabel: Record<string, string> = {
-    IT_GENERAL: 'BT', IT_APPLICATION: 'BT', BT: 'BT',
-    OPERATIONAL: 'BT Dışı', COMPLIANCE: 'BT Dışı', FINANCIAL: 'BT Dışı', BT_DISI: 'BT Dışı',
-};
-const natureLabel: Record<string, { label: string; variant: BadgeVariant }> = {
-    PREVENTIVE: { label: 'Önleyici', variant: 'info' },
-    DETECTIVE: { label: 'Tespit Edici', variant: 'medium' },
-    CORRECTIVE: { label: 'Düzeltici', variant: 'warning' },
-};
-const automationLabel: Record<string, { label: string; variant: BadgeVariant }> = {
-    AUTOMATED: { label: 'Otomatik', variant: 'success' },
-    SEMI_AUTOMATED: { label: 'Yarı Oto.', variant: 'warning' },
-    MANUAL: { label: 'Manuel', variant: 'neutral' },
-};
 const frequencyLabel: Record<string, string> = {
     DAILY: 'Günlük', WEEKLY: 'Haftalık', MONTHLY: 'Aylık',
     QUARTERLY: '3 Aylık', SEMI_ANNUAL: '6 Aylık', ANNUAL: 'Yıllık', AD_HOC: 'Arızi',
@@ -74,6 +64,18 @@ const statusLabel: Record<string, { label: string; variant: BadgeVariant }> = {
     PASSIVE: { label: 'Pasif', variant: 'neutral' },
 };
 
+const emptyColFilters: Record<string, string> = {
+    controlId: '',
+    name: '',
+    type: '',
+    nature: '',
+    automation: '',
+    frequency: '',
+    status: '',
+    effectiveness: '',
+    hasFinding: '',
+};
+
 const formatDate = (d: string | null | undefined) => {
     if (!d) return '—';
     const dt = new Date(d);
@@ -82,6 +84,7 @@ const formatDate = (d: string | null | undefined) => {
 };
 
 export default function ControlInventoryPage() {
+    const router = useRouter();
     const { success, error: showError } = useToast();
     const { user: currentUser } = useAuth();
 
@@ -92,27 +95,15 @@ export default function ControlInventoryPage() {
     const [deleting, setDeleting] = useState(false);
     const [importModalOpen, setImportModalOpen] = useState(false);
 
-    // Advanced Filtering States
+    // Filtering states
     const [searchQuery, setSearchQuery] = useState('');
     const [page, setPage] = useState(1);
     const pageSize = 20;
 
-    const [colFilters, setColFilters] = useState<Record<string, string>>({
-        controlId: '',
-        name: '',
-        type: '',
-        nature: '',
-        automation: '',
-        frequency: '',
-        status: '',
-        effectiveness: '',
-        hasFinding: '',
-    });
+    const [colFilters, setColFilters] = useState<Record<string, string>>({ ...emptyColFilters });
+    const [quickFilter, setQuickFilter] = useState<string | null>(null);
 
     const [sortConfig, setSortConfig] = useState<{ key: keyof Control | 'owner.name' | ''; direction: 'asc' | 'desc' }>({ key: '', direction: 'asc' });
-
-    // Active Preset Name for styling indicator
-    const [activePreset, setActivePreset] = useState<string>('');
 
     // ── Fetch ─────────────────────────────────────────────────────────────────
 
@@ -155,41 +146,26 @@ export default function ControlInventoryPage() {
         } finally {
             setLoading(false);
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useEffect(() => { fetchControls(); }, [fetchControls]);
 
-    // ── Presets ───────────────────────────────────────────────────────────────
+    // ── Quick filter predicate'leri (eski preset mantığı birebir korunur) ─────
 
-    const applyPreset = (presetName: string) => {
-        setActivePreset(presetName);
-        setPage(1);
-
-        // Reset first
-        const newFilters = {
-            controlId: '', name: '', type: '', nature: '', automation: '', frequency: '', status: '', effectiveness: '', hasFinding: ''
-        };
-
-        if (presetName === 'my_controls') {
-            setColFilters({ ...newFilters });
-            // Will filter in useMemo using currentUser id
-        } else if (presetName === 'open_findings') {
-            setColFilters({ ...newFilters, hasFinding: 'true' });
-        } else if (presetName === 'this_month') {
-            setColFilters({ ...newFilters, status: 'ACTIVE' });
-            // Will also filter by calendar month in useMemo
-        } else {
-            setActivePreset('');
-            setColFilters({ ...newFilters });
-        }
-    };
+    const quickFilterFns: Record<string, (c: Control) => boolean> = useMemo(() => ({
+        // "Benim Kontrollerim": kullanıcı yoksa filtre uygulanmaz (eski davranış)
+        my_controls: (c) => !currentUser || c.owner.id === currentUser.id,
+        // "Açık Bulgulu": hasFinding=true ile aynı mantık
+        open_findings: (c) => c.linkedFindings.length > 0,
+        // "Bu Ay": status=ACTIVE + Günlük/Haftalık/Aylık sıklık
+        this_month: (c) => c.status === 'ACTIVE' && ['MONTHLY', 'DAILY', 'WEEKLY'].includes(c.frequency),
+    }), [currentUser]);
 
     const clearAllFilters = () => {
         setSearchQuery('');
-        setActivePreset('');
-        setColFilters({
-            controlId: '', name: '', type: '', nature: '', automation: '', frequency: '', status: '', effectiveness: '', hasFinding: ''
-        });
+        setQuickFilter(null);
+        setColFilters({ ...emptyColFilters });
         setSortConfig({ key: '', direction: 'asc' });
         setPage(1);
     };
@@ -210,14 +186,9 @@ export default function ControlInventoryPage() {
             );
         }
 
-        // Apply Preset Specials
-        if (activePreset === 'my_controls' && currentUser) {
-            result = result.filter(c => c.owner.id === currentUser.id);
-        }
-
-        if (activePreset === 'this_month') {
-            const currentMonthName = new Intl.DateTimeFormat('tr-TR', { month: 'long' }).format(new Date()); // e.g. "Mayıs"
-            result = result.filter(c => c.frequency === 'MONTHLY' || c.frequency === 'DAILY' || c.frequency === 'WEEKLY');
+        // Quick filter
+        if (quickFilter && quickFilterFns[quickFilter]) {
+            result = result.filter(quickFilterFns[quickFilter]);
         }
 
         // Column Specific Filters
@@ -306,7 +277,7 @@ export default function ControlInventoryPage() {
         }
 
         return result;
-    }, [controls, searchQuery, colFilters, sortConfig, activePreset, currentUser]);
+    }, [controls, searchQuery, colFilters, sortConfig, quickFilter, quickFilterFns]);
 
     const paginatedControls = useMemo(() => {
         const start = (page - 1) * pageSize;
@@ -316,9 +287,81 @@ export default function ControlInventoryPage() {
     // ── KPIs ──────────────────────────────────────────────────────────────────
     const activeCount = controls.filter(c => c.status === 'ACTIVE').length;
     const passiveCount = controls.filter(c => c.status === 'PASSIVE').length;
-    const effectiveCount = controls.filter(c => c.effectivenessStatus === 'EFFECTIVE').length;
     const ineffectiveCount = controls.filter(c => c.effectivenessStatus === 'INEFFECTIVE').length;
     const notTestedCount = controls.filter(c => c.effectivenessStatus === 'NOT_TESTED').length;
+
+    const hasAnyFilter = !!searchQuery || !!quickFilter || Object.values(colFilters).some(v => v);
+
+    // ── Quick filter chip'leri (canlı sayaçlarla) ─────────────────────────────
+    const quickFilterItems: QuickFilterItem[] = useMemo(() => [
+        { key: 'my_controls', label: 'Benim Kontrollerim', count: controls.filter(quickFilterFns['my_controls']).length },
+        { key: 'open_findings', label: 'Açık Bulgulu', count: controls.filter(quickFilterFns['open_findings']).length },
+        { key: 'this_month', label: 'Bu Ay', count: controls.filter(quickFilterFns['this_month']).length },
+    ], [controls, quickFilterFns]);
+
+    const quickFilterLabels: Record<string, string> = {
+        my_controls: 'Benim Kontrollerim',
+        open_findings: 'Açık Bulgulu',
+        this_month: 'Bu Ay',
+    };
+
+    // ── Gelişmiş filtre alanları ──────────────────────────────────────────────
+    const advancedFields: AdvancedFilterField[] = useMemo(() => [
+        {
+            type: 'select', key: 'hasFinding', label: 'Bulgu Durumu',
+            value: colFilters.hasFinding ?? '',
+            onChange: (v) => { setColFilters(p => ({ ...p, hasFinding: v })); setPage(1); },
+            options: [
+                { value: 'true', label: 'Bulgulu' },
+                { value: 'false', label: 'Bulgusu Yok' },
+            ],
+        },
+        {
+            type: 'select', key: 'frequency', label: 'Periyodik Sıklık',
+            value: colFilters.frequency ?? '',
+            onChange: (v) => { setColFilters(p => ({ ...p, frequency: v })); setPage(1); },
+            options: Object.entries(frequencyLabel).map(([k, v]) => ({ value: k, label: v })),
+        },
+    ], [colFilters.hasFinding, colFilters.frequency]);
+
+    const advancedActiveCount = [colFilters.hasFinding, colFilters.frequency].filter(Boolean).length;
+
+    // ── Aktif filtre chip'leri ────────────────────────────────────────────────
+    const colFilterLabels: Record<string, string> = {
+        controlId: 'Kontrol ID', name: 'Kontrol Adı', mehaz: 'Mehaz', owner: 'Sahip',
+        type: 'Tip', nature: 'Nitelik', automation: 'Otomasyon',
+        frequency: 'Sıklık', status: 'Durum',
+        effectiveness: 'Etkinlik', effectivenessStatus: 'Etkinlik', lastTestResult: 'Son Kontrol Sonucu',
+        hasFinding: 'Bulgu Durumu', findingStatus: 'Bulgu Durumu',
+    };
+    const colFilterValueLabel = (key: string, value: string): string => {
+        if (key === 'frequency') return frequencyLabel[value] ?? value;
+        if (key === 'status') return statusLabel[value]?.label ?? value;
+        if (key === 'effectiveness' || key === 'effectivenessStatus' || key === 'lastTestResult') return effectivenessLabel[value]?.label ?? value;
+        if (key === 'hasFinding' || key === 'findingStatus') return value === 'true' ? 'Bulgulu' : 'Bulgusu Yok';
+        if (key === 'type') return value === 'BT' ? 'BT' : 'BT Dışı';
+        return value;
+    };
+
+    const activeChips: ActiveFilterChip[] = useMemo(() => {
+        const chips: ActiveFilterChip[] = [];
+        if (searchQuery) chips.push({
+            key: 'search', label: 'Arama', value: searchQuery,
+            onRemove: () => { setSearchQuery(''); setPage(1); },
+        });
+        if (quickFilter) chips.push({
+            key: 'quick', label: 'Hızlı Filtre', value: quickFilterLabels[quickFilter] ?? quickFilter,
+            onRemove: () => { setQuickFilter(null); setPage(1); },
+        });
+        Object.entries(colFilters).forEach(([k, v]) => {
+            if (v) chips.push({
+                key: k, label: colFilterLabels[k] ?? k, value: colFilterValueLabel(k, v),
+                onRemove: () => { setColFilters(p => ({ ...p, [k]: '' })); setPage(1); },
+            });
+        });
+        return chips;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchQuery, quickFilter, colFilters]);
 
     // ── Selection & Delete ────────────────────────────────────────────────────
     const handleRowSelect = (id: string) => {
@@ -340,15 +383,6 @@ export default function ControlInventoryPage() {
         } finally {
             setDeleting(false);
         }
-    };
-
-    const handleSort = (key: keyof Control | 'owner.name') => {
-        setSortConfig(prev => {
-            if (prev.key === key) {
-                return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
-            }
-            return { key, direction: 'asc' };
-        });
     };
 
     // ── Columns ───────────────────────────────────────────────────────────────
@@ -405,8 +439,8 @@ export default function ControlInventoryPage() {
             key: 'findingsCount', header: 'Bulgu Sayısı', defaultWidth: 100, hideable: true,
             render: (c) => (
                 <span className={`px-2 py-0.5 rounded-full text-xs font-extrabold ${
-                    c.linkedFindings.length > 0 
-                        ? 'bg-rose-100 text-rose-700 border border-rose-200' 
+                    c.linkedFindings.length > 0
+                        ? 'bg-rose-100 text-rose-700 border border-rose-200'
                         : 'bg-slate-100 text-slate-500 border border-slate-200'
                 }`}>
                     {c.linkedFindings.length}
@@ -448,7 +482,7 @@ export default function ControlInventoryPage() {
             filter: { type: 'select', options: Object.entries(effectivenessLabel).map(([k, v]) => ({ value: k, label: v.label })) },
             render: (c) => {
                 const cfg = effectivenessLabel[c.effectivenessStatus];
-                return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-gray-400">—</span>;
+                return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-slate-400">—</span>;
             },
         },
         {
@@ -456,7 +490,7 @@ export default function ControlInventoryPage() {
             filter: { type: 'select', options: Object.entries(statusLabel).map(([k, v]) => ({ value: k, label: v.label })) },
             render: (c) => {
                 const cfg = statusLabel[c.status];
-                return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-gray-400">—</span>;
+                return cfg ? <StatusBadge variant={cfg.variant}>{cfg.label}</StatusBadge> : <span className="text-slate-400">—</span>;
             },
         },
         {
@@ -475,164 +509,120 @@ export default function ControlInventoryPage() {
     ], []);
 
     return (
-        <div className="flex flex-col h-full bg-slate-50/50">
-            <div className="px-8 pt-8">
-                <PageHeader
-                    title="Kontrol Envanteri"
-                    description="Tüm iç kontrol mekanizmalarını görüntüleyin ve yönetin"
-                    breadcrumbs={[{ label: 'Kontrol Yönetimi', href: '/controls' }, { label: 'Envanter' }]}
-                    actions={
-                        <div className="flex items-center gap-2">
-                            {selectedRows.size > 0 && (
-                                <Button variant="danger" size="sm" onClick={() => setConfirmDeleteOpen(true)}
-                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}>
-                                    {selectedRows.size} Seçiliyi Sil
-                                </Button>
-                            )}
-                            <Button variant="outline" onClick={() => setImportModalOpen(true)} icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>}>
-                                Dışarıdan Yükle
+        <PageShell>
+            <PageHeader
+                title="Kontrol Envanteri"
+                description="Tüm iç kontrol mekanizmalarını görüntüleyin ve yönetin"
+                breadcrumbs={[{ label: 'Kontrol Yönetimi', href: '/controls' }, { label: 'Envanter' }]}
+                actions={
+                    <div className="flex items-center gap-2">
+                        {selectedRows.size > 0 && (
+                            <Button variant="danger" size="sm" onClick={() => setConfirmDeleteOpen(true)}
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}>
+                                {selectedRows.size} Seçiliyi Sil
                             </Button>
-                            <Link href="/controls/new">
-                                <Button variant="primary" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}>
-                                    Yeni Kontrol
-                                </Button>
-                            </Link>
-                        </div>
-                    }
-                />
-
-                {/* KPI Cards */}
-                <div className="grid grid-cols-5 gap-4 mb-6">
-                    {[
-                        { label: 'Toplam', value: controls.length, color: 'slate', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
-                        { label: 'Aktif', value: activeCount, color: 'green', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
-                        { label: 'Pasif', value: passiveCount, color: 'amber', icon: 'M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636' },
-                        { label: 'Etkin Değil', value: ineffectiveCount, color: 'red', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z' },
-                        { label: 'Test Edilmedi', value: notTestedCount, color: 'blue', icon: 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
-                    ].map(kpi => (
-                        <div key={kpi.label} className={`bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-4`}>
-                            <div className={`p-3 rounded-xl ${kpi.color === 'slate' ? 'bg-slate-50 text-slate-600' : kpi.color === 'green' ? 'bg-emerald-50 text-emerald-600' : kpi.color === 'amber' ? 'bg-amber-50 text-amber-600' : kpi.color === 'red' ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'}`}>
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={kpi.icon} />
-                                </svg>
-                            </div>
-                            <div>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{kpi.label}</p>
-                                <p className="text-xl font-extrabold text-slate-800 mt-0.5">{kpi.value}</p>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                {/* Filter and Presets Panel */}
-                <div className="mb-5 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 space-y-4">
-                    
-                    {/* Saved Filter Presets */}
-                    <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                        <div className="flex items-center gap-2">
-                            <span className="text-sm font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">🎯 Hızlı Filtreler:</span>
-                            <button
-                                type="button"
-                                onClick={() => applyPreset(activePreset === 'my_controls' ? '' : 'my_controls')}
-                                className={`px-4 py-1.5 text-xs font-bold rounded-xl border transition-all ${activePreset === 'my_controls' ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/10' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-                            >
-                                Benim Kontrollerim
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => applyPreset(activePreset === 'open_findings' ? '' : 'open_findings')}
-                                className={`px-4 py-1.5 text-xs font-bold rounded-xl border transition-all ${activePreset === 'open_findings' ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/10' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-                            >
-                                Açık Bulgulu Kontroller
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => applyPreset(activePreset === 'this_month' ? '' : 'this_month')}
-                                className={`px-4 py-1.5 text-xs font-bold rounded-xl border transition-all ${activePreset === 'this_month' ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/10' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-                            >
-                                Bu Ay Yapılacaklar
-                            </button>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={clearAllFilters}
-                            className="text-xs font-bold text-slate-400 hover:text-slate-600 uppercase tracking-wider transition-colors"
-                        >
-                            Filtreleri Temizle
-                        </button>
+                        )}
+                        <Button variant="outline" onClick={() => setImportModalOpen(true)} icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>}>
+                            Dışarıdan Yükle
+                        </Button>
+                        <Link href="/controls/new">
+                            <Button variant="primary" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}>
+                                Yeni Kontrol
+                            </Button>
+                        </Link>
                     </div>
+                }
+            />
 
-                    {/* Column Filtering Controls */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                        <div className="col-span-1 sm:col-span-2">
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Küresel Arama (Her Şeyde Ara)</label>
-                            <input
-                                type="text"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="ID, ad, sahip, açıklama..."
-                                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-800 font-semibold"
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bulgu Durumu</label>
-                            <select
-                                value={colFilters.hasFinding}
-                                onChange={(e) => setColFilters(p => ({ ...p, hasFinding: e.target.value }))}
-                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 outline-none font-bold text-slate-600"
-                            >
-                                <option value="">Tümü</option>
-                                <option value="true">Bulgulu</option>
-                                <option value="false">Bulgusu Yok</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Periyodik Sıklık</label>
-                            <select
-                                value={colFilters.frequency}
-                                onChange={(e) => setColFilters(p => ({ ...p, frequency: e.target.value }))}
-                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 outline-none font-bold text-slate-600"
-                            >
-                                <option value="">Tümü</option>
-                                <option value="DAILY">Günlük</option>
-                                <option value="WEEKLY">Haftalık</option>
-                                <option value="MONTHLY">Aylık</option>
-                                <option value="QUARTERLY">3 Aylık</option>
-                                <option value="SEMI_ANNUAL">6 Aylık</option>
-                                <option value="ANNUAL">Yıllık</option>
-                                <option value="AD_HOC">Arızi</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Table */}
-            <div className="px-8 pb-8 flex-1">
-                <DataTable
-                    columns={columns}
-                    data={paginatedControls}
-                    rowKey={(c) => c.id}
-                    loading={loading}
-                    showCheckbox
-                    selectedRows={selectedRows}
-                    onRowSelect={handleRowSelect}
-                    onSelectAll={handleSelectAll}
-                    totalCount={filteredControls.length}
-                    page={page}
-                    pageSize={pageSize}
-                    onPageChange={setPage}
-                    storageKey="controls-table"
-                    emptyTitle="Kontrol bulunamadı"
-                    emptyDescription="Filtrelerinizi değiştirin veya yeni bir kontrol ekleyin."
-                    emptyActionLabel="Yeni Kontrol Ekle"
-                    onEmptyAction={() => window.location.href = '/controls/new'}
-                    columnFilters={colFilters}
-                    onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
+            {/* KPI'lar — click-to-filter */}
+            <KpiGrid columns={5}>
+                <KpiCard
+                    title="Toplam" value={controls.length} variant="default"
+                    active={!hasAnyFilter}
+                    onClick={clearAllFilters}
+                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
                 />
-            </div>
+                <KpiCard
+                    title="Aktif" value={activeCount} variant="success"
+                    active={colFilters.status === 'ACTIVE'}
+                    onClick={() => { setColFilters(p => ({ ...p, status: p.status === 'ACTIVE' ? '' : 'ACTIVE' })); setPage(1); }}
+                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>}
+                />
+                <KpiCard
+                    title="Pasif" value={passiveCount} variant="warning"
+                    active={colFilters.status === 'PASSIVE'}
+                    onClick={() => { setColFilters(p => ({ ...p, status: p.status === 'PASSIVE' ? '' : 'PASSIVE' })); setPage(1); }}
+                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>}
+                />
+                <KpiCard
+                    title="Etkin Değil" value={ineffectiveCount} variant="critical"
+                    active={colFilters.effectiveness === 'INEFFECTIVE'}
+                    onClick={() => { setColFilters(p => ({ ...p, effectiveness: p.effectiveness === 'INEFFECTIVE' ? '' : 'INEFFECTIVE' })); setPage(1); }}
+                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>}
+                />
+                <KpiCard
+                    title="Test Edilmedi" value={notTestedCount} variant="info"
+                    active={colFilters.effectiveness === 'NOT_TESTED'}
+                    onClick={() => { setColFilters(p => ({ ...p, effectiveness: p.effectiveness === 'NOT_TESTED' ? '' : 'NOT_TESTED' })); setPage(1); }}
+                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+                />
+            </KpiGrid>
+
+            {/* Hızlı filtreler */}
+            <QuickFilterBar
+                items={quickFilterItems}
+                active={quickFilter}
+                onChange={(k) => { setQuickFilter(k); setPage(1); }}
+            />
+
+            {/* Gelişmiş filtre paneli */}
+            <AdvancedFilterPanel
+                searchValue={searchQuery}
+                onSearchChange={(v) => { setSearchQuery(v); setPage(1); }}
+                searchPlaceholder="ID, ad, sahip, açıklama ara..."
+                fields={advancedFields}
+                activeCount={advancedActiveCount}
+                onClearAll={clearAllFilters}
+            />
+
+            {/* Aktif filtre chip'leri */}
+            <ActiveFilterChips chips={activeChips} onClearAll={clearAllFilters} />
+
+            <DataTable
+                columns={columns}
+                data={paginatedControls}
+                rowKey={(c) => c.id}
+                loading={loading}
+                showCheckbox
+                selectedRows={selectedRows}
+                onRowSelect={handleRowSelect}
+                onSelectAll={handleSelectAll}
+                totalCount={filteredControls.length}
+                page={page}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                storageKey="controls-table"
+                emptyTitle="Kontrol bulunamadı"
+                emptyDescription="Filtrelerinizi değiştirin veya yeni bir kontrol ekleyin."
+                emptyActionLabel="Yeni Kontrol Ekle"
+                onEmptyAction={() => router.push('/controls/new')}
+                columnFilters={colFilters}
+                onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
+                stickyFirstColumn
+                onRefresh={fetchControls}
+                toolbar={
+                    <SavedViewMenu
+                        storageKey="controls-table"
+                        getPayload={() => ({ search: searchQuery, quickFilter, columnFilters: colFilters })}
+                        onApply={(p) => {
+                            setSearchQuery(typeof p.search === 'string' ? p.search : '');
+                            setQuickFilter(typeof p.quickFilter === 'string' ? p.quickFilter : null);
+                            setColFilters({ ...emptyColFilters, ...((p.columnFilters as Record<string, string>) || {}) });
+                            setPage(1);
+                        }}
+                    />
+                }
+            />
 
             <ConfirmDialog
                 open={confirmDeleteOpen}
@@ -644,7 +634,7 @@ export default function ControlInventoryPage() {
                 loading={deleting}
                 variant="danger"
             />
-            
+
             <ImportControlModal
                 isOpen={importModalOpen}
                 onClose={() => setImportModalOpen(false)}
@@ -653,6 +643,6 @@ export default function ControlInventoryPage() {
                     fetchControls();
                 }}
             />
-        </div>
+        </PageShell>
     );
 }

@@ -1,45 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-
-// Demo data - same as detail page
-const AUDIT_TEAMS = [
-    { id: '1', name: 'BT Denetim Ekibi', members: ['Ahmet Yılmaz', 'Ayşe Kaya', 'Mehmet Demir'] },
-    { id: '2', name: 'Finansal Denetim Ekibi', members: ['Fatma Öz', 'Can Arslan', 'Elif Şahin'] },
-    { id: '3', name: 'Uyum Denetim Ekibi', members: ['Zeynep Şen', 'Ali Veli', 'Kemal Yurt'] },
-    { id: '4', name: 'Operasyonel Denetim Ekibi', members: ['Murat Kaya', 'Selin Demir', 'Ece Tan'] },
-];
+import { LoadingState, ErrorState } from '@/components/ui';
+import { api } from '@/lib/api';
 
 const AUDITABLE_UNITS = [
     'Bilgi Teknolojileri', 'Kredi Tahsis', 'Uyum Birimi', 'Şube Ağı', 'İnsan Kaynakları',
-    'Satın Alma', 'Finans', 'Hazine', 'Risk Yönetimi', 'Operasyonlar',
+    'Satın Alma', 'Finans', 'Hazine', 'Risk Yönetimi', 'Operasyonlar', 'Pazarlama',
 ];
-
-const DEMO_AUDIT = {
-    id: '1',
-    auditCode: 'AP-2024-001',
-    auditName: 'Bilgi Güvenliği Yıllık Denetimi',
-    auditedUnit: 'Bilgi Teknolojileri',
-    selectedTeamId: '1',
-    teamLeader: 'Ahmet Yılmaz',
-    selectedMembers: ['Ayşe Kaya', 'Mehmet Demir'],
-    rationale: 'PERIODIC',
-    priority: 'HIGH',
-    status: 'COMPLETED',
-    phase: 'CLOSED',
-    plannedStartDate: '2024-01-15',
-    plannedEndDate: '2024-02-15',
-    actualStartDate: '2024-01-15',
-    actualEndDate: '2024-02-20',
-    plannedManDays: 30,
-    actualManDays: 35,
-    year: 2024,
-    period: 'Q1',
-    objectives: 'Bilgi güvenliği politikalarının uygulanma durumunun değerlendirilmesi, erişim kontrol mekanizmalarının etkinliğinin test edilmesi, siber güvenlik açıklarının belirlenmesi.',
-    scope: 'Ağ güvenliği, kimlik yönetimi, veri şifreleme, yedekleme prosedürleri, olay yönetimi süreçleri, ISO 27001 uyumluluğu.',
-};
 
 const PRIORITY_OPTIONS = [
     { value: 'LOW', label: 'Düşük', color: 'bg-green-100 text-green-700 border-green-300' },
@@ -48,6 +18,8 @@ const PRIORITY_OPTIONS = [
 ];
 
 const STATUS_OPTIONS = [
+    { value: 'DRAFT', label: 'Taslak' },
+    { value: 'APPROVED', label: 'Onaylandı' },
     { value: 'PLANNED', label: 'Planlandı' },
     { value: 'IN_PROGRESS', label: 'Devam Ediyor' },
     { value: 'COMPLETED', label: 'Tamamlandı' },
@@ -61,53 +33,110 @@ const PHASE_OPTIONS = [
     { value: 'CLOSED', label: 'Kapatıldı' },
 ];
 
+const RATIONALE_OPTIONS = [
+    { value: 'PERIODIC', label: 'Periyodik' },
+    { value: 'REGULATORY', label: 'Regülatif' },
+    { value: 'MANAGEMENT_REQUEST', label: 'Yönetim Talebi' },
+    { value: 'RISK_BASED', label: 'Risk Bazlı' },
+];
+
+const toDateInput = (v: string | null) => (v ? v.slice(0, 10) : '');
+
 export default function EditAuditPlanPage() {
     const params = useParams();
     const router = useRouter();
+    const planId = params.id as string;
 
-    // Initialize with demo data
-    const [auditName, setAuditName] = useState(DEMO_AUDIT.auditName);
-    const [auditedUnit, setAuditedUnit] = useState(DEMO_AUDIT.auditedUnit);
-    const [selectedTeamId, setSelectedTeamId] = useState(DEMO_AUDIT.selectedTeamId);
-    const [teamLeader, setTeamLeader] = useState(DEMO_AUDIT.teamLeader);
-    const [selectedMembers, setSelectedMembers] = useState<string[]>(DEMO_AUDIT.selectedMembers);
-    const [rationale, setRationale] = useState(DEMO_AUDIT.rationale);
-    const [priority, setPriority] = useState(DEMO_AUDIT.priority);
-    const [status, setStatus] = useState(DEMO_AUDIT.status);
-    const [phase, setPhase] = useState(DEMO_AUDIT.phase);
-    const [plannedStartDate, setPlannedStartDate] = useState(DEMO_AUDIT.plannedStartDate);
-    const [plannedEndDate, setPlannedEndDate] = useState(DEMO_AUDIT.plannedEndDate);
-    const [actualStartDate, setActualStartDate] = useState(DEMO_AUDIT.actualStartDate);
-    const [actualEndDate, setActualEndDate] = useState(DEMO_AUDIT.actualEndDate);
-    const [plannedManDays, setPlannedManDays] = useState(DEMO_AUDIT.plannedManDays.toString());
-    const [actualManDays, setActualManDays] = useState(DEMO_AUDIT.actualManDays.toString());
-    const [year, setYear] = useState(DEMO_AUDIT.year.toString());
-    const [period, setPeriod] = useState(DEMO_AUDIT.period);
-    const [objectives, setObjectives] = useState(DEMO_AUDIT.objectives);
-    const [scope, setScope] = useState(DEMO_AUDIT.scope);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [saving, setSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [planCode, setPlanCode] = useState('');
 
-    const selectedTeam = AUDIT_TEAMS.find(t => t.id === selectedTeamId);
-    const availableMembers = selectedTeam?.members || [];
+    const [auditName, setAuditName] = useState('');
+    const [auditedUnit, setAuditedUnit] = useState('');
+    const [auditTeam, setAuditTeam] = useState('');
+    const [teamLeader, setTeamLeader] = useState('');
+    const [teamSize, setTeamSize] = useState('');
+    const [rationale, setRationale] = useState('PERIODIC');
+    const [priority, setPriority] = useState('MEDIUM');
+    const [status, setStatus] = useState('PLANNED');
+    const [phase, setPhase] = useState('PLANNING');
+    const [plannedStartDate, setPlannedStartDate] = useState('');
+    const [plannedEndDate, setPlannedEndDate] = useState('');
+    const [draftReportDate, setDraftReportDate] = useState('');
+    const [finalReportDate, setFinalReportDate] = useState('');
+    const [plannedManDays, setPlannedManDays] = useState('');
+    const [actualManDays, setActualManDays] = useState('');
+    const [objectives, setObjectives] = useState('');
+    const [scope, setScope] = useState('');
 
-    const handleTeamChange = (teamId: string) => {
-        setSelectedTeamId(teamId);
-        setTeamLeader('');
-        setSelectedMembers([]);
-    };
+    const load = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const plan: any = await api.getAuditPlan(planId);
+            setPlanCode(plan.planId);
+            setAuditName(plan.name || '');
+            setAuditedUnit(plan.auditedUnit || '');
+            setAuditTeam(plan.auditTeam || '');
+            setTeamLeader(plan.teamLeader || '');
+            setTeamSize(plan.teamSize?.toString() || '');
+            setRationale(plan.rationale || 'PERIODIC');
+            setPriority(plan.priority || 'MEDIUM');
+            setStatus(plan.status || 'PLANNED');
+            setPhase(plan.phase || 'PLANNING');
+            setPlannedStartDate(toDateInput(plan.plannedStartDate));
+            setPlannedEndDate(toDateInput(plan.plannedEndDate));
+            setDraftReportDate(toDateInput(plan.draftReportDate));
+            setFinalReportDate(toDateInput(plan.finalReportDate));
+            setPlannedManDays(plan.plannedManDays?.toString() || '');
+            setActualManDays(plan.actualManDays?.toString() || '');
+            setObjectives(plan.objectives || '');
+            setScope(plan.scope || '');
+        } catch {
+            setError('Denetim planı yüklenemedi.');
+        } finally {
+            setLoading(false);
+        }
+    }, [planId]);
 
-    const toggleMember = (member: string) => {
-        if (selectedMembers.includes(member)) {
-            setSelectedMembers(prev => prev.filter(m => m !== member));
-        } else {
-            setSelectedMembers(prev => [...prev, member]);
+    useEffect(() => { load(); }, [load]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setSaveError(null);
+        setSaving(true);
+        try {
+            await api.updateAuditPlan(planId, {
+                name: auditName,
+                auditedUnit,
+                auditTeam,
+                teamLeader,
+                teamSize: teamSize ? parseInt(teamSize, 10) : null,
+                rationale,
+                priority,
+                status,
+                phase,
+                plannedStartDate: plannedStartDate ? new Date(plannedStartDate).toISOString() : null,
+                plannedEndDate: plannedEndDate ? new Date(plannedEndDate).toISOString() : null,
+                draftReportDate: draftReportDate ? new Date(draftReportDate).toISOString() : null,
+                finalReportDate: finalReportDate ? new Date(finalReportDate).toISOString() : null,
+                plannedManDays: plannedManDays ? parseInt(plannedManDays, 10) : null,
+                actualManDays: actualManDays ? parseInt(actualManDays, 10) : null,
+                objectives,
+                scope,
+            });
+            router.push(`/audits/plans/${planId}`);
+        } catch (err: any) {
+            setSaveError(err?.body?.message || 'Denetim planı güncellenemedi.');
+        } finally {
+            setSaving(false);
         }
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        alert('Denetim planı güncellendi! (Demo modda API çağrısı yapılmadı)');
-        router.push(`/audits/plans/${params.id}`);
-    };
+    if (loading) return <LoadingState />;
+    if (error) return <ErrorState description={error} onRetry={load} />;
 
     return (
         <div className="min-h-screen bg-gray-50">
@@ -119,14 +148,14 @@ export default function EditAuditPlanPage() {
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
-                        <Link href={`/audits/plans/${params.id}`} className="hover:text-gray-700">{DEMO_AUDIT.auditCode}</Link>
+                        <Link href={`/audits/plans/${planId}`} className="hover:text-gray-700">{planCode}</Link>
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
                         <span className="text-gray-900">Düzenle</span>
                     </div>
                     <h1 className="text-2xl font-bold text-gray-900">Denetim Planını Düzenle</h1>
-                    <p className="text-gray-500 mt-1">{DEMO_AUDIT.auditCode}</p>
+                    <p className="text-gray-500 mt-1">{planCode}</p>
                 </div>
 
                 <form onSubmit={handleSubmit}>
@@ -153,6 +182,7 @@ export default function EditAuditPlanPage() {
                                     onChange={(e) => setAuditedUnit(e.target.value)}
                                     className="w-full px-4 py-2.5 border border-gray-200 rounded-lg"
                                 >
+                                    <option value="">Birim seçin</option>
                                     {AUDITABLE_UNITS.map(unit => (
                                         <option key={unit} value={unit}>{unit}</option>
                                     ))}
@@ -166,28 +196,7 @@ export default function EditAuditPlanPage() {
                                     onChange={(e) => setRationale(e.target.value)}
                                     className="w-full px-4 py-2.5 border border-gray-200 rounded-lg"
                                 >
-                                    <option value="PERIODIC">Periyodik</option>
-                                    <option value="REGULATORY">Regülatif</option>
-                                    <option value="MANAGEMENT_REQUEST">Yönetim Talebi</option>
-                                    <option value="RISK_BASED">Risk Bazlı</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Yıl</label>
-                                <select value={year} onChange={(e) => setYear(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-lg">
-                                    <option value="2024">2024</option>
-                                    <option value="2025">2025</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Dönem</label>
-                                <select value={period} onChange={(e) => setPeriod(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-lg">
-                                    <option value="Q1">Q1</option>
-                                    <option value="Q2">Q2</option>
-                                    <option value="Q3">Q3</option>
-                                    <option value="Q4">Q4</option>
+                                    {RATIONALE_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                                 </select>
                             </div>
                         </div>
@@ -237,43 +246,20 @@ export default function EditAuditPlanPage() {
                     <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
                         <h2 className="text-lg font-semibold text-gray-900 mb-4">Denetim Ekibi</h2>
 
-                        <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="grid grid-cols-3 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Ekip</label>
-                                <select value={selectedTeamId} onChange={(e) => handleTeamChange(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-lg">
-                                    {AUDIT_TEAMS.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}
-                                </select>
+                                <input type="text" value={auditTeam} onChange={(e) => setAuditTeam(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-lg" />
                             </div>
-
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Ekip Lideri</label>
-                                <select value={teamLeader} onChange={(e) => setTeamLeader(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-lg">
-                                    <option value="">Seçin</option>
-                                    {availableMembers.map(m => <option key={m} value={m}>{m}</option>)}
-                                </select>
+                                <input type="text" value={teamLeader} onChange={(e) => setTeamLeader(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-lg" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Ekip Büyüklüğü</label>
+                                <input type="number" min="1" value={teamSize} onChange={(e) => setTeamSize(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-lg" />
                             </div>
                         </div>
-
-                        {selectedTeamId && (
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Ekip Üyeleri</label>
-                                <div className="flex flex-wrap gap-2">
-                                    {availableMembers.filter(m => m !== teamLeader).map(member => (
-                                        <button
-                                            key={member}
-                                            type="button"
-                                            onClick={() => toggleMember(member)}
-                                            className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-all ${selectedMembers.includes(member)
-                                                    ? 'bg-blue-100 text-blue-700 border-blue-300'
-                                                    : 'bg-gray-50 text-gray-600 border-gray-200'
-                                                }`}
-                                        >
-                                            {selectedMembers.includes(member) && '✓ '}{member}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
                     </div>
 
                     {/* Schedule */}
@@ -290,12 +276,12 @@ export default function EditAuditPlanPage() {
                                 <input type="date" value={plannedEndDate} onChange={(e) => setPlannedEndDate(e.target.value)} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg" />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Gerçek Başlangıç</label>
-                                <input type="date" value={actualStartDate} onChange={(e) => setActualStartDate(e.target.value)} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg" />
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Taslak Rapor Tarihi</label>
+                                <input type="date" value={draftReportDate} onChange={(e) => setDraftReportDate(e.target.value)} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg" />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Gerçek Bitiş</label>
-                                <input type="date" value={actualEndDate} onChange={(e) => setActualEndDate(e.target.value)} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg" />
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Final Rapor Tarihi</label>
+                                <input type="date" value={finalReportDate} onChange={(e) => setFinalReportDate(e.target.value)} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg" />
                             </div>
                         </div>
 
@@ -327,13 +313,19 @@ export default function EditAuditPlanPage() {
                         </div>
                     </div>
 
+                    {saveError && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">
+                            {saveError}
+                        </div>
+                    )}
+
                     {/* Actions */}
                     <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-                        <Link href={`/audits/plans/${params.id}`} className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900">
+                        <Link href={`/audits/plans/${planId}`} className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900">
                             İptal
                         </Link>
-                        <button type="submit" className="px-5 py-2.5 text-sm font-medium text-white bg-[#1e3a5f] rounded-lg hover:bg-[#152a45]">
-                            Değişiklikleri Kaydet
+                        <button type="submit" disabled={saving} className="px-5 py-2.5 text-sm font-medium text-white bg-[#1e3a5f] rounded-lg hover:bg-[#152a45] disabled:opacity-50">
+                            {saving ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
                         </button>
                     </div>
                 </form>

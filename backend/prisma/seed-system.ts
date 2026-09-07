@@ -43,11 +43,11 @@ const SYSTEM_ROLES: { name: string; description?: string; permissions: string[] 
     { name: 'SYSTEM_ADMIN', description: 'Sistem Yöneticisi — tüm yetkiler', permissions: ['*'] },
     {
         name: 'RISK_CONTROL_MANAGER', description: 'Risk ve Kontrol Yöneticisi',
-        permissions: ['finding:view', 'finding:create', 'finding:update', 'action:*', 'control:*'],
+        permissions: ['finding:view', 'finding:create', 'finding:update', 'action:*', 'control:*', 'ai:view', 'ai:run', 'ai:accept', 'ai:review', 'ai:admin'],
     },
     {
         name: 'AUDITOR', description: 'Denetçi',
-        permissions: ['finding:view', 'finding:create', 'action:view', 'action:create', 'control:view', 'control:test'],
+        permissions: ['finding:view', 'finding:create', 'action:view', 'action:create', 'control:view', 'control:test', 'ai:view', 'ai:run', 'ai:accept'],
     },
     { name: 'RISK_ANALYST', description: 'Risk Analisti', permissions: ['finding:view', 'control:view'] },
     { name: 'VIEWER', description: 'Görüntüleyici', permissions: ['finding:view', 'control:view', 'action:view'] },
@@ -146,6 +146,69 @@ async function upsertDirectorates() {
     }
 }
 
+// AI Kontrol & Kanıt Değerlendirme için başlangıç kaynak kütüphanesi. Kurum kendi
+// politika/prosedürlerini uygulamadan ekler; bunlar yalnızca çalışma zemini.
+const STARTER_KNOWLEDGE_DOCS: {
+    kind: 'POLICY' | 'PROCEDURE' | 'METHODOLOGY' | 'RUBRIC' | 'GLOSSARY' | 'PRECEDENT';
+    code: string;
+    title: string;
+    category: string;
+    body: string;
+}[] = [
+    {
+        kind: 'RUBRIC',
+        code: 'RUB-BULGU-DERECE',
+        title: 'Bulgu Önem Derecesi Rehberi',
+        category: 'Derecelendirme',
+        body: [
+            'CRITICAL: Yasal/regülatif yaptırım riski veya çok yüksek bağlı risk; kontrol tümüyle işlemiyor; doğrudan parasal veya veri kaybı mümkün. Hedef çözüm süresi ≈ 30 gün.',
+            'HIGH: Kontrol büyük ölçüde işlemiyor; bağlı risk yüksek; tekrar eden uygunsuzluk. Hedef süre ≈ 60 gün.',
+            'MEDIUM: Kontrol kısmen işliyor; telafi edici kontrol mevcut; etki sınırlı. Hedef süre ≈ 90 gün.',
+            'LOW: Biçimsel/dokümantasyon eksiği; işleyişe etkisi düşük. Hedef süre ≈ 120 gün.',
+        ].join('\n'),
+    },
+    {
+        kind: 'METHODOLOGY',
+        code: 'MET-KANIT-KABUL',
+        title: 'Kabul Edilen Kanıt Türleri ve Kalite Ölçütleri',
+        category: 'Metodoloji',
+        body: [
+            'Bir kanıt; testin kapsadığı döneme ait olmalı, kaynağı belli olmalı (sistem raporu, onay e-postası, imzalı tutanak, ekran görüntüsü) ve üzerinde tarih/dönem bilgisi bulunmalıdır.',
+            'Eksik imza/onay, dönem dışı tarih, maskesiz kişisel veri (KVKK) ve okunamazlık kanıt kalitesini düşüren uyarılardır.',
+            'Tek bir ekran görüntüsü genelde yetersizdir; mümkünse sistem kaydı veya bağımsız ikinci bir kanıtla desteklenmelidir.',
+        ].join('\n'),
+    },
+    {
+        kind: 'GLOSSARY',
+        code: 'GLO-TEMEL',
+        title: 'Temel Terimler',
+        category: 'Terminoloji',
+        body: [
+            'Kontrol etkinliği: Kontrolün tasarlandığı amaca uygun ve tutarlı biçimde işlemesi.',
+            'Bulgu: Kontrol testinde tespit edilen, kontrol zafiyetine işaret eden nesnel durum.',
+            'Bulgu adayı: İç kontrolün değerlendirmesine sunulan, henüz bulgu niteliği kazanmamış tespit.',
+            'Telafi edici kontrol: Asıl kontrol zayıf olduğunda riski kısmen azaltan ikincil kontrol.',
+        ].join('\n'),
+    },
+];
+
+async function upsertKnowledgeDocs() {
+    const email = process.env.PILOT_ADMIN_EMAIL || 'admin@rmic.com';
+    const admin = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (!admin) {
+        console.log('  ℹ️  Admin kullanıcı bulunamadı — başlangıç kaynakları atlandı.');
+        return;
+    }
+    for (const d of STARTER_KNOWLEDGE_DOCS) {
+        await prisma.knowledgeDoc.upsert({
+            where: { code: d.code },
+            update: { kind: d.kind, title: d.title, body: d.body, category: d.category, isActive: true },
+            create: { ...d, createdById: admin.id },
+        });
+        console.log(`  ✅ Kaynak: ${d.code}`);
+    }
+}
+
 async function main() {
     console.log('🔧 Sistem/referans veri seed başlıyor (pilot-güvenli, domain veri üretmez)');
     console.log(`   DB: ${maskDatabaseUrl(process.env.DATABASE_URL)}`);
@@ -162,6 +225,9 @@ async function main() {
 
     console.log('👉 Direktörlükler');
     await upsertDirectorates();
+
+    console.log('👉 AI Kaynak Kütüphanesi (başlangıç)');
+    await upsertKnowledgeDocs();
 
     console.log('');
     console.log('✅ Sistem seed tamamlandı — hiçbir domain/demo verisi oluşturulmadı.');

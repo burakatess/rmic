@@ -25,23 +25,23 @@ model User {
   updatedAt    DateTime @updatedAt
 
   // Relations
-  role          Role     @relation(fields: [roleId], references: [id])
-  roleId        String
-  ownedRisks    Risk[]   @relation("RiskOwner")
-  ownedControls Control[] @relation("ControlOwner")
-  testPerformerControls Control[] @relation("ControlTestPerformer")
-  reviewerControls Control[] @relation("ControlReviewer")
-  ownedActions  Action[] @relation("ActionOwner")
-  auditLogs     AuditLog[]
-  refreshTokens RefreshToken[]
-  riskProposals RiskProposal[] @relation("RiskProposalRequester")
+  role                  Role           @relation(fields: [roleId], references: [id])
+  roleId                String
+  ownedRisks            Risk[]         @relation("RiskOwner")
+  ownedControls         Control[]      @relation("ControlOwner")
+  testPerformerControls Control[]      @relation("ControlTestPerformer")
+  reviewerControls      Control[]      @relation("ControlReviewer")
+  ownedActions          Action[]       @relation("ActionOwner")
+  auditLogs             AuditLog[]
+  refreshTokens         RefreshToken[]
+  riskProposals         RiskProposal[] @relation("RiskProposalRequester")
 }
 
 model Role {
   id          String   @id @default(cuid())
   name        String   @unique
   description String?
-  permissions Json     // Permission list as JSON array
+  permissions Json // Permission list as JSON array
   users       User[]
   createdAt   DateTime @default(now())
 }
@@ -61,18 +61,18 @@ model RefreshToken {
 
 model Directorate {
   id       String  @id @default(cuid())
-  name     String  @unique  // "BT Ağ Yönetimi"
-  code     String? @unique  // "BT-AG"
-  gmy      String?          // Bağlı GMY bilgisi
+  name     String  @unique // "BT Ağ Yönetimi"
+  code     String? @unique // "BT-AG"
+  gmy      String? // Bağlı GMY bilgisi
   isActive Boolean @default(true)
 
   // Relations
-  controls      Control[]        @relation("ControlDirectorate")
-  findings      Finding[]        @relation("FindingDirectorate")
-  actions       Action[]         @relation("ActionDirectorate")
+  controls      Control[]         @relation("ControlDirectorate")
+  findings      Finding[]         @relation("FindingDirectorate")
+  actions       Action[]          @relation("ActionDirectorate")
   followUps     FindingFollowUp[] @relation("FollowUpDirectorate")
-  controlTests  ControlTest[]    @relation("ControlTestDirectorate")
-  riskProposals RiskProposal[]   @relation("RiskProposalDirectorate")
+  controlTests  ControlTest[]     @relation("ControlTestDirectorate")
+  riskProposals RiskProposal[]    @relation("RiskProposalDirectorate")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -115,44 +115,44 @@ model RiskProposal {
 model Risk {
   id          String     @id @default(cuid())
   riskId      String     @unique // R-2024-001
-  kayitId     String?    // Jira kayıt ID (eski sistem referansı)
+  kayitId     String? // Jira kayıt ID (eski sistem referansı)
   name        String
   description String     @db.Text
   status      RiskStatus @default(IDENTIFIED)
-  ozet        String?    @db.Text  // Özet / summary
+  ozet        String?    @db.Text // Özet / summary
 
   // Organizasyon
-  ilgiliGmy   String?   // İlgili Genel Müdür Yardımcılığı
-  surec       String?   // Süreç
-  altSurec    String?   // Alt Süreç
-  flagForIT   Boolean   @default(false)  // Flag 4 IT
+  ilgiliGmy String? // İlgili Genel Müdür Yardımcılığı
+  surec     String? // Süreç
+  altSurec  String? // Alt Süreç
+  flagForIT Boolean @default(false) // Flag 4 IT
 
   // Owner
-  owner   User   @relation("RiskOwner", fields: [ownerId], references: [id])
-  ownerId String
-  riskSorumlusu String?  // Risk Sorumlusu (serbest metin, LDAP gelince FK olacak)
+  owner         User    @relation("RiskOwner", fields: [ownerId], references: [id])
+  ownerId       String
+  riskSorumlusu String? // Risk Sorumlusu (serbest metin, LDAP gelince FK olacak)
 
   // Category
   category   RiskCategory @relation(fields: [categoryId], references: [id])
   categoryId String
 
   // Etki Boyutları (1-5, ağırlıklı)
-  finansalEtki          Int?  // Finansal Etki (%30)
-  itibarEtkisi          Int?  // İtibar Etkisi (%30)
-  regulasyonEtkisi      Int?  // Regülasyon Etkisi (%20)
-  musteriEtkisi         Int?  // Müşteri Etkisi (%20)
-  gizlilikEtkisi        Int?  // Gizlilik Etkisi (%35, BT)
-  butunlukEtkisi        Int?  // Bütünlük Etkisi (%30, BT)
-  erisilebilirlikEtkisi Int?  // Erişilebilirlik Etkisi (%35, BT)
+  finansalEtki          Int? // Finansal Etki (%30)
+  itibarEtkisi          Int? // İtibar Etkisi (%30)
+  regulasyonEtkisi      Int? // Regülasyon Etkisi (%20)
+  musteriEtkisi         Int? // Müşteri Etkisi (%20)
+  gizlilikEtkisi        Int? // Gizlilik Etkisi (%35, BT)
+  butunlukEtkisi        Int? // Bütünlük Etkisi (%30, BT)
+  erisilebilirlikEtkisi Int? // Erişilebilirlik Etkisi (%35, BT)
 
   // Hesaplanan Değerler
-  etki     Float?  // Ağırlıklı toplam etki
-  olasilik Int?    // Olasılık (1-5)
+  etki     Float? // Ağırlıklı toplam etki
+  olasilik Int? // Olasılık (1-5)
 
   // Doğal Risk
-  dogalRiskPuani    Float?   // etki * olasilik
-  dogalRiskSkoru    Int?     // 1-25
-  dogalRiskSeviyesi String?  // DÜŞÜK / ORTA / YÜKSEK / KRİTİK
+  dogalRiskPuani    Float? // etki * olasilik
+  dogalRiskSkoru    Int? // 1-25
+  dogalRiskSeviyesi String? // DÜŞÜK / ORTA / YÜKSEK / KRİTİK
 
   // Bütünleşik Kontrol
   butunlesikKontrolPuani    Float?
@@ -165,7 +165,7 @@ model Risk {
   kalintiRiskSeviyesi String?
 
   // Risk İşleme
-  riskIsleme      String?   // KABUL / AZALT / TRANSFER / KAÇIN
+  riskIsleme      String? // KABUL / AZALT / TRANSFER / KAÇIN
   mutabakatTarihi DateTime?
 
   // Inherent Risk Scoring (geriye dönük uyumluluk)
@@ -184,7 +184,7 @@ model Risk {
 
   // Treatment Decision
   treatmentDecision   TreatmentDecision?
-  treatmentApproval   Boolean   @default(false)
+  treatmentApproval   Boolean            @default(false)
   treatmentApprovedBy String?
   treatmentApprovedAt DateTime?
 
@@ -192,18 +192,18 @@ model Risk {
   version Int @default(1)
 
   // Relations
-  controls        ControlRiskMapping[]
-  findings        Finding[]
-  linkedFindings  Finding[] @relation("FindingRisks")
-  actions         Action[]
-  regulations     RiskRegulation[]
-  assessments     RiskAssessment[]
-  history         RiskHistory[]
-  processes       ProcessRisk[]
-  systems         SystemRisk[]
-  riskEntries     RiskEntry[]
-  riskControls    RiskControlRisk[]   // Risk Yönetimi Kontrolleri
-  riskActions     RiskActionRisk[]    // Risk Yönetimi Aksiyonları
+  controls       ControlRiskMapping[]
+  findings       Finding[]
+  linkedFindings Finding[]            @relation("FindingRisks")
+  actions        Action[]
+  regulations    RiskRegulation[]
+  assessments    RiskAssessment[]
+  history        RiskHistory[]
+  processes      ProcessRisk[]
+  systems        SystemRisk[]
+  riskEntries    RiskEntry[]
+  riskControls   RiskControlRisk[] // Risk Yönetimi Kontrolleri
+  riskActions    RiskActionRisk[] // Risk Yönetimi Aksiyonları
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -214,8 +214,8 @@ model Risk {
 }
 
 model RiskCategory {
-  id          String  @id @default(cuid())
-  name        String  @unique
+  id          String   @id @default(cuid())
+  name        String   @unique
   description String?
   color       String? // For UI display
   risks       Risk[]
@@ -244,7 +244,7 @@ model RiskAssessment {
 
   // Treatment
   treatmentDecision TreatmentDecision?
-  justification     String? @db.Text
+  justification     String?            @db.Text
 
   createdAt DateTime @default(now())
 
@@ -256,7 +256,7 @@ model RiskHistory {
   risk       Risk     @relation(fields: [riskId], references: [id], onDelete: Cascade)
   riskId     String
   version    Int
-  changeType String   // CREATE, UPDATE, ASSESSMENT, TREATMENT
+  changeType String // CREATE, UPDATE, ASSESSMENT, TREATMENT
   changeData Json
   changedBy  String
   changedAt  DateTime @default(now())
@@ -322,40 +322,40 @@ enum TreatmentDecision {
 // ==========================================
 
 model Control {
-  id          String            @id @default(cuid())
-  controlId   String            @unique // C-2024-001
-  name        String
-  description String            @db.Text
-  type        ControlType
-  nature      ControlNature
-  automation  ControlAutomation
-  frequency   ControlFrequency
-  controlPeriod String?         // For QUARTERLY, SEMI_ANNUAL, ANNUAL
-  controlDate DateTime?         // For AD_HOC controls
+  id            String            @id @default(cuid())
+  controlId     String            @unique // C-2024-001
+  name          String
+  description   String            @db.Text
+  type          ControlType
+  nature        ControlNature
+  automation    ControlAutomation
+  frequency     ControlFrequency
+  controlPeriod String? // For QUARTERLY, SEMI_ANNUAL, ANNUAL
+  controlDate   DateTime? // For AD_HOC controls
 
   // Operational Status
-  status         ControlStatus    @default(ACTIVE)
+  status ControlStatus @default(ACTIVE)
 
   // Extended operational fields
-  directorate    String?          // Legacy: serbest metin (geriye dönük uyumluluk)
-  directorateId  String?          // FK: Directorate tablosu
-  gmy            String?          // İlgili Genel Müdür Yardımcılığı
-  mehaz          String?          // Mehaz / Dayanak
-  testSteps      String?          @db.Text // Test adımları
-  notes          String?          @db.Text // Notlar
-  selectedMonths String[]         // Seçili aylar (3 Aylık, 6 Aylık, Yıllık, Arızi)
+  directorate    String? // Legacy: serbest metin (geriye dönük uyumluluk)
+  directorateId  String? // FK: Directorate tablosu
+  gmy            String? // İlgili Genel Müdür Yardımcılığı
+  mehaz          String? // Mehaz / Dayanak
+  testSteps      String?  @db.Text // Test adımları
+  notes          String?  @db.Text // Notlar
+  selectedMonths String[] // Seçili aylar (3 Aylık, 6 Aylık, Yıllık, Arızi)
 
   // Owner
   owner   User   @relation("ControlOwner", fields: [ownerId], references: [id])
   ownerId String
 
   // Test Roles
-  testPerformer   User?   @relation("ControlTestPerformer", fields: [testPerformerId], references: [id])
-  testPerformerId String?
-  reviewer        User?   @relation("ControlReviewer", fields: [reviewerId], references: [id])
-  reviewerId      String?
-  secondControllerId String?     // 2. Kontrolcü
-  contactPersonId    String?     // İletişim Kişisi (LDAP)
+  testPerformer      User?   @relation("ControlTestPerformer", fields: [testPerformerId], references: [id])
+  testPerformerId    String?
+  reviewer           User?   @relation("ControlReviewer", fields: [reviewerId], references: [id])
+  reviewerId         String?
+  secondControllerId String? // 2. Kontrolcü
+  contactPersonId    String? // İletişim Kişisi (LDAP)
 
   // Effectiveness
   effectivenessStatus EffectivenessStatus @default(NOT_TESTED)
@@ -363,12 +363,12 @@ model Control {
   lastTestResult      TestResult?
 
   // Relations
-  directorateRel  Directorate?       @relation("ControlDirectorate", fields: [directorateId], references: [id])
-  risks           ControlRiskMapping[]
-  regulations     ControlRegulation[]
-  tests           ControlTest[]
-  findings        Finding[]
-  actions         Action[]
+  directorateRel Directorate?         @relation("ControlDirectorate", fields: [directorateId], references: [id])
+  risks          ControlRiskMapping[]
+  regulations    ControlRegulation[]
+  tests          ControlTest[]
+  findings       Finding[]
+  actions        Action[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -398,13 +398,13 @@ model ControlRiskMapping {
 // Birleştirilmiş test modeli (eski ControlTest + TestRecord → tek model)
 model ControlTest {
   id        String  @id @default(cuid())
-  testNo    String  @unique   // T-YYYY-XXXX (otomatik)
+  testNo    String  @unique // T-YYYY-XXXX (otomatik)
   control   Control @relation(fields: [controlId], references: [id], onDelete: Cascade)
   controlId String
 
   // Planlama
-  plannedDate     DateTime          // Test yapılması planlanan tarih
-  isAutoGenerated Boolean @default(false) // Frekansa göre otomatik mi?
+  plannedDate     DateTime // Test yapılması planlanan tarih
+  isAutoGenerated Boolean  @default(false) // Frekansa göre otomatik mi?
   sprint          String?
 
   // Atama
@@ -418,18 +418,33 @@ model ControlTest {
   // İçerik
   summary         String?
   description     String?  @db.Text
-  resultText      String?  @db.Text  // Kontrol sonucu açıklaması
-  evidenceSummary String?  @db.Text  // Kanıt özeti
-  evidenceUrls    String[]           // Kanıt URL listesi
+  resultText      String?  @db.Text // Kontrol sonucu açıklaması
+  evidenceSummary String?  @db.Text // Kanıt özeti
+  evidenceUrls    String[] // Kanıt URL listesi
 
   // Statü
   status        ControlTestStatus  @default(BEKLIYOR)
-  findingStatus FindingTestStatus?  // Tamamlanınca dolar
+  findingStatus FindingTestStatus? // Tamamlanınca dolar
 
-  // Approval Workflow
+  // İkinci Kontrolcü Onay Akışı — TAMAMLANDI = onaya gönderildi (bkz. enum yorumu)
   approvedAt      DateTime?
   approvedById    String?
-  rejectionReason String?
+  rejectionReason String? // Geri gönderme gerekçesi (zorunlu)
+  returnedById    String? // Geri gönderen ikinci kontrolcü
+  returnedAt      DateTime?
+
+  // Final onaydan sonra iptal — yalnızca SYSTEM_ADMIN
+  cancelledAt   DateTime?
+  cancelledById String?
+  cancelReason  String?
+
+  // Devam eden açık bulguya "referans" ile ilerletme (Madde 6) — basit tek-referans
+  // ilişki: bir test en fazla bir açık bulguyu referans alabilir. Çoklu referans
+  // ihtiyacı doğarsa ayrı bir ilişki tablosuna (ControlTestFindingReference)
+  // geçilebilir; şu an için en basit/güvenli çözüm tercih edildi.
+  referencedFinding   Finding? @relation("ControlTestFindingReference", fields: [referencedFindingId], references: [id])
+  referencedFindingId String?
+  referenceReason     String?  @db.Text
 
   // Tarihler
   completedAt DateTime?
@@ -448,28 +463,33 @@ model ControlTest {
   @@index([plannedDate])
   @@index([directorateId])
   @@index([assigneeId])
+  @@index([secondControllerId])
+  @@index([referencedFindingId])
 }
 
 enum ControlTestStatus {
-  BEKLIYOR       // Henüz başlanmadı
-  DEVAM_EDIYOR   // Test yürütülüyor
-  TAMAMLANDI     // Test bitti, onay bekliyor
-  ONAYLANDI      // 2. kontrolcü onayladı
+  BEKLIYOR // Henüz başlanmadı
+  DEVAM_EDIYOR // Test yürütülüyor
+  TAMAMLANDI // Test bitti, 2. kontrolcü onayına gönderildi (ONAYA_GONDERILDI ile eşdeğer —
+  // ayrı bir statü eklenmedi, mevcut TAMAMLANDI zaten bu anlamı taşıyordu)
+  GERI_GONDERILDI // 2. kontrolcü düzeltme için geri gönderdi
+  ONAYLANDI // 2. kontrolcü onayladı — final
+  IPTAL // Final onaydan sonra SYSTEM_ADMIN tarafından iptal edildi
 }
 
 enum FindingTestStatus {
-  BULGUSU_YOK  // Kontrol etkin
-  BULGUSU_VAR  // Bulgu tespit edildi
+  BULGUSU_YOK // Kontrol etkin
+  BULGUSU_VAR // Bulgu tespit edildi
 }
 
 enum ControlType {
-  IT_GENERAL      // Legacy - maps to BT
-  IT_APPLICATION  // Legacy - maps to BT
-  OPERATIONAL     // Legacy - maps to BT_DISI
-  FINANCIAL       // Legacy - maps to BT_DISI
-  COMPLIANCE      // Legacy - maps to BT_DISI
-  BT              // New: IT Controls
-  BT_DISI         // New: Non-IT Controls
+  IT_GENERAL // Legacy - maps to BT
+  IT_APPLICATION // Legacy - maps to BT
+  OPERATIONAL // Legacy - maps to BT_DISI
+  FINANCIAL // Legacy - maps to BT_DISI
+  COMPLIANCE // Legacy - maps to BT_DISI
+  BT // New: IT Controls
+  BT_DISI // New: Non-IT Controls
 }
 
 enum ControlNature {
@@ -512,10 +532,10 @@ enum TestResult {
 }
 
 enum ApprovalStatus {
-  DRAFT            // Taslak
+  DRAFT // Taslak
   PENDING_APPROVAL // Onay bekliyor
-  APPROVED         // Onaylandı  
-  REJECTED         // Reddedildi
+  APPROVED // Onaylandı  
+  REJECTED // Reddedildi
 }
 
 // TestRecord kaldırıldı — ControlTest'e absorbe edildi (Adım 12)
@@ -538,6 +558,22 @@ model AuditPlan {
   riskIds    String[]
   controlIds String[]
 
+  // Planlama detayları (Design System v2 / audits-plans UI)
+  auditedUnit      String?
+  auditTeam        String?
+  teamLeader       String?
+  teamSize         Int?
+  plannedStartDate DateTime?
+  plannedEndDate   DateTime?
+  phase            AuditPlanPhase      @default(PLANNING)
+  rationale        AuditPlanRationale?
+  priority         AuditPlanPriority   @default(MEDIUM)
+  plannedManDays   Int?
+  actualManDays    Int?
+  delayStatus      AuditDelayStatus    @default(ON_TRACK)
+  draftReportDate  DateTime?
+  finalReportDate  DateTime?
+
   // Relations
   executions AuditExecution[]
 
@@ -550,12 +586,15 @@ model AuditPlan {
 
 model AuditExecution {
   id          String               @id @default(cuid())
+  executionId String?              @unique // AE-2024-001
   auditPlan   AuditPlan            @relation(fields: [auditPlanId], references: [id])
   auditPlanId String
   startDate   DateTime
   endDate     DateTime?
   auditor     String
   status      AuditExecutionStatus @default(IN_PROGRESS)
+  progress    Int                  @default(0) // 0-100
+  workpapers  Int                  @default(0)
 
   // Test results stored as JSON
   controlTests Json? // [{controlId, result, evidence, notes}]
@@ -583,16 +622,16 @@ model Finding {
   gmy         String?
 
   // Assignee
-  assigneeId  String?          // User id reference
+  assigneeId String? // User id reference
 
   // Direktörlük (FK)
   directorateRel Directorate? @relation("FindingDirectorate", fields: [directorateId], references: [id])
   directorateId  String?
 
   // Optional relations
-  risk      Risk?        @relation(fields: [riskId], references: [id])
+  risk      Risk?    @relation(fields: [riskId], references: [id])
   riskId    String?
-  control   Control?     @relation(fields: [controlId], references: [id])
+  control   Control? @relation(fields: [controlId], references: [id])
   controlId String?
 
   // ControlTest bağlantısı (TestRecord yerine)
@@ -615,24 +654,26 @@ model Finding {
   source                    FindingSource @default(INTERNAL_AUDIT)
   affectedSystem            String?
   recommendation            String?       @db.Text
-  managementResponse        String?       @db.Text  // alias: birimCevabi
-  birimCevabi               String?       @db.Text  // Birim Cevabı
+  managementResponse        String?       @db.Text // alias: birimCevabi
+  birimCevabi               String?       @db.Text // Birim Cevabı
   internalControlAssessment String?       @db.Text
   currentStatusDetail       String?       @db.Text
-  targetResolutionDate      DateTime?     // Hesaplamalı: MAX(open actions.dueDate)
+  targetResolutionDate      DateTime? // Hesaplamalı: MAX(open actions.dueDate)
   closedDate                DateTime?
   testDate                  DateTime?
   sendEmail                 Boolean       @default(false)
-  relatedDepartment         String?       // Legacy: free-text direktörlük
+  relatedDepartment         String? // Legacy: free-text direktörlük
   responsiblePerson         String?
 
   // Relations
-  actions       Action[]
-  followUps     FindingFollowUp[]
-  statusHistory FindingStatusHistory[]
-  attachments   FindingAttachment[]
-  statusLogs    FindingStatusLog[]
-  riskProposals RiskProposal[]        @relation("FindingRiskProposals")
+  actions          Action[]
+  followUps        FindingFollowUp[]
+  statusHistory    FindingStatusHistory[]
+  attachments      FindingAttachment[]
+  statusLogs       FindingStatusLog[]
+  riskProposals    RiskProposal[]         @relation("FindingRiskProposals")
+  // Bu bulguyu "referans" alarak ilerletilmiş sonraki kontrol testleri (Madde 6)
+  referencingTests ControlTest[]          @relation("ControlTestFindingReference")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -666,14 +707,44 @@ enum PeriodType {
 enum AuditPlanStatus {
   DRAFT
   APPROVED
-  IN_PROGRESS
-  COMPLETED
-}
-
-enum AuditExecutionStatus {
+  PLANNED
   IN_PROGRESS
   COMPLETED
   CANCELLED
+}
+
+enum AuditExecutionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  REVIEW
+  COMPLETED
+  CANCELLED
+}
+
+enum AuditPlanPhase {
+  PLANNING
+  FIELDWORK
+  REPORTING
+  CLOSED
+}
+
+enum AuditPlanRationale {
+  PERIODIC
+  REGULATORY
+  MANAGEMENT_REQUEST
+  RISK_BASED
+}
+
+enum AuditPlanPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AuditDelayStatus {
+  ON_TRACK
+  AT_RISK
+  DELAYED
 }
 
 enum FindingSeverity {
@@ -685,34 +756,34 @@ enum FindingSeverity {
 
 // Mutabakat iş akışı statüsü (Jira BE projesi akışı)
 enum FindingWorkflowStatus {
-  TASLAK                          // İKS oluşturdu, birim göremez
-  MUTABAKATA_GONDERILDI           // İKS → Birim: e-posta gönderildi
-  IC_KONTROL_ONAYINA_GONDERILDI   // Birim yanıtladı → İKS onayına gönderildi
-  MUTABAKAT_YAPILDI               // İKS onayladı
-  IPTAL                           // İKS Business Owner tarafından iptal
+  TASLAK // İKS oluşturdu, birim göremez
+  MUTABAKATA_GONDERILDI // İKS → Birim: e-posta gönderildi
+  IC_KONTROL_ONAYINA_GONDERILDI // Birim yanıtladı → İKS onayına gönderildi
+  MUTABAKAT_YAPILDI // İKS onayladı
+  IPTAL // İKS Business Owner tarafından iptal
 }
 
 // Bulgunun gerçek çözüm durumu (resolution state)
 enum FindingResolutionStatus {
-  DEVAM_EDIYOR           // Aksiyon henüz tamamlanmadı
-  KISMEN_KAPATILDI       // Kısmen kapatıldı, izleme devam ediyor
-  KAPATILDI              // Tamamen kapatıldı
-  ERTELENDI              // Test tarihi ertelendi
-  YENI_AKSIYON_GEREKLI   // Yeni düzeltici aksiyon açılması gerekiyor
+  DEVAM_EDIYOR // Aksiyon henüz tamamlanmadı
+  KISMEN_KAPATILDI // Kısmen kapatıldı, izleme devam ediyor
+  KAPATILDI // Tamamen kapatıldı
+  ERTELENDI // Test tarihi ertelendi
+  YENI_AKSIYON_GEREKLI // Yeni düzeltici aksiyon açılması gerekiyor
 }
 
 enum FindingStatus {
-  OPEN             // Legacy
-  IN_PROGRESS      // Devam Ediyor
+  OPEN // Legacy
+  IN_PROGRESS // Devam Ediyor
   PARTIALLY_CLOSED // Kısmen Kapatıldı
-  PENDING_REVIEW   // Legacy
-  CLOSED           // Kapatıldı
-  VERIFIED         // Legacy
+  PENDING_REVIEW // Legacy
+  CLOSED // Kapatıldı
+  VERIFIED // Legacy
 }
 
 enum FindingType {
-  BT               // Bilgi Teknolojileri Birimleri Bulgusu
-  IB               // İş Birimleri Bulgusu
+  BT // Bilgi Teknolojileri Birimleri Bulgusu
+  IB // İş Birimleri Bulgusu
   // Legacy values
   CONTROL_DEFICIENCY
   PROCESS_GAP
@@ -727,45 +798,45 @@ enum FindingType {
 // ==========================================
 
 model FindingFollowUp {
-  id              String         @id @default(cuid())
-  followUpId      String         @unique // 2026.03.BT.01
-  finding         Finding        @relation(fields: [findingId], references: [id], onDelete: Cascade)
-  findingId       String
+  id         String  @id @default(cuid())
+  followUpId String  @unique // 2026.03.BT.01
+  finding    Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  findingId  String
 
   // Linked corrective action (which action triggered this follow-up)
-  action          Action?        @relation(fields: [actionId], references: [id])
-  actionId        String?
+  action   Action? @relation(fields: [actionId], references: [id])
+  actionId String?
 
-  status          FollowUpStatus @default(BEKLIYOR)
-  plannedDate     DateTime?      // = Action.dueDate when auto-generated
+  status               FollowUpStatus @default(BEKLIYOR)
+  plannedDate          DateTime? // = Action.dueDate when auto-generated
   targetResolutionDate DateTime?
-  testDate        DateTime?
+  testDate             DateTime?
 
   // Bu takip çalışmasında verilen bulgu durumu kararı
-  resolutionOutcome  FindingResolutionStatus?
+  resolutionOutcome FindingResolutionStatus?
   // Erteleme durumunda yeni takip tarihi
-  newFollowUpDate    DateTime?
+  newFollowUpDate   DateTime?
 
   // Evaluation (filled during follow-up)
-  evaluatorId               String?              // Kim değerlendirdi
-  evaluatedAt               DateTime?            // Ne zaman değerlendirdi
-  result                    FollowUpResult?      // YETERLI / YETERSIZ / YENI_AKSIYON_GEREKLI
-  explanation               String?   @db.Text   // Değerlendirme açıklaması
+  evaluatorId String? // Kim değerlendirdi
+  evaluatedAt DateTime? // Ne zaman değerlendirdi
+  result      FollowUpResult? // YETERLI / YETERSIZ / YENI_AKSIYON_GEREKLI
+  explanation String?         @db.Text // Değerlendirme açıklaması
 
   // Approval
-  approvalStatus            FollowUpApprovalStatus?      @default(BEKLIYOR)
-  approvedBy                String?
-  approvedAt                DateTime?
+  approvalStatus FollowUpApprovalStatus? @default(BEKLIYOR)
+  approvedBy     String?
+  approvedAt     DateTime?
 
   // Direktörlük (FK)
   directorate   Directorate? @relation("FollowUpDirectorate", fields: [directorateId], references: [id])
   directorateId String?
 
   // Content
-  birimCevabi               String?  @db.Text
-  currentStatusDetail       String?  @db.Text
-  internalControlAssessment String?  @db.Text
-  notes                     String?  @db.Text
+  birimCevabi               String? @db.Text
+  currentStatusDetail       String? @db.Text
+  internalControlAssessment String? @db.Text
+  notes                     String? @db.Text
   secondControllerId        String?
   sprint                    String?
 
@@ -797,7 +868,7 @@ enum FollowUpStatus {
 enum FollowUpResult {
   YETERLI
   YETERSIZ
-  YENI_AKSIYON_GEREKLI   // Yeni düzeltici aksiyon açılması gerekiyor
+  YENI_AKSIYON_GEREKLI // Yeni düzeltici aksiyon açılması gerekiyor
 }
 
 enum FollowUpApprovalStatus {
@@ -811,44 +882,44 @@ enum FollowUpApprovalStatus {
 // ==========================================
 
 model FindingStatusHistory {
-  id         String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  finding    Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
-  findingId  String
+  finding   Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  findingId String
 
   followUp   FindingFollowUp? @relation(fields: [followUpId], references: [id])
   followUpId String?
 
-  action     Action?  @relation(fields: [actionId], references: [id])
-  actionId   String?
+  action   Action? @relation(fields: [actionId], references: [id])
+  actionId String?
 
   // Entry content
-  entryDate    DateTime @default(now())
-  evaluator    String?  // Kim yazdı / değerlendirdi
-  result       FollowUpResult?
-  explanation  String?  @db.Text
+  entryDate     DateTime        @default(now())
+  evaluator     String? // Kim yazdı / değerlendirdi
+  result        FollowUpResult?
+  explanation   String?         @db.Text
   evidenceLinks String?
 
   // Audit trail — işlem tipi ve değer değişiklikleri
-  operation               String?   // FINDING_CREATED | FINDING_UPDATED | STATUS_CHANGED |
-                                    // ACTION_ADDED | ACTION_UPDATED | ACTION_CLOSED |
-                                    // FOLLOWUP_OPENED | FOLLOWUP_COMPLETED |
-                                    // TEST_DATE_CHANGED | TARGET_DATE_CHANGED |
-                                    // FILE_UPLOADED | FILE_DELETED |
-                                    // FINDING_CLOSED | FINDING_REOPENED |
-                                    // WORKFLOW_CHANGE | RESOLUTION_CHANGED
-  userId                  String?   // İşlemi yapan kullanıcı
-  fieldName               String?   // Hangi alan değişti
-  oldValue                Json?     // Eski değer
-  newValue                Json?     // Yeni değer
+  operation String? // FINDING_CREATED | FINDING_UPDATED | STATUS_CHANGED |
+  // ACTION_ADDED | ACTION_UPDATED | ACTION_CLOSED |
+  // FOLLOWUP_OPENED | FOLLOWUP_COMPLETED |
+  // TEST_DATE_CHANGED | TARGET_DATE_CHANGED |
+  // FILE_UPLOADED | FILE_DELETED |
+  // FINDING_CLOSED | FINDING_REOPENED |
+  // WORKFLOW_CHANGE | RESOLUTION_CHANGED
+  userId    String? // İşlemi yapan kullanıcı
+  fieldName String? // Hangi alan değişti
+  oldValue  Json? // Eski değer
+  newValue  Json? // Yeni değer
 
   // Mutabakat akışı geçiş kaydı (backward compat)
-  changeType              String?   // Eski alan, operation ile eşdeğer
-  workflowStatus          FindingWorkflowStatus?  // Yeni durum
-  previousWorkflowStatus  FindingWorkflowStatus?  // Önceki durum
-  resolutionStatus        FindingResolutionStatus? // Çözüm durumu değişikliği
+  changeType             String? // Eski alan, operation ile eşdeğer
+  workflowStatus         FindingWorkflowStatus? // Yeni durum
+  previousWorkflowStatus FindingWorkflowStatus? // Önceki durum
+  resolutionStatus       FindingResolutionStatus? // Çözüm durumu değişikliği
 
-  createdAt  DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([findingId])
   @@index([followUpId])
@@ -862,44 +933,44 @@ model FindingStatusHistory {
 // ==========================================
 
 model Action {
-  id          String       @id @default(cuid())
-  actionId    String       @unique // A-2026-001
-  description String       @db.Text
+  id          String @id @default(cuid())
+  actionId    String @unique // A-2026-001
+  description String @db.Text
 
   // Action always belongs to a Finding (iş kuralı)
-  finding     Finding      @relation(fields: [findingId], references: [id])
-  findingId   String
+  finding   Finding @relation(fields: [findingId], references: [id])
+  findingId String
 
   // Optional: inherited context from Finding
-  control     Control? @relation(fields: [controlId], references: [id])
-  controlId   String?
-  risk        Risk?    @relation(fields: [riskId], references: [id])
-  riskId      String?
+  control   Control? @relation(fields: [controlId], references: [id])
+  controlId String?
+  risk      Risk?    @relation(fields: [riskId], references: [id])
+  riskId    String?
 
   // Responsibility
   owner                 User         @relation("ActionOwner", fields: [ownerId], references: [id])
   ownerId               String
-  responsibleDepartment String?      // Legacy free-text
+  responsibleDepartment String? // Legacy free-text
   directorate           Directorate? @relation("ActionDirectorate", fields: [directorateId], references: [id])
   directorateId         String?
 
   // Status & Dates
   status      ActionStatus @default(BEKLIYOR)
-  dueDate     DateTime     // Hedef Tamamlanma Tarihi
+  dueDate     DateTime // Hedef Tamamlanma Tarihi
   completedAt DateTime?
 
   // Content
-  notes       String?      @db.Text
+  notes String? @db.Text
 
   // Extension tracking
-  extensionReason   String?  @db.Text
-  extensionApproved Boolean  @default(false)
+  extensionReason   String? @db.Text
+  extensionApproved Boolean @default(false)
 
   // Attachments
-  attachments       ActionAttachment[]
+  attachments ActionAttachment[]
 
   // Follow-ups generated for this action
-  followUps         FindingFollowUp[]
+  followUps            FindingFollowUp[]
   statusHistoryEntries FindingStatusHistory[]
 
   // Legacy: kept for backward compat with EffectivenessReview
@@ -956,14 +1027,14 @@ enum ActionStatus {
 
 model Attachment {
   id           String               @id @default(cuid())
-  fileName     String               // storage dosya adı
-  originalName String               // kullanıcının yüklediği orijinal isim
-  mimeType     String               // "application/pdf", "image/png" vb.
-  sizeBytes    Int                  // byte cinsinden boyut
-  filePath     String?              // storage path (sonraki sprint)
+  fileName     String // storage dosya adı
+  originalName String // kullanıcının yüklediği orijinal isim
+  mimeType     String // "application/pdf", "image/png" vb.
+  sizeBytes    Int // byte cinsinden boyut
+  filePath     String? // storage path (sonraki sprint)
   entityType   AttachmentEntityType
-  entityId     String               // ilgili kaydın ID'si
-  uploadedById String?              // userId
+  entityId     String // ilgili kaydın ID'si
+  uploadedById String? // userId
 
   createdAt DateTime @default(now())
 
@@ -987,12 +1058,12 @@ model FindingAttachment {
   id           String   @id @default(cuid())
   finding      Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
   findingId    String
-  fileName     String           // storage dosya adı (uuid.pdf)
-  originalName String           // kullanıcının yüklediği orijinal isim
-  mimeType     String           // "application/pdf", "image/png" vb.
-  sizeBytes    Int              // dosya boyutu (byte)
-  url          String?          // gelecekte storage URL; şimdilik null
-  uploadedBy   String?          // userId
+  fileName     String // storage dosya adı (uuid.pdf)
+  originalName String // kullanıcının yüklediği orijinal isim
+  mimeType     String // "application/pdf", "image/png" vb.
+  sizeBytes    Int // dosya boyutu (byte)
+  url          String? // gelecekte storage URL; şimdilik null
+  uploadedBy   String? // userId
   createdAt    DateTime @default(now())
 
   @@index([findingId])
@@ -1023,7 +1094,7 @@ model FollowUpAttachment {
   sizeBytes    Int
   url          String?
   uploadedBy   String?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime        @default(now())
 
   @@index([followUpId])
 }
@@ -1049,10 +1120,10 @@ model FindingStatusLog {
   finding    Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
   findingId  String
   entryDate  DateTime @default(now())
-  text       String   @db.Text   // "Aksiyon tamamlandı ancak kanıt yetersiz bulundu."
-  authorId   String?             // userId — kim yazdı
-  authorName String?             // görüntüleme için isim
-  followUpId String?             // hangi takip çalışmasından geldi (opsiyonel)
+  text       String   @db.Text // "Aksiyon tamamlandı ancak kanıt yetersiz bulundu."
+  authorId   String? // userId — kim yazdı
+  authorName String? // görüntüleme için isim
+  followUpId String? // hangi takip çalışmasından geldi (opsiyonel)
 
   @@index([findingId])
   @@index([entryDate])
@@ -1084,10 +1155,10 @@ model RegulationArticle {
   id           String     @id @default(cuid())
   regulation   Regulation @relation(fields: [regulationId], references: [id], onDelete: Cascade)
   regulationId String
-  articleCode  String     // Article number/code
+  articleCode  String // Article number/code
   title        String
   description  String     @db.Text
-  category     String?    // Yönetişim, Risk, Teknik, Erişim, Personel, Fiziksel, Denetim, Süreklilik, Genel
+  category     String? // Yönetişim, Risk, Teknik, Erişim, Personel, Fiziksel, Denetim, Süreklilik, Genel
 
   // Mappings
   risks    RiskRegulation[]
@@ -1139,6 +1210,41 @@ model ControlRegulation {
 }
 
 // ==========================================
+// KURUMSAL KAYNAK KÜTÜPHANESİ
+// AI Kontrol & Kanıt Değerlendirme'nin "grounding" katmanı: politika, prosedür,
+// metodoloji, derecelendirme rehberi, terminoloji ve emsal kararlar. Mevzuat
+// maddeleri gibi elle seçilip değerlendirme oturumuna snapshot'lanır.
+// ==========================================
+
+model KnowledgeDoc {
+  id            String           @id @default(cuid())
+  kind          KnowledgeDocKind
+  code          String           @unique // ör. "POL-BT-01"
+  title         String
+  body          String           @db.Text
+  category      String?
+  tags          String[]
+  sourceRef     String? // kaynak/atıf (doküman no, yayım bilgisi)
+  effectiveDate DateTime?
+  isActive      Boolean          @default(true)
+  createdById   String
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([kind])
+  @@index([isActive])
+}
+
+enum KnowledgeDocKind {
+  POLICY // Politika
+  PROCEDURE // Prosedür / talimat
+  METHODOLOGY // Test / denetim metodolojisi
+  RUBRIC // Derecelendirme / puanlama rehberi
+  GLOSSARY // Terminoloji
+  PRECEDENT // Emsal karar / örnek bulgu (elle girilen)
+}
+
+// ==========================================
 // AUDIT LOG (System-wide logging)
 // ==========================================
 
@@ -1146,8 +1252,8 @@ model AuditLog {
   id         String   @id @default(cuid())
   user       User?    @relation(fields: [userId], references: [id])
   userId     String?
-  action     String   // CREATE, UPDATE, DELETE, LOGIN, LOGOUT, APPROVAL
-  entityType String   // Risk, Control, Finding, Action, etc.
+  action     String // CREATE, UPDATE, DELETE, LOGIN, LOGOUT, APPROVAL
+  entityType String // Risk, Control, Finding, Action, etc.
   entityId   String
   oldValue   Json?
   newValue   Json?
@@ -1167,7 +1273,7 @@ model AuditLog {
 
 model Parameter {
   id          String   @id @default(cuid())
-  category    String   // RISK_SCORING, SLA, GENERAL
+  category    String // RISK_SCORING, SLA, GENERAL
   key         String   @unique
   value       Json
   description String?
@@ -1183,12 +1289,12 @@ model Parameter {
 
 model SystemOption {
   id        String   @id @default(cuid())
-  category  String   // CONTROL_FREQUENCY, CONTROL_TYPE, CONTROL_NATURE, etc.
-  value     String   // DAILY, WEEKLY, IT_GENERAL, etc.
-  label     String   // Günlük, Haftalık, IT Genel, etc.
-  labelEn   String?  // English label (optional)
-  color     String?  // Badge color (optional)
-  icon      String?  // Icon name (optional)
+  category  String // CONTROL_FREQUENCY, CONTROL_TYPE, CONTROL_NATURE, etc.
+  value     String // DAILY, WEEKLY, IT_GENERAL, etc.
+  label     String // Günlük, Haftalık, IT Genel, etc.
+  labelEn   String? // English label (optional)
+  color     String? // Badge color (optional)
+  icon      String? // Icon name (optional)
   sortOrder Int      @default(0)
   isActive  Boolean  @default(true)
   isDefault Boolean  @default(false) // Default selection
@@ -1240,71 +1346,71 @@ enum RiskTreatmentOption {
 }
 
 model RiskEntry {
-  id                      String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Group 1: Kimlik (Identity)
-  riskId                  String   @unique // Auto: R-YYYY-NNNN
-  kayitId                 String   @unique // Unique record identifier
-  kayitTipi               RiskEntryRecordType @default(RISK)
-  riskStatus              RiskEntryStatus @default(AKTIF)
-  
+  riskId     String              @unique // Auto: R-YYYY-NNNN
+  kayitId    String              @unique // Unique record identifier
+  kayitTipi  RiskEntryRecordType @default(RISK)
+  riskStatus RiskEntryStatus     @default(AKTIF)
+
   // Group 2: Organizasyon (Organization)
-  riskSahibi              String?  // User reference (text for now, LDAP later)
-  surec                   String?  // Process name
-  altSurec                String?  // Sub-process name
-  riskTanimi              String   @db.Text // Risk definition (multi-line)
-  
+  riskSahibi String? // User reference (text for now, LDAP later)
+  surec      String? // Process name
+  altSurec   String? // Sub-process name
+  riskTanimi String  @db.Text // Risk definition (multi-line)
+
   // Group 3: IT Flag
-  flagForIT               Boolean  @default(false)
-  
+  flagForIT Boolean @default(false)
+
   // Group 4: Etki Boyutları (Impact Dimensions) - All 1-5 scale
-  finansalEtki            Int?     @default(1) // (%30)
-  itibarEtkisi            Int?     @default(1) // (%30)
-  regulasyonEtkisi        Int?     @default(1) // (%20)
-  musteriEtkisi           Int?     @default(1) // (%20)
-  gizlilikEtkisi          Int?     @default(1) // (%35) - CIA
-  butunlukEtkisi          Int?     @default(1) // (%30) - CIA
-  erisebilirlikEtkisi     Int?     @default(1) // (%35) - CIA
-  
+  finansalEtki        Int? @default(1) // (%30)
+  itibarEtkisi        Int? @default(1) // (%30)
+  regulasyonEtkisi    Int? @default(1) // (%20)
+  musteriEtkisi       Int? @default(1) // (%20)
+  gizlilikEtkisi      Int? @default(1) // (%35) - CIA
+  butunlukEtkisi      Int? @default(1) // (%30) - CIA
+  erisebilirlikEtkisi Int? @default(1) // (%35) - CIA
+
   // Group 5: Doğal Risk Skorlama (Inherent Risk Scoring)
-  etki                    Float?   // CALCULATED: Weighted average of impacts
-  olasilik                Int?     @default(1) // 1-5 scale, user input
-  dogalRiskPuani          Float?   // CALCULATED: Etki × Olasılık
-  dogalRiskSkoru          Int?     // CALCULATED: Normalized 0-100
-  dogalRiskSeviyesi       RiskEntryLevel? // CALCULATED: Threshold-based
-  
+  etki              Float? // CALCULATED: Weighted average of impacts
+  olasilik          Int?            @default(1) // 1-5 scale, user input
+  dogalRiskPuani    Float? // CALCULATED: Etki × Olasılık
+  dogalRiskSkoru    Int? // CALCULATED: Normalized 0-100
+  dogalRiskSeviyesi RiskEntryLevel? // CALCULATED: Threshold-based
+
   // Group 6: Kontrol Değerlendirmesi (Control Assessment)
-  butunlesikKontrolPuani  Float?   // User input or from controls
-  butunlesikKontrolSkoru  Int?     // CALCULATED
+  butunlesikKontrolPuani    Float? // User input or from controls
+  butunlesikKontrolSkoru    Int? // CALCULATED
   butunlesikKontrolSeviyesi ControlEffectivenessLevel? // CALCULATED
-  
+
   // Group 7: Kalıntı Risk (Residual Risk)
-  kalintiRiskPuani        Float?   // CALCULATED
-  kalintiRiskSkoru        Int?     // CALCULATED
-  kalintiRiskSeviyesi     RiskEntryLevel? // CALCULATED
-  
+  kalintiRiskPuani    Float? // CALCULATED
+  kalintiRiskSkoru    Int? // CALCULATED
+  kalintiRiskSeviyesi RiskEntryLevel? // CALCULATED
+
   // Group 8: İşleme & Tarihler (Treatment & Dates)
-  riskIsleme              RiskTreatmentOption?
-  mutabakatTarihi         DateTime?
-  olusturmaTarihi         DateTime @default(now()) // SYSTEM
-  guncellemeTarihi        DateTime @updatedAt      // SYSTEM
-  
+  riskIsleme       RiskTreatmentOption?
+  mutabakatTarihi  DateTime?
+  olusturmaTarihi  DateTime             @default(now()) // SYSTEM
+  guncellemeTarihi DateTime             @updatedAt // SYSTEM
+
   // Group 9: Sorumluluk (Responsibility)
-  riskSorumlusu           String?  // User reference
-  atanan                  String?  // User reference
-  olusturan               String?  // SYSTEM: Current user
-  kaydiAcan               String?  // SYSTEM: Current user
-  
+  riskSorumlusu String? // User reference
+  atanan        String? // User reference
+  olusturan     String? // SYSTEM: Current user
+  kaydiAcan     String? // SYSTEM: Current user
+
   // Audit & Version
-  version                 Int      @default(1)
-  
+  version Int @default(1)
+
   // Relation to main Risk table (optional sync)
-  syncedRisk              Risk?    @relation(fields: [syncedRiskId], references: [id])
-  syncedRiskId            String?
-  
+  syncedRisk   Risk?   @relation(fields: [syncedRiskId], references: [id])
+  syncedRiskId String?
+
   // Relation to Risk Management Controls (RYK)
-  riskManagementControls  RiskEntryRMControl[]
-  
+  riskManagementControls RiskEntryRMControl[]
+
   @@index([riskStatus])
   @@index([dogalRiskSeviyesi])
   @@index([kalintiRiskSeviyesi])
@@ -1319,49 +1425,49 @@ model RiskEntry {
 
 // Risk Management Control (RYK) - Risk Yönetimi Ekibinin Kontrolleri
 model RiskManagementControl {
-  id          String   @id @default(cuid())
-  controlCode String   @unique // RYK-001, RYK-002...
+  id          String @id @default(cuid())
+  controlCode String @unique // RYK-001, RYK-002...
   name        String
-  description String   @db.Text
-  
+  description String @db.Text
+
   // Kontrol Parametreleri (1-5 arası)
-  effectiveness    Int @default(3) // Etkinlik (%50)
-  frequency        Int @default(3) // Sıklık (%30)
-  automationLevel  Int @default(3) // Otomasyon (%20)
-  
+  effectiveness   Int @default(3) // Etkinlik (%50)
+  frequency       Int @default(3) // Sıklık (%30)
+  automationLevel Int @default(3) // Otomasyon (%20)
+
   // Hesaplanan Skorlar
-  controlScore     Float?  // Bireysel kontrol skoru
-  
+  controlScore Float? // Bireysel kontrol skoru
+
   // Owner
   ownerId String?
-  
+
   // Status
   isActive Boolean @default(true)
-  
+
   // Relations
   riskMappings RiskEntryRMControl[]
   tests        RMControlTest[]
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@index([controlCode])
   @@index([isActive])
 }
 
 // Risk-RYK Kontrol Eşleştirmesi
 model RiskEntryRMControl {
-  id          String @id @default(cuid())
-  riskEntry   RiskEntry @relation(fields: [riskEntryId], references: [id], onDelete: Cascade)
+  id          String                @id @default(cuid())
+  riskEntry   RiskEntry             @relation(fields: [riskEntryId], references: [id], onDelete: Cascade)
   riskEntryId String
   control     RiskManagementControl @relation(fields: [controlId], references: [id], onDelete: Cascade)
   controlId   String
-  
+
   // Bu kontrol için risk-spesifik etkinlik değerlendirmesi
   applicabilityScore Int @default(3) // 1-5, bu risk için kontrol ne kadar geçerli
-  
+
   createdAt DateTime @default(now())
-  
+
   @@unique([riskEntryId, controlId])
   @@index([riskEntryId])
   @@index([controlId])
@@ -1369,13 +1475,13 @@ model RiskEntryRMControl {
 
 // RYK Test Geçmişi
 model RMControlTest {
-  id         String   @id @default(cuid())
-  control    RiskManagementControl @relation(fields: [controlId], references: [id], onDelete: Cascade)
-  controlId  String
-  testDate   DateTime
-  tester     String
-  result     TestResult
-  notes      String?  @db.Text
+  id        String                @id @default(cuid())
+  control   RiskManagementControl @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  controlId String
+  testDate  DateTime
+  tester    String
+  result    TestResult
+  notes     String?               @db.Text
 
   createdAt DateTime @default(now())
 
@@ -1403,43 +1509,43 @@ enum RiskActionStatus {
 }
 
 model RiskControl {
-  id      String            @id @default(cuid())
-  kontrolId String          @unique  // RC-YYYY-XXXX
-  kayitId   String?         // Jira kayıt ID
+  id        String  @id @default(cuid())
+  kontrolId String  @unique // RC-YYYY-XXXX
+  kayitId   String? // Jira kayıt ID
 
-  status  RiskControlStatus @default(AKTIF)
+  status RiskControlStatus @default(AKTIF)
 
   // Risk bağlamı (denormalized — RCA mapping görünümü için)
-  ilgiliGmy   String?
-  riskSahibi  String?
-  surec       String?
-  altSurec    String?
-  riskTanimi  String?  @db.Text
+  ilgiliGmy  String?
+  riskSahibi String?
+  surec      String?
+  altSurec   String?
+  riskTanimi String? @db.Text
 
   // Kontrol içeriği
-  kontrolTanimi           String   @db.Text
-  kontrolTuru             String?   // Önleyici / Düzeltici / Tespit Edici
-  kontrolIslevi           String?   // Manuel / Otomatik / Yarı Otomatik
+  kontrolTanimi           String  @db.Text
+  kontrolTuru             String? // Önleyici / Düzeltici / Tespit Edici
+  kontrolIslevi           String? // Manuel / Otomatik / Yarı Otomatik
   kontrolIsletimeSekli    String?
   kontrolIsletimDenetimi  String?
   kontrolIsletimRaporlama String?
-  birSeviyeKontrolSikligi String?   // Günlük / Haftalık / Aylık / vb.
+  birSeviyeKontrolSikligi String? // Günlük / Haftalık / Aylık / vb.
 
   // Puanlama
   kontrolPuani              Float?
-  kontrolSkoru              String?   // 1-25
+  kontrolSkoru              String? // 1-25
   butunlesikKontrolPuani    Float?
   butunlesikKontrolSkoru    String?
-  butunlesikKontrolSeviyesi String?   // DÜŞÜK / ORTA / YÜKSEK
+  butunlesikKontrolSeviyesi String? // DÜŞÜK / ORTA / YÜKSEK
 
   // Org
-  riskSorumlusu  String?
-  ozet           String?  @db.Text
+  riskSorumlusu   String?
+  ozet            String?   @db.Text
   mutabakatTarihi DateTime?
 
   // İlişkiler
-  risks    RiskControlRisk[]
-  actions  RiskAction[]
+  risks   RiskControlRisk[]
+  actions RiskAction[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1464,20 +1570,20 @@ model RiskControlRisk {
 // ==========================================
 
 model RiskAction {
-  id        String           @id @default(cuid())
-  aksiyonId String           @unique  // RA-YYYY-XXXX
-  kayitId   String?          // Jira kayıt ID
+  id        String  @id @default(cuid())
+  aksiyonId String  @unique // RA-YYYY-XXXX
+  kayitId   String? // Jira kayıt ID
 
-  status    RiskActionStatus @default(ACIK)
+  status RiskActionStatus @default(ACIK)
 
-  aksiyonTanimi     String   @db.Text
-  aksiyonSahibi     String?
-  aksiyonSorumlusu  String?
-  atanan            String?
-  ilgiliGmy         String?
-  ozet              String?  @db.Text
-  potaNo            String?
-  bulgReferansNo    String?
+  aksiyonTanimi    String  @db.Text
+  aksiyonSahibi    String?
+  aksiyonSorumlusu String?
+  atanan           String?
+  ilgiliGmy        String?
+  ozet             String? @db.Text
+  potaNo           String?
+  bulgReferansNo   String?
 
   mutabakatTarihi            DateTime?
   hedeflenenTamamlanmaTarihi DateTime?
@@ -1507,3 +1613,153 @@ model RiskActionRisk {
   @@index([riskActionId])
 }
 
+// ==========================================
+// AI — YAPAY ZEKA DESTEKLİ MODÜLLER
+// ==========================================
+
+/// Bir AI aşama çıktısının kalıcı kaydı. Polimorfik bağ (entityType + entityId),
+/// tıpkı Attachment gibi — mevcut modellere kolon eklenmez. AI hiçbir kaydı
+/// doğrudan değiştirmez: çıktı burada "öneri" olarak durur, kullanıcı
+/// Kabul / Düzenle / Reddet yapar, kabul edilen içerik ilgili servisle yazılır.
+model AiAssessment {
+  id         String             @id @default(cuid())
+  kind       AiAssessmentKind
+  entityType String // "ControlTest" | "Finding"
+  entityId   String
+  status     AiAssessmentStatus @default(PROCESSING)
+
+  // Model çağrısı meta
+  tier          String // "heavy" | "light" | "vision"
+  modelName     String
+  promptVersion String
+  inputHash     String // aynı girdi → önbellek anahtarı
+  tokensIn      Int?
+  tokensOut     Int?
+  latencyMs     Int?
+  errorText     String? @db.Text
+
+  // Çıktı
+  output     Json? // yapılandırılmış sonuç (plan / skorkart / taslak)
+  confidence Float?
+
+  // Kullanıcı kararı
+  createdById  String
+  reviewedById String?
+  reviewedAt   DateTime?
+  editedOutput Json? // kullanıcı "Düzenle" ile değiştirdiyse
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([entityType, entityId])
+  @@index([kind])
+  @@index([status])
+  @@index([inputHash])
+  @@index([createdById])
+}
+
+enum AiAssessmentKind {
+  PREP_PLAN // Aşama 0 — test hazırlık planı
+  EVIDENCE_READ // Aşama 1 — kanıt okuma / OCR / sınıflandırma
+  ASSESSMENT // Aşama 2 — test adımı × kanıt skorkartı
+  RESULT_DRAFT // Aşama 3 — sonuç + kanıt özeti taslağı
+  FINDING_DRAFT // Aşama 4 — bulgu + öneri taslağı
+  REVIEW // Faz 3 — 2. kontrolcü inceleme ön-raporu
+}
+
+enum AiAssessmentStatus {
+  PROCESSING // kuyrukta / model çağrısı sürüyor
+  SUGGESTED // çıktı hazır, kullanıcı kararı bekliyor
+  ACCEPTED // kullanıcı kabul etti (ilgili alana yazıldı)
+  EDITED // kullanıcı düzenleyip kabul etti
+  REJECTED // kullanıcı reddetti
+  FAILED // model çağrısı hata verdi
+}
+
+// ==========================================
+// AI — KONTROL & KANIT DEĞERLENDİRME
+// Kayıttan bağımsız, sohbet tabanlı uyum değerlendirmesi.
+// Kontrol Alanı (envanterden veya elle) + Mevzuat + Yanıt/Kanıt Alanı → AI uyum çıktısı.
+// ==========================================
+
+model AiEvalSession {
+  id    String @id @default(cuid())
+  title String
+
+  // Kontrol Alanı
+  controlRefId         String? // Kontrol Envanteri'nden seçildiyse Control.id
+  controlText          String?  @db.Text // elle yazıldıysa
+  controlManualNote    String?  @db.Text // envanter seçiminde bile eklenebilen serbest not
+  controlSnapshot      Json? // seçilen kontrolün o anki kopyası (isim/tanım/testSteps)
+  regulationArticleIds String[] // seçilen RegulationArticle.id listesi
+  regulationSnapshot   Json? // maddelerin kopyası
+  knowledgeDocIds      String[] // seçilen KnowledgeDoc.id listesi
+  knowledgeSnapshot    Json? // kurumsal kaynakların kopyası
+
+  // Yanıt/Kanıt Alanı — kalıcı serbest metin (dosyalara ek olarak)
+  evidenceText String? @db.Text
+
+  createdById String
+  status      AiEvalStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages    AiEvalMessage[]
+  attachments AiEvalAttachment[]
+
+  @@index([createdById])
+  @@index([controlRefId])
+  @@index([status])
+}
+
+model AiEvalMessage {
+  id         String        @id @default(cuid())
+  session    AiEvalSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId  String
+  role       AiEvalRole
+  content    String        @db.Text // kullanıcı mesajı ham metni veya asistan sohbet notu
+  evaluation Json? // asistan turunda yapılandırılmış çıktı: { uyumluAlanlar[], uyumsuzAlanlar[], genelDurum, bulguAdaylari[], eksikBilgi[] }
+  modelName  String?
+  tokensIn   Int?
+  tokensOut  Int?
+  latencyMs  Int?
+  errorText  String?       @db.Text
+  createdAt  DateTime      @default(now())
+
+  @@index([sessionId])
+}
+
+model AiEvalAttachment {
+  id            String               @id @default(cuid())
+  session       AiEvalSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId     String
+  fileName      String // uploads göreli yolu (YYYY/MM/hex.ext)
+  originalName  String
+  mimeType      String
+  sizeBytes     Int
+  kind          AiEvalAttachmentKind
+  extractedText String?              @db.Text // çıkarılan metin (önbellek)
+  uploadedById  String?
+  createdAt     DateTime             @default(now())
+
+  @@index([sessionId])
+}
+
+enum AiEvalStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum AiEvalRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum AiEvalAttachmentKind {
+  DOCUMENT
+  IMAGE
+  EMAIL
+  TEXT
+}

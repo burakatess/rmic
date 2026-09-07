@@ -1,5 +1,6 @@
 import { IsString, IsNotEmpty, IsOptional, IsEnum, IsDateString, IsBoolean, ValidateNested, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
+import { EmptyToUndefined } from '../../../common/decorators';
 
 export enum FollowUpStatus { BEKLIYOR = 'BEKLIYOR', DEVAM_EDIYOR = 'DEVAM_EDIYOR', TAMAMLANDI = 'TAMAMLANDI', ONAYLANDI = 'ONAYLANDI' }
 export enum FollowUpResult { YETERLI = 'YETERLI', YETERSIZ = 'YETERSIZ', YENI_AKSIYON_GEREKLI = 'YENI_AKSIYON_GEREKLI' }
@@ -27,14 +28,14 @@ export class CreateFollowUpDto {
     @IsOptional() @IsString() birimCevabi?: string;
     @IsOptional() @IsString() currentStatusDetail?: string;
     @IsOptional() @IsString() internalControlAssessment?: string;
-    @IsOptional() @IsDateString() targetResolutionDate?: string;
-    @IsOptional() @IsDateString() testDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() targetResolutionDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() testDate?: string;
     @IsOptional() @IsString() secondControllerId?: string;
     @IsOptional() @IsString() sprint?: string;
     @IsOptional() @IsString() notes?: string;
     @IsOptional() @IsEnum(FollowUpResult) result?: FollowUpResult;
     @IsOptional() @IsEnum(FindingResolutionOutcome) resolutionOutcome?: FindingResolutionOutcome;
-    @IsOptional() @IsDateString() newFollowUpDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() newFollowUpDate?: string;
     @IsOptional() @IsString() explanation?: string;
     @IsOptional() @IsBoolean() newActionRequired?: boolean;
     @IsOptional() @ValidateNested() @Type(() => NewActionInputDto) newAction?: NewActionInputDto;
@@ -46,21 +47,21 @@ export class UpdateFollowUpDto {
     @IsOptional() @IsString() birimCevabi?: string;
     @IsOptional() @IsString() currentStatusDetail?: string;
     @IsOptional() @IsString() internalControlAssessment?: string;
-    @IsOptional() @IsDateString() targetResolutionDate?: string;
-    @IsOptional() @IsDateString() testDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() targetResolutionDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() testDate?: string;
     @IsOptional() @IsString() secondControllerId?: string;
     @IsOptional() @IsString() sprint?: string;
     @IsOptional() @IsString() notes?: string;
     @IsOptional() @IsString() evaluatorId?: string;
-    @IsOptional() @IsDateString() evaluatedAt?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() evaluatedAt?: string;
     @IsOptional() @IsEnum(FollowUpResult) result?: FollowUpResult;
     @IsOptional() @IsString() explanation?: string;
     @IsOptional() @IsString() evidence?: string;
     @IsOptional() @IsEnum(FollowUpApprovalStatus) approvalStatus?: FollowUpApprovalStatus;
     @IsOptional() @IsString() approvedBy?: string;
-    @IsOptional() @IsDateString() approvedAt?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() approvedAt?: string;
     @IsOptional() @IsEnum(FindingResolutionOutcome) resolutionOutcome?: FindingResolutionOutcome;
-    @IsOptional() @IsDateString() newFollowUpDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() newFollowUpDate?: string;
     @IsOptional() @IsBoolean() newActionRequired?: boolean;
     @IsOptional() @ValidateNested() @Type(() => NewActionInputDto) newAction?: NewActionInputDto;
 }

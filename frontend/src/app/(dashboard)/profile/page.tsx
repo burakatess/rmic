@@ -167,6 +167,12 @@ export default function ProfilePage() {
                     </div>
                 </form>
             </div>
+
+            <p className="text-xs text-slate-400">
+                <a href="/kvkk-aydinlatma-metni" target="_blank" rel="noopener noreferrer" className="hover:text-slate-600 underline">
+                    KVKK Aydınlatma Metni
+                </a>
+            </p>
         </div>
     );
 }

@@ -1,4 +1,5 @@
 import { IsString, IsNotEmpty, IsOptional, IsEnum, IsBoolean, IsArray, IsIn, IsDateString } from 'class-validator';
+import { EmptyToUndefined } from '../../../common/decorators';
 
 export enum ControlType { IT_GENERAL = 'IT_GENERAL', IT_APPLICATION = 'IT_APPLICATION', OPERATIONAL = 'OPERATIONAL', FINANCIAL = 'FINANCIAL', COMPLIANCE = 'COMPLIANCE', BT = 'BT', BT_DISI = 'BT_DISI' }
 export enum ControlNature { PREVENTIVE = 'PREVENTIVE', DETECTIVE = 'DETECTIVE' }
@@ -14,7 +15,7 @@ export class CreateControlDto {
     @IsOptional() @IsEnum(ControlAutomation) automation?: ControlAutomation;
     @IsOptional() @IsEnum(ControlFrequency) frequency?: ControlFrequency;
     @IsOptional() @IsString() controlPeriod?: string;
-    @IsOptional() @IsDateString() controlDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() controlDate?: string;
     @IsOptional() @IsString() directorate?: string; // Legacy serbest metin
     @IsOptional() @IsString() directorateId?: string;
     @IsOptional() @IsString() gmy?: string;
@@ -42,7 +43,7 @@ export class UpdateControlDto {
     @IsOptional() @IsEnum(ControlAutomation) automation?: ControlAutomation;
     @IsOptional() @IsEnum(ControlFrequency) frequency?: ControlFrequency;
     @IsOptional() @IsString() controlPeriod?: string;
-    @IsOptional() @IsDateString() controlDate?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() controlDate?: string;
     @IsOptional() @IsString() directorate?: string;
     @IsOptional() @IsString() directorateId?: string;
     @IsOptional() @IsString() gmy?: string;

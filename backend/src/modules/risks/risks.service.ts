@@ -586,6 +586,48 @@ export class RisksService {
         return updatedRisk;
     }
 
+    async approveTreatment(id: string, userId: string) {
+        const risk = await this.findOne(id);
+        if (!risk.treatmentDecision) {
+            throw new BadRequestException('Onaylamadan önce bir tedavi kararı verilmelidir');
+        }
+
+        const approver = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { firstName: true, lastName: true },
+        });
+
+        const updatedRisk = await this.prisma.risk.update({
+            where: { id },
+            data: {
+                treatmentApproval: true,
+                treatmentApprovedBy: approver ? `${approver.firstName} ${approver.lastName}` : userId,
+                treatmentApprovedAt: new Date(),
+                version: { increment: 1 },
+            },
+            include: {
+                category: true,
+                owner: { select: { id: true, firstName: true, lastName: true, email: true, department: true } },
+            },
+        });
+
+        await this.prisma.riskHistory.create({
+            data: {
+                riskId: id,
+                version: updatedRisk.version,
+                changeType: 'TREATMENT_APPROVAL',
+                changeData: { approvedBy: userId },
+                changedBy: userId,
+            },
+        });
+
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'UPDATE', entityType: 'Risk', entityId: id, newValue: { treatmentApproval: true } },
+        });
+
+        return updatedRisk;
+    }
+
     async getHistory(id: string) {
         await this.findOne(id); // Verify risk exists
 
@@ -677,7 +719,7 @@ export class RisksService {
                     { riskId: id },
                 ],
             },
-            select: { id: true, findingId: true, description: true, status: true, severity: true },
+            select: { id: true, findingId: true, description: true, status: true, severity: true, controlId: true },
         });
         const findingIds = findings.map(f => f.id);
 
@@ -689,7 +731,10 @@ export class RisksService {
                     { riskId: id },
                 ],
             },
-            select: { id: true, actionId: true, description: true, status: true, dueDate: true },
+            select: {
+                id: true, actionId: true, description: true, status: true, dueDate: true, findingId: true,
+                owner: { select: { id: true, firstName: true, lastName: true } },
+            },
         });
 
         return {
