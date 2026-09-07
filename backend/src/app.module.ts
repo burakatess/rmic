@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth';
@@ -23,7 +24,7 @@ import { RiskProposalsModule } from './modules/risk-proposals/risk-proposals.mod
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AiModule } from './modules/ai/ai.module';
 import { KnowledgeModule } from './modules/knowledge/knowledge.module';
-import { JwtAuthGuard } from './common/guards';
+import { JwtAuthGuard, PermissionsGuard } from './common/guards';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
@@ -37,6 +38,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     // karşılayacak kadar geniş; hassas auth route'ları kendi @Throttle override'larıyla
     // (login/register/refresh: 5 istek/60sn) çok daha sıkı sınırlanır.
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
+    ScheduleModule.forRoot(),
     PrismaModule,
     HealthModule,
     AuthModule,
@@ -68,6 +70,12 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    // Merkezi izin guard'ı — global ama opt-in (@RequirePermissions olan route'lara).
+    // JwtAuthGuard'dan SONRA kayıtlı: req.user hazır olduktan sonra çalışır.
+    {
+      provide: APP_GUARD,
+      useClass: PermissionsGuard,
     },
     // Prisma hatalarının çıplak sızmasını önle — bkz. common/filters/prisma-exception.filter.ts
     {

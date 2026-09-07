@@ -96,49 +96,48 @@ export class AdminService {
         },
         updatedBy: string,
     ) {
-        const user = await this.prisma.user.findUnique({ where: { id } });
+        const user = await this.prisma.user.findUnique({ where: { id }, include: { role: true } });
         if (!user) throw new NotFoundException('User not found');
 
-        const oldValue = { ...user };
-
-        const updated = await this.prisma.user.update({
-            where: { id },
-            data,
-            include: { role: true },
-        });
-
-        await this.prisma.auditLog.create({
-            data: {
-                userId: updatedBy,
-                action: 'UPDATE',
-                entityType: 'User',
-                entityId: id,
-                oldValue: { firstName: oldValue.firstName, lastName: oldValue.lastName, isActive: oldValue.isActive },
-                newValue: data,
-            },
+        // Kritik değişiklik (rol / aktiflik) + audit AYNI transaction'da (Madde 6).
+        const updated = await this.prisma.$transaction(async (tx) => {
+            const u = await tx.user.update({ where: { id }, data, include: { role: true } });
+            await tx.auditLog.create({
+                data: {
+                    userId: updatedBy,
+                    action:
+                        data.roleId !== undefined && data.roleId !== user.roleId ? 'ROLE_CHANGE'
+                        : data.isActive !== undefined && data.isActive !== user.isActive ? 'USER_ACTIVATION_CHANGE'
+                        : 'UPDATE',
+                    entityType: 'User',
+                    entityId: id,
+                    oldValue: {
+                        firstName: user.firstName, lastName: user.lastName, department: user.department,
+                        isActive: user.isActive, roleId: user.roleId, roleName: user.role.name,
+                    },
+                    newValue: {
+                        ...data,
+                        ...(data.roleId ? { roleName: u.role.name } : {}),
+                    },
+                },
+            });
+            return u;
         });
 
         const { passwordHash, ...result } = updated;
+        void passwordHash;
         return result;
     }
 
     async resetPassword(id: string, newPassword: string, resetBy: string) {
         const passwordHash = await bcrypt.hash(newPassword, 10);
-
-        await this.prisma.user.update({
-            where: { id },
-            data: { passwordHash },
+        await this.prisma.$transaction(async (tx) => {
+            await tx.user.update({ where: { id }, data: { passwordHash } });
+            // Şifre/haş ASLA loglanmaz — yalnızca olay.
+            await tx.auditLog.create({
+                data: { userId: resetBy, action: 'PASSWORD_RESET', entityType: 'User', entityId: id },
+            });
         });
-
-        await this.prisma.auditLog.create({
-            data: {
-                userId: resetBy,
-                action: 'PASSWORD_RESET',
-                entityType: 'User',
-                entityId: id,
-            },
-        });
-
         return { message: 'Password reset successfully' };
     }
 
@@ -170,8 +169,17 @@ export class AdminService {
         name: string;
         description?: string;
         permissions: string[];
-    }) {
-        return this.prisma.role.create({ data });
+    }, userId: string) {
+        return this.prisma.$transaction(async (tx) => {
+            const role = await tx.role.create({ data });
+            await tx.auditLog.create({
+                data: {
+                    userId, action: 'ROLE_CREATE', entityType: 'Role', entityId: role.id,
+                    newValue: { name: role.name, permissions: role.permissions },
+                },
+            });
+            return role;
+        });
     }
 
     async updateRole(
@@ -181,10 +189,22 @@ export class AdminService {
             description?: string;
             permissions?: string[];
         },
+        userId: string,
     ) {
-        return this.prisma.role.update({
-            where: { id },
-            data,
+        const before = await this.prisma.role.findUnique({ where: { id } });
+        if (!before) throw new NotFoundException('Role not found');
+        return this.prisma.$transaction(async (tx) => {
+            const role = await tx.role.update({ where: { id }, data });
+            await tx.auditLog.create({
+                data: {
+                    userId,
+                    action: data.permissions !== undefined ? 'PERMISSION_CHANGE' : 'ROLE_UPDATE',
+                    entityType: 'Role', entityId: id,
+                    oldValue: { name: before.name, permissions: before.permissions },
+                    newValue: { name: role.name, permissions: role.permissions },
+                },
+            });
+            return role;
         });
     }
 

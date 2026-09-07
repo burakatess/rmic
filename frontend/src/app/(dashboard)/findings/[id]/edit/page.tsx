@@ -38,10 +38,11 @@ const findingTypeOptions = [
 ];
 
 // İş kuralı: bulgunun durumu yalnızca bu 3 seçenekten biri olabilir.
+// Kapanış artık genel düzenlemeden yapılamıyor — bulgu detay sayfasındaki
+// "Bulguyu Kapat" işlemi kullanılır (tüm aksiyonlar KAPATILDI + gerekçe koşuluyla).
 const statusOptions = [
     { value: 'IN_PROGRESS', label: 'Devam Ediyor' },
     { value: 'PARTIALLY_CLOSED', label: 'Kısmen Kapatıldı' },
-    { value: 'CLOSED', label: 'Kapatıldı' },
 ];
 
 // İş kuralı: önem derecesi yalnızca KZ (Kontrol Zayıflığı) / KD (Kayda Değer Kontrol Eksikliği).
@@ -57,6 +58,7 @@ export default function FindingEditPage() {
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [loadedStatus, setLoadedStatus] = useState<string>('');
     const [controls, setControls] = useState<Control[]>([]);
     const [users, setUsers] = useState<User[]>([]);
     const [directorates, setDirectorates] = useState<Directorate[]>([]);
@@ -132,6 +134,7 @@ export default function FindingEditPage() {
                         assigneeId: data.assigneeId || (data.assignee?.id || ''),
                         sendEmail: data.sendEmail ?? false,
                     });
+                    setLoadedStatus(data.status || 'IN_PROGRESS');
                 }
             } catch (error) {
                 console.error('Failed to load edit data:', error);
@@ -170,8 +173,15 @@ export default function FindingEditPage() {
             // targetResolutionDate gönderilmiyor — backend'de authoritative olarak
             // bağlı aksiyonlardan hesaplanıyor (Madde 4), buradan gelen değer zaten
             // yok sayılıyor ama kafa karışıklığını önlemek için hiç göndermiyoruz.
-            const { targetResolutionDate, ...rest } = formData;
-            const payload = { ...rest };
+            const { targetResolutionDate, closedDate, ...rest } = formData;
+            void targetResolutionDate; void closedDate;
+            const payload: Record<string, unknown> = { ...rest };
+            // Kapanış/geçiş alanları genel güncellemeden gönderilmez (backend 400 döner).
+            // status yalnızca ara statülerden biriyse ve gerçekten değiştiyse gönderilir.
+            const selectable = statusOptions.map(o => o.value);
+            if (!selectable.includes(payload.status as string) || payload.status === loadedStatus) {
+                delete payload.status;
+            }
 
             await api.updateFinding(params.id as string, payload);
             showToastSuccess('Başarılı', 'Bulgu başarıyla güncellendi.');

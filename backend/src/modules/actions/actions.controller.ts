@@ -35,8 +35,13 @@ export class ActionsController {
 
     @Put(':id')
     @Roles('SYSTEM_ADMIN', 'AUDITOR', 'AUDITEE')
-    async update(@Param('id') id: string, @Body() data: UpdateStandaloneActionDto, @CurrentUser('id') userId: string) {
-        return this.actionsService.update(id, data, userId);
+    async update(
+        @Param('id') id: string,
+        @Body() data: UpdateStandaloneActionDto,
+        @CurrentUser('id') userId: string,
+        @CurrentUser('role') role: string,
+    ) {
+        return this.actionsService.update(id, data, userId, role);
     }
 
     @Delete(':id')
@@ -47,14 +52,23 @@ export class ActionsController {
 
     @Post(':id/complete')
     @Roles('SYSTEM_ADMIN', 'AUDITOR', 'AUDITEE')
-    async complete(@Param('id') id: string, @CurrentUser('id') userId: string) {
-        return this.actionsService.complete(id, userId);
+    async complete(
+        @Param('id') id: string,
+        @CurrentUser('id') userId: string,
+        @CurrentUser('role') role: string,
+    ) {
+        return this.actionsService.complete(id, userId, role);
     }
 
     @Post(':id/extend')
     @Roles('SYSTEM_ADMIN', 'AUDITOR', 'AUDITEE')
-    async extend(@Param('id') id: string, @Body() data: ExtendActionDto, @CurrentUser('id') userId: string) {
-        return this.actionsService.extend(id, data, userId);
+    async extend(
+        @Param('id') id: string,
+        @Body() data: ExtendActionDto,
+        @CurrentUser('id') userId: string,
+        @CurrentUser('role') role: string,
+    ) {
+        return this.actionsService.extend(id, data, userId, role);
     }
 
     @Post(':id/effectiveness-review')

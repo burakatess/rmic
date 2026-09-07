@@ -5,7 +5,7 @@ import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
 import {
     CreateFindingDto, UpdateFindingDto, CreateActionDto, UpdateActionDto,
-    CreateFollowUpDto, UpdateFollowUpDto,
+    CreateFollowUpDto, UpdateFollowUpDto, AssignSecondControllerDto,
 } from './dto';
 
 @ApiTags('Findings')
@@ -141,6 +141,28 @@ export class AuditsController {
         return this.auditsService.iptalEt(id, body.reason, userId);
     }
 
+    // Onaylı kapanış — tüm aksiyonlar KAPATILDI + gerekçe (Madde 3).
+    @Post('findings/:id/workflow/kapat')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    async closeFinding(
+        @Param('id') id: string,
+        @Body() body: { reason: string },
+        @CurrentUser('id') userId: string,
+    ) {
+        return this.auditsService.closeFinding(id, body?.reason, userId);
+    }
+
+    // Yeniden açma — gerekçeli, yetkili, loglanan ayrı işlem (Madde 3).
+    @Post('findings/:id/workflow/yeniden-ac')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    async reopenFinding(
+        @Param('id') id: string,
+        @Body() body: { reason: string },
+        @CurrentUser('id') userId: string,
+    ) {
+        return this.auditsService.reopenFinding(id, body?.reason, userId);
+    }
+
     // ─── Risk ↔ Finding Linking ───────────────────────────────────────────────
 
     @Post('findings/:id/link-risk')
@@ -175,8 +197,22 @@ export class AuditsController {
         @Param('followUpId') followUpId: string,
         @Body() data: UpdateFollowUpDto,
         @CurrentUser('id') userId: string,
+        @CurrentUser('role') userRole: string,
     ) {
-        return this.auditsService.updateFollowUp(id, followUpId, data, userId);
+        return this.auditsService.updateFollowUp(id, followUpId, data, userId, userRole);
+    }
+
+    // İkinci kontrolcü ataması — genel güncellemeden ayrı, gerekçeli, loglanan işlem (Madde 4).
+    @Post('findings/:id/follow-ups/:followUpId/second-controller')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    async assignSecondController(
+        @Param('id') id: string,
+        @Param('followUpId') followUpId: string,
+        @Body() body: AssignSecondControllerDto,
+        @CurrentUser('id') userId: string,
+        @CurrentUser('role') userRole: string,
+    ) {
+        return this.auditsService.assignSecondController(id, followUpId, body, userId, userRole);
     }
 
     @Delete('findings/:id/follow-ups/:followUpId')
@@ -262,7 +298,7 @@ export class AuditsController {
     @Post('findings/generate-due-followups')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
     async generateDueFollowUps() {
-        return this.auditsService.generateDueFollowUps();
+        return this.auditsService.generateDueFollowUps('manual');
     }
 
     // ─── Status Logs (Append-only Güncel Durum) ──────────────────────────────

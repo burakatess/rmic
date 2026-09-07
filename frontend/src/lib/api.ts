@@ -812,6 +812,20 @@ class ApiClient {
         return this.request(`/findings/${findingId}/workflow/iptal-et`, { method: 'POST', body: { reason } });
     }
 
+    // Onaylı kapanış — tüm aksiyonlar KAPATILDI + gerekçe (Madde 3).
+    async closeFinding(findingId: string, reason: string) {
+        return this.request(`/findings/${findingId}/workflow/kapat`, { method: 'POST', body: { reason } });
+    }
+
+    // İkinci kontrolcü ataması — genel takip güncellemesinden ayrı, gerekçeli (Madde 4).
+    async assignSecondController(findingId: string, followUpId: string, body: { secondControllerId: string; reason: string }) {
+        return this.request(`/findings/${findingId}/follow-ups/${followUpId}/second-controller`, { method: 'POST', body });
+    }
+
+    async reopenFinding(findingId: string, reason: string) {
+        return this.request(`/findings/${findingId}/workflow/yeniden-ac`, { method: 'POST', body: { reason } });
+    }
+
     // ── Risks (for selectors) — already defined as getRisks() above ──────────
 
     // ── Yapay Zeka — Kontrol Testi Asistanı ─────────────────────────────────

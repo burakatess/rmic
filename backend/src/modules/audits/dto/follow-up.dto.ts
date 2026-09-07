@@ -49,19 +49,26 @@ export class UpdateFollowUpDto {
     @IsOptional() @IsString() internalControlAssessment?: string;
     @IsOptional() @EmptyToUndefined() @IsDateString() targetResolutionDate?: string;
     @IsOptional() @EmptyToUndefined() @IsDateString() testDate?: string;
-    @IsOptional() @IsString() secondControllerId?: string;
+    // secondControllerId: genel güncellemeden KABUL EDİLMEZ (forbidNonWhitelisted → 400).
+    // Ayrı korumalı işlemden değişir: POST /findings/:id/follow-ups/:followUpId/second-controller (Madde 4).
     @IsOptional() @IsString() sprint?: string;
     @IsOptional() @IsString() notes?: string;
-    @IsOptional() @IsString() evaluatorId?: string;
-    @IsOptional() @EmptyToUndefined() @IsDateString() evaluatedAt?: string;
+    // evaluatorId / evaluatedAt: SUNUCU üretir (@CurrentUser + new Date). İstemciden
+    // gelen değer yok sayılır — sahte "değerlendiren" kimliği engellenir.
     @IsOptional() @IsEnum(FollowUpResult) result?: FollowUpResult;
     @IsOptional() @IsString() explanation?: string;
-    @IsOptional() @IsString() evidence?: string;
+    // approvalStatus onay/ret niyetini bildirir; approvedBy / approvedAt SUNUCU üretir
+    // (istemciden kabul edilmez) ve onay kuralları audits.service.ts::updateFollowUp'ta
+    // uygulanır (geçerli önceki durum, ikinci kontrolcü, kendi değerlendirmesini
+    // onaylayamama, tekrarlı onayın yan etki üretmemesi).
     @IsOptional() @IsEnum(FollowUpApprovalStatus) approvalStatus?: FollowUpApprovalStatus;
-    @IsOptional() @IsString() approvedBy?: string;
-    @IsOptional() @EmptyToUndefined() @IsDateString() approvedAt?: string;
     @IsOptional() @IsEnum(FindingResolutionOutcome) resolutionOutcome?: FindingResolutionOutcome;
     @IsOptional() @EmptyToUndefined() @IsDateString() newFollowUpDate?: string;
     @IsOptional() @IsBoolean() newActionRequired?: boolean;
     @IsOptional() @ValidateNested() @Type(() => NewActionInputDto) newAction?: NewActionInputDto;
+}
+
+export class AssignSecondControllerDto {
+    @IsString() @IsNotEmpty() secondControllerId: string;
+    @IsString() @IsNotEmpty() @MaxLength(1000) reason: string;
 }

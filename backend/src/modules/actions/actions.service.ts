@@ -1,14 +1,36 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
+import { nextCounterValue, formatRecordId } from '../../common/util/sequential-id';
+import { AuditsService } from '../audits/audits.service';
+
+const normalizeRole = (r?: string): string =>
+    ({ ADMIN: 'SYSTEM_ADMIN', RISK_MANAGER: 'RISK_CONTROL_MANAGER', CONTROL_OWNER: 'AUDITEE' }[r ?? ''] ?? r ?? '');
 
 @Injectable()
 export class ActionsService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private audits: AuditsService,
+    ) { }
 
-    private generateActionId(): string {
-        const year = new Date().getFullYear();
-        const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-        return `A-${year}-${random}`;
+    /**
+     * Aksiyon var mı + oturum sahibi bu aksiyonu değiştirebilir mi?
+     * AUDITEE (denetlenen) yalnızca KENDİ sahip olduğu aksiyonu güncelleyebilir/
+     * tamamlayabilir/uzatabilir — başka bir kullanıcının aksiyonuna dokunamaz
+     * (Madde 2, nesne bazlı yetkilendirme). Diğer roller mevcut RBAC ile sınırlı.
+     */
+    private async loadActionForMutation(id: string, userId: string, role?: string) {
+        const action = await this.prisma.action.findUnique({ where: { id } });
+        if (!action) throw new NotFoundException('Aksiyon bulunamadı');
+        if (normalizeRole(role) === 'AUDITEE' && action.ownerId !== userId) {
+            throw new ForbiddenException('Yalnızca kendi sorumluluğunuzdaki aksiyonu değiştirebilirsiniz');
+        }
+        return action;
+    }
+
+    /** Atomik sayaçtan A-2026-NNNN (bkz. audits.service.ts ile aynı). */
+    private async nextActionId(): Promise<string> {
+        return formatRecordId('A', await nextCounterValue(this.prisma, 'action'));
     }
 
     async findAll(query: any) {
@@ -127,137 +149,81 @@ export class ActionsService {
     }
 
     async create(data: any, userId: string) {
-        // ENFORCE: Action must have risk impact
-        if (!data.riskId && !data.findingId) {
-            throw new BadRequestException('Action must be linked to a risk or a finding');
+        // Veri modeli: Action.findingId ZORUNLU. `/actions` ve `/findings/:id/actions`
+        // aynı ortak domain kuralından geçer (Madde 2). Yalnız riske bağlı, findingId
+        // olmayan aksiyon veri modelinde temsil edilemez.
+        if (!data.findingId) {
+            throw new BadRequestException('Aksiyon bir bulguya bağlı olmalıdır (findingId zorunlu).');
         }
-
-        // FK doğrulaması — Prisma FK 500 yerine okunur 400
-        if (data.riskId) {
-            const riskExists = await this.prisma.risk.findUnique({ where: { id: data.riskId }, select: { id: true } });
-            if (!riskExists) throw new BadRequestException('Geçersiz risk: seçilen risk bulunamadı');
-        }
-        if (data.findingId) {
-            const findingExists = await this.prisma.finding.findUnique({ where: { id: data.findingId }, select: { id: true } });
-            if (!findingExists) throw new BadRequestException('Geçersiz bulgu: seçilen bulgu bulunamadı');
-        }
+        const findingExists = await this.prisma.finding.findUnique({ where: { id: data.findingId }, select: { id: true } });
+        if (!findingExists) throw new BadRequestException('Geçersiz bulgu: seçilen bulgu bulunamadı');
         if (data.controlId) {
             const controlExists = await this.prisma.control.findUnique({ where: { id: data.controlId }, select: { id: true } });
             if (!controlExists) throw new BadRequestException('Geçersiz kontrol: seçilen kontrol bulunamadı');
         }
-        if (data.ownerId) {
-            const ownerExists = await this.prisma.user.findUnique({ where: { id: data.ownerId }, select: { id: true } });
-            if (!ownerExists) throw new BadRequestException('Geçersiz kullanıcı: aksiyon sorumlusu bulunamadı');
-        }
 
-        const action = await this.prisma.action.create({
-            data: {
-                actionId: this.generateActionId(),
-                description: data.description,
-                ownerId: data.ownerId || userId,
-                riskId: data.riskId || null,
-                findingId: data.findingId || null,
-                controlId: data.controlId || null,
-                dueDate: new Date(data.dueDate),
-                status: data.status || undefined,
-            },
-            include: {
-                owner: { select: { id: true, firstName: true, lastName: true, email: true } },
-                risk: { select: { id: true, riskId: true, name: true } },
-                finding: { select: { id: true, findingId: true } },
-            },
-        });
-
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'CREATE', entityType: 'Action', entityId: action.id, newValue: action },
-        });
-
-        return action;
+        // ORTAK domain servisi — otomatik takip, hedef tarih, atomik audit.
+        return this.audits.createAction(data.findingId, {
+            description: data.description,
+            ownerId: data.ownerId || userId,
+            responsibleDepartment: data.responsibleDepartment,
+            dueDate: data.dueDate,
+            notes: data.notes,
+            status: data.status,
+        }, userId);
     }
 
-    async update(id: string, data: any, userId: string) {
-        // Whitelist — findingId/riskId/controlId burada DEĞİŞTİRİLEMEZ (iş kuralı + mass-assignment koruması)
-        if (data.ownerId) {
-            const ownerExists = await this.prisma.user.findUnique({ where: { id: data.ownerId }, select: { id: true } });
-            if (!ownerExists) throw new BadRequestException('Geçersiz kullanıcı: aksiyon sorumlusu bulunamadı');
-        }
-
-        const action = await this.prisma.action.update({
-            where: { id },
-            data: {
-                description: data.description !== undefined ? data.description : undefined,
-                ownerId: data.ownerId !== undefined ? data.ownerId : undefined,
-                dueDate: data.dueDate !== undefined ? new Date(data.dueDate) : undefined,
-                status: data.status !== undefined ? data.status : undefined,
-            },
-            include: {
-                owner: { select: { id: true, firstName: true, lastName: true, email: true } },
-                risk: { select: { id: true, riskId: true, name: true } },
-                finding: { select: { id: true, findingId: true } },
-            },
-        });
-
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'Action', entityId: id, newValue: action },
-        });
-
-        return action;
+    async update(id: string, data: any, userId: string, role?: string) {
+        const action = await this.loadActionForMutation(id, userId, role);
+        // findingId/riskId/controlId genel update ile DEĞİŞTİRİLEMEZ (whitelist).
+        // Tüm aksiyonlar bir bulguya bağlıdır → ORTAK domain servisine delege (Madde 2).
+        return this.audits.updateAction(action.findingId, id, {
+            description: data.description,
+            ownerId: data.ownerId,
+            dueDate: data.dueDate,
+            status: data.status,
+            notes: data.notes,
+        }, userId);
     }
 
     async delete(id: string, userId: string) {
         const action = await this.prisma.action.findUnique({ where: { id } });
         if (!action) throw new NotFoundException('Aksiyon bulunamadı');
-
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'DELETE', entityType: 'Action', entityId: id, oldValue: action },
-        });
-
-        // FindingFollowUp.actionId cascade değil — silmeden önce bağı koparılmalı,
-        // yoksa FK constraint hatası (500) alınır.
-        await this.prisma.findingFollowUp.updateMany({
-            where: { actionId: id },
-            data: { actionId: null },
-        });
-        // ActionAttachment ve EffectivenessReview onDelete: Cascade — otomatik silinir.
-        await this.prisma.action.delete({ where: { id } });
-
-        return { message: 'Aksiyon silindi' };
+        return this.audits.deleteAction(action.findingId, id, userId);
     }
 
-    async complete(id: string, userId: string) {
-        const action = await this.prisma.action.update({
-            where: { id },
-            data: { status: 'COMPLETED', completedAt: new Date() },
+    async complete(id: string, userId: string, role?: string) {
+        const action = await this.loadActionForMutation(id, userId, role);
+        if (action.status === 'KAPATILDI' || action.status === 'CLOSED') {
+            throw new BadRequestException('Onaylı biçimde kapatılmış aksiyon yeniden tamamlanamaz.');
+        }
+        // "Tamamlandı" — ONAYLI KAPANIŞ DEĞİL. Bulgu kapanışı yalnızca takip
+        // onayından geçer (checkAndCloseFindinIfAllActionsClosed KAPATILDI arar).
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.action.update({
+                where: { id }, data: { status: 'COMPLETED', completedAt: new Date() },
+            });
+            await tx.auditLog.create({
+                data: { userId, action: 'COMPLETE', entityType: 'Action', entityId: id, oldValue: action, newValue: updated },
+            });
+            return updated;
         });
-
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'COMPLETE', entityType: 'Action', entityId: id, newValue: action },
-        });
-
-        return action;
     }
 
-    async extend(id: string, data: { newDueDate: string; reason: string }, userId: string) {
-        if (!data.reason) {
-            throw new BadRequestException('Extension reason is mandatory');
+    async extend(id: string, data: { newDueDate: string; reason: string }, userId: string, role?: string) {
+        const action = await this.loadActionForMutation(id, userId, role);
+        if (!data.reason) throw new BadRequestException('Extension reason is mandatory');
+        if (!data.newDueDate || isNaN(new Date(data.newDueDate).getTime())) {
+            throw new BadRequestException('Geçerli bir yeni termin (newDueDate) zorunludur.');
         }
 
-        const newDueDate = new Date(data.newDueDate);
-
-        const action = await this.prisma.action.update({
-            where: { id },
-            data: {
-                dueDate: newDueDate,
-                extensionReason: data.reason,
-                extensionApproved: false,
-            },
-        });
-
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'EXTEND', entityType: 'Action', entityId: id, newValue: { newDueDate, reason: data.reason } },
-        });
-
-        return action;
+        // ORTAK domain servisi — termin değişimi takip planını ve bulgu hedef
+        // tarihini de günceller (Madde 2).
+        return this.audits.updateAction(action.findingId, id, {
+            dueDate: data.newDueDate,
+            extensionReason: data.reason,
+            extensionApproved: false,
+        }, userId);
     }
 
     async createEffectivenessReview(id: string, data: any, userId: string) {

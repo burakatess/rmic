@@ -33,11 +33,12 @@ interface FindingFollowUpModalProps {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
+// ONAYLANDI bilinçli olarak DIŞARIDA: onay, değerlendirenin bu formda seçebileceği
+// bir statü değil — atanmış ikinci kontrolcünün ayrı "Onayla" işlemidir (Madde 3).
 const FOLLOW_UP_STATUSES = [
     { value: 'BEKLIYOR',     label: 'Bekliyor' },
     { value: 'DEVAM_EDIYOR', label: 'Devam Ediyor' },
     { value: 'TAMAMLANDI',   label: 'Tamamlandı' },
-    { value: 'ONAYLANDI',    label: 'Onaylandı' },
 ];
 
 // 4 sonuç seçeneği (Madde 6)
@@ -87,6 +88,7 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
     const [form, setForm] = useState({
         actionId:                  '',
         status:                    'BEKLIYOR',
+        secondControllerId:        '',
         // Birim tarafı
         birimCevabi:               '',
         currentStatusDetail:       '',
@@ -117,7 +119,8 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
         if (followUp) {
             setForm({
                 actionId:                  followUp.actionId || '',
-                status:                    followUp.status || 'BEKLIYOR',
+                status:                    followUp.status === 'ONAYLANDI' ? 'TAMAMLANDI' : (followUp.status || 'BEKLIYOR'),
+                secondControllerId:        (followUp as { secondControllerId?: string }).secondControllerId || '',
                 birimCevabi:               followUp.birimCevabi || '',
                 currentStatusDetail:       followUp.currentStatusDetail || '',
                 internalControlAssessment: followUp.internalControlAssessment || '',
@@ -130,7 +133,7 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                 notes:                     followUp.notes || '',
             });
         } else {
-            setForm({ actionId: '', status: 'BEKLIYOR', birimCevabi: '', currentStatusDetail: '', internalControlAssessment: '', result: '', resolutionOutcome: '', newFollowUpDate: '', testDate: '', targetResolutionDate: '', explanation: '', notes: '' });
+            setForm({ actionId: '', status: 'BEKLIYOR', secondControllerId: '', birimCevabi: '', currentStatusDetail: '', internalControlAssessment: '', result: '', resolutionOutcome: '', newFollowUpDate: '', testDate: '', targetResolutionDate: '', explanation: '', notes: '' });
         }
         // Load users for new action
         api.getUsers().then((res: any) => setUsers(Array.isArray(res) ? res : res?.data || [])).catch(() => setUsers([]));
@@ -199,9 +202,18 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
             };
 
             if (isEdit && followUp) {
-                await api.updateFollowUp(findingId, followUp.id, payload);
-                success('Güncellendi', isNewActionCase
-                    ? 'Takip çalışması güncellendi ve yeni düzeltici aksiyon oluşturuldu.'
+                // İkinci kontrolcü ataması AYRI, gerekçeli işlem (Madde 4).
+                const loadedSC = (followUp as { secondControllerId?: string }).secondControllerId || '';
+                if (form.secondControllerId && form.secondControllerId !== loadedSC) {
+                    await api.assignSecondController(findingId, followUp.id, {
+                        secondControllerId: form.secondControllerId,
+                        reason: form.explanation?.trim() || 'Takip değerlendirmesi için ikinci kontrolcü atandı.',
+                    });
+                }
+                const res = await api.updateFollowUp(findingId, followUp.id, payload) as { createdAction?: { actionId: string } | null };
+                // Mesaj, formun doluluğuna göre DEĞİL, backend'in gerçek sonucuna göre (Madde 7).
+                success('Güncellendi', res?.createdAction
+                    ? `Takip çalışması güncellendi. Yeni düzeltici aksiyon oluşturuldu: ${res.createdAction.actionId}`
                     : 'Takip çalışması güncellendi.');
             } else {
                 await api.createFollowUp(findingId, payload);
@@ -363,6 +375,23 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                                         placeholder="Kısa değerlendirme notu…"
                                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-300 outline-none" />
                                 </div>
+                            </div>
+
+                            {/* İkinci kontrolcü — onayı yalnızca bu kişi verebilir (Madde 3) */}
+                            <div>
+                                <label className="text-xs font-semibold text-slate-700 uppercase tracking-wide block mb-1.5">
+                                    İkinci Kontrolcü (onaylayacak kişi)
+                                </label>
+                                <select value={form.secondControllerId} onChange={set('secondControllerId')}
+                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-300 outline-none bg-white">
+                                    <option value="">— Seçilmedi —</option>
+                                    {users.map(u => (
+                                        <option key={u.id} value={u.id}>{u.firstName} {u.lastName}{u.department ? ` · ${u.department}` : ''}</option>
+                                    ))}
+                                </select>
+                                <p className="mt-1 text-[11px] text-slate-400">
+                                    Onay ayrı bir adımdır: değerlendirmeyi yapan kişi onaylayamaz; onayı yalnızca atanan ikinci kontrolcü verir.
+                                </p>
                             </div>
                         </div>
 

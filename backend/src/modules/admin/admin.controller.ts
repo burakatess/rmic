@@ -96,16 +96,18 @@ export class AdminController {
     @Post('roles')
     async createRole(
         @Body() body: { name: string; description?: string; permissions: string[] },
+        @CurrentUser() user: { id: string },
     ) {
-        return this.adminService.createRole(body);
+        return this.adminService.createRole(body, user.id);
     }
 
     @Put('roles/:id')
     async updateRole(
         @Param('id') id: string,
         @Body() body: { name?: string; description?: string; permissions?: string[] },
+        @CurrentUser() user: { id: string },
     ) {
-        return this.adminService.updateRole(id, body);
+        return this.adminService.updateRole(id, body, user.id);
     }
 
     // Parameters

@@ -1245,6 +1245,19 @@ enum KnowledgeDocKind {
 }
 
 // ==========================================
+// KAYIT NUMARASI SAYAÇLARI
+// İnsan-okur sıralı kayıt numaraları (A-2026-0007, T-2026-0012 …) için atomik
+// sayaç. "max+1" / random yerine `UPDATE ... value = value + 1 RETURNING` — tek
+// deyim, yarış-koşulu yok, retry gerektirmez, transaction içinde güvenli.
+// ==========================================
+
+model RecordCounter {
+  scope     String   @id // "action" | "followup"
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+// ==========================================
 // AUDIT LOG (System-wide logging)
 // ==========================================
 

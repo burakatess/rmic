@@ -113,8 +113,8 @@ export class KnowledgeService {
                     action,
                     entityType: 'KnowledgeDoc',
                     entityId,
-                    oldValue: (oldValue ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-                    newValue: (newValue ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+                    oldValue: oldValue ?? Prisma.JsonNull,
+                    newValue: newValue ?? Prisma.JsonNull,
                 },
             })
             .catch(() => undefined);
