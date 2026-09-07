@@ -89,6 +89,21 @@ Email:  admin@grc.com
 Şifre:  password123
 ```
 
+## Production Kurulumu
+
+- `npm run prisma:seed` **yalnızca dev/staging** içindir — demo hesapları
+  (`admin@grc.com` dahil) prod veritabanına yüklemeyin.
+- Prod'da ilk yönetici kullanıcı ayrı, güvenli bir yöntemle oluşturulmalı
+  (ör. tek seferlik bir script ile, rastgele parola üretip ilk girişte
+  değiştirmeye zorlayarak) — seed script'i bu amaç için kullanılmamalı.
+- `JWT_SECRET` / `JWT_REFRESH_SECRET` `.env.example`'daki placeholder
+  değerlerden farklı, birbirinden farklı ve rastgele üretilmiş olmalı
+  (`openssl rand -base64 48`). Backend, `NODE_ENV=production`'da bu şart
+  sağlanmazsa açık bir hata mesajıyla başlamayı reddeder.
+- Swagger (`/api/docs`) prod'da varsayılan kapalıdır; bkz.
+  `backend/.env.example` içindeki `SWAGGER_ENABLED`.
+- Veritabanı yedekleme/geri yükleme için bkz. [`docs/backup-restore.md`](docs/backup-restore.md).
+
 ## API Dokümantasyonu
 
 Backend çalışırken Swagger UI'a şu adresten erişilebilir:

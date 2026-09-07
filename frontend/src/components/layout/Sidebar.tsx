@@ -139,6 +139,22 @@ const navigation: NavItem[] = [
         ),
     },
     {
+        label: 'Yapay Zeka (AI)',
+        permission: 'ai:view',
+        icon: (
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
+                <path d="M12 3a3.5 3.5 0 0 0-3.5 3.5A3.5 3.5 0 0 0 6 13a3.5 3.5 0 0 0 3.5 5.5 3.5 3.5 0 0 0 5 0A3.5 3.5 0 0 0 18 13a3.5 3.5 0 0 0-2.5-6.5A3.5 3.5 0 0 0 12 3Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                <path d="M12 8v9M9.5 11h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+        ),
+        children: [
+            { label: 'Kontrol & Kanıt Değerlendirme', href: '/ai/kontrol-kanit', permission: 'ai:run' },
+            { label: 'Doğal Dil Sorgu', href: '/ai/sorgu' },
+            { label: 'Kaynak Kütüphanesi', href: '/ai/kaynaklar', permission: 'ai:admin' },
+            { label: 'Ayarlar & Kullanım', href: '/ai/ayarlar', permission: 'ai:admin' },
+        ],
+    },
+    {
         label: 'Sistem Yönetimi',
         permission: 'user:view',
         icon: (

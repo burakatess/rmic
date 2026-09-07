@@ -6,6 +6,37 @@ import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
+// .env.example / docker-compose.yml içindeki varsayılan değerler — prod'da
+// bunlardan biri hâlâ kullanılıyorsa JWT tahmin edilebilir demektir, boot durdurulur.
+const PLACEHOLDER_SECRETS = new Set([
+  'your-super-secret-jwt-key-change-in-production',
+  'your-super-secret-refresh-key-change-in-production',
+  'change-this-in-production',
+  'change-this-refresh-in-production',
+]);
+
+function assertProductionSecrets(configService: ConfigService, logger: Logger) {
+  if (configService.get<string>('NODE_ENV') !== 'production') return;
+
+  const jwtSecret = configService.get<string>('JWT_SECRET');
+  const jwtRefreshSecret = configService.get<string>('JWT_REFRESH_SECRET');
+
+  const usesPlaceholder =
+    !jwtSecret ||
+    !jwtRefreshSecret ||
+    PLACEHOLDER_SECRETS.has(jwtSecret) ||
+    PLACEHOLDER_SECRETS.has(jwtRefreshSecret) ||
+    jwtSecret === jwtRefreshSecret;
+
+  if (usesPlaceholder) {
+    logger.error(
+      'JWT_SECRET / JWT_REFRESH_SECRET eksik, placeholder değerde veya birbirine eşit. ' +
+        'Production ortamında benzersiz, rastgele üretilmiş secret\'lar zorunludur — başlatma durduruldu.',
+    );
+    process.exit(1);
+  }
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log'],
@@ -13,6 +44,8 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
+
+  assertProductionSecrets(configService, logger);
 
   // Global validation pipe
   app.useGlobalPipes(
@@ -35,40 +68,50 @@ async function bootstrap() {
   // API prefix
   app.setGlobalPrefix('api');
 
-  // Swagger / OpenAPI
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('RMIC API')
-    .setDescription(
-      'Risk Yönetimi ve İç Kontrol Platformu API Dokümantasyonu. ' +
-      'Bankacılık ve finans sektörüne yönelik GRC (Governance, Risk & Compliance) platformu.',
-    )
-    .setVersion('1.0')
-    .addBearerAuth(
-      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
-      'JWT-Auth',
-    )
-    .addTag('Auth', 'Kimlik doğrulama ve oturum yönetimi')
-    .addTag('Risks', 'Risk envanteri yönetimi')
-    .addTag('Controls', 'Kontrol envanteri ve test workflow')
-    .addTag('Audit Plans', 'Denetim plan yönetimi')
-    .addTag('Audit Executions', 'Denetim uygulama yönetimi')
-    .addTag('Findings', 'Bulgu yönetimi')
-    .addTag('Actions', 'Aksiyon takibi ve SLA yönetimi')
-    .addTag('Compliance', 'Mevzuat uyumu')
-    .addTag('Risk Entries', 'Risk giriş ekranı (Excel benzeri)')
-    .addTag('Risk Management Controls', 'Risk Yönetimi Kontrolleri (RYK)')
-    .addTag('Reports', 'Dashboard ve raporlar')
-    .addTag('Admin', 'Sistem yönetimi')
-    .build();
+  // Swagger / OpenAPI — production'da tüm API şemasını (endpoint/DTO/auth
+  // yapısı) herkese açık bırakmamak için varsayılan kapalı; yalnızca
+  // SWAGGER_ENABLED=true açıkça set edilirse prod'da da açılabilir.
+  const swaggerEnabled =
+    configService.get<string>('NODE_ENV') !== 'production' ||
+    configService.get<string>('SWAGGER_ENABLED') === 'true';
 
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document);
+  if (swaggerEnabled) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('RMIC API')
+      .setDescription(
+        'Risk Yönetimi ve İç Kontrol Platformu API Dokümantasyonu. ' +
+        'Bankacılık ve finans sektörüne yönelik GRC (Governance, Risk & Compliance) platformu.',
+      )
+      .setVersion('1.0')
+      .addBearerAuth(
+        { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        'JWT-Auth',
+      )
+      .addTag('Auth', 'Kimlik doğrulama ve oturum yönetimi')
+      .addTag('Risks', 'Risk envanteri yönetimi')
+      .addTag('Controls', 'Kontrol envanteri ve test workflow')
+      .addTag('Audit Plans', 'Denetim plan yönetimi')
+      .addTag('Audit Executions', 'Denetim uygulama yönetimi')
+      .addTag('Findings', 'Bulgu yönetimi')
+      .addTag('Actions', 'Aksiyon takibi ve SLA yönetimi')
+      .addTag('Compliance', 'Mevzuat uyumu')
+      .addTag('Risk Entries', 'Risk giriş ekranı (Excel benzeri)')
+      .addTag('Risk Management Controls', 'Risk Yönetimi Kontrolleri (RYK)')
+      .addTag('Reports', 'Dashboard ve raporlar')
+      .addTag('Admin', 'Sistem yönetimi')
+      .build();
+
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, document);
+  }
 
   const port = configService.get<number>('PORT') || 3001;
   await app.listen(port);
 
   logger.log(`🚀 GRC Backend is running on: http://localhost:${port}/api`);
-  logger.log(`📚 Swagger docs available at: http://localhost:${port}/api/docs`);
+  if (swaggerEnabled) {
+    logger.log(`📚 Swagger docs available at: http://localhost:${port}/api/docs`);
+  }
 }
 
 bootstrap();

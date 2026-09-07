@@ -154,6 +154,9 @@ export default function LoginPage() {
                     <p className="text-xs text-slate-500">
                         Güvenli GRC Portalı • IP: 192.168.1.101 • v2.0
                     </p>
+                    <a href="/kvkk-aydinlatma-metni" className="text-xs text-slate-500 hover:text-slate-300 underline mt-2 inline-block">
+                        KVKK Aydınlatma Metni
+                    </a>
                 </div>
             </div>
         </div>
