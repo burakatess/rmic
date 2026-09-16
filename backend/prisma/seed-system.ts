@@ -44,6 +44,7 @@ const SYSTEM_ROLES: { name: string; description?: string; permissions: string[] 
     {
         name: 'RISK_CONTROL_MANAGER', description: 'Risk ve Kontrol Yöneticisi',
         permissions: [
+            'dashboard:view',
             'finding:view', 'finding:create', 'finding:update', 'action:*', 'control:*',
             'report:view', 'report:export', 'report:org',
             'ai:view', 'ai:run', 'ai:accept', 'ai:review', 'ai:admin',
@@ -55,16 +56,17 @@ const SYSTEM_ROLES: { name: string; description?: string; permissions: string[] 
         // gelmez — gerektiğinde yetkili yönetici açıkça ekler.
         name: 'AUDITOR', description: 'Denetçi',
         permissions: [
+            'dashboard:view',
             'finding:view', 'finding:create', 'action:view', 'action:create', 'control:view', 'control:test',
             'report:view', 'report:export',
             'ai:view', 'ai:run', 'ai:accept',
         ],
     },
-    { name: 'RISK_ANALYST', description: 'Risk Analisti', permissions: ['finding:view', 'control:view'] },
+    { name: 'RISK_ANALYST', description: 'Risk Analisti', permissions: ['dashboard:view', 'finding:view', 'control:view'] },
     // AUDITEE (denetlenen birim): yalnızca kendisine atanmış kayıtların raporları.
     // Kurum geneli özet / dışa aktarma KAPALI.
-    { name: 'AUDITEE', description: 'Denetlenen Birim', permissions: ['finding:view', 'action:view', 'action:update', 'report:view'] },
-    { name: 'VIEWER', description: 'Görüntüleyici', permissions: ['finding:view', 'control:view', 'action:view'] },
+    { name: 'AUDITEE', description: 'Denetlenen Birim', permissions: ['dashboard:view', 'finding:view', 'action:view', 'action:update', 'report:view'] },
+    { name: 'VIEWER', description: 'Görüntüleyici', permissions: ['dashboard:view', 'finding:view', 'control:view', 'action:view'] },
     {
         name: 'IKS_EMPLOYEE', description: 'İç Kontrol Sistemi Çalışanı',
         permissions: ['dashboard:view', 'control:view', 'finding:view', 'action:view', 'test:execute'],

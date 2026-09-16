@@ -10,6 +10,7 @@ import {
 } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { CreateFindingModal } from '@/components/modals/CreateFindingModal';
+import ControlScopePanel from '@/components/controls/ControlScopePanel';
 
 interface User {
     id?: string;
@@ -83,6 +84,8 @@ interface Control {
     linkedFindings: Finding[];
     linkedTests: ControlTest[];
     linkedTestRecords: TestRecord[];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    yearScopes: any[];
 }
 
 type BV = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'success' | 'warning' | 'neutral' | 'primary';
@@ -212,7 +215,8 @@ export default function ControlDetailPage() {
                             notes: t.resultText,
                             hasFinding: t.findingStatus === 'BULGUSU_VAR'
                         };
-                    })
+                    }),
+                    yearScopes: data.yearScopes || [],
                 });
             }
         } catch (err) {
@@ -266,6 +270,7 @@ export default function ControlDetailPage() {
 
     const tabs = [
         { key: 'summary', label: 'Özet ve Kapsam' },
+        { key: 'yearScope', label: 'Yıllık Kapsam', count: control.yearScopes.filter((s) => s.status === 'ACTIVE').length },
         { key: 'risks', label: 'Eşleşen Riskler', count: control.linkedRisks.length },
         { key: 'findings', label: 'Bulgular & Aksiyonlar', count: control.linkedFindings.length },
         { key: 'tests', label: 'Test Planı', count: control.linkedTestRecords.length },
@@ -459,6 +464,15 @@ export default function ControlDetailPage() {
                         </div>
                     )}
 
+                    {/* Tab: Yıllık Kapsam */}
+                    {activeTab === 'yearScope' && (
+                        <ControlScopePanel
+                            controlId={control.id}
+                            yearScopes={control.yearScopes}
+                            onChanged={() => fetchControlData(true)}
+                        />
+                    )}
+
                     {/* Tab 2: Riskler */}
                     {activeTab === 'risks' && (
                         <div>
@@ -627,7 +641,7 @@ export default function ControlDetailPage() {
                                                     <td className="px-3 py-3 text-right">
                                                         <Button
                                                             variant="outline" size="sm"
-                                                            onClick={() => router.push(`/controls/testing?recordId=${tr.id}`)}
+                                                            onClick={() => router.push(`/controls/testing/${tr.id}`)}
                                                         >
                                                             Teste Git
                                                         </Button>

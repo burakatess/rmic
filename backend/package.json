@@ -26,7 +26,13 @@
     "db:setup": "npm run prisma:generate && npm run prisma:migrate && npm run prisma:seed",
     "db:clean-domain:dry": "npx ts-node prisma/clean-domain-data.ts",
     "db:clean-domain": "npx ts-node prisma/clean-domain-data.ts",
-    "db:prepare-pilot": "npx ts-node prisma/prepare-pilot-db.ts"
+    "db:prepare-pilot": "npx ts-node prisma/prepare-pilot-db.ts",
+    "db:import-knowledge": "npx ts-node prisma/import-knowledge.ts",
+    "db:seed-library": "npx ts-node prisma/seed-library.ts",
+    "db:seed-library-fixtures": "npx ts-node prisma/seed-library-fixtures.ts",
+    "db:migrate-control-scopes:dry": "npx ts-node prisma/migrate-control-scopes.ts",
+    "db:migrate-control-scopes": "npx ts-node prisma/migrate-control-scopes.ts --apply",
+    "test:source-integration": "npx ts-node prisma/test-source-integration.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

@@ -73,6 +73,15 @@ export class AdminController {
         return this.adminService.updateUser(id, body, user.id);
     }
 
+    @Put('users/:id/directorates')
+    async setUserDirectorates(
+        @Param('id') id: string,
+        @Body() body: { directorateIds: string[] },
+        @CurrentUser() user: { id: string },
+    ) {
+        return this.adminService.setUserDirectorates(id, body.directorateIds ?? [], user.id);
+    }
+
     @Post('users/:id/reset-password')
     async resetPassword(
         @Param('id') id: string,

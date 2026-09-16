@@ -1,598 +1,637 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import api from '@/lib/api';
-import { PageHeader, PageShell, KpiCard, KpiGrid, LoadingState } from '@/components/ui';
+import api, { ApiError } from '@/lib/api';
 import { useAuth } from '@/components/auth/AuthProvider';
-import MyWorkSection from '@/components/dashboard/MyWorkSection';
+import { PermissionGate } from '@/components/auth';
 import {
-    LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
-    XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
-} from 'recharts';
+    PageShell, PageHeader, KpiCard, KpiGrid, Tabs, DataTable, StatusBadge,
+    LoadingState, EmptyState, ErrorState, Button,
+} from '@/components/ui';
+import type { ColumnDef } from '@/components/ui';
+import type {
+    DashboardScope, DashboardScopeOptions, DashboardSummary, DashboardWorkItem, DashboardWorkItemsResponse,
+    DashboardApprovals, DashboardCriticalIssue, DashboardAnnualPlan, DashboardUpcoming, DashboardWorkTab,
+} from '@/types/dashboard';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Ortak veri kaynağı hook'u ──────────────────────────────────────────────
+// Hızlı filtre değişiminde geç dönen eski cevap yeni kapsamı EZMEMELİ (Madde
+// 15) — istek sırası (reqId) ile korunur. Güncellenme zamanı yalnızca
+// BAŞARILI yüklemede ilerler (Madde 16).
 
-interface DashboardData {
-    summary: {
-        totalRisks: number;
-        risksAboveAppetite: number;
-        openFindings: number;
-        criticalFindings: number;
-        criticalHighFindings: number;
-        overdueActions: number;
-        totalControls: number;
-    };
-    risksByScore: {
-        high: number;
-        medium: number;
-        low: number;
-    };
-    riskTrend: Array<{
-        month: string;
-        total: number;
-        high: number;
-    }>;
-    controlEffectiveness: Array<{
-        effectivenessStatus: string;
-        _count: number;
-    }>;
-    controlTestStatusDistribution: Array<{ status: string; _count: number }>;
-    findingWorkflowStatusDistribution: Array<{ workflowStatus: string; _count: number }>;
-    followUpResultDistribution: Array<{ result: string; _count: number }>;
-    overdueActionsByDirectorate: Array<{ directorateId: string | null; directorateName: string; count: number }>;
-    findingsByDirectorate: Array<{ directorateId: string | null; directorateName: string; count: number }>;
+function useDashboardResource<T>(fetcher: () => Promise<T>, deps: React.DependencyList) {
+    const [data, setData] = useState<T | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+    const reqId = useRef(0);
+    const fetcherRef = useRef(fetcher);
+    fetcherRef.current = fetcher;
+
+    const load = useCallback(() => {
+        const id = ++reqId.current;
+        setLoading(true);
+        setError(null);
+        fetcherRef.current()
+            .then((d) => {
+                if (id !== reqId.current) return;
+                setData(d);
+                setUpdatedAt(new Date());
+            })
+            .catch((err) => {
+                if (id !== reqId.current) return;
+                setError(err instanceof ApiError ? err.message : 'Veri alınamadı');
+            })
+            .finally(() => {
+                if (id === reqId.current) setLoading(false);
+            });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, deps);
+
+    useEffect(() => { load(); }, [load]);
+
+    return { data, loading, error, updatedAt, reload: load };
 }
 
-const CONTROL_TEST_STATUS_LABELS: Record<string, string> = {
-    BEKLIYOR: 'Bekliyor', DEVAM_EDIYOR: 'Devam Ediyor', TAMAMLANDI: 'Tamamlandı', ONAYLANDI: 'Onaylandı',
-};
-const WORKFLOW_STATUS_LABELS: Record<string, string> = {
-    TASLAK: 'Taslak', MUTABAKATA_GONDERILDI: 'Mutabakata Gönderildi',
-    IC_KONTROL_ONAYINA_GONDERILDI: 'İç Kontrol Onayında', MUTABAKAT_YAPILDI: 'Mutabakat Yapıldı', IPTAL: 'İptal',
-};
-const FOLLOWUP_RESULT_LABELS: Record<string, string> = {
-    YETERLI: 'Yeterli', YETERSIZ: 'Yetersiz', YENI_AKSIYON_GEREKLI: 'Yeni Aksiyon Gerekli',
-};
+// ─── Sabitler ────────────────────────────────────────────────────────────────
 
-interface TrendData {
-    month: string;
-    year: number;
-    total: number;
-    high: number;
-    medium: number;
-    low: number;
-    avgScore: number;
+const SCOPE_LABELS: Record<DashboardScope, string> = { MINE: 'İşlerim', UNIT: 'Birimim', ORG: 'Kurum' };
+const BASE_TAB_LABELS: { key: DashboardWorkTab; label: string }[] = [
+    { key: 'ALL', label: 'Tümü' },
+    { key: 'TESTS', label: 'Testler' },
+    { key: 'ACTIONS', label: 'Aksiyonlar' },
+    { key: 'FOLLOWUPS', label: 'Takipler' },
+];
+// Mutabakatlar sekmesi yalnızca model destekliyor (Finding.workflowStatus) VE
+// kullanıcının finding:view izni varsa gösterilir (Madde 6 — mevcut model
+// destekliyorsa Mutabakatlar).
+const RECONCILIATION_TAB = { key: 'RECONCILIATION' as const, label: 'Mutabakatlar' };
+const TYPE_LABELS: Record<string, string> = { TEST: 'Test', ACTION: 'Aksiyon', FOLLOWUP: 'Takip', RECONCILIATION: 'Mutabakat' };
+const OPEN_LABELS: Record<string, string> = { TEST: 'Testi Aç', ACTION: 'Aksiyonu Aç', FOLLOWUP: 'Takibi Aç', RECONCILIATION: 'Mutabakatı Aç' };
+const SEVERITY_VARIANT: Record<string, 'critical' | 'high' | 'medium' | 'low'> = {
+    CRITICAL: 'critical', HIGH: 'high', MEDIUM: 'medium', LOW: 'low',
+};
+const SEVERITY_LABEL: Record<string, string> = { CRITICAL: 'Kritik', HIGH: 'Yüksek', MEDIUM: 'Orta', LOW: 'Düşük' };
+const ISSUE_SEVERITY_VARIANT: Record<string, 'critical' | 'high' | 'medium'> = { critical: 'critical', high: 'high', medium: 'medium' };
+
+const CURRENT_YEAR = new Date().getFullYear();
+const YEAR_OPTIONS = [CURRENT_YEAR - 2, CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1];
+const MONTH_NAMES = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+
+function fmtDate(d?: string | null) {
+    if (!d) return '—';
+    return new Date(d).toLocaleDateString('tr-TR');
 }
 
-interface HeatmapCell {
-    count: number;
-    risks: Array<{ id: string; riskId: string; name: string }>;
+function daysOverdue(dueDate: string): number {
+    const due = new Date(dueDate);
+    due.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.round((today.getTime() - due.getTime()) / 86_400_000);
 }
 
-// ─── Colors ──────────────────────────────────────────────────────────────────
-
-const COLORS = {
-    high: '#EF4444',
-    medium: '#F59E0B',
-    low: '#10B981',
-    primary: '#4F46E5',
-    blue: '#3B82F6',
-};
-
-const PIE_COLORS = ['#EF4444', '#F59E0B', '#10B981'];
-const CONTROL_COLORS = ['#10B981', '#F59E0B', '#EF4444', '#9CA3AF'];
-
-// Heat map color based on risk score (probability * impact position)
-const getHeatmapColor = (row: number, col: number): string => {
-    const score = (5 - row) * (col + 1);
-    if (score >= 15) return 'bg-red-500 hover:bg-red-600 ring-red-200';
-    if (score >= 10) return 'bg-amber-400 hover:bg-amber-500 ring-amber-200';
-    if (score >= 5) return 'bg-yellow-400 hover:bg-yellow-500 ring-yellow-200';
-    return 'bg-emerald-400 hover:bg-emerald-500 ring-emerald-200';
-};
-
-// ─── Ortak section kartı ─────────────────────────────────────────────────────
-
-function SectionCard({ title, children, className = '' }: { title: string; children: React.ReactNode; className?: string }) {
-    return (
-        <div className={`bg-white rounded-xl p-6 shadow-sm border border-slate-200 ${className}`}>
-            <h3 className="text-sm font-semibold text-slate-700 mb-4">{title}</h3>
-            {children}
-        </div>
-    );
-}
-
-// ─── Rol Bazlı Dashboard ──────────────────────────────────────────────────────
-
-function RoleDashboard({ roleName, firstName }: { roleName: string; firstName?: string }) {
-    const [heatmapData, setHeatmapData] = useState<HeatmapCell[][]>([]);
-    const [actionPerf, setActionPerf] = useState<any | null>(null);
-    const showHeatmap = roleName === 'RISK_ANALYST';
-    const showActionPerf = roleName === 'IKS_MANAGER' || roleName === 'AUDITOR';
-
-    useEffect(() => {
-        if (showHeatmap) {
-            api.request('/reports/risk-heatmap').then((d: any) => setHeatmapData(d)).catch(() => { });
-        }
-        if (showActionPerf) {
-            api.request('/reports/action-performance').then((d: any) => setActionPerf(d)).catch(() => { });
-        }
-    }, [showHeatmap, showActionPerf]);
-
-    const roleLabels: Record<string, string> = {
-        IKS_EMPLOYEE: 'İKS Çalışanı', IKS_MANAGER: 'İKS Yöneticisi',
-        AUDITOR: 'Denetçi', RISK_ANALYST: 'Risk Analisti', VIEWER: 'İzleyici',
-    };
-
-    return (
-        <PageShell>
-            <div className="space-y-6">
-                <PageHeader
-                    title={`Hoş geldiniz${firstName ? `, ${firstName}` : ''}`}
-                    description={`${roleLabels[roleName] ?? roleName} paneli — bu ayki işleriniz ve öncelikleriniz`}
-                />
-
-                <MyWorkSection />
-
-                {showActionPerf && actionPerf && (
-                    <SectionCard title="Aksiyon Performansı">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            {Object.entries(actionPerf).filter(([, v]) => typeof v === 'number').slice(0, 4).map(([k, v]) => (
-                                <div key={k} className="bg-slate-50 rounded-lg p-4">
-                                    <p className="text-xs text-slate-500">{k}</p>
-                                    <p className="text-2xl font-bold tabular-nums text-slate-800">{String(v)}</p>
-                                </div>
-                            ))}
-                        </div>
-                    </SectionCard>
-                )}
-
-                {showHeatmap && heatmapData.length > 0 && (
-                    <SectionCard title="Risk Isı Haritası">
-                        <div className="grid grid-cols-5 gap-1 max-w-md">
-                            {heatmapData.map((row, ri) => row.map((cell, ci) => (
-                                <div key={`${ri}-${ci}`}
-                                    className={`aspect-square rounded flex items-center justify-center text-white text-sm font-bold ${getHeatmapColor(ri, ci)}`}>
-                                    {cell.count > 0 ? cell.count : ''}
-                                </div>
-                            )))}
-                        </div>
-                    </SectionCard>
-                )}
-            </div>
-        </PageShell>
-    );
-}
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
+const inputCls = 'px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400';
 
 export default function DashboardPage() {
-    const { user } = useAuth();
-    const roleName = user?.role?.name ?? 'VIEWER';
-    const isFullDashboard = roleName === 'SYSTEM_ADMIN' || roleName === 'ADMIN'
-        || roleName === 'RISK_CONTROL_MANAGER' || user?.role?.permissions?.includes('*');
-
-    if (!isFullDashboard) {
-        return <RoleDashboard roleName={roleName} firstName={user?.firstName} />;
-    }
-    return <AdminDashboard />;
+    return (
+        <Suspense fallback={<PageShell><LoadingState message="Çalışma Panosu yükleniyor..." /></PageShell>}>
+            <DashboardPageContent />
+        </Suspense>
+    );
 }
 
-function AdminDashboard() {
+function DashboardPageContent() {
+    const { user, hasPermission } = useAuth();
+    const tabDefs = useMemo(
+        () => hasPermission('finding:view') ? [...BASE_TAB_LABELS, RECONCILIATION_TAB] : BASE_TAB_LABELS,
+        [hasPermission],
+    );
     const router = useRouter();
-    const [data, setData] = useState<DashboardData | null>(null);
-    const [trendData, setTrendData] = useState<TrendData[]>([]);
-    const [heatmapData, setHeatmapData] = useState<HeatmapCell[][]>([]);
-    const [loading, setLoading] = useState(true);
-    const [hoveredCell, setHoveredCell] = useState<{ row: number; col: number } | null>(null);
+    const searchParams = useSearchParams();
+
+    // ─── URL ile senkronize filtre durumu ──────────────────────────────────
+    const [scope, setScope] = useState<DashboardScope>((searchParams.get('scope') as DashboardScope) || 'MINE');
+    const [directorateIds, setDirectorateIds] = useState<string[]>(searchParams.getAll('dir'));
+    const [year, setYear] = useState<number>(Number(searchParams.get('year')) || CURRENT_YEAR);
+    const [month, setMonth] = useState<number | null>(searchParams.get('month') ? Number(searchParams.get('month')) : null);
+    const [includeCarryover, setIncludeCarryover] = useState<boolean>(searchParams.get('carry') !== '0');
+    const [tab, setTab] = useState<DashboardWorkTab>((searchParams.get('tab') as DashboardWorkTab) || 'ALL');
+    const [page, setPage] = useState<number>(Number(searchParams.get('page')) || 1);
+    const [calendarDays, setCalendarDays] = useState<7 | 30>(searchParams.get('days') === '30' ? 30 : 7);
 
     useEffect(() => {
-        const loadData = async () => {
-            try {
-                const [dashboardRes, trendRes, heatmapRes] = await Promise.all([
-                    api.getDashboard(),
-                    api.request('/reports/risk-trend-enhanced'),
-                    api.request('/reports/risk-heatmap'),
-                ]);
-                setData(dashboardRes as DashboardData);
-                setTrendData(trendRes as TrendData[]);
-                setHeatmapData(heatmapRes as HeatmapCell[][]);
-            } catch (err) {
-                console.error('Failed to load dashboard:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        loadData();
+        const params = new URLSearchParams();
+        params.set('scope', scope);
+        directorateIds.forEach(d => params.append('dir', d));
+        params.set('year', String(year));
+        if (month) params.set('month', String(month));
+        if (!includeCarryover) params.set('carry', '0');
+        if (tab !== 'ALL') params.set('tab', tab);
+        if (page !== 1) params.set('page', String(page));
+        if (calendarDays !== 7) params.set('days', String(calendarDays));
+        router.replace(`/dashboard?${params.toString()}`, { scroll: false });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [scope, directorateIds, year, month, includeCarryover, tab, page, calendarDays]);
+
+    // Sekme/kapsam değişince sayfa başa dönsün.
+    useEffect(() => { setPage(1); }, [tab, scope, directorateIds, year, month, includeCarryover]);
+
+    const scopeParams = useMemo(() => ({
+        scope, directorateId: scope === 'UNIT' ? directorateIds : undefined,
+        year, month: month ?? undefined, includeCarryover,
+    }), [scope, directorateIds, year, month, includeCarryover]);
+
+    // ─── Kapsam seçenekleri ─────────────────────────────────────────────────
+    const scopeOptions = useDashboardResource<DashboardScopeOptions>(
+        () => api.getDashboardScopeOptions(), [],
+    );
+
+    // Kullanıcı Birimim'i seçtiyse ama hiç direktörlük seçilmediyse, mevcut
+    // olan tüm yetkili birimleri varsayılan olarak işaretle (backend zaten
+    // aynısını server-side uygular; burada yalnızca UI checkbox durumu için).
+    useEffect(() => {
+        if (scope === 'UNIT' && directorateIds.length === 0 && scopeOptions.data?.unit.directorates.length) {
+            setDirectorateIds(scopeOptions.data.unit.directorates.map(d => d.id));
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [scope, scopeOptions.data]);
+
+    // ─── Kaynaklar ──────────────────────────────────────────────────────────
+    const summary = useDashboardResource<DashboardSummary>(
+        () => api.getDashboardSummary(scopeParams),
+        [scope, JSON.stringify(directorateIds)],
+    );
+    const workItems = useDashboardResource<DashboardWorkItemsResponse>(
+        () => api.getDashboardWorkItems({ ...scopeParams, tab, page, pageSize: 20 }),
+        [scope, JSON.stringify(directorateIds), tab, page, year, month, includeCarryover],
+    );
+    const approvals = useDashboardResource<DashboardApprovals>(() => api.getDashboardApprovals(), []);
+    const criticalIssues = useDashboardResource<DashboardCriticalIssue[]>(
+        () => api.getDashboardCriticalIssues(scopeParams),
+        [scope, JSON.stringify(directorateIds)],
+    );
+    const annualPlan = useDashboardResource<DashboardAnnualPlan>(
+        () => api.getDashboardAnnualPlan({ ...scopeParams, month: undefined }),
+        [scope, JSON.stringify(directorateIds), year],
+    );
+    const upcoming = useDashboardResource<DashboardUpcoming>(
+        () => api.getDashboardUpcoming({ ...scopeParams, days: calendarDays }),
+        [scope, JSON.stringify(directorateIds), calendarDays],
+    );
+
+    const lastUpdated = useMemo(() => {
+        const dates = [summary.updatedAt, workItems.updatedAt, approvals.updatedAt, criticalIssues.updatedAt, annualPlan.updatedAt, upcoming.updatedAt].filter(Boolean) as Date[];
+        if (dates.length === 0) return null;
+        return new Date(Math.max(...dates.map(d => d.getTime())));
+    }, [summary.updatedAt, workItems.updatedAt, approvals.updatedAt, criticalIssues.updatedAt, annualPlan.updatedAt, upcoming.updatedAt]);
+
+    const refreshAll = useCallback(() => {
+        summary.reload(); workItems.reload(); approvals.reload(); criticalIssues.reload(); annualPlan.reload(); upcoming.reload();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    if (loading) {
-        return (
-            <PageShell>
-                <LoadingState message="Panel verileri yükleniyor..." />
-            </PageShell>
-        );
-    }
+    const toggleDirectorate = (id: string) => setDirectorateIds(prev => prev.includes(id) ? prev.filter(d => d !== id) : [...prev, id]);
 
-    const pieData = [
-        { name: 'Yüksek', value: data?.risksByScore?.high || 0 },
-        { name: 'Orta', value: data?.risksByScore?.medium || 0 },
-        { name: 'Düşük', value: data?.risksByScore?.low || 0 },
-    ].filter(d => d.value > 0);
+    const availableScopes: DashboardScope[] = useMemo(() => {
+        const opts = scopeOptions.data;
+        const list: DashboardScope[] = ['MINE'];
+        if (opts?.unit.available) list.push('UNIT');
+        if (opts?.org.available) list.push('ORG');
+        return list;
+    }, [scopeOptions.data]);
 
-    const controlData = data?.controlEffectiveness?.map(item => {
-        const labels: Record<string, string> = {
-            EFFECTIVE: 'Etkin',
-            PARTIALLY_EFFECTIVE: 'Kısmen Etkin',
-            INEFFECTIVE: 'Etkin Değil',
-            NOT_TESTED: 'Test Edilmedi',
-        };
-        return {
-            name: labels[item.effectivenessStatus] || item.effectivenessStatus,
-            value: item._count,
-        };
-    }) || [];
+    // ─── Kolonlar ───────────────────────────────────────────────────────────
+    const columns: ColumnDef<DashboardWorkItem>[] = useMemo(() => [
+        {
+            key: 'ref', header: 'Kayıt No / İş', defaultWidth: 260,
+            render: (item) => (
+                <Link href={item.expectedAction.href} className="block hover:text-blue-600">
+                    <p className="text-xs font-mono font-bold text-blue-700">{item.ref}</p>
+                    <p className="text-sm text-slate-700 truncate max-w-[220px]" title={item.title}>{item.title}</p>
+                    <div className="flex items-center gap-1 mt-0.5">
+                        {item.carriedOver && <StatusBadge variant="neutral" size="sm">Devreden</StatusBadge>}
+                        {item.isAdHoc && <StatusBadge variant="info" size="sm">Plansız / Ad Hoc</StatusBadge>}
+                    </div>
+                </Link>
+            ),
+        },
+        { key: 'type', header: 'Tür', defaultWidth: 90, render: (item) => <span className="text-xs text-slate-500">{TYPE_LABELS[item.type]}</span> },
+        {
+            key: 'assignee', header: 'Sorumlu', defaultWidth: 150,
+            render: (item) => <span className="text-sm text-slate-600">{scope === 'MINE' ? 'Ben' : (item.assigneeName || '—')}</span>,
+        },
+        {
+            key: 'dueDate', header: 'Son Tarih', defaultWidth: 140,
+            render: (item) => {
+                if (!item.dueDate) return <span className="text-sm text-slate-400">—</span>;
+                const overdue = daysOverdue(item.dueDate);
+                return (
+                    <div>
+                        <p className="text-sm text-slate-700">{fmtDate(item.dueDate)}</p>
+                        {overdue > 0 && <p className="text-xs font-semibold text-red-600">{overdue} gün gecikmiş</p>}
+                    </div>
+                );
+            },
+        },
+        {
+            key: 'severity', header: 'Önem', defaultWidth: 100,
+            render: (item) => item.severity
+                ? <StatusBadge variant={SEVERITY_VARIANT[item.severity] || 'neutral'}>{SEVERITY_LABEL[item.severity] || item.severity}</StatusBadge>
+                : <span className="text-sm text-slate-400">—</span>,
+        },
+        {
+            key: 'expected', header: scope === 'MINE' ? 'Benden Beklenen' : 'Beklenen İşlem', defaultWidth: 160,
+            render: (item) => <span className="text-sm text-slate-600">{item.expectedAction.label}</span>,
+        },
+        {
+            key: 'action', header: 'İşlem', defaultWidth: 120,
+            render: (item) => (
+                <Link href={item.expectedAction.href}>
+                    <Button size="sm" variant="outline">{OPEN_LABELS[item.type]}</Button>
+                </Link>
+            ),
+        },
+    ], [scope]);
 
     return (
         <PageShell>
             <PageHeader
-                title="GRC Yönetim Paneli"
-                description="Organizasyonun güncel risk, kontrol ve bulgu durumu analizleri"
+                title="Çalışma Panosu"
+                description="Önceliklerimiz, bekleyen onaylar ve kritik konular"
+                breadcrumbs={[{ label: 'Ana Sayfa' }, { label: 'Dashboard' }]}
+                actions={
+                    <div className="flex items-center gap-2 text-xs text-slate-400">
+                        {lastUpdated && <span>Güncellendi: {lastUpdated.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
+                        <Button size="sm" variant="outline" onClick={refreshAll}
+                            icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
+                        >
+                            Yenile
+                        </Button>
+                    </div>
+                }
             />
 
-            {/* Risk Dağılımı KPI'ları — tümü click-to-filter */}
-            <KpiGrid columns={4}>
-                <KpiCard
-                    title="Yüksek Riskler"
-                    value={data?.risksByScore?.high || 0}
-                    variant="critical"
-                    subtitle="Skor ≥ 15 olan riskler"
-                    onClick={() => router.push('/risks?score=high')}
-                    icon={
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                    }
-                />
-                <KpiCard
-                    title="Orta Riskler"
-                    value={data?.risksByScore?.medium || 0}
-                    variant="warning"
-                    subtitle="Skor 8-14 arası riskler"
-                    onClick={() => router.push('/risks?score=medium')}
-                    icon={
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    }
-                />
-                <KpiCard
-                    title="Düşük Riskler"
-                    value={data?.risksByScore?.low || 0}
-                    variant="success"
-                    subtitle="Skor < 8 olan riskler"
-                    onClick={() => router.push('/risks?score=low')}
-                    icon={
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    }
-                />
-                <KpiCard
-                    title="İştah Üzerinde"
-                    value={data?.summary?.risksAboveAppetite || 0}
-                    variant="violet"
-                    subtitle="Risk iştahını aşanlar"
-                    onClick={() => router.push('/risks?aboveAppetite=true')}
-                    icon={
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-                    }
-                />
-            </KpiGrid>
+            {/* Kapsam + tarih filtreleri */}
+            <div className="flex flex-wrap items-center gap-3 mb-5 bg-white border border-slate-200 rounded-xl px-4 py-3">
+                <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden">
+                    {availableScopes.map(s => (
+                        <button
+                            key={s}
+                            onClick={() => setScope(s)}
+                            className={`px-3 py-1.5 text-sm font-medium transition-colors ${scope === s ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                        >
+                            {SCOPE_LABELS[s]}
+                        </button>
+                    ))}
+                </div>
 
-            {/* Kritik Konular KPI'ları */}
-            <KpiGrid columns={3} className="mb-6">
-                <KpiCard
-                    title="Açık Kritik Bulgular"
-                    value={data?.summary?.criticalFindings || 0}
-                    variant="critical"
-                    subtitle={`Kritik + Yüksek: ${data?.summary?.criticalHighFindings ?? 0}`}
-                    onClick={() => router.push('/findings?severity=CRITICAL')}
-                    icon={
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                    }
-                />
-                <KpiCard
-                    title="Gecikmiş Aksiyonlar"
-                    value={data?.summary?.overdueActions || 0}
-                    variant="high"
-                    subtitle="Filtreli aksiyon listesi"
-                    onClick={() => router.push('/actions?status=OVERDUE')}
-                    icon={
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    }
-                />
-                <KpiCard
-                    title="Toplam Kontrol Sayısı"
-                    value={data?.summary?.totalControls || 0}
-                    variant="primary"
-                    subtitle="Kontrol envanteri"
-                    onClick={() => router.push('/controls')}
-                    icon={
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
-                    }
-                />
-            </KpiGrid>
-
-            {/* Charts Row 1 - Trend & Heat Map */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                {/* Risk Trend Chart */}
-                <SectionCard title="Risk Trendi (Son 12 Ay)">
-                    <div className="h-72">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={trendData}>
-                                <defs>
-                                    <linearGradient id="colorHigh" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor={COLORS.high} stopOpacity={0.3} />
-                                        <stop offset="95%" stopColor={COLORS.high} stopOpacity={0} />
-                                    </linearGradient>
-                                    <linearGradient id="colorMedium" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor={COLORS.medium} stopOpacity={0.3} />
-                                        <stop offset="95%" stopColor={COLORS.medium} stopOpacity={0} />
-                                    </linearGradient>
-                                    <linearGradient id="colorLow" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor={COLORS.low} stopOpacity={0.3} />
-                                        <stop offset="95%" stopColor={COLORS.low} stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                                <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                                <YAxis tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                                <Tooltip
-                                    contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
-                                />
-                                <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '20px' }} />
-                                <Area type="monotone" dataKey="high" name="Yüksek" stackId="1" stroke={COLORS.high} fill="url(#colorHigh)" strokeWidth={2} />
-                                <Area type="monotone" dataKey="medium" name="Orta" stackId="1" stroke={COLORS.medium} fill="url(#colorMedium)" strokeWidth={2} />
-                                <Area type="monotone" dataKey="low" name="Düşük" stackId="1" stroke={COLORS.low} fill="url(#colorLow)" strokeWidth={2} />
-                            </AreaChart>
-                        </ResponsiveContainer>
+                {scope === 'UNIT' && (scopeOptions.data?.unit.directorates.length ?? 0) > 1 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        {scopeOptions.data!.unit.directorates.map(d => (
+                            <button
+                                key={d.id}
+                                onClick={() => toggleDirectorate(d.id)}
+                                className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${directorateIds.includes(d.id) ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-slate-200 text-slate-500'}`}
+                            >
+                                {d.name}
+                            </button>
+                        ))}
                     </div>
-                </SectionCard>
+                )}
 
-                {/* Risk Heat Map */}
-                <SectionCard title="Risk Isı Haritası (Olasılık × Etki)">
-                    <div className="flex gap-4 h-72">
-                        {/* Y Axis Label */}
-                        <div className="flex flex-col justify-between text-xs font-medium text-slate-400 py-1 pb-6">
-                            <span>5</span>
-                            <span>4</span>
-                            <span>3</span>
-                            <span>2</span>
-                            <span>1</span>
+                <div className="h-5 w-px bg-slate-200" />
+
+                <select value={year} onChange={(e) => setYear(Number(e.target.value))} className={inputCls}>
+                    {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+                <select value={month ?? ''} onChange={(e) => setMonth(e.target.value ? Number(e.target.value) : null)} className={inputCls}>
+                    <option value="">Tüm Yıl</option>
+                    {MONTH_NAMES.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                </select>
+
+                <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+                    <input type="checkbox" checked={includeCarryover} onChange={(e) => setIncludeCarryover(e.target.checked)} className="rounded border-slate-300 text-blue-600" />
+                    Devredenleri dahil et
+                </label>
+            </div>
+
+            {/* Özet göstergeler */}
+            <SummarySection summary={summary} scope={scope} router={router} />
+
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-6">
+                {/* Ana gövde — öncelikli işler (2/3) */}
+                <div className="xl:col-span-2 space-y-6">
+                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                        <div className="px-2 pt-2">
+                            <Tabs
+                                tabs={tabDefs.map(t => ({ key: t.key, label: t.label }))}
+                                activeTab={tab}
+                                onChange={(k) => setTab(k as DashboardWorkTab)}
+                            />
                         </div>
-
-                        {/* Heat Map Grid */}
-                        <div className="flex-1 flex flex-col">
-                            <div className="grid grid-cols-5 gap-1.5 flex-1">
-                                {heatmapData.map((row, rowIndex) =>
-                                    row.map((cell, colIndex) => (
-                                        <div
-                                            key={`${rowIndex}-${colIndex}`}
-                                            className={`rounded-lg flex items-center justify-center text-white font-bold text-base cursor-pointer transition-all hover:ring-2 ring-offset-2 ${getHeatmapColor(rowIndex, colIndex)} ${cell.count === 0 && 'opacity-60 saturate-50'}`}
-                                            onMouseEnter={() => setHoveredCell({ row: rowIndex, col: colIndex })}
-                                            onMouseLeave={() => setHoveredCell(null)}
-                                        >
-                                            {cell.count > 0 ? cell.count : ''}
+                        <div className="p-4">
+                            <PageResource resource={workItems} onRetry={workItems.reload} emptyTitle="Öncelikli iş bulunmuyor" emptyDescription="Seçili kapsam ve dönemde bekleyen bir işiniz yok.">
+                                {(data) => (
+                                    <>
+                                        <DataTable
+                                            columns={columns}
+                                            data={data.data}
+                                            rowKey={(i) => `${i.type}-${i.id}`}
+                                            emptyTitle="Öncelikli iş bulunmuyor"
+                                            storageKey="work-dashboard-items"
+                                        />
+                                        <div className="flex items-center justify-between px-1 pt-3 text-sm text-slate-500">
+                                            <span>{Math.min(data.data.length, data.pageSize)} / {data.totalCount} kayıt</span>
+                                            <div className="flex items-center gap-2">
+                                                {data.totalCount > data.pageSize && (
+                                                    <>
+                                                        <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>Önceki</Button>
+                                                        <span>{page} / {Math.max(1, Math.ceil(data.totalCount / data.pageSize))}</span>
+                                                        <Button size="sm" variant="outline" disabled={page >= Math.ceil(data.totalCount / data.pageSize)} onClick={() => setPage(p => p + 1)}>Sonraki</Button>
+                                                    </>
+                                                )}
+                                                <Link href={`/controls/agenda?year=${year}`} className="text-blue-600 font-semibold hover:underline ml-3">Tüm İşleri Gör →</Link>
+                                            </div>
                                         </div>
-                                    ))
+                                    </>
                                 )}
-                            </div>
-                            {/* X Axis Labels */}
-                            <div className="grid grid-cols-5 gap-1.5 mt-3">
-                                {[1, 2, 3, 4, 5].map(i => (
-                                    <div key={i} className="text-center text-xs font-medium text-slate-400">{i}</div>
-                                ))}
-                            </div>
-                            <div className="text-center text-[10px] font-semibold text-slate-400 uppercase tracking-widest mt-1">Etki Derecesi →</div>
-                        </div>
-
-                        {/* Y Axis Title */}
-                        <div className="flex items-center">
-                            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest transform -rotate-90 whitespace-nowrap">Olasılık →</span>
+                            </PageResource>
                         </div>
                     </div>
 
-                    {/* Hover Tooltip for Heatmap */}
-                    {hoveredCell && heatmapData[hoveredCell.row]?.[hoveredCell.col]?.risks?.length > 0 && (
-                        <div className="absolute bg-white border border-slate-200 shadow-xl rounded-xl p-4 mt-2 z-10 min-w-[250px] animate-in fade-in slide-in-from-bottom-2">
-                            <div className="flex items-center gap-2 mb-3">
-                                <div className={`w-3 h-3 rounded-full ${getHeatmapColor(hoveredCell.row, hoveredCell.col)}`} />
-                                <p className="text-sm font-bold text-slate-800">
-                                    Skor: {(5 - hoveredCell.row) * (hoveredCell.col + 1)} <span className="text-slate-400 font-normal">(O: {5 - hoveredCell.row}, E: {hoveredCell.col + 1})</span>
-                                </p>
-                            </div>
-                            <div className="space-y-2">
-                                {heatmapData[hoveredCell.row][hoveredCell.col].risks.slice(0, 5).map(risk => (
-                                    <Link key={risk.id} href={`/risks/${risk.id}`} className="block text-xs font-medium text-slate-600 hover:text-blue-600 truncate">
-                                        <span className="text-slate-400 mr-2">{risk.riskId}</span>
-                                        {risk.name}
-                                    </Link>
-                                ))}
-                                {heatmapData[hoveredCell.row][hoveredCell.col].risks.length > 5 && (
-                                    <p className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block mt-2">
-                                        +{heatmapData[hoveredCell.row][hoveredCell.col].risks.length - 5} risk daha
-                                    </p>
-                                )}
-                            </div>
-                        </div>
-                    )}
-                </SectionCard>
-            </div>
+                    <AnnualPlanSection resource={annualPlan} year={year} />
+                </div>
 
-            {/* Charts Row 2 - Pie Charts & Avg Trend */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                <SectionCard title="Risk Dağılımı">
-                    <div className="h-60">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie
-                                    data={pieData}
-                                    cx="50%" cy="50%"
-                                    innerRadius={65} outerRadius={85}
-                                    paddingAngle={5}
-                                    dataKey="value"
-                                    label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
-                                    labelLine={false}
-                                >
-                                    {pieData.map((_, index) => <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />)}
-                                </Pie>
-                                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
-                </SectionCard>
-
-                <SectionCard title="Kontrol Etkinliği">
-                    <div className="h-60">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie
-                                    data={controlData}
-                                    cx="50%" cy="50%"
-                                    innerRadius={65} outerRadius={85}
-                                    paddingAngle={5}
-                                    dataKey="value"
-                                    label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
-                                    labelLine={false}
-                                >
-                                    {controlData.map((_, index) => <Cell key={`cell-${index}`} fill={CONTROL_COLORS[index % CONTROL_COLORS.length]} />)}
-                                </Pie>
-                                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
-                </SectionCard>
-
-                <SectionCard title="Ort. Risk Skoru Trendi">
-                    <div className="h-60">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={trendData}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                                <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                                <YAxis domain={[0, 25]} tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
-                                <Line type="monotone" dataKey="avgScore" name="Ort. Skor" stroke={COLORS.primary} strokeWidth={3} dot={{ fill: COLORS.primary, strokeWidth: 2, r: 4 }} activeDot={{ r: 6, fill: COLORS.primary }} />
-                                {/* Not: Sabit "Risk İştahı" referans çizgisi kaldırıldı — sistemde
-                                    organizasyon geneli tek bir eşik değeri (skaler) tutulmuyor,
-                                    yalnızca risk bazlı isAboveAppetite bayrağı var. Yanıltıcı sabit
-                                    veri göstermek yerine çizgi kaldırıldı; "İştah Üzerinde" KPI kartı
-                                    (yukarıda) gerçek veriye dayalı eşdeğer bilgiyi zaten sağlıyor. */}
-                            </LineChart>
-                        </ResponsiveContainer>
-                    </div>
-                </SectionCard>
-            </div>
-
-            {/* Durum Dağılımları */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                <SectionCard title="Kontrol Testi Durum Dağılımı">
-                    <div className="space-y-2">
-                        {(data?.controlTestStatusDistribution ?? []).map(d => (
-                            <div key={d.status} className="flex items-center justify-between text-sm">
-                                <span className="text-slate-600">{CONTROL_TEST_STATUS_LABELS[d.status] ?? d.status}</span>
-                                <span className="font-bold tabular-nums text-slate-800">{d._count}</span>
-                            </div>
-                        ))}
-                        {(!data?.controlTestStatusDistribution || data.controlTestStatusDistribution.length === 0) && (
-                            <p className="text-xs text-slate-400">Veri yok</p>
-                        )}
-                    </div>
-                </SectionCard>
-
-                <SectionCard title="Mutabakat Workflow Durumu">
-                    <div className="space-y-2">
-                        {(data?.findingWorkflowStatusDistribution ?? []).map(d => (
-                            <div key={d.workflowStatus} className="flex items-center justify-between text-sm">
-                                <span className="text-slate-600">{WORKFLOW_STATUS_LABELS[d.workflowStatus] ?? d.workflowStatus}</span>
-                                <span className="font-bold tabular-nums text-slate-800">{d._count}</span>
-                            </div>
-                        ))}
-                        {(!data?.findingWorkflowStatusDistribution || data.findingWorkflowStatusDistribution.length === 0) && (
-                            <p className="text-xs text-slate-400">Veri yok</p>
-                        )}
-                    </div>
-                </SectionCard>
-
-                <SectionCard title="Takip Çalışması Sonuç Dağılımı">
-                    <div className="space-y-2">
-                        {(data?.followUpResultDistribution ?? []).map(d => (
-                            <div key={d.result} className="flex items-center justify-between text-sm">
-                                <span className="text-slate-600">{FOLLOWUP_RESULT_LABELS[d.result] ?? d.result}</span>
-                                <span className="font-bold tabular-nums text-slate-800">{d._count}</span>
-                            </div>
-                        ))}
-                        {(!data?.followUpResultDistribution || data.followUpResultDistribution.length === 0) && (
-                            <p className="text-xs text-slate-400">Veri yok</p>
-                        )}
-                    </div>
-                </SectionCard>
-            </div>
-
-            {/* Direktörlük Bazlı Dağılımlar */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <SectionCard title="Direktörlük Bazlı Açık Bulgular">
-                    <div className="space-y-2">
-                        {(data?.findingsByDirectorate ?? []).map(d => (
-                            <div key={d.directorateId ?? 'none'} className="flex items-center justify-between text-sm">
-                                <span className="text-slate-600">{d.directorateName}</span>
-                                <span className="font-bold tabular-nums text-slate-800">{d.count}</span>
-                            </div>
-                        ))}
-                        {(!data?.findingsByDirectorate || data.findingsByDirectorate.length === 0) && (
-                            <p className="text-xs text-slate-400">Açık bulgu yok</p>
-                        )}
-                    </div>
-                </SectionCard>
-
-                <SectionCard title="Direktörlük Bazlı Gecikmiş Aksiyonlar">
-                    <div className="space-y-2">
-                        {(data?.overdueActionsByDirectorate ?? []).map(d => (
-                            <div key={d.directorateId ?? 'none'} className="flex items-center justify-between text-sm">
-                                <span className="text-slate-600">{d.directorateName}</span>
-                                <span className="font-bold tabular-nums text-red-600">{d.count}</span>
-                            </div>
-                        ))}
-                        {(!data?.overdueActionsByDirectorate || data.overdueActionsByDirectorate.length === 0) && (
-                            <p className="text-xs text-slate-400">Gecikmiş aksiyon yok</p>
-                        )}
-                    </div>
-                </SectionCard>
-            </div>
-
-            {/* Quick Actions Footer */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Link href="/risks/new" className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all group">
-                    <div className="p-3 bg-blue-50 text-blue-600 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                    </div>
-                    <span className="font-semibold text-slate-700">Yeni Risk</span>
-                </Link>
-                <Link href="/controls/new" className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-emerald-300 hover:shadow-md transition-all group">
-                    <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                    </div>
-                    <span className="font-semibold text-slate-700">Yeni Kontrol</span>
-                </Link>
-                <Link href="/findings/new" className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-violet-300 hover:shadow-md transition-all group">
-                    <div className="p-3 bg-violet-50 text-violet-600 rounded-lg group-hover:bg-violet-600 group-hover:text-white transition-colors">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                    </div>
-                    <span className="font-semibold text-slate-700">Yeni Bulgu</span>
-                </Link>
-                <Link href="/reports" className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-slate-400 hover:shadow-md transition-all group">
-                    <div className="p-3 bg-slate-100 text-slate-600 rounded-lg group-hover:bg-slate-700 group-hover:text-white transition-colors">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                    </div>
-                    <span className="font-semibold text-slate-700">Raporlar</span>
-                </Link>
+                {/* Sağ panel — onaylar + kritik konular + takvim (1/3) */}
+                <div className="space-y-6">
+                    <ApprovalsPanel resource={approvals} />
+                    <CriticalIssuesPanel resource={criticalIssues} />
+                    <UpcomingPanel resource={upcoming} days={calendarDays} onDaysChange={setCalendarDays} />
+                </div>
             </div>
         </PageShell>
+    );
+}
+
+// ─── Ortak "yükleniyor/hata/boş" sarmalayıcı ────────────────────────────────
+
+function PageResource<T>({ resource, onRetry, emptyTitle, emptyDescription, children }: {
+    resource: { data: T | null; loading: boolean; error: string | null };
+    onRetry: () => void;
+    emptyTitle: string;
+    emptyDescription?: string;
+    children: (data: T) => React.ReactNode;
+}) {
+    if (resource.loading && !resource.data) return <LoadingState compact message="Yükleniyor..." />;
+    if (resource.error) return <ErrorState compact description={resource.error} onRetry={onRetry} />;
+    if (!resource.data) return <EmptyState title={emptyTitle} description={emptyDescription} />;
+    return <>{children(resource.data)}</>;
+}
+
+// ─── Özet göstergeler ────────────────────────────────────────────────────────
+
+function SummarySection({ summary, scope, router }: {
+    summary: ReturnType<typeof useDashboardResource<DashboardSummary>>;
+    scope: DashboardScope;
+    router: ReturnType<typeof useRouter>;
+}) {
+    if (summary.loading && !summary.data) {
+        return <div className="grid grid-cols-2 md:grid-cols-4 gap-4"><LoadingState compact message="Göstergeler yükleniyor..." /></div>;
+    }
+    if (summary.error) {
+        return <ErrorState compact description={summary.error} onRetry={summary.reload} />;
+    }
+    const d = summary.data;
+    if (!d) return null;
+    void scope;
+
+    return (
+        <KpiGrid columns={4}>
+            <KpiCard
+                title="Gecikmiş İşler" value={d.overdue?.total ?? '—'} variant="critical"
+                subtitle={d.overdue ? `Test: ${d.overdue.tests ?? 0} · Aksiyon: ${d.overdue.actions ?? 0} · Takip: ${d.overdue.followUps ?? 0}` : 'Yetkiniz yok'}
+                onClick={() => router.push('/controls/agenda?overdue=true')}
+                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+            />
+            <KpiCard
+                title="Onay Bekleyen" value={d.pendingApproval.total} variant="warning"
+                subtitle="Onaylar sayfasına git"
+                onClick={() => router.push('/approvals')}
+                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+            />
+            <KpiCard
+                title="Bu Hafta Vadesi Gelen" value={d.dueThisWeek?.total ?? '—'} variant="info"
+                subtitle={d.dueThisWeek ? `${fmtDate(d.dueThisWeek.from)} – ${fmtDate(d.dueThisWeek.to)}` : 'Yetkiniz yok'}
+                onClick={() => router.push('/controls/agenda?days=7')}
+                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>}
+            />
+            <KpiCard
+                title="Kritik / Yüksek Açık Bulgu" value={d.criticalHighFindings.total ?? '—'} variant="violet"
+                subtitle={d.criticalHighFindings.total === null ? (d.criticalHighFindings.reason || 'Yetkiniz yok') : 'Detay için tıklayın'}
+                onClick={() => router.push('/findings?severity=CRITICAL')}
+                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
+            />
+        </KpiGrid>
+    );
+}
+
+// ─── Onay Bekleyenler ────────────────────────────────────────────────────────
+
+function ApprovalsPanel({ resource }: { resource: ReturnType<typeof useDashboardResource<DashboardApprovals>> }) {
+    return (
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+            <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-slate-800">Onay Bekleyenler</h3>
+                {resource.data && <StatusBadge variant="warning">{resource.data.total}</StatusBadge>}
+            </div>
+            <PageResource resource={resource} onRetry={resource.reload} emptyTitle="Onay bekleyen kayıt yok">
+                {(d) => (
+                    <>
+                        <div className="space-y-1">
+                            <ApprovalRow label="Kontrol testi onayı" count={d.byType.controlTest.count} href={d.byType.controlTest.href} />
+                            <ApprovalRow label="Takip değerlendirmesi" count={d.byType.followUp.count} href={d.byType.followUp.href} />
+                            <ApprovalRow label="Bulgu mutabakatı" count={d.byType.reconciliation.count} href={d.byType.reconciliation.href} />
+                        </div>
+                        <Link href="/approvals" className="block text-center mt-3 text-sm font-semibold text-blue-600 hover:underline">Onayları İncele →</Link>
+                    </>
+                )}
+            </PageResource>
+        </div>
+    );
+}
+
+function ApprovalRow({ label, count, href }: { label: string; count: number; href: string }) {
+    return (
+        <Link href={href} className="flex items-center justify-between px-2 py-2 rounded-lg hover:bg-slate-50 text-sm">
+            <span className="text-slate-600">{label}</span>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${count > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-400'}`}>{count}</span>
+        </Link>
+    );
+}
+
+// ─── Kritik Konular ─────────────────────────────────────────────────────────
+
+function CriticalIssuesPanel({ resource }: { resource: ReturnType<typeof useDashboardResource<DashboardCriticalIssue[]>> }) {
+    return (
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+            <h3 className="text-sm font-bold text-slate-800 mb-3">Kritik Konular</h3>
+            <PageResource resource={resource} onRetry={resource.reload} emptyTitle="Kritik konu yok" emptyDescription="Şu an işlem gerektiren bir durum bulunmuyor.">
+                {(issues) => issues.length === 0 ? (
+                    <EmptyState title="Kritik konu yok" description="Şu an işlem gerektiren bir durum bulunmuyor." />
+                ) : (
+                    <div className="space-y-1">
+                        {issues.map(issue => (
+                            <Link key={issue.key} href={issue.href} className="flex items-start gap-2.5 px-2 py-2 rounded-lg hover:bg-slate-50">
+                                <span className={`w-1 self-stretch rounded-full ${issue.severity === 'critical' ? 'bg-red-500' : issue.severity === 'high' ? 'bg-orange-500' : 'bg-amber-400'}`} />
+                                <span className="text-sm text-slate-600 flex-1">{issue.count} {issue.label}</span>
+                                <StatusBadge variant={ISSUE_SEVERITY_VARIANT[issue.severity]} size="sm" dot>{issue.count}</StatusBadge>
+                            </Link>
+                        ))}
+                    </div>
+                )}
+            </PageResource>
+        </div>
+    );
+}
+
+// ─── Yıllık Kontrol Planı ────────────────────────────────────────────────────
+
+function AnnualPlanSection({ resource, year }: { resource: ReturnType<typeof useDashboardResource<DashboardAnnualPlan>>; year: number }) {
+    const manageLink = (
+        <PermissionGate permission="control:*">
+            <Link href="/controls" className="text-xs font-semibold text-blue-600 hover:underline">Yıllık Kapsamı Yönet →</Link>
+        </PermissionGate>
+    );
+
+    return (
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+            <div className="flex items-center justify-between mb-3">
+                <div>
+                    <h3 className="text-sm font-bold text-slate-800">Yıllık Kontrol Planı</h3>
+                    <p className="text-xs text-slate-400">{year} · Ay filtresinden bağımsız, seçili kapsamın tüm yılı</p>
+                </div>
+                <Link href={`/controls/agenda?year=${year}`} className="text-sm font-semibold text-blue-600 hover:underline">Kontrol Takip Panosu →</Link>
+            </div>
+            <PageResource resource={resource} onRetry={resource.reload} emptyTitle="Veri yok">
+                {(d) => {
+                    // Veri yükleme HATASI zaten PageResource/ErrorState tarafından ayrı
+                    // gösteriliyor (retry'lı) — buraya yalnızca BAŞARILI ama boş/kısmi
+                    // sonuçlar düşer, üç ayrı durum olarak ele alınır (Madde 2).
+                    if (d.controlCount === 0) {
+                        return (
+                            <div>
+                                <EmptyState
+                                    title="Bu yıl için kontrol kapsamı henüz oluşturulmamış"
+                                    description="Seçili kapsamda hiçbir kontrol bu yılın planına eklenmemiş."
+                                    className="py-6"
+                                />
+                                <div className="text-center -mt-2 mb-2">{manageLink}</div>
+                            </div>
+                        );
+                    }
+                    if (d.plannedTaskCount === 0) {
+                        return (
+                            <div className="py-4">
+                                <EmptyState
+                                    title="Kapsamdaki kontroller için task planlaması eksik"
+                                    description={`${d.controlCount} kontrol yıl kapsamına alınmış ama henüz hiçbir dönem task'ı oluşmamış.`}
+                                    className="py-2"
+                                />
+                                <div className="text-center mt-1">{manageLink}</div>
+                            </div>
+                        );
+                    }
+
+                    const total = d.notStarted + d.inProgress + d.pendingApproval + d.completed;
+                    const seg = (n: number) => total > 0 ? (n / total) * 100 : 0;
+                    return (
+                        <div>
+                            <div className="flex h-3 rounded-full overflow-hidden bg-slate-100">
+                                <div className="bg-emerald-500" style={{ width: `${seg(d.completed)}%` }} />
+                                <div className="bg-amber-400" style={{ width: `${seg(d.pendingApproval)}%` }} />
+                                <div className="bg-blue-500" style={{ width: `${seg(d.inProgress)}%` }} />
+                                <div className="bg-slate-300" style={{ width: `${seg(d.notStarted)}%` }} />
+                            </div>
+                            <div className="flex flex-wrap items-center gap-4 mt-3 text-xs">
+                                <Legend color="bg-emerald-500" label="Onaylandı" value={d.completed} />
+                                <Legend color="bg-amber-400" label="Onayda" value={d.pendingApproval} />
+                                <Legend color="bg-blue-500" label="Devam ediyor" value={d.inProgress} />
+                                <Legend color="bg-slate-300" label="Başlamadı" value={d.notStarted} />
+                                {d.cancelled > 0 && <Legend color="bg-slate-100 border border-slate-300" label="İptal/Kapsam Dışı" value={d.cancelled} />}
+                            </div>
+                            <div className="flex items-center justify-between mt-2">
+                                <p className="text-xs text-slate-400">
+                                    {d.controlCount} kontrol · {d.plannedTaskCount} task
+                                    {d.completionRate !== null && ` · %${d.completionRate} tamamlanma`}
+                                </p>
+                                {manageLink}
+                            </div>
+                        </div>
+                    );
+                }}
+            </PageResource>
+        </div>
+    );
+}
+
+function Legend({ color, label, value }: { color: string; label: string; value: number }) {
+    return (
+        <span className="flex items-center gap-1.5 text-slate-600">
+            <span className={`w-2.5 h-2.5 rounded-full ${color}`} />
+            {label} <span className="font-bold text-slate-800">{value}</span>
+        </span>
+    );
+}
+
+// ─── Yaklaşan Takvim ─────────────────────────────────────────────────────────
+
+function UpcomingPanel({ resource, days, onDaysChange }: {
+    resource: ReturnType<typeof useDashboardResource<DashboardUpcoming>>;
+    days: 7 | 30;
+    onDaysChange: (d: 7 | 30) => void;
+}) {
+    return (
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+            <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-slate-800">Yaklaşan Takvim</h3>
+                <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden text-xs">
+                    {[7, 30].map(n => (
+                        <button key={n} onClick={() => onDaysChange(n as 7 | 30)}
+                            className={`px-2 py-1 font-medium ${days === n ? 'bg-blue-600 text-white' : 'bg-white text-slate-500'}`}>
+                            {n} gün
+                        </button>
+                    ))}
+                </div>
+            </div>
+            <PageResource resource={resource} onRetry={resource.reload} emptyTitle="Yaklaşan iş yok">
+                {(d) => (
+                    <>
+                        <p className="text-xs text-slate-400 mb-2">{fmtDate(d.range.from)} – {fmtDate(d.range.to)}</p>
+                        {d.days.length === 0 ? (
+                            <EmptyState title="Yaklaşan iş yok" description={`Önümüzdeki ${days} günde planlanmış iş bulunmuyor.`} />
+                        ) : (
+                            <div className="space-y-2">
+                                {d.days.map(group => (
+                                    <div key={group.date} className="flex items-start gap-3">
+                                        <span className="text-xs font-semibold text-slate-500 w-20 pt-0.5">{new Date(group.date).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' })}</span>
+                                        <div className="flex-1 space-y-1">
+                                            {group.items.map(item => (
+                                                <Link key={`${item.type}-${item.ref}`} href={item.href} className="flex items-center gap-2 text-sm hover:text-blue-600">
+                                                    <span className="text-slate-400">{TYPE_LABELS[item.type]}</span>
+                                                    <span className="text-slate-700 truncate">{item.title}</span>
+                                                </Link>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </>
+                )}
+            </PageResource>
+        </div>
     );
 }

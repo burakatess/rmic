@@ -1,0 +1,31 @@
+{
+  "generatedAt": "2026-09-16T13:49:38.725Z",
+  "mode": "DRY-RUN",
+  "summary": {
+    "totalControls": 31,
+    "scopesCreated": 0,
+    "scopesExisting": 0,
+    "testsMigrated": 0,
+    "testsUnresolved": 2
+  },
+  "unresolved": [
+    {
+      "testId": "cmtla83590077d3vwjwlkxws8",
+      "testNo": "TST-2026-0158",
+      "controlId": "cmtla831b001ld3vwtngsr0s0",
+      "controlCode": "K-2026-0024",
+      "year": 2026,
+      "plannedDate": "2026-01-29T21:00:00.000Z",
+      "reason": "Frekans 'AD_HOC' için güvenilir dönem çıkarımı yok"
+    },
+    {
+      "testId": "cmtla835a0078d3vwqqzp2qyb",
+      "testNo": "TST-2026-0159",
+      "controlId": "cmtla831c001md3vwqs61t0fq",
+      "controlCode": "K-2026-0025",
+      "year": 2026,
+      "plannedDate": "2026-02-26T21:00:00.000Z",
+      "reason": "Frekans 'AD_HOC' için güvenilir dönem çıkarımı yok"
+    }
+  ]
+}

@@ -1,7 +1,14 @@
 // AI modülü — çalışma zamanı yapılandırması. Kod tabanının geneli gibi doğrudan
 // process.env okur (bkz. PrismaService). Tek değişiklik noktası: backend/.env
 
-export const AI_PROMPT_VERSION = '2026-09-07.1';
+export const AI_PROMPT_VERSION = '2026-09-08.1';
+
+// Kontrol & Kanıt Değerlendirme — yapılandırılmış çıktı şemasının sürümü.
+// Şema değişince BUMP et; eski AiEvalMessage kayıtları kendi sürümleriyle kalır,
+// FE eski/yeni kartı schemaVersion'a göre seçer (geriye dönük veri taşıma yok).
+export const EVAL_OUTPUT_SCHEMA_VERSION = '2026-09-10.1';
+// Bu şema sürümünü üreten prompt şablonunun sürümü (denetim izinde saklanır).
+export const EVAL_PROMPT_VERSION = '2026-09-10.1';
 
 export type AiTier = 'heavy' | 'light' | 'vision';
 

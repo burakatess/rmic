@@ -36,6 +36,6 @@ import { AiEvalService } from './ai-eval.service';
         AiQueryService,
         AiEvalService,
     ],
-    exports: [AiProviderService, AiAssessmentService],
+    exports: [AiProviderService, AiAssessmentService, AiEmbeddingService],
 })
 export class AiModule {}

@@ -11,7 +11,6 @@ import {
     DataTable,
     StatusBadge,
     Button,
-    ConfirmDialog,
     KpiCard,
     KpiGrid,
     QuickFilterBar,
@@ -22,6 +21,9 @@ import {
 import type { ColumnDef, ActiveFilterChip, QuickFilterItem, AdvancedFilterField } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import ImportControlModal from '@/components/modals/ImportControlModal';
+import ScopeAddModal from '@/components/modals/ScopeAddModal';
+import CopyScopeModal from '@/components/modals/CopyScopeModal';
+import { PermissionGate } from '@/components/auth/AuthProvider';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -43,6 +45,7 @@ interface Control {
     linkedFindings: { id: string; findingId: string }[];
     linkedActions: { id: string; actionId: string }[];
     status: 'ACTIVE' | 'PASSIVE';
+    scopeYears: number[];
 }
 
 // ─── Config Maps ──────────────────────────────────────────────────────────────
@@ -91,9 +94,12 @@ export default function ControlInventoryPage() {
     const [controls, setControls] = useState<Control[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
-    const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-    const [deleting, setDeleting] = useState(false);
     const [importModalOpen, setImportModalOpen] = useState(false);
+    const [scopeModalOpen, setScopeModalOpen] = useState(false);
+    const [copyModalOpen, setCopyModalOpen] = useState(false);
+    const [yearFilter, setYearFilter] = useState<number | 'all'>('all');
+    const [availableYears, setAvailableYears] = useState<number[]>([]);
+    const [togglingId, setTogglingId] = useState<string | null>(null);
 
     // Filtering states
     const [searchQuery, setSearchQuery] = useState('');
@@ -111,7 +117,7 @@ export default function ControlInventoryPage() {
         try {
             setLoading(true);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const data = await api.getControls() as any;
+            const data = await api.getControls(yearFilter === 'all' ? undefined : { year: yearFilter }) as any;
             const list = Array.isArray(data) ? data : (data.data || []);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const transformed: Control[] = list.map((c: any) => ({
@@ -138,6 +144,7 @@ export default function ControlInventoryPage() {
                 linkedFindings: (c.findings || []).map((f: any) => ({ id: f.id, findingId: f.findingId })).filter((f: any) => f.id && f.findingId),
                 linkedActions: [],
                 status: (c.status || 'ACTIVE') as 'ACTIVE' | 'PASSIVE',
+                scopeYears: Array.isArray(c.scopeYears) ? c.scopeYears : [],
             }));
             setControls(transformed);
         } catch (err) {
@@ -147,9 +154,13 @@ export default function ControlInventoryPage() {
             setLoading(false);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [yearFilter]);
 
     useEffect(() => { fetchControls(); }, [fetchControls]);
+
+    useEffect(() => {
+        api.getScopeYears().then(r => setAvailableYears(r.years)).catch(() => { });
+    }, []);
 
     // ── Quick filter predicate'leri (eski preset mantığı birebir korunur) ─────
 
@@ -370,18 +381,17 @@ export default function ControlInventoryPage() {
     const handleSelectAll = () => {
         setSelectedRows(prev => prev.size === filteredControls.length ? new Set() : new Set(filteredControls.map(c => c.id)));
     };
-    const handleBulkDelete = async () => {
-        setDeleting(true);
+    const handleToggleStatus = async (c: Control) => {
+        setTogglingId(c.id);
         try {
-            for (const id of selectedRows) await api.deleteControl(id);
-            setControls(prev => prev.filter(c => !selectedRows.has(c.id)));
-            setSelectedRows(new Set());
-            setConfirmDeleteOpen(false);
-            success('Başarılı', `${selectedRows.size} kontrol silindi.`);
+            if (c.status === 'ACTIVE') await api.passivateControl(c.id);
+            else await api.activateControl(c.id);
+            setControls(prev => prev.map(x => x.id === c.id ? { ...x, status: x.status === 'ACTIVE' ? 'PASSIVE' : 'ACTIVE' } : x));
+            success('Başarılı', c.status === 'ACTIVE' ? 'Kontrol pasifleştirildi.' : 'Kontrol aktifleştirildi.');
         } catch {
-            showError('Hata', 'Bazı kontroller silinemedi.');
+            showError('Hata', 'Durum güncellenemedi.');
         } finally {
-            setDeleting(false);
+            setTogglingId(null);
         }
     };
 
@@ -486,6 +496,16 @@ export default function ControlInventoryPage() {
             },
         },
         {
+            key: 'scopeYears', header: 'Kapsam Yılları', defaultWidth: 140, hideable: true,
+            render: (c) => c.scopeYears.length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                    {c.scopeYears.map(y => (
+                        <span key={y} className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">{y}</span>
+                    ))}
+                </div>
+            ) : <span className="text-slate-300 text-xs">Kapsamda değil</span>,
+        },
+        {
             key: 'status', header: 'Durum', defaultWidth: 90,
             filter: { type: 'select', options: Object.entries(statusLabel).map(([k, v]) => ({ value: k, label: v.label })) },
             render: (c) => {
@@ -494,7 +514,7 @@ export default function ControlInventoryPage() {
             },
         },
         {
-            key: 'actions', header: 'İşlemler', defaultWidth: 110,
+            key: 'actions', header: 'İşlemler', defaultWidth: 140,
             render: (c) => (
                 <div className="flex items-center gap-1">
                     <Link href={`/controls/${c.id}`} className="p-1.5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="Görüntüle">
@@ -503,10 +523,22 @@ export default function ControlInventoryPage() {
                     <Link href={`/controls/${c.id}/edit`} className="p-1.5 rounded text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors" title="Düzenle">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                     </Link>
+                    <PermissionGate permission="control:*">
+                        <button
+                            onClick={() => handleToggleStatus(c)}
+                            disabled={togglingId === c.id}
+                            className="p-1.5 rounded text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors disabled:opacity-40"
+                            title={c.status === 'ACTIVE' ? 'Pasifleştir' : 'Aktifleştir'}
+                        >
+                            {c.status === 'ACTIVE'
+                                ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+                                : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+                        </button>
+                    </PermissionGate>
                 </div>
             ),
         },
-    ], []);
+    ], [togglingId]);
 
     return (
         <PageShell>
@@ -517,11 +549,18 @@ export default function ControlInventoryPage() {
                 actions={
                     <div className="flex items-center gap-2">
                         {selectedRows.size > 0 && (
-                            <Button variant="danger" size="sm" onClick={() => setConfirmDeleteOpen(true)}
-                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}>
-                                {selectedRows.size} Seçiliyi Sil
-                            </Button>
+                            <PermissionGate permission="control:*">
+                                <Button variant="outline" size="sm" onClick={() => setScopeModalOpen(true)}
+                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>}>
+                                    {selectedRows.size} Kontrolü Kapsama Al
+                                </Button>
+                            </PermissionGate>
                         )}
+                        <PermissionGate permission="control:*">
+                            <Button variant="outline" onClick={() => setCopyModalOpen(true)} icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>}>
+                                Önceki Yıldan Kopyala
+                            </Button>
+                        </PermissionGate>
                         <Button variant="outline" onClick={() => setImportModalOpen(true)} icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>}>
                             Dışarıdan Yükle
                         </Button>
@@ -533,6 +572,28 @@ export default function ControlInventoryPage() {
                     </div>
                 }
             />
+
+            {/* Yıl kapsamı seçici — "Tüm Envanter" = filtresiz kalıcı ana envanter */}
+            <div className="flex items-center gap-2 -mt-2">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Kapsam:</span>
+                <div className="flex flex-wrap gap-1.5">
+                    <button
+                        onClick={() => setYearFilter('all')}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold border transition-colors ${yearFilter === 'all' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}
+                    >
+                        Tüm Envanter
+                    </button>
+                    {availableYears.map(y => (
+                        <button
+                            key={y}
+                            onClick={() => setYearFilter(y)}
+                            className={`px-3 py-1 rounded-lg text-xs font-bold border transition-colors ${yearFilter === y ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300'}`}
+                        >
+                            {y}
+                        </button>
+                    ))}
+                </div>
+            </div>
 
             {/* KPI'lar — click-to-filter */}
             <KpiGrid columns={5}>
@@ -624,15 +685,17 @@ export default function ControlInventoryPage() {
                 }
             />
 
-            <ConfirmDialog
-                open={confirmDeleteOpen}
-                onClose={() => setConfirmDeleteOpen(false)}
-                onConfirm={handleBulkDelete}
-                title="Kontroller Silinecek"
-                message={`Seçilen ${selectedRows.size} kontrol kalıcı olarak silinecektir.`}
-                confirmLabel="Evet, Sil"
-                loading={deleting}
-                variant="danger"
+            <ScopeAddModal
+                open={scopeModalOpen}
+                onClose={() => setScopeModalOpen(false)}
+                controlIds={Array.from(selectedRows)}
+                onSuccess={() => { setSelectedRows(new Set()); fetchControls(); }}
+            />
+
+            <CopyScopeModal
+                open={copyModalOpen}
+                onClose={() => setCopyModalOpen(false)}
+                onSuccess={fetchControls}
             />
 
             <ImportControlModal

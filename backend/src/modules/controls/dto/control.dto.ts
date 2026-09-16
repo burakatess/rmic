@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsEnum, IsBoolean, IsArray, IsIn, IsDateString } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsEnum, IsBoolean, IsArray, IsIn, IsDateString, IsInt, MaxLength } from 'class-validator';
 import { EmptyToUndefined } from '../../../common/decorators';
 
 export enum ControlType { IT_GENERAL = 'IT_GENERAL', IT_APPLICATION = 'IT_APPLICATION', OPERATIONAL = 'OPERATIONAL', FINANCIAL = 'FINANCIAL', COMPLIANCE = 'COMPLIANCE', BT = 'BT', BT_DISI = 'BT_DISI' }
@@ -24,10 +24,10 @@ export class CreateControlDto {
     @IsOptional() @IsString() notes?: string;
     @IsOptional() @IsArray() @IsString({ each: true }) selectedMonths?: string[];
     @IsOptional() @IsArray() @IsString({ each: true }) months?: string[]; // selectedMonths alias
-    @IsOptional() @IsString() ownerId?: string;
-    @IsOptional() @IsString() testPerformerId?: string;
-    @IsOptional() @IsString() reviewerId?: string;
-    @IsOptional() @IsString() secondControllerId?: string;
+    // ownerId/testPerformerId/reviewerId/secondControllerId KASITLI OLARAK YOK —
+    // test kontrolcü ataması artık ana kontrolün değil, yıllık kapsamın (bkz.
+    // control-scope.dto.ts::AddScopeDto) özelliği. contactPersonId (LDAP bildirim
+    // kişisi) ayrı bir kavram olduğu için kalır.
     @IsOptional() @IsString() contactPersonId?: string;
     @IsOptional() @IsBoolean() isActive?: boolean;
     // Prisma'ya doğrudan yazılmaz, servis 'ACTIVE'/'PASSIVE' kararını isActive'den türetir — 'DRAFT' geçişi de kabul edilir.
@@ -52,11 +52,17 @@ export class UpdateControlDto {
     @IsOptional() @IsString() notes?: string;
     @IsOptional() @IsArray() @IsString({ each: true }) selectedMonths?: string[];
     @IsOptional() @IsArray() @IsString({ each: true }) months?: string[];
-    @IsOptional() @IsString() ownerId?: string;
-    @IsOptional() @IsString() testPerformerId?: string;
-    @IsOptional() @IsString() reviewerId?: string;
-    @IsOptional() @IsString() secondControllerId?: string;
+    // ownerId/testPerformerId/reviewerId/secondControllerId KASITLI OLARAK YOK —
+    // bkz. CreateControlDto üstündeki not.
     @IsOptional() @IsString() contactPersonId?: string;
     @IsOptional() @IsBoolean() isActive?: boolean;
     @IsOptional() @IsIn(['ACTIVE', 'PASSIVE', 'DRAFT']) status?: string;
+}
+
+export class SaveTestDraftDto {
+    @IsOptional() @IsString() @MaxLength(10000) resultText?: string;
+    @IsOptional() @IsString() @MaxLength(10000) evidenceSummary?: string;
+    @IsOptional() @IsIn(['BULGUSU_YOK', 'BULGUSU_VAR']) findingStatus?: string;
+    @IsOptional() @IsArray() stepObservations?: Record<string, unknown>[];
+    @IsInt() contentVersion: number;
 }

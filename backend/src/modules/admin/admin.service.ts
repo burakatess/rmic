@@ -22,7 +22,7 @@ export class AdminService {
 
         const users = await this.prisma.user.findMany({
             where,
-            include: { role: true },
+            include: { role: true, directorateMemberships: { select: { directorateId: true } } },
             orderBy: { createdAt: 'desc' },
         });
 
@@ -32,13 +32,54 @@ export class AdminService {
     async findUserById(id: string) {
         const user = await this.prisma.user.findUnique({
             where: { id },
-            include: { role: true },
+            include: {
+                role: true,
+                directorateMemberships: { include: { directorate: { select: { id: true, name: true } } } },
+            },
         });
 
         if (!user) throw new NotFoundException('User not found');
 
         const { passwordHash, ...result } = user;
         return result;
+    }
+
+    // "Birimim" kapsamı için kullanıcı ↔ direktörlük yetkilendirmesi. Tam
+    // liste değişimi (set-replace), transaction + audit (Madde 6).
+    async setUserDirectorates(id: string, directorateIds: string[], updatedBy: string) {
+        const user = await this.prisma.user.findUnique({ where: { id } });
+        if (!user) throw new NotFoundException('User not found');
+
+        const uniqueIds = [...new Set(directorateIds)];
+        if (uniqueIds.length > 0) {
+            const found = await this.prisma.directorate.findMany({ where: { id: { in: uniqueIds } }, select: { id: true } });
+            if (found.length !== uniqueIds.length) {
+                throw new NotFoundException('Geçersiz direktörlük seçildi');
+            }
+        }
+
+        const before = await this.prisma.directorateMembership.findMany({ where: { userId: id }, select: { directorateId: true } });
+
+        await this.prisma.$transaction(async (tx) => {
+            await tx.directorateMembership.deleteMany({ where: { userId: id } });
+            if (uniqueIds.length > 0) {
+                await tx.directorateMembership.createMany({
+                    data: uniqueIds.map((directorateId) => ({ userId: id, directorateId, createdById: updatedBy })),
+                });
+            }
+            await tx.auditLog.create({
+                data: {
+                    userId: updatedBy,
+                    action: 'UPDATE',
+                    entityType: 'DirectorateMembership',
+                    entityId: id,
+                    oldValue: { directorateIds: before.map(b => b.directorateId) },
+                    newValue: { directorateIds: uniqueIds },
+                },
+            });
+        });
+
+        return this.findUserById(id);
     }
 
     async createUser(data: {

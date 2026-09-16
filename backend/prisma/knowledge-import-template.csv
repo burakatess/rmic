@@ -1,0 +1,3 @@
+kind,code,title,body,category,tags,sourceRef,effectiveDate,isActive
+POLICY,POL-BT-01,Bilgi Güvenliği Politikası,Bu politika ... (AI'nin uyum değerlendirmesinde referans alacağı tam metin veya odaklı özet).,Bilgi Teknolojileri,"erişim;ISO 27001;KVKK",POL-BT-01 Rev.3 (Yön. Kurulu 2025/14),2025-01-01,true
+RUBRIC,RUB-BULGU-DERECE,Bulgu Önem Derecesi Rehberi,CRITICAL: yasal yaptırım riski... HIGH: kontrol büyük ölçüde işlemiyor... MEDIUM: ... LOW: ...,İç Kontrol,derecelendirme,İç Kontrol Metodolojisi Ek-2,,true

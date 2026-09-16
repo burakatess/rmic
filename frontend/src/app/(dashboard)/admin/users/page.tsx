@@ -21,6 +21,7 @@ interface User {
         id: string;
         name: string;
     };
+    directorateMemberships?: { directorateId: string }[];
 }
 
 interface Role {
@@ -28,6 +29,12 @@ interface Role {
     name: string;
     description?: string;
     _count?: { users: number };
+}
+
+interface Directorate {
+    id: string;
+    name: string;
+    isActive: boolean;
 }
 
 const roleLabels: Record<string, string> = {
@@ -43,6 +50,7 @@ export default function UsersPage() {
     const { success, error: showError } = useToast();
     const [users, setUsers] = useState<User[]>([]);
     const [roles, setRoles] = useState<Role[]>([]);
+    const [directorates, setDirectorates] = useState<Directorate[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [roleFilter, setRoleFilter] = useState('');
@@ -60,6 +68,7 @@ export default function UsersPage() {
         lastName: '',
         department: '',
         roleId: '',
+        directorateIds: [] as string[],
     });
     const [resettingPasswordUser, setResettingPasswordUser] = useState<User | null>(null);
     const [newPassword, setNewPassword] = useState('');
@@ -70,9 +79,10 @@ export default function UsersPage() {
 
     const loadData = async () => {
         try {
-            const [usersRes, rolesRes] = await Promise.all([
+            const [usersRes, rolesRes, directoratesRes] = await Promise.all([
                 api.request<User[]>('/admin/users'),
                 api.request<Role[]>('/admin/roles'),
+                api.request<Directorate[]>('/directorates'),
             ]);
             setUsers(usersRes);
             // Filter only active roles (4 new roles)
@@ -80,6 +90,7 @@ export default function UsersPage() {
                 ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR', 'AUDITEE'].includes(r.name)
             );
             setRoles(activeRoles);
+            setDirectorates(directoratesRes.filter(d => d.isActive));
         } catch (error) {
             console.error('Failed to load data:', error);
         } finally {
@@ -87,12 +98,22 @@ export default function UsersPage() {
         }
     };
 
+    const toggleDirectorate = (directorateId: string) =>
+        setFormData(prev => ({
+            ...prev,
+            directorateIds: prev.directorateIds.includes(directorateId)
+                ? prev.directorateIds.filter(id => id !== directorateId)
+                : [...prev.directorateIds, directorateId],
+        }));
+
     const handleCreateUser = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
-            await api.request('/admin/users', { method: 'POST', body: formData });
+            const { directorateIds: _directorateIds, ...createBody } = formData;
+            void _directorateIds;
+            await api.request('/admin/users', { method: 'POST', body: createBody });
             setShowModal(false);
-            setFormData({ email: '', password: '', firstName: '', lastName: '', department: '', roleId: '' });
+            setFormData({ email: '', password: '', firstName: '', lastName: '', department: '', roleId: '', directorateIds: [] });
             success('Oluşturuldu', 'Kullanıcı başarıyla oluşturuldu.');
             loadData();
         } catch (error) {
@@ -105,17 +126,23 @@ export default function UsersPage() {
         e.preventDefault();
         if (!editingUser) return;
         try {
-            await api.request(`/admin/users/${editingUser.id}`, {
-                method: 'PUT',
-                body: {
-                    firstName: formData.firstName,
-                    lastName: formData.lastName,
-                    department: formData.department,
-                    roleId: formData.roleId,
-                }
-            });
+            await Promise.all([
+                api.request(`/admin/users/${editingUser.id}`, {
+                    method: 'PUT',
+                    body: {
+                        firstName: formData.firstName,
+                        lastName: formData.lastName,
+                        department: formData.department,
+                        roleId: formData.roleId,
+                    }
+                }),
+                api.request(`/admin/users/${editingUser.id}/directorates`, {
+                    method: 'PUT',
+                    body: { directorateIds: formData.directorateIds },
+                }),
+            ]);
             setEditingUser(null);
-            setFormData({ email: '', password: '', firstName: '', lastName: '', department: '', roleId: '' });
+            setFormData({ email: '', password: '', firstName: '', lastName: '', department: '', roleId: '', directorateIds: [] });
             success('Güncellendi', 'Kullanıcı başarıyla güncellendi.');
             loadData();
         } catch (error) {
@@ -133,6 +160,7 @@ export default function UsersPage() {
             lastName: user.lastName,
             department: user.department || '',
             roleId: user.role.id,
+            directorateIds: (user.directorateMemberships || []).map(m => m.directorateId),
         });
     };
 
@@ -434,7 +462,7 @@ export default function UsersPage() {
                 open={!!editingUser}
                 onClose={() => {
                     setEditingUser(null);
-                    setFormData({ email: '', password: '', firstName: '', lastName: '', department: '', roleId: '' });
+                    setFormData({ email: '', password: '', firstName: '', lastName: '', department: '', roleId: '', directorateIds: [] });
                 }}
                 title="Kullanıcı Düzenle"
                 description={editingUser?.email}
@@ -485,13 +513,34 @@ export default function UsersPage() {
                             ))}
                         </select>
                     </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">
+                            Yetkili Direktörlükler <span className="text-slate-400 font-normal">("Birimim" kapsamı)</span>
+                        </label>
+                        <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+                            {directorates.length === 0 ? (
+                                <p className="px-3 py-3 text-xs text-slate-400">Tanımlı direktörlük yok.</p>
+                            ) : directorates.map((d) => (
+                                <label key={d.id} className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={formData.directorateIds.includes(d.id)}
+                                        onChange={() => toggleDirectorate(d.id)}
+                                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-400"
+                                    />
+                                    {d.name}
+                                </label>
+                            ))}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1">Seçim yapılmazsa kullanıcı Çalışma Panosu'nda "Birimim" kapsamını göremez.</p>
+                    </div>
                     <div className="flex justify-end gap-3 pt-4">
                         <Button
                             type="button"
                             variant="outline"
                             onClick={() => {
                                 setEditingUser(null);
-                                setFormData({ email: '', password: '', firstName: '', lastName: '', department: '', roleId: '' });
+                                setFormData({ email: '', password: '', firstName: '', lastName: '', department: '', roleId: '', directorateIds: [] });
                             }}
                         >
                             İptal

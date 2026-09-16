@@ -82,12 +82,91 @@ describe('AiEvalService — kaynak & emsal katmanı', () => {
         });
     });
 
+    describe('deriveTitle', () => {
+        it('kontrol adı + dönemden anlamlı başlık üretir', () => {
+            const t = (service as any).deriveTitle({ name: 'E-posta güvenliği' }, null, 'Eylül 2026');
+            expect(t).toBe('E-posta güvenliği — Eylül 2026');
+        });
+        it('elle metinden kısa başlık türetir (ekstra LLM çağrısı yok)', () => {
+            const t = (service as any).deriveTitle(null, 'Yetkilendirme matrisi gözden geçirildi mi', 'Ekim 2026');
+            expect(t).toBe('Yetkilendirme matrisi gözden geçirildi mi — Ekim 2026');
+        });
+    });
+
+    describe('countUnreviewed', () => {
+        it('yalnızca uyumsuzAlanlar ve bulguAdaylari içinden _review taşımayanları sayar', () => {
+            const n = (service as any).countUnreviewed({
+                uyumluAlanlar: [{ konu: 'x' }],
+                uyumsuzAlanlar: [{ konu: 'a', _review: { status: 'ACCEPTED' } }, { konu: 'b' }],
+                bulguAdaylari: [{ baslik: 'c' }],
+            });
+            expect(n).toBe(2);
+        });
+    });
+
+    describe('completeSession', () => {
+        beforeEach(() => {
+            prisma.aiEvalSession.findUnique = jest.fn();
+            prisma.aiEvalMessage = { count: jest.fn() };
+        });
+
+        it('AWAITING_REVIEW değilse tamamlamayı reddeder', async () => {
+            prisma.aiEvalSession.findUnique.mockResolvedValue({
+                id: 's1', createdById: 'u1', runStatus: 'DRAFT', messages: [], attachments: [],
+            });
+            await expect(service.completeSession('s1', 'MET', 'u1')).rejects.toThrow(/İnceleme bekliyor/);
+        });
+
+        it('incelenmemiş tespit varsa tamamlamayı reddeder', async () => {
+            prisma.aiEvalSession.findUnique.mockResolvedValue({
+                id: 's1', createdById: 'u1', runStatus: 'AWAITING_REVIEW', attachments: [],
+                messages: [{
+                    id: 'm1', role: 'ASSISTANT', cancelled: false, stale: false,
+                    evaluation: { uyumsuzAlanlar: [{ konu: 'a' }], bulguAdaylari: [] }, editedEvaluation: null,
+                }],
+            });
+            await expect(service.completeSession('s1', 'NOT_MET', 'u1')).rejects.toThrow(/incelenmedi/);
+        });
+    });
+
+    describe('trashSession', () => {
+        it('çalışan değerlendirme çöpe taşınamaz', async () => {
+            prisma.aiEvalSession.findUnique = jest.fn().mockResolvedValue({
+                id: 's1', createdById: 'u1', runStatus: 'RUNNING',
+            });
+            await expect(service.trashSession('s1', 'u1')).rejects.toThrow(/sürüyor/);
+        });
+
+        it('başkasının oturumuna erişimi reddeder', async () => {
+            prisma.aiEvalSession.findUnique = jest.fn().mockResolvedValue({
+                id: 's1', createdById: 'other', runStatus: 'DRAFT',
+            });
+            await expect(service.trashSession('s1', 'u1')).rejects.toThrow(/erişiminiz yok/);
+        });
+    });
+
+    describe('updateSession — iyimser eşzamanlılık', () => {
+        it('contentVersion uyuşmazsa 409 (eski istek yeni içeriği ezmez)', async () => {
+            prisma.aiEvalSession.findUnique = jest.fn().mockResolvedValue({
+                id: 's1', createdById: 'u1', status: 'ACTIVE', contentVersion: 5,
+                regulationArticleIds: [], knowledgeDocIds: [],
+            });
+            await expect(
+                service.updateSession('s1', { contentVersion: 3, controlText: 'x' }, 'u1'),
+            ).rejects.toThrow(/başka bir yerden güncellendi/);
+        });
+    });
+
     describe('createSession — knowledge snapshot', () => {
         it('yalnızca aktif kaynak dokümanlarını snapshot alır', async () => {
             prisma.knowledgeDoc.findMany.mockResolvedValue([
                 { kind: 'RUBRIC', code: 'RUB-1', title: 'Rehber', body: 'metin', sourceRef: null },
             ]);
             prisma.aiEvalSession.create.mockResolvedValue({ id: 's-1' });
+            // createSession artık tutarlı tam şekil için getSession'a düşüyor.
+            prisma.aiEvalSession.findUnique = jest.fn().mockResolvedValue({
+                id: 's-1', createdById: 'user-1', messages: [], attachments: [],
+            });
 
             await service.createSession(
                 { controlText: 'Kontrol', knowledgeDocIds: ['k-1', 'k-2'] },

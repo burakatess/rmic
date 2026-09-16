@@ -1,9 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
-
-// "Kapanmış/tamamlanmış" aksiyon statüleri — Türkçe kanonik + legacy İngilizce.
-// Tüm rapor sayaçları (genel + direktörlük kırılımı) AYNI tanımı kullanmalı (Madde 8).
-const CLOSED_ACTION_STATUSES = ['CLOSED', 'COMPLETED', 'KAPATILDI', 'TAMAMLANDI'] as const;
+import { CLOSED_ACTION_STATUSES } from '../../common/util/metric-definitions';
 
 @Injectable()
 export class ReportsService {
@@ -624,9 +621,6 @@ export class ReportsService {
         const end = new Date(year, mon + 1, 0, 23, 59, 59, 999);
         const monthName = start.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
 
-        const user = await this.prisma.user.findUnique({ where: { id: userId } });
-        const fullName = user ? `${user.firstName} ${user.lastName}` : '';
-
         // Ay adı (selectedMonths eşleşmesi için, örn. "Temmuz")
         const trMonth = start.toLocaleDateString('tr-TR', { month: 'long' });
 
@@ -648,14 +642,13 @@ export class ReportsService {
                 || !c.lastTestDate
                 || c.lastTestDate < start,
             )),
-            // Sorumlusu kullanıcı olan açık bulgular
+            // Sorumlusu kullanıcı olan açık bulgular — YALNIZCA ilişkisel assigneeId
+            // eşleşmesi (serbest metin ad-soyad eşleşmesi yetkilendirme dayanağı
+            // olamaz, bkz. Çalışma Panosu Madde 3).
             this.prisma.finding.findMany({
                 where: {
                     status: { not: 'CLOSED' },
-                    OR: [
-                        { assigneeId: userId },
-                        ...(fullName ? [{ responsiblePerson: { contains: fullName, mode: 'insensitive' as any } }] : []),
-                    ],
+                    assigneeId: userId,
                 },
                 select: {
                     id: true, findingId: true, summary: true, severity: true,
@@ -664,11 +657,12 @@ export class ReportsService {
                 },
                 orderBy: { targetResolutionDate: 'asc' },
             }),
-            // Kullanıcıya atanmış açık aksiyonlar
+            // Kullanıcıya atanmış açık aksiyonlar — ortak CLOSED_ACTION_STATUSES
+            // tanımı kullanılır (Madde 8: rapor sayaçlarıyla drift olmasın).
             this.prisma.action.findMany({
                 where: {
                     ownerId: userId,
-                    status: { notIn: ['TAMAMLANDI', 'KAPATILDI'] as any },
+                    status: { notIn: [...CLOSED_ACTION_STATUSES] },
                 },
                 select: {
                     id: true, actionId: true, description: true, status: true, dueDate: true,
@@ -676,23 +670,25 @@ export class ReportsService {
                 },
                 orderBy: { dueDate: 'asc' },
             }),
-            // Ay içinde planlanan takip çalışmaları (kullanıcının bulgu/aksiyonlarıyla ilişkili)
+            // Ay içinde planlanan, kullanıcının bulgusu/aksiyonuyla ilişkili takip
+            // çalışmaları — YALNIZCA ilişkisel eşleşme, WHERE içinde (uygulama
+            // tarafında filtrelemeye gerek yok).
             this.prisma.findingFollowUp.findMany({
                 where: {
                     plannedDate: { gte: start, lte: end },
                     status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] as any },
+                    OR: [
+                        { finding: { assigneeId: userId } },
+                        { action: { ownerId: userId } },
+                    ],
                 },
                 select: {
                     id: true, followUpId: true, status: true, plannedDate: true,
-                    finding: { select: { findingId: true, summary: true, assigneeId: true, responsiblePerson: true } },
+                    finding: { select: { findingId: true, summary: true, assigneeId: true } },
                     action: { select: { actionId: true, ownerId: true } },
                 },
                 orderBy: { plannedDate: 'asc' },
-            }).then(fus => fus.filter(fu =>
-                fu.finding?.assigneeId === userId
-                || (fullName && fu.finding?.responsiblePerson?.toLowerCase().includes(fullName.toLowerCase()))
-                || fu.action?.ownerId === userId,
-            )),
+            }),
         ]);
 
         // Yaklaşan vadeler: ay içi aksiyon vadeleri + takip planları birleşik

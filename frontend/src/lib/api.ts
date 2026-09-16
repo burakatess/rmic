@@ -1,10 +1,43 @@
 import type {
     AiAssessment, AiStatus, AiUsage, AiCockpit, AiQueryResult,
-    AiEvalSession, AiEvalSessionListItem,
+    AiEvalSession, AiEvalListResponse, AiEvalListParams, AiEvalOutcome, BulkEvalResult,
+    EvalOutputBundle,
     KnowledgeDoc, KnowledgeDocKind,
 } from '@/types/ai';
+import type {
+    Source as LibSource, SourceVersionDetail as LibVersionDetail, SourceUnit as LibUnit,
+    RetrievalResponse as LibRetrievalResponse, SourceMapping as LibMapping, ControlTestCard as LibTestCard,
+    ProcessScopeCard as LibProcessCard, EvidenceRule as LibEvidenceRule, EvalDataset as LibDataset,
+    EvalScenario as LibScenario, QualityRun as LibQualityRun,
+    VersionReadiness as LibVersionReadiness, IndexJob as LibIndexJob, UnitLookupResult as LibUnitLookupResult,
+    SuggestSourcesResponse as LibSuggestSourcesResponse,
+} from '@/types/library';
+import type {
+    DashboardScopeParams, DashboardScopeOptions, DashboardSummary, DashboardWorkItemsResponse,
+    DashboardApprovals, DashboardCriticalIssue, DashboardAnnualPlan, DashboardUpcoming,
+} from '@/types/dashboard';
+import type {
+    AnnualPlanWorkspace, AnnualPlanDraftItem, AnnualPlanPreview, AnnualPlanApplyResult,
+    EligibleController, WorkloadByAssignee,
+} from '@/types/annual-plan';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+
+/** Çalışma Panosu sorgu parametrelerini querystring'e çevirir (directorateId dizisi tekrarlı key olarak). */
+function buildQuery(params?: object): string {
+    if (!params) return '';
+    const usp = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+        if (value === undefined || value === null || value === '') continue;
+        if (Array.isArray(value)) {
+            value.forEach(v => usp.append(key, String(v)));
+        } else {
+            usp.append(key, String(value));
+        }
+    }
+    const qs = usp.toString();
+    return qs ? `?${qs}` : '';
+}
 
 export class ApiError extends Error {
     status: number;
@@ -170,8 +203,33 @@ class ApiClient {
         return this.request<{ message: string }>('/auth/change-password', { method: 'POST', body: data });
     }
 
-    async getMyWork(month?: string) {
-        return this.request<any>(`/reports/my-work${month ? `?month=${month}` : ''}`);
+    // Çalışma Panosu — kapsam/tarih sözleşmesi tüm uç noktalarda ortaktır.
+    async getDashboardScopeOptions() {
+        return this.request<DashboardScopeOptions>('/dashboard/scope-options');
+    }
+
+    async getDashboardSummary(params?: DashboardScopeParams) {
+        return this.request<DashboardSummary>(`/dashboard/summary${buildQuery(params)}`);
+    }
+
+    async getDashboardWorkItems(params?: DashboardScopeParams & { tab?: string; page?: number; pageSize?: number }) {
+        return this.request<DashboardWorkItemsResponse>(`/dashboard/work-items${buildQuery(params)}`);
+    }
+
+    async getDashboardApprovals() {
+        return this.request<DashboardApprovals>('/dashboard/approvals');
+    }
+
+    async getDashboardCriticalIssues(params?: DashboardScopeParams) {
+        return this.request<DashboardCriticalIssue[]>(`/dashboard/critical-issues${buildQuery(params)}`);
+    }
+
+    async getDashboardAnnualPlan(params?: DashboardScopeParams) {
+        return this.request<DashboardAnnualPlan>(`/dashboard/annual-plan${buildQuery(params)}`);
+    }
+
+    async getDashboardUpcoming(params?: DashboardScopeParams & { days?: number }) {
+        return this.request<DashboardUpcoming>(`/dashboard/upcoming${buildQuery(params)}`);
     }
 
     async getUsers() {
@@ -193,6 +251,44 @@ class ApiClient {
             throw new ApiError(err?.message || 'Dosya yüklenemedi', res.status, err);
         }
         return res.json();
+    }
+
+    /** XHR tabanlı yükleme — gerçek ilerleme yüzdesi için (fetch upload-progress'i güvenilir desteklemiyor). */
+    uploadFileWithProgress(file: File, onProgress: (pct: number) => void): { promise: Promise<{ fileName: string; originalName: string; mimeType: string; sizeBytes: number }>; abort: () => void } {
+        const token = this.getToken();
+        const xhr = new XMLHttpRequest();
+        const promise = new Promise<any>((resolve, reject) => {
+            const form = new FormData();
+            form.append('file', file);
+            xhr.open('POST', `${this.baseUrl}/uploads`);
+            if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+            xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100)); };
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try { resolve(JSON.parse(xhr.responseText)); } catch { reject(new ApiError('Sunucu yanıtı okunamadı', xhr.status)); }
+                } else {
+                    let msg = 'Dosya yüklenemedi';
+                    try { msg = JSON.parse(xhr.responseText)?.message || msg; } catch { /* noop */ }
+                    reject(new ApiError(msg, xhr.status));
+                }
+            };
+            xhr.onerror = () => reject(new ApiError('Ağ hatası — dosya yüklenemedi', 0));
+            xhr.onabort = () => reject(new ApiError('Yükleme iptal edildi', 0));
+            xhr.send(form);
+        });
+        return { promise, abort: () => xhr.abort() };
+    }
+
+    /** Kanıt önizleme için blob URL — çağıran taraf işi bitince URL.revokeObjectURL etmeli. */
+    async getAttachmentBlobUrl(fileName: string, originalName: string): Promise<string> {
+        const token = this.getToken();
+        const q = new URLSearchParams({ file: fileName, name: originalName });
+        const res = await fetch(`${this.baseUrl}/uploads/download?${q}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) throw new ApiError('Kanıt yüklenemedi', res.status);
+        const blob = await res.blob();
+        return URL.createObjectURL(blob);
     }
 
     async addControlTestAttachment(testId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
@@ -243,6 +339,17 @@ class ApiClient {
         return this.request(`/controls/${controlId}/tests`);
     }
 
+    async getControlTestById(testId: string) {
+        return this.request<any>(`/controls/tests/${testId}`);
+    }
+
+    async saveTestDraft(testId: string, data: {
+        resultText?: string; evidenceSummary?: string; findingStatus?: string | null;
+        stepObservations?: unknown[]; contentVersion: number;
+    }) {
+        return this.request<any>(`/controls/tests/${testId}/draft`, { method: 'PATCH', body: data });
+    }
+
     async createControlTest(controlId: string, data: unknown) {
         return this.request(`/controls/${controlId}/tests`, { method: 'POST', body: data });
     }
@@ -275,10 +382,6 @@ class ApiClient {
 
     async getApprovalDetail(id: string) {
         return this.request(`/approvals/${id}`);
-    }
-
-    async generateControlTests(controlId: string) {
-        return this.request(`/controls/${controlId}/generate-tests`, { method: 'POST' });
     }
 
     async activateControl(id: string) {
@@ -355,8 +458,99 @@ class ApiClient {
         return this.request(`/controls/${id}`, { method: 'PUT', body: data });
     }
 
-    async deleteControl(id: string) {
-        return this.request(`/controls/${id}`, { method: 'DELETE' });
+    // Kalıcı silme kaldırıldı — bkz. passivateControl(). Control ana envanterdir.
+
+    // ─── Yıllık Kapsam (ControlYearScope) ────────────────────────────────────
+    async getScopeYears() {
+        return this.request<{ years: number[] }>('/controls/scope-years');
+    }
+
+    async getControlDashboard(params?: Record<string, string | number | boolean>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request<any>(`/controls/dashboard${query}`);
+    }
+
+    async addControlScope(controlId: string, data: {
+        years: number[]; frequency?: string; selectedMonths?: string[]; controlDate?: string;
+        includePastPeriods?: boolean; dryRun?: boolean;
+    }) {
+        return this.request<any>(`/controls/${controlId}/scope`, { method: 'POST', body: data });
+    }
+
+    async bulkAddControlScope(data: {
+        controlIds: string[]; year: number; frequency?: string; selectedMonths?: string[];
+        includePastPeriods?: boolean; dryRun?: boolean;
+    }) {
+        return this.request<any>('/controls/scope/bulk', { method: 'POST', body: data });
+    }
+
+    async copyControlScope(data: { fromYear: number; toYear: number; controlIds?: string[]; dryRun?: boolean }) {
+        return this.request<any>('/controls/scope/copy', { method: 'POST', body: data });
+    }
+
+    async removeControlScope(controlId: string, year: number, data: { reason: string; decisions?: { taskId: string; action: 'CONTINUE' | 'CANCEL' }[] }) {
+        return this.request<any>(`/controls/${controlId}/scope/${year}`, { method: 'DELETE', body: data });
+    }
+
+    async changeControlScopePeriodicity(controlId: string, year: number, data: { frequency?: string; selectedMonths?: string[]; reason: string; dryRun?: boolean }) {
+        return this.request<any>(`/controls/${controlId}/scope/${year}`, { method: 'PATCH', body: data });
+    }
+
+    async reactivateControlScope(controlId: string, year: number) {
+        return this.request<any>(`/controls/${controlId}/scope/${year}/reactivate`, { method: 'POST' });
+    }
+
+    async reactivateControlTask(taskId: string) {
+        return this.request<any>(`/controls/tests/${taskId}/reactivate`, { method: 'POST' });
+    }
+
+    async getControlScopeHistory(controlId: string) {
+        return this.request<{ data: any[] }>(`/controls/${controlId}/scope-history`);
+    }
+
+    // Yıllık Plan (Kontrol Yönetimi) — "Çalışma Panosu"nun /dashboard/annual-plan
+    // uç noktasıyla KARIŞTIRILMASIN, ayrı bir özellik.
+    async getAnnualPlanWorkspace(year: number, params?: Record<string, unknown>): Promise<AnnualPlanWorkspace> {
+        return this.request<AnnualPlanWorkspace>(`/controls/annual-plan/${year}/workspace${buildQuery(params)}`);
+    }
+
+    async saveAnnualPlanDraftItems(year: number, data: { expectedRevision: number; items: Partial<AnnualPlanDraftItem & { referenceMonth?: number; assigneeId?: string; secondControllerId?: string }>[] }, scopeParams?: Record<string, unknown>) {
+        return this.request(`/controls/annual-plan/${year}/draft/items${buildQuery(scopeParams)}`, { method: 'POST', body: data });
+    }
+
+    async bulkAnnualPlanDraftAction(year: number, data: {
+        controlIds: string[]; action: 'ADD' | 'REMOVE' | 'ASSIGN'; frequency?: string; selectedMonths?: string[];
+        assigneeId?: string; secondControllerId?: string; onlyMissing?: boolean; dryRun?: boolean; expectedRevision: number;
+    }, scopeParams?: Record<string, unknown>) {
+        return this.request(`/controls/annual-plan/${year}/draft/bulk${buildQuery(scopeParams)}`, { method: 'POST', body: data });
+    }
+
+    async getAnnualPlanAssignments(year: number, params?: Record<string, unknown>): Promise<AnnualPlanWorkspace> {
+        return this.request<AnnualPlanWorkspace>(`/controls/annual-plan/${year}/assignments${buildQuery(params)}`);
+    }
+
+    async getEligibleControllers(year: number, role: 'assignee' | 'secondController', controlId?: string): Promise<{ data: EligibleController[]; directorateId: string | null }> {
+        return this.request(`/controls/annual-plan/${year}/eligible-controllers${buildQuery({ role, controlId })}`);
+    }
+
+    async getWorkloadByAssignee(year: number, scopeParams?: Record<string, unknown>): Promise<WorkloadByAssignee> {
+        return this.request<WorkloadByAssignee>(`/controls/annual-plan/${year}/workload-by-assignee${buildQuery(scopeParams)}`);
+    }
+
+    async copyAnnualPlanFromYear(year: number, fromYear: number, scopeParams?: Record<string, unknown>) {
+        return this.request(`/controls/annual-plan/${year}/draft/copy-from/${fromYear}${buildQuery(scopeParams)}`, { method: 'POST' });
+    }
+
+    async discardAnnualPlanDraft(year: number) {
+        return this.request(`/controls/annual-plan/${year}/draft/discard`, { method: 'POST' });
+    }
+
+    async previewAnnualPlanApply(year: number): Promise<AnnualPlanPreview> {
+        return this.request<AnnualPlanPreview>(`/controls/annual-plan/${year}/preview`, { method: 'POST' });
+    }
+
+    async applyAnnualPlan(year: number, expectedRevision: number): Promise<AnnualPlanApplyResult> {
+        return this.request<AnnualPlanApplyResult>(`/controls/annual-plan/${year}/apply`, { method: 'POST', body: { expectedRevision } });
     }
 
     async mapControlRisk(controlId: string, riskId: string, mappingType?: string) {
@@ -910,14 +1104,20 @@ class ApiClient {
         return this.request<{ ok: boolean }>(`/knowledge-docs/${id}`, { method: 'DELETE' });
     }
 
-    async listAiEvalSessions() {
-        return this.request<AiEvalSessionListItem[]>('/ai/eval-sessions');
+    async listAiEvalSessions(params: AiEvalListParams = {}) {
+        const qs = new URLSearchParams();
+        Object.entries(params).forEach(([k, v]) => {
+            if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+        });
+        const suffix = qs.toString() ? `?${qs.toString()}` : '';
+        return this.request<AiEvalListResponse>(`/ai/eval-sessions${suffix}`);
     }
 
     async createAiEvalSession(body: {
-        title?: string; controlRefId?: string | null; controlText?: string | null;
+        title?: string; period?: string | null;
+        controlRefId?: string | null; controlText?: string | null;
         controlManualNote?: string | null; evidenceText?: string | null;
-        regulationArticleIds?: string[]; knowledgeDocIds?: string[];
+        regulationArticleIds?: string[]; knowledgeDocIds?: string[]; sourceUnitIds?: string[];
     }) {
         return this.request<AiEvalSession>('/ai/eval-sessions', { method: 'POST', body });
     }
@@ -927,27 +1127,352 @@ class ApiClient {
     }
 
     async updateAiEvalSession(id: string, body: {
-        title?: string; controlRefId?: string | null; controlText?: string | null;
+        title?: string; period?: string | null;
+        controlRefId?: string | null; controlText?: string | null;
         controlManualNote?: string | null; evidenceText?: string | null;
-        regulationArticleIds?: string[]; knowledgeDocIds?: string[];
+        regulationArticleIds?: string[]; knowledgeDocIds?: string[]; sourceUnitIds?: string[];
+        contentVersion?: number;
     }) {
         return this.request<AiEvalSession>(`/ai/eval-sessions/${id}`, { method: 'PATCH', body });
     }
 
-    async archiveAiEvalSession(id: string) {
+    async renameAiEvalSession(id: string, title: string) {
+        return this.request<AiEvalSession>(`/ai/eval-sessions/${id}/rename`, { method: 'POST', body: { title } });
+    }
+
+    async completeAiEvalSession(id: string, outcome: AiEvalOutcome) {
+        return this.request<AiEvalSession>(`/ai/eval-sessions/${id}/complete`, { method: 'POST', body: { outcome } });
+    }
+
+    async reopenAiEvalSession(id: string) {
+        return this.request<AiEvalSession>(`/ai/eval-sessions/${id}/reopen`, { method: 'POST' });
+    }
+
+    async cloneAiEvalSession(id: string, period: string) {
+        return this.request<AiEvalSession>(`/ai/eval-sessions/${id}/clone`, { method: 'POST', body: { period } });
+    }
+
+    /** Varsayılan silme = çöp kutusuna taşı (geri alınabilir). */
+    async trashAiEvalSession(id: string) {
         return this.request<{ ok: boolean }>(`/ai/eval-sessions/${id}`, { method: 'DELETE' });
+    }
+
+    async restoreAiEvalSession(id: string) {
+        return this.request<{ ok: boolean }>(`/ai/eval-sessions/${id}/restore`, { method: 'POST' });
+    }
+
+    async archiveAiEvalSession(id: string) {
+        return this.request<{ ok: boolean }>(`/ai/eval-sessions/${id}/archive`, { method: 'POST' });
+    }
+
+    async unarchiveAiEvalSession(id: string) {
+        return this.request<{ ok: boolean }>(`/ai/eval-sessions/${id}/unarchive`, { method: 'POST' });
+    }
+
+    async bulkArchiveAiEvalSessions(ids: string[]) {
+        return this.request<BulkEvalResult>('/ai/eval-sessions/bulk/archive', { method: 'POST', body: { ids } });
+    }
+
+    async bulkTrashAiEvalSessions(ids: string[]) {
+        return this.request<BulkEvalResult>('/ai/eval-sessions/bulk/trash', { method: 'POST', body: { ids } });
     }
 
     async addAiEvalAttachment(id: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
         return this.request(`/ai/eval-sessions/${id}/attachments`, { method: 'POST', body: meta });
     }
 
+    async updateAiEvalAttachmentMeta(id: string, attId: string, meta: {
+        docDate?: string | null; relatedSystem?: string | null; relatedSample?: string | null;
+        relatedTestStep?: string | null; note?: string | null;
+    }) {
+        return this.request(`/ai/eval-sessions/${id}/attachments/${attId}`, { method: 'PATCH', body: meta });
+    }
+
+    async replaceAiEvalAttachment(id: string, attId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
+        return this.request(`/ai/eval-sessions/${id}/attachments/${attId}/version`, { method: 'POST', body: meta });
+    }
+
     async removeAiEvalAttachment(id: string, attId: string) {
         return this.request(`/ai/eval-sessions/${id}/attachments/${attId}`, { method: 'DELETE' });
     }
 
+    /**
+     * "Değerlendir / Yeniden Değerlendir" — EKRANDAKİ tüm girdi gövdede.
+     * Sunucu önce kaydeder (contentVersion çakışırsa 409), sonra değerlendirir.
+     */
+    async evaluateAiEvalSession(
+        id: string,
+        body: {
+            title?: string; period?: string | null;
+            controlRefId?: string | null; controlText?: string | null; controlManualNote?: string | null;
+            evidenceText?: string | null;
+            regulationArticleIds?: string[]; knowledgeDocIds?: string[]; sourceUnitIds?: string[];
+            additionalNote?: string | null; contentVersion?: number;
+        },
+    ) {
+        return this.request<AiEvalSession>(`/ai/eval-sessions/${id}/evaluate`, { method: 'POST', body });
+    }
+
+    /** "Ek soru sor" — 6 başlıklı raporu yeniden üretmez, soruya yanıt verir. */
+    async askAiEvalSession(id: string, question: string, contentVersion?: number) {
+        return this.request<AiEvalSession>(`/ai/eval-sessions/${id}/ask`, {
+            method: 'POST', body: { question, contentVersion },
+        });
+    }
+
+    /** @deprecated `evaluateAiEvalSession` kullanın. */
     async sendAiEvalMessage(id: string, text: string) {
         return this.request<AiEvalSession>(`/ai/eval-sessions/${id}/messages`, { method: 'POST', body: { text } });
+    }
+
+    async cancelAiEvalRun(id: string) {
+        return this.request<{ ok: boolean }>(`/ai/eval-sessions/${id}/cancel`, { method: 'POST' });
+    }
+
+    async reviewAiEvalFinding(id: string, body: {
+        group: 'uyumsuzAlanlar' | 'bulguAdaylari' | 'uyumluAlanlar' | 'findingAssessment' | 'requirementAssessments';
+        index: number;
+        status: 'ACCEPTED' | 'EDITED' | 'REJECTED';
+        reason?: string;
+        edited?: unknown;
+    }) {
+        return this.request<AiEvalSession>(`/ai/eval-sessions/${id}/findings/review`, { method: 'POST', body });
+    }
+
+    async getAiEvalOutputs(id: string) {
+        return this.request<EvalOutputBundle>(`/ai/eval-sessions/${id}/outputs`);
+    }
+
+    // ── Kaynak Kataloğu (Genişletilmiş Kütüphane) ─────────────────────────
+    async listLibrarySources(params: { q?: string; kind?: string; confidentiality?: string } = {}) {
+        const qs = new URLSearchParams();
+        Object.entries(params).forEach(([k, v]) => v && qs.set(k, String(v)));
+        return this.request<LibSource[]>(`/library/sources${qs.toString() ? `?${qs}` : ''}`);
+    }
+    async getLibrarySource(id: string) {
+        return this.request<LibSource>(`/library/sources/${id}`);
+    }
+    async createLibrarySource(body: Record<string, unknown>) {
+        return this.request<LibSource>('/library/sources', { method: 'POST', body });
+    }
+    async updateLibrarySource(id: string, body: Record<string, unknown>) {
+        return this.request<LibSource>(`/library/sources/${id}`, { method: 'PATCH', body });
+    }
+    async addLibraryVersion(sourceId: string, body: Record<string, unknown>) {
+        return this.request(`/library/sources/${sourceId}/versions`, { method: 'POST', body });
+    }
+    async getLibraryVersion(id: string) {
+        return this.request<LibVersionDetail>(`/library/versions/${id}`);
+    }
+    async updateLibraryVersion(id: string, body: Record<string, unknown>) {
+        return this.request(`/library/versions/${id}`, { method: 'PATCH', body });
+    }
+    async diffLibraryVersions(a: string, b: string) {
+        return this.request<{
+            source: { id: string; title: string };
+            from: { id: string; label: string };
+            to: { id: string; label: string };
+            addedKeys: string[];
+            removedKeys: string[];
+            changed: { stableKey: string; from: string; to: string; title: string }[];
+            affectedMappingKeys: string[];
+        }>(`/library/versions/${a}/diff/${b}`);
+    }
+    async flagLibraryReReview(versionId: string, changedUnitKeys: string[]) {
+        return this.request<{ flagged: number }>(`/library/versions/${versionId}/flag-re-review`, {
+            method: 'POST',
+            body: { changedUnitKeys },
+        });
+    }
+    async addLibraryUnit(versionId: string, body: Record<string, unknown>) {
+        return this.request<LibUnit>(`/library/versions/${versionId}/units`, { method: 'POST', body });
+    }
+    async updateLibraryUnit(id: string, body: Record<string, unknown>) {
+        return this.request<LibUnit>(`/library/units/${id}`, { method: 'PATCH', body });
+    }
+    async removeLibraryUnit(id: string) {
+        return this.request<{ ok: boolean }>(`/library/units/${id}`, { method: 'DELETE' });
+    }
+    async buildLibraryChunks(versionId: string) {
+        return this.request<{ jobId: string; status: string; chunks: number }>(`/library/versions/${versionId}/build-index`, { method: 'POST' });
+    }
+    async retryLibraryIndex(versionId: string) {
+        return this.request<{ jobId: string; status: string; chunks: number }>(`/library/versions/${versionId}/retry-index`, { method: 'POST' });
+    }
+    async libraryVersionReadiness(versionId: string) {
+        return this.request<LibVersionReadiness>(`/library/versions/${versionId}/readiness`);
+    }
+    async libraryIndexJobs(versionId: string) {
+        return this.request<LibIndexJob[]>(`/library/versions/${versionId}/index-jobs`);
+    }
+    async libraryReviewContent(versionId: string) {
+        return this.request(`/library/versions/${versionId}/review-content`, { method: 'POST' });
+    }
+    async libraryVerifyRights(sourceId: string, body: { basis: string; rightRag?: string; rightFullText?: string; rightRefLink?: string; rightFineTune?: string; rightExport?: string }) {
+        return this.request(`/library/sources/${sourceId}/verify-rights`, { method: 'POST', body });
+    }
+    async libraryRevokeRights(sourceId: string, reason: string) {
+        return this.request(`/library/sources/${sourceId}/revoke-rights`, { method: 'POST', body: { reason } });
+    }
+    async libraryUnitLookup(params: { code?: string; q?: string; versionId?: string }) {
+        const qs = new URLSearchParams();
+        Object.entries(params).forEach(([k, v]) => v && qs.set(k, String(v)));
+        return this.request<LibUnitLookupResult[]>(`/library/unit-lookup${qs.toString() ? `?${qs}` : ''}`);
+    }
+    async suggestEvalSources(sessionId: string) {
+        return this.request<LibSuggestSourcesResponse>(`/ai/eval-sessions/${sessionId}/suggest-sources`, { method: 'POST' });
+    }
+    async libraryRetrievalSearch(body: Record<string, unknown>) {
+        return this.request<LibRetrievalResponse>('/library/retrieval/search', { method: 'POST', body });
+    }
+    async libraryVerifyCitations(citations: { unitCode?: string; versionId?: string; quote?: string }[]) {
+        return this.request<{ citations: { input: unknown; verified: boolean; reason: string }[]; allVerified: boolean }>(
+            '/library/retrieval/verify-citations',
+            { method: 'POST', body: { citations } },
+        );
+    }
+    async listLibraryMappings(params: { controlId?: string; testCardId?: string; processCardId?: string; status?: string }) {
+        const qs = new URLSearchParams();
+        Object.entries(params).forEach(([k, v]) => v && qs.set(k, String(v)));
+        return this.request<LibMapping[]>(`/library/mappings${qs.toString() ? `?${qs}` : ''}`);
+    }
+    async listLibraryVersionMappings(versionId: string) {
+        return this.request<LibMapping[]>(`/library/versions/${versionId}/mappings`);
+    }
+    async libraryUsedInEvaluations(versionId: string) {
+        return this.request<Array<{ id: string; title: string; period: string | null; runStatus: string; outcome: string | null; updatedAt: string }>>(
+            `/library/versions/${versionId}/used-in-evaluations`,
+        );
+    }
+    async createLibraryMapping(body: Record<string, unknown>, asAiDraft = false) {
+        return this.request<LibMapping>(`/library/mappings${asAiDraft ? '/ai-draft' : ''}`, { method: 'POST', body });
+    }
+    async reviewLibraryMapping(id: string, body: { status: string; rationale?: string }) {
+        return this.request<LibMapping>(`/library/mappings/${id}/review`, { method: 'PATCH', body });
+    }
+    async removeLibraryMapping(id: string) {
+        return this.request<{ ok: boolean }>(`/library/mappings/${id}`, { method: 'DELETE' });
+    }
+    async listLibraryTestCards(params: { status?: string; topicNo?: number } = {}) {
+        const qs = new URLSearchParams();
+        Object.entries(params).forEach(([k, v]) => v != null && qs.set(k, String(v)));
+        return this.request<LibTestCard[]>(`/library/test-cards${qs.toString() ? `?${qs}` : ''}`);
+    }
+    async getLibraryTestCard(id: string) {
+        return this.request<LibTestCard>(`/library/test-cards/${id}`);
+    }
+    async upsertLibraryTestCard(body: Record<string, unknown>) {
+        return this.request<LibTestCard>('/library/test-cards', { method: 'POST', body });
+    }
+    async setLibraryTestCardStatus(id: string, status: string) {
+        return this.request<LibTestCard>(`/library/test-cards/${id}/status`, { method: 'PATCH', body: { status } });
+    }
+    async listLibraryProcessCards(area?: string) {
+        return this.request<LibProcessCard[]>(`/library/process-cards${area ? `?area=${area}` : ''}`);
+    }
+    async getLibraryProcessCard(id: string) {
+        return this.request<LibProcessCard>(`/library/process-cards/${id}`);
+    }
+    async upsertLibraryProcessCard(body: Record<string, unknown>) {
+        return this.request<LibProcessCard>('/library/process-cards', { method: 'POST', body });
+    }
+    async listLibraryEvidenceRules(category?: string) {
+        return this.request<LibEvidenceRule[]>(`/library/evidence-rules${category ? `?category=${category}` : ''}`);
+    }
+    async listLibraryDatasets() {
+        return this.request<LibDataset[]>('/library/datasets');
+    }
+    async listLibraryScenarios(params: { datasetId?: string; status?: string; testCardId?: string; kind?: string } = {}) {
+        const qs = new URLSearchParams();
+        Object.entries(params).forEach(([k, v]) => v && qs.set(k, String(v)));
+        return this.request<LibScenario[]>(`/library/scenarios${qs.toString() ? `?${qs}` : ''}`);
+    }
+    async getLibraryScenario(id: string) {
+        return this.request<LibScenario>(`/library/scenarios/${id}`);
+    }
+    async reviewLibraryScenario(id: string, body: { status: string; note?: string }) {
+        return this.request<LibScenario>(`/library/scenarios/${id}/review`, { method: 'PATCH', body });
+    }
+    async exportLibraryJsonl(datasetId: string, onlyApproved = false) {
+        return this.request<{ dataset: { code: string; purpose: string }; count: number; jsonl: string; note: string }>(
+            `/library/datasets/${datasetId}/export.jsonl${onlyApproved ? '?onlyApproved=true' : ''}`,
+        );
+    }
+    async listLibraryQualityRuns(datasetId?: string) {
+        return this.request<LibQualityRun[]>(`/library/quality-runs${datasetId ? `?datasetId=${datasetId}` : ''}`);
+    }
+    async getLibraryQualityRun(id: string) {
+        return this.request<LibQualityRun & { items: unknown[] }>(`/library/quality-runs/${id}`);
+    }
+
+    // ── Risk Simülasyonu ─────────────────────────────────────────────────────
+    async getRiskSimulations(params: { status?: string; search?: string } = {}) {
+        const qs = new URLSearchParams();
+        Object.entries(params).forEach(([k, v]) => v && qs.set(k, String(v)));
+        return this.request<unknown[]>(`/risk-simulations${qs.toString() ? `?${qs}` : ''}`);
+    }
+    async getRiskSimulation(id: string) {
+        return this.request<unknown>(`/risk-simulations/${id}`);
+    }
+    async createRiskSimulation(data: { name: string; description?: string }) {
+        return this.request<unknown>('/risk-simulations', { method: 'POST', body: data });
+    }
+    async updateRiskSimulation(id: string, data: unknown) {
+        return this.request<unknown>(`/risk-simulations/${id}`, { method: 'PATCH', body: data });
+    }
+    async createSimScenario(simulationId: string, data: unknown) {
+        return this.request<unknown>(`/risk-simulations/${simulationId}/scenarios`, { method: 'POST', body: data });
+    }
+    async getSimScenario(scenarioId: string) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}`);
+    }
+    async updateSimScenario(scenarioId: string, data: unknown) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}`, { method: 'PATCH', body: data });
+    }
+    async resetSimScenario(scenarioId: string) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/reset`, { method: 'POST' });
+    }
+    async previewSimRefresh(scenarioId: string) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/refresh-preview`);
+    }
+    async applySimRefresh(scenarioId: string, acceptFields: string[]) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/refresh-apply`, { method: 'POST', body: { acceptFields } });
+    }
+    async calculateSimScenario(scenarioId: string) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/calculate`, { method: 'POST' });
+    }
+    async compareSimScenarios(a: string, b: string) {
+        return this.request<any>(`/risk-simulations/scenarios/compare?a=${a}&b=${b}`);
+    }
+    async addSimControl(scenarioId: string, data: unknown) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/controls`, { method: 'POST', body: data });
+    }
+    async updateSimControl(scenarioId: string, controlId: string, data: unknown) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/controls/${controlId}`, { method: 'PATCH', body: data });
+    }
+    async removeSimControl(scenarioId: string, controlId: string) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/controls/${controlId}`, { method: 'DELETE' });
+    }
+    async redistributeSimWeights(scenarioId: string, weights: Record<string, number>) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/controls/redistribute-weights`, { method: 'POST', body: { weights } });
+    }
+    async addSimAction(scenarioId: string, data: unknown) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/actions`, { method: 'POST', body: data });
+    }
+    async updateSimAction(scenarioId: string, actionId: string, data: unknown) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/actions/${actionId}`, { method: 'PATCH', body: data });
+    }
+    async toggleSimAction(scenarioId: string, actionId: string, isApplied: boolean) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/actions/${actionId}/toggle`, { method: 'PATCH', body: { isApplied } });
+    }
+    async removeSimAction(scenarioId: string, actionId: string) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/actions/${actionId}`, { method: 'DELETE' });
+    }
+    async previewSimTransfer(scenarioId: string) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/transfer/preview`, { method: 'POST' });
+    }
+    async applySimTransfer(scenarioId: string, data: unknown) {
+        return this.request<any>(`/risk-simulations/scenarios/${scenarioId}/transfer`, { method: 'POST', body: data });
     }
 }
 

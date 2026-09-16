@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import * as bcrypt from 'bcrypt';
+import { METHODOLOGY_V1 } from '../src/modules/risk-simulation/calculation-engine';
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -77,6 +78,12 @@ async function main() {
     await prisma.systemRisk.deleteMany({});
     await prisma.process.deleteMany({});
     await prisma.system.deleteMany({});
+    await prisma.riskSimulationTransfer.deleteMany({});
+    await prisma.riskSimulationAction.deleteMany({});
+    await prisma.riskSimulationControl.deleteMany({});
+    await prisma.riskSimulationScenario.deleteMany({});
+    await prisma.riskSimulation.deleteMany({});
+    await prisma.simulationMethodology.deleteMany({});
     await prisma.auditLog.deleteMany({});
     await prisma.refreshToken.deleteMany({});
     await prisma.user.deleteMany({});
@@ -91,10 +98,10 @@ async function main() {
     // ── 2. Roller ────────────────────────────────────────────────────────────
     const [adminRole, managerRole, auditorRole, analystRole, viewerRole] = await Promise.all([
         prisma.role.create({ data: { name: 'SYSTEM_ADMIN',         permissions: ['*'] } }),
-        prisma.role.create({ data: { name: 'RISK_CONTROL_MANAGER', permissions: ['finding:view','finding:create','finding:update','action:*','control:*','report:view','report:export','report:org'] } }),
-        prisma.role.create({ data: { name: 'AUDITOR',              permissions: ['finding:view','finding:create','action:view','action:create','control:view','control:test','report:view','report:export'] } }),
-        prisma.role.create({ data: { name: 'RISK_ANALYST',         permissions: ['finding:view','control:view'] } }),
-        prisma.role.create({ data: { name: 'VIEWER',               permissions: ['finding:view','control:view','action:view'] } }),
+        prisma.role.create({ data: { name: 'RISK_CONTROL_MANAGER', permissions: ['dashboard:view','finding:view','finding:create','finding:update','action:*','control:*','report:view','report:export','report:org','risk:sim:view','risk:sim:create','risk:sim:edit','risk:sim:archive','risk:sim:transfer'] } }),
+        prisma.role.create({ data: { name: 'AUDITOR',              permissions: ['dashboard:view','finding:view','finding:create','action:view','action:create','control:view','control:test','report:view','report:export'] } }),
+        prisma.role.create({ data: { name: 'RISK_ANALYST',         permissions: ['dashboard:view','finding:view','control:view','risk:sim:view','risk:sim:create','risk:sim:edit'] } }),
+        prisma.role.create({ data: { name: 'VIEWER',               permissions: ['dashboard:view','finding:view','control:view','action:view'] } }),
     ]);
     console.log('✅ 5 rol');
 
@@ -591,6 +598,16 @@ async function main() {
     }
     console.log(`✅ ${followUps.length} takip çalışması`);
 
+    // RecordCounter senkronizasyonu — bu seed script actionId/followUpId'yi kendi
+    // bellek-içi sayacıyla üretiyor (RecordCounter'ı hiç çağırmıyor). audits.service.ts
+    // içindeki nextCounterValue-tabanlı generateActionId/generateFollowUpId (tercih
+    // edilen, atomik üretim yolu — bkz. sequential-id.ts) bu senkronizasyon olmadan
+    // her taze seed sonrası A-2026-0001'den başlar ve yukarıdaki seed kayıtlarıyla
+    // ÇAKIŞIR. Var olan en yüksek sıra numarasına eşitleniyor.
+    await prisma.recordCounter.upsert({ where: { scope: 'action' }, update: { value: aNum - 1 }, create: { scope: 'action', value: aNum - 1 } });
+    await prisma.recordCounter.upsert({ where: { scope: 'followup' }, update: { value: fuNum - 1 }, create: { scope: 'followup', value: fuNum - 1 } });
+    console.log('✅ RecordCounter (action/followup) mevcut seed verisiyle senkronize edildi');
+
     // ── 11. Audit Trail & StatusLog ──────────────────────────────────────────
     for (const f of findings.slice(0, 10)) {
         await prisma.findingStatusLog.create({ data: {
@@ -616,6 +633,14 @@ async function main() {
             uploadedById: randOf(auditors).id,
         }});
     }
+
+    // ── Risk Simülasyonu: SIM_METHODOLOGY_V1 (aktif sürüm) ──────────────────
+    await prisma.simulationMethodology.create({ data: {
+        version: METHODOLOGY_V1.version, config: METHODOLOGY_V1 as any, isActive: true,
+        changeNote: 'İlk sürüm — calculation-engine.ts::METHODOLOGY_V1 ile birebir.',
+        createdById: uAdmin.id,
+    }});
+    console.log('✅ SIM_METHODOLOGY_V1 (Risk Simülasyonu) aktif sürüm olarak eklendi');
 
     // ── 13. Parametreler ─────────────────────────────────────────────────────
     await prisma.parameter.createMany({ data: [

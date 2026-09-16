@@ -10,7 +10,7 @@ describe('AuditsService — kritik iş kuralları', () => {
     beforeEach(async () => {
         prisma = {
             finding: { findUnique: jest.fn(), update: jest.fn() },
-            findingStatusHistory: { create: jest.fn() },
+            findingStatusHistory: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
             findingStatusLog: { create: jest.fn() },
             auditLog: { create: jest.fn() },
             action: { findMany: jest.fn(), update: jest.fn() },
@@ -106,6 +106,26 @@ describe('AuditsService — kritik iş kuralları', () => {
             await expect(
                 service.mutabakatOnayla('f-1', {}, 'user-1'),
             ).rejects.toThrow(BadRequestException);
+        });
+
+        it('mutabakatı İç Kontrol onayına GÖNDEREN kişi kendi mutabakatını onaylayamaz', async () => {
+            prisma.finding.findUnique.mockResolvedValue({ workflowStatus: 'IC_KONTROL_ONAYINA_GONDERILDI' });
+            prisma.findingStatusHistory.findFirst.mockResolvedValue({ evaluator: 'user-1' });
+
+            await expect(
+                service.mutabakatOnayla('f-1', {}, 'user-1'),
+            ).rejects.toThrow(ForbiddenException);
+            expect(prisma.finding.update).not.toHaveBeenCalled();
+        });
+
+        it('gönderen BAŞKA bir kullanıcıysa onay sorunsuz ilerler', async () => {
+            prisma.finding.findUnique.mockResolvedValue({ workflowStatus: 'IC_KONTROL_ONAYINA_GONDERILDI' });
+            prisma.finding.update.mockResolvedValue({ id: 'f-1', workflowStatus: 'MUTABAKAT_YAPILDI' });
+            prisma.findingStatusHistory.findFirst.mockResolvedValue({ evaluator: 'other-user' });
+
+            const result = await service.mutabakatOnayla('f-1', {}, 'user-1');
+
+            expect(result.workflowStatus).toBe('MUTABAKAT_YAPILDI');
         });
     });
 

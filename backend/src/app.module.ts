@@ -24,6 +24,9 @@ import { RiskProposalsModule } from './modules/risk-proposals/risk-proposals.mod
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AiModule } from './modules/ai/ai.module';
 import { KnowledgeModule } from './modules/knowledge/knowledge.module';
+import { LibraryModule } from './modules/library/library.module';
+import { RiskSimulationModule } from './modules/risk-simulation/risk-simulation.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { JwtAuthGuard, PermissionsGuard } from './common/guards';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -60,6 +63,9 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     RiskProposalsModule,
     AiModule,
     KnowledgeModule,
+    LibraryModule,
+    RiskSimulationModule,
+    DashboardModule,
   ],
   providers: [
     // Rate limit önce, sonra JWT auth

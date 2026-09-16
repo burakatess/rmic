@@ -707,6 +707,17 @@ export class AuditsService {
         if (finding.workflowStatus !== 'IC_KONTROL_ONAYINA_GONDERILDI') {
             throw new BadRequestException(`Beklenen statü IC_KONTROL_ONAYINA_GONDERILDI, mevcut: ${finding.workflowStatus}`);
         }
+        // Maker/checker: mutabakatı İç Kontrol onayına GÖNDEREN kişi, aynı
+        // mutabakatı onaylayamaz (kendi değerlendirmesini onaylama yasağı —
+        // ControlTest.approveTest / FollowUp onayıyla aynı ilke).
+        const lastSendToApproval = await this.prisma.findingStatusHistory.findFirst({
+            where: { findingId: id, workflowStatus: 'IC_KONTROL_ONAYINA_GONDERILDI' },
+            orderBy: { createdAt: 'desc' },
+            select: { evaluator: true },
+        });
+        if (lastSendToApproval?.evaluator && lastSendToApproval.evaluator === userId) {
+            throw new ForbiddenException('Kendi gönderdiğiniz mutabakatı onaylayamazsınız.');
+        }
         const updateData: any = {};
         if (data.internalControlAssessment) updateData.internalControlAssessment = data.internalControlAssessment;
         if (data.resolutionStatus) {

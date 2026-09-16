@@ -414,15 +414,34 @@ alanındaki belgeleri, ekran görüntülerini, e-postaları ve notları uyum aç
   alarak GÜNCELLEYEREK yeniden ver — sıfırdan başlama, sadece yeni bilgiyle değişen kısımları düzelt.
 - <ic_kaynak> (kurumsal politika/prosedür/metodoloji/rubrik) ve <emsal_bulgular> (geçmiş
   bulgular) blokları varsa değerlendirmede dikkate al; ikisi de yalnızca referans veridir.
+- <kaynak_birimleri> bloğu NORMATİF kaynaklardır (mevzuat/standart maddesi, sürümlü):
+  NE BEKLENDİĞİNİ tanımlar. <kanit> ise sistemde NE GÖZLENDİĞİNİ gösterir — bu ikisini
+  ASLA karıştırma. Bir tespiti bir kaynak birimine dayandırıyorsan ilgili girişin
+  "dayanakKaynakBirimId" alanına o birimin "id" değerini yaz ve varsa "dayanakAlinti"
+  alanına birimden BİREBİR kısa bir alıntı koy. Bu blokta OLMAYAN bir birime ATIF YAPMA;
+  kimlik uydurma.
+- Kaynak birimi seçilmiş olması uygunsuzluk üretme ZORUNLULUĞU değildir. Seçilen kaynak
+  ilgisiz veya yetersizse bunu açıkça belirt (gerekce içinde "seçili kaynak bu adımı
+  kapsamıyor" gibi) ve o adımı kaynağa dayandırma.
+- Kanıt yetersizliğini "kontrol çalışmıyor" diye YORUMLAMA — sonuç "DEGERLENDIRILEMEDI".
+- İyi uygulama / rehber niteliğindeki bir kaynak OTOMATİK hukuki yükümlülük değildir;
+  yalnız bağlayıcı mevzuat maddesi ihlali "uyumsuzluk" olarak nitelenir.
+- Her "uyumsuzAlanlar" ve "uyumluAlanlar" girişinde mümkünse şu yapı bulunsun:
+  beklenenDurum (kaynağa göre), gozlenenDurum (kanıta göre), kanitRef (hangi kanıt),
+  karsilastirma (kısa muhakeme). Bilgi yoksa alanı boş bırak.
 
 ${KALIP}`,
     schema: `{
   "sohbetNotu": "string — kullanıcıya 1-3 cümlelik doğal dil özet/yanıt",
   "uyumluAlanlar": [
-    { "konu": "string", "gerekce": "string", "kaynak": "string — hangi kanıt / mevzuat maddesi" }
+    { "konu": "string", "gerekce": "string", "kaynak": "string — hangi kanıt / mevzuat maddesi",
+      "beklenenDurum": "string | ''", "gozlenenDurum": "string | ''", "kanitRef": "string | ''",
+      "karsilastirma": "string | ''", "dayanakKaynakBirimId": "string | null", "dayanakAlinti": "string | null" }
   ],
   "uyumsuzAlanlar": [
     { "konu": "string", "gerekce": "string", "kaynak": "string", "onem": "YUKSEK | ORTA | DUSUK",
+      "beklenenDurum": "string | ''", "gozlenenDurum": "string | ''", "kanitRef": "string | ''",
+      "karsilastirma": "string | ''", "dayanakKaynakBirimId": "string | null", "dayanakAlinti": "string | null",
       "ihlalEdilenMaddeler": [ { "madde": "string — ör. 'MADDE 6' / 'CBDDO-BIGR md.3.1.1.2'",
         "aciklama": "string — nasıl ihlal ediliyor; '... maddesi/maddeleri uyumsuzluk içermektedir' ile bitir" } ] }
   ],
@@ -440,7 +459,9 @@ ${KALIP}`,
       "hedefGunSayisi": 60,
       "ilgiliMevzuat": "string",
       "tekrarMi": false,
-      "emsalFindingId": "string | null — tekrarMi=true ise emsal bulgunun findingId'si" }
+      "emsalFindingId": "string | null — tekrarMi=true ise emsal bulgunun findingId'si",
+      "dayanakKaynakBirimId": "string | null — tespit bir kaynak birimine dayanıyorsa birimin id'si",
+      "dayanakAlinti": "string | null — dayanak birimden birebir kısa alıntı" }
   ],
   "eksikBilgi": ["string — değerlendirme için gereken ama sağlanmayan"]
 }`,
@@ -448,6 +469,7 @@ ${KALIP}`,
         controlText: string;
         regulationText: string;
         knowledgeText?: string;
+        sourceUnitsText?: string;
         precedentText?: string;
         evidenceDigest: string;
         history: string;
@@ -459,6 +481,14 @@ ${KALIP}`,
             block('mevzuat', params.regulationText || '(mevzuat maddesi seçilmedi)'),
             block('ic_kaynak', params.knowledgeText || '(kurumsal kaynak seçilmedi)'),
         ];
+        if (params.sourceUnitsText?.trim()) {
+            parts.push(
+                block(
+                    'kaynak_birimleri',
+                    `${params.sourceUnitsText}\n\n(NORMATİF kaynaklar — ne beklendiğini tanımlar. Tespiti bir birime dayandırırken "dayanakKaynakBirimId" alanına birimin id'sini yaz; burada olmayan birime atıf yapma.)`,
+                ),
+            );
+        }
         if (params.precedentText?.trim()) parts.push(block('emsal_bulgular', params.precedentText));
         parts.push(block('kanit', params.evidenceDigest || '(kanıt sağlanmadı)'));
         if (params.history.trim()) parts.push(block('onceki_konusma', params.history));
