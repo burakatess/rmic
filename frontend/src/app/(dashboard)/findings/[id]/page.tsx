@@ -10,6 +10,7 @@ import {
 } from '@/components/ui';
 import type { TimelineItem, TimelineVariant, AttachmentMeta } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
+import { PermissionGate, useAuth } from '@/components/auth';
 import AddActionModal from '@/components/modals/AddActionModal';
 import { FindingFollowUpModal } from '@/components/modals/FindingFollowUpModal';
 
@@ -26,6 +27,7 @@ interface Action {
 }
 interface FollowUp {
     id: string; followUpId: string; status: string; actionId?: string | null;
+    secondControllerId?: string | null; approvalStatus?: string | null; evaluatorId?: string | null;
     result?: string | null; resolutionOutcome?: string | null; newFollowUpDate?: string | null;
     explanation?: string | null; birimCevabi?: string | null; currentStatusDetail?: string | null;
     internalControlAssessment?: string | null; targetResolutionDate?: string | null;
@@ -168,6 +170,7 @@ export default function FindingDetailPage() {
     const { id } = useParams<{ id: string }>();
     const router = useRouter();
     const { success, error: showError } = useToast();
+    const { user } = useAuth();
 
     const [finding, setFinding] = useState<Finding | null>(null);
     const [auditTrail, setAuditTrail] = useState<AuditEntry[]>([]);
@@ -218,10 +221,25 @@ export default function FindingDetailPage() {
             else if (workflowAction === 'mutabakat-onayla') await api.mutabakatOnayla(finding.id, { internalControlAssessment: workflowInput });
             else if (workflowAction === 'mutabakat-geri-gonder') { if (!workflowInput.trim()) { showError('Zorunlu', 'Gerekçe yazın.'); return; } await api.mutabakatGeriGonder(finding.id, workflowInput); }
             else if (workflowAction === 'iptal-et') { if (!workflowInput.trim()) { showError('Zorunlu', 'İptal gerekçesi yazın.'); return; } await api.iptalEt(finding.id, workflowInput); }
+            else if (workflowAction === 'kapat') { if (!workflowInput.trim()) { showError('Zorunlu', 'Kapanış gerekçesi yazın.'); return; } await api.closeFinding(finding.id, workflowInput); }
+            else if (workflowAction === 'yeniden-ac') { if (!workflowInput.trim()) { showError('Zorunlu', 'Yeniden açma gerekçesi yazın.'); return; } await api.reopenFinding(finding.id, workflowInput); }
             success('Başarılı', 'İşlem tamamlandı.');
             setWorkflowAction(null); setWorkflowInput(''); load();
         } catch (err: any) { showError('Hata', err?.message || 'İşlem gerçekleştirilemedi.'); }
         finally { setWorkflowLoading(false); }
+    };
+
+    const approveFollowUp = async (fuId: string) => {
+        if (!finding) return;
+        try {
+            const res = await api.updateFollowUp(finding.id, fuId, { status: 'ONAYLANDI' }) as { createdAction?: { actionId: string } | null };
+            success('Onaylandı', res?.createdAction
+                ? `Takip onaylandı. Yeni aksiyon: ${res.createdAction.actionId}`
+                : 'Takip değerlendirmesi onaylandı.');
+            load();
+        } catch (err) {
+            showError('Onaylanamadı', err instanceof Error ? err.message : 'İşlem başarısız');
+        }
     };
 
     const addLog = async () => {
@@ -439,6 +457,22 @@ export default function FindingDetailPage() {
                             <Button variant="ghost" size="sm" onClick={() => setWorkflowAction('iptal-et')} className="text-red-500 hover:bg-red-50">
                                 İptal Et
                             </Button>
+                        )}
+                        {finding.status !== 'CLOSED' && (
+                            <PermissionGate permission="finding:update">
+                                <Button variant="success" size="sm" onClick={() => setWorkflowAction('kapat')}
+                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                                >
+                                    Bulguyu Kapat
+                                </Button>
+                            </PermissionGate>
+                        )}
+                        {finding.status === 'CLOSED' && (
+                            <PermissionGate permission="finding:update">
+                                <Button variant="outline" size="sm" onClick={() => setWorkflowAction('yeniden-ac')}>
+                                    Yeniden Aç
+                                </Button>
+                            </PermissionGate>
                         )}
                         <Link href={`/findings/${id}/edit`}>
                             <Button variant="secondary" size="sm"
@@ -729,7 +763,12 @@ export default function FindingDetailPage() {
                                                         <span>{fmtDatetime(fu.createdAt)}</span>
                                                     </div>
                                                 </div>
-                                                <Button variant="secondary" size="sm" onClick={() => { setSelectedFollowUp(fu); setFollowUpOpen(true); }}>Düzenle</Button>
+                                                <div className="flex items-center gap-2">
+                                                    {fu.status !== 'ONAYLANDI' && fu.result && fu.secondControllerId === user?.id && (
+                                                        <Button variant="success" size="sm" onClick={() => approveFollowUp(fu.id)}>Onayla</Button>
+                                                    )}
+                                                    <Button variant="secondary" size="sm" onClick={() => { setSelectedFollowUp(fu); setFollowUpOpen(true); }}>Düzenle</Button>
+                                                </div>
                                             </div>
                                             <div className="p-5 space-y-3">
                                                 {fu.currentStatusDetail && (
@@ -843,11 +882,24 @@ export default function FindingDetailPage() {
                                 {workflowAction === 'mutabakat-onayla'          && 'Mutabakatı Onayla'}
                                 {workflowAction === 'mutabakat-geri-gonder'     && 'Birime Geri Gönder'}
                                 {workflowAction === 'iptal-et'                  && 'Bulguyu İptal Et'}
+                                {workflowAction === 'kapat'                     && 'Bulguyu Kapat'}
+                                {workflowAction === 'yeniden-ac'                && 'Bulguyu Yeniden Aç'}
                             </h3>
                         </div>
                         <div className="p-6 space-y-4">
                             {workflowAction === 'mutabakata-gonder' && (
                                 <p className="text-sm text-slate-600">Bu bulgu mutabakata gönderilecek ve iletişim kişisine bildirim yapılacak. Onaylıyor musunuz?</p>
+                            )}
+                            {workflowAction === 'kapat' && (
+                                <p className="text-sm text-slate-600">Bulgu ancak <b>tüm düzeltici aksiyonlar KAPATILDI</b> durumundaysa kapatılabilir. Kapanış tarihi sunucu tarafından atanır.</p>
+                            )}
+                            {(workflowAction === 'kapat' || workflowAction === 'yeniden-ac') && (
+                                <div>
+                                    <label className="text-xs font-semibold text-slate-700 uppercase block mb-1.5">Gerekçe *</label>
+                                    <textarea value={workflowInput} onChange={e => setWorkflowInput(e.target.value)} rows={3}
+                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-300 outline-none resize-none"
+                                        placeholder="Gerekçeyi yazın…" />
+                                </div>
                             )}
                             {(workflowAction === 'ic-kontrol-onayina-gonder' || workflowAction === 'mutabakat-onayla') && (
                                 <div>

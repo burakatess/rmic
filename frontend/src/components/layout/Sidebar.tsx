@@ -53,6 +53,7 @@ const navigation: NavItem[] = [
             { label: 'Kontrol Alanı', href: '/risks/controls' },
             { label: 'Aksiyon Tablosu', href: '/risks/actions' },
             { label: 'RCA Haritalama', href: '/risks/rca-mapping' },
+            { label: 'Risk Simülasyonu', href: '/risks/simulation', permission: 'risk:sim:view' },
         ],
     },
     {
@@ -66,6 +67,7 @@ const navigation: NavItem[] = [
         ),
         children: [
             { label: 'Kontrol Envanteri', href: '/controls' },
+            { label: 'Yıllık Plan', href: '/controls/annual-plan', permission: 'control:*' },
             { label: 'Kontrol Takip Panosu', href: '/controls/agenda' },
             { label: 'Kontrol-Risk Eşleştirme', href: '/controls/mapping' },
             { label: 'Kontrol Testi', href: '/controls/testing', permission: 'control:test' },
@@ -151,6 +153,7 @@ const navigation: NavItem[] = [
             { label: 'Kontrol & Kanıt Değerlendirme', href: '/ai/kontrol-kanit', permission: 'ai:run' },
             { label: 'Doğal Dil Sorgu', href: '/ai/sorgu' },
             { label: 'Kaynak Kütüphanesi', href: '/ai/kaynaklar', permission: 'ai:admin' },
+            { label: 'Kaynak Kataloğu', href: '/ai/kaynak-katalogu', permission: 'ai:view' },
             { label: 'Ayarlar & Kullanım', href: '/ai/ayarlar', permission: 'ai:admin' },
         ],
     },

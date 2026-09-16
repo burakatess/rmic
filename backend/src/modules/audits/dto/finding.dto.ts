@@ -12,7 +12,13 @@ import { EmptyToUndefined } from '../../../common/decorators';
 export const CREATABLE_SEVERITIES = ['CRITICAL', 'HIGH'] as const;
 // FindingStatus şeması 6 değer taşıyor (OPEN/PENDING_REVIEW/VERIFIED legacy) — iş
 // kuralı: yeni/güncellenen bulgularda yalnızca bu 3 değer seçilebilir.
-export const SELECTABLE_STATUSES = ['IN_PROGRESS', 'PARTIALLY_CLOSED', 'CLOSED'] as const;
+// Genel bulgu düzenleme (PUT /findings/:id) ile seçilebilecek statüler.
+// CLOSED BİLİNÇLİ olarak DIŞARIDA: kapanış yalnızca korumalı ayrı işlemden geçer
+// (POST /findings/:id/workflow/kapat) — tüm aksiyonlar KAPATILDI + gerekçe + log
+// koşullarıyla. Genel PUT'tan CLOSED gönderilmesi 400 döner (Madde 3).
+export const SELECTABLE_STATUSES = ['IN_PROGRESS', 'PARTIALLY_CLOSED'] as const;
+// Bulgu oluştururken kullanılabilecek statüler (kapanmış bulgu oluşturulamaz).
+export const CREATABLE_STATUSES = ['IN_PROGRESS'] as const;
 
 export enum FindingSeverity { CRITICAL = 'CRITICAL', HIGH = 'HIGH', MEDIUM = 'MEDIUM', LOW = 'LOW' }
 export enum FindingType {
@@ -116,8 +122,11 @@ export class UpdateFindingDto {
     // targetResolutionDate DTO'da yer alır (frontend eski payload'ları kırılmasın diye)
     // ama servis katmanında İSTEMCİDEN gelen değer HER ZAMAN yok sayılır (Madde 4).
     @IsOptional() @EmptyToUndefined() @IsDateString() targetResolutionDate?: string;
-    @IsOptional() @EmptyToUndefined() @IsDateString() closedDate?: string;
     @IsOptional() @EmptyToUndefined() @IsDateString() testDate?: string;
+    // closedDate / workflowStatus / resolutionStatus: genel PUT'tan KABUL EDİLMEZ
+    // (forbidNonWhitelisted → 400). Bunlar yalnızca korumalı geçiş işlemlerinden
+    // değişir: POST /findings/:id/workflow/{mutabakata-gonder|ic-kontrol-onayina-gonder|
+    // mutabakat-onayla|mutabakat-geri-gonder|iptal-et|kapat|yeniden-ac} ve takip akışı.
     @IsOptional() @IsString() attachment?: string;
     @IsOptional() @IsString() assigneeId?: string;
     @IsOptional() @IsBoolean() sendEmail?: boolean;
@@ -128,8 +137,6 @@ export class UpdateFindingDto {
     @IsOptional() @IsString() recommendation?: string;
     @IsOptional() @IsString() managementResponse?: string;
     @IsOptional() @IsString() iletisimKisisi?: string;
-    @IsOptional() @IsEnum(FindingWorkflowStatus) workflowStatus?: FindingWorkflowStatus;
-    @IsOptional() @IsEnum(FindingResolutionStatus) resolutionStatus?: FindingResolutionStatus;
 }
 
 export class CreateActionDto {

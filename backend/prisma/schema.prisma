@@ -25,16 +25,31 @@ model User {
   updatedAt    DateTime @updatedAt
 
   // Relations
-  role                  Role           @relation(fields: [roleId], references: [id])
-  roleId                String
-  ownedRisks            Risk[]         @relation("RiskOwner")
-  ownedControls         Control[]      @relation("ControlOwner")
-  testPerformerControls Control[]      @relation("ControlTestPerformer")
-  reviewerControls      Control[]      @relation("ControlReviewer")
-  ownedActions          Action[]       @relation("ActionOwner")
-  auditLogs             AuditLog[]
-  refreshTokens         RefreshToken[]
-  riskProposals         RiskProposal[] @relation("RiskProposalRequester")
+  role                       Role               @relation(fields: [roleId], references: [id])
+  roleId                     String
+  ownedRisks                 Risk[]             @relation("RiskOwner")
+  ownedControls              Control[]          @relation("ControlOwner")
+  testPerformerControls      Control[]          @relation("ControlTestPerformer")
+  reviewerControls           Control[]          @relation("ControlReviewer")
+  ownedActions               Action[]           @relation("ActionOwner")
+  auditLogs                  AuditLog[]
+  refreshTokens              RefreshToken[]
+  riskProposals              RiskProposal[]     @relation("RiskProposalRequester")
+  addedControlScopes         ControlYearScope[] @relation("ControlYearScopeAddedBy")
+  removedControlScopes       ControlYearScope[] @relation("ControlYearScopeRemovedBy")
+  assignedScopeYears         ControlYearScope[] @relation("ScopeAssignee")
+  secondControlledScopeYears ControlYearScope[] @relation("ScopeSecondController")
+
+  createdSimMethodologies SimulationMethodology[]  @relation("SimMethodologyCreatedBy")
+  createdRiskSimulations  RiskSimulation[]         @relation("RiskSimulationCreatedBy")
+  createdSimScenarios     RiskSimulationScenario[] @relation("RiskSimScenarioCreatedBy")
+  performedSimTransfers   RiskSimulationTransfer[] @relation("RiskSimTransferPerformedBy")
+
+  directorateMemberships        DirectorateMembership[] @relation("DirectorateMembershipUser")
+  createdDirectorateMemberships DirectorateMembership[] @relation("DirectorateMembershipCreatedBy")
+
+  updatedAnnualPlanDrafts AnnualPlanDraft[] @relation("AnnualPlanDraftUpdatedBy")
+  appliedAnnualPlanDrafts AnnualPlanDraft[] @relation("AnnualPlanDraftAppliedBy")
 }
 
 model Role {
@@ -67,17 +82,36 @@ model Directorate {
   isActive Boolean @default(true)
 
   // Relations
-  controls      Control[]         @relation("ControlDirectorate")
-  findings      Finding[]         @relation("FindingDirectorate")
-  actions       Action[]          @relation("ActionDirectorate")
-  followUps     FindingFollowUp[] @relation("FollowUpDirectorate")
-  controlTests  ControlTest[]     @relation("ControlTestDirectorate")
-  riskProposals RiskProposal[]    @relation("RiskProposalDirectorate")
+  controls      Control[]               @relation("ControlDirectorate")
+  findings      Finding[]               @relation("FindingDirectorate")
+  actions       Action[]                @relation("ActionDirectorate")
+  followUps     FindingFollowUp[]       @relation("FollowUpDirectorate")
+  controlTests  ControlTest[]           @relation("ControlTestDirectorate")
+  riskProposals RiskProposal[]          @relation("RiskProposalDirectorate")
+  memberships   DirectorateMembership[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([isActive])
+}
+
+// Kullanıcı ↔ Direktörlük yetkilendirme ilişkisi ("Birimim" kapsamı). Çoka-çok:
+// bir kullanıcı birden fazla direktörlükte yetkili olabilir. Yalnızca GÖRÜNTÜLEME
+// kapsamı belirler — modül bazlı işlem izinleri (finding:view vb.) ayrıca uygulanır.
+model DirectorateMembership {
+  id            String      @id @default(cuid())
+  user          User        @relation("DirectorateMembershipUser", fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+  directorate   Directorate @relation(fields: [directorateId], references: [id], onDelete: Cascade)
+  directorateId String
+
+  createdAt   DateTime @default(now())
+  createdBy   User?    @relation("DirectorateMembershipCreatedBy", fields: [createdById], references: [id])
+  createdById String?
+
+  @@unique([userId, directorateId])
+  @@index([directorateId])
 }
 
 enum RiskProposalStatus {
@@ -323,7 +357,7 @@ enum TreatmentDecision {
 
 model Control {
   id            String            @id @default(cuid())
-  controlId     String            @unique // C-2024-001
+  controlId     String            @unique // Kalıcı görüntü kodu — BTK-XXXX (control_code_seq); eski K-YYYY-NNNN değerleri CodeAlias'ta saklanır
   name          String
   description   String            @db.Text
   type          ControlType
@@ -345,17 +379,21 @@ model Control {
   notes          String?  @db.Text // Notlar
   selectedMonths String[] // Seçili aylar (3 Aylık, 6 Aylık, Yıllık, Arızi)
 
-  // Owner
+  // Owner — kaydı oluşturan/idari sahip. ARTIK "atanan kontrolcü" DEĞİL —
+  // create() içinde userId (oluşturan) ile sabitlenir, DTO'dan yazılamaz.
+  // Test kontrolcüsü ataması yıl bazlı: bkz. ControlYearScope.assigneeId.
   owner   User   @relation("ControlOwner", fields: [ownerId], references: [id])
   ownerId String
 
-  // Test Roles
+  // LEGACY test rolleri — yeni create/update yollarından artık yazılmaz,
+  // yalnızca geriye dönük okuma için tutulur. Yıl bazlı atama için bkz.
+  // ControlYearScope.assigneeId / secondControllerId.
   testPerformer      User?   @relation("ControlTestPerformer", fields: [testPerformerId], references: [id])
   testPerformerId    String?
   reviewer           User?   @relation("ControlReviewer", fields: [reviewerId], references: [id])
   reviewerId         String?
-  secondControllerId String? // 2. Kontrolcü
-  contactPersonId    String? // İletişim Kişisi (LDAP)
+  secondControllerId String? // LEGACY — 2. Kontrolcü (bkz. yukarıdaki not)
+  contactPersonId    String? // İletişim Kişisi (LDAP) — canlı kalır, ayrı bir kavram
 
   // Effectiveness
   effectivenessStatus EffectivenessStatus @default(NOT_TESTED)
@@ -363,12 +401,16 @@ model Control {
   lastTestResult      TestResult?
 
   // Relations
-  directorateRel Directorate?         @relation("ControlDirectorate", fields: [directorateId], references: [id])
-  risks          ControlRiskMapping[]
-  regulations    ControlRegulation[]
-  tests          ControlTest[]
-  findings       Finding[]
-  actions        Action[]
+  directorateRel       Directorate?          @relation("ControlDirectorate", fields: [directorateId], references: [id])
+  risks                ControlRiskMapping[]
+  regulations          ControlRegulation[]
+  tests                ControlTest[]
+  findings             Finding[]
+  actions              Action[]
+  sourceMappings       SourceMapping[] // Kaynak Kataloğu eşleştirmeleri (çoktan çoğa)
+  testCards            ControlTestCard[] // İlişkili kontrol test kartları
+  yearScopes           ControlYearScope[] // Yıllık kapsam kayıtları (ayrı yaşam döngüsü)
+  annualPlanDraftItems AnnualPlanDraftItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -379,6 +421,139 @@ model Control {
   @@index([effectivenessStatus])
   @@index([status])
   @@index([directorateId])
+}
+
+// Kontrol–yıl ilişkisi: Control kalıcı ana envanterdir, bu model o kontrolün
+// hangi yıl(lar)ın kapsamına alındığını, o yıla özel periyodiklik/planlama
+// ayarlarını ve kapsamdan çıkarma geçmişini (satır silinmeden) tutar.
+model ControlYearScope {
+  id        String  @id @default(cuid())
+  control   Control @relation(fields: [controlId], references: [id])
+  controlId String
+  year      Int
+
+  status ControlYearScopeStatus @default(ACTIVE)
+
+  // Bu yıla özel planlama ayarları — Control.frequency'den bağımsız değişebilir,
+  // envanterdeki varsayılan periyodiklik değişikliği geçmiş yılları etkilemez.
+  frequency      ControlFrequency
+  referenceMonth Int? // 1-12 — QUARTERLY/SEMI_ANNUAL/ANNUAL için kullanıcı seçimi; selectedMonths bundan türetilir
+  selectedMonths String[] // AD_HOC / özel ay listesi — periyodik sıklıklar için backend'de referenceMonth'tan hesaplanır
+  controlDate    DateTime? // AD_HOC tekil tarih
+
+  // Bu yılın test kontrolcü atamaları — Control'den bağımsız, yıl bazlı.
+  assignee           User?   @relation("ScopeAssignee", fields: [assigneeId], references: [id])
+  assigneeId         String?
+  secondController   User?   @relation("ScopeSecondController", fields: [secondControllerId], references: [id])
+  secondControllerId String?
+
+  addedBy   User     @relation("ControlYearScopeAddedBy", fields: [addedById], references: [id])
+  addedById String
+  addedAt   DateTime @default(now())
+
+  removedBy     User?     @relation("ControlYearScopeRemovedBy", fields: [removedById], references: [id])
+  removedById   String?
+  removedAt     DateTime?
+  removalReason String?   @db.Text
+
+  copiedFromYear Int? // "önceki yıldan kopyala" ile oluşturulduysa kaynak yıl
+
+  tasks ControlTest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([controlId, year])
+  @@index([year])
+  @@index([status])
+  @@index([assigneeId])
+  @@index([secondControllerId])
+}
+
+enum ControlYearScopeStatus {
+  ACTIVE
+  REMOVED
+}
+
+// Yıllık Plan — taslak katmanı. Gerçek ControlYearScope/ControlTest'i ASLA
+// doğrudan değiştirmez; yalnızca "Planı Uygula" ControlScopeService'in aynı
+// motoruyla gerçek kapsamı günceller. Yıl başına TEK paylaşılan taslak
+// (kullanıcı başına değil) — birden fazla yetkili aynı taslağı düzenleyebilir,
+// `revision` ile iyimser eşzamanlılık korunur (ControlTest.contentVersion ile
+// aynı desen).
+model AnnualPlanDraft {
+  id       String                @id @default(cuid())
+  year     Int                   @unique
+  revision Int                   @default(0)
+  status   AnnualPlanDraftStatus @default(OPEN)
+
+  updatedBy   User   @relation("AnnualPlanDraftUpdatedBy", fields: [updatedById], references: [id])
+  updatedById String
+
+  lastAppliedAt   DateTime?
+  lastAppliedBy   User?     @relation("AnnualPlanDraftAppliedBy", fields: [lastAppliedById], references: [id])
+  lastAppliedById String?
+
+  items AnnualPlanDraftItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum AnnualPlanDraftStatus {
+  OPEN
+  APPLIED
+}
+
+// Taslaktaki tek kontrol satırının önerilen (henüz uygulanmamış) durumu.
+// `inScope=false` + gerçek ACTIVE kapsam var demek "kapsamdan çıkarılacak";
+// `inScope=true` + gerçek kapsam yok demek "eklenecek" — fark, apply anında
+// gerçek ControlYearScope ile karşılaştırılarak (stored değil, hesaplanarak)
+// belirlenir.
+model AnnualPlanDraftItem {
+  id      String          @id @default(cuid())
+  draft   AnnualPlanDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  draftId String
+
+  control   Control @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  controlId String
+
+  inScope        Boolean
+  frequency      ControlFrequency?
+  referenceMonth Int? // 1-12 — QUARTERLY/SEMI_ANNUAL/ANNUAL referans ay seçimi
+  selectedMonths String[]
+  controlDate    DateTime? // yalnızca AD_HOC
+  reason         String?           @db.Text // sıklık/takvim/atama değişikliği gerekçesi
+
+  // Bu yılın taslak kontrolcü atamaları — plain string (Control gibi FK
+  // doğrulaması servis katmanında yapılır, draft satırı hafif kalır).
+  assigneeId         String?
+  secondControllerId String?
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([draftId, controlId])
+  @@index([controlId])
+}
+
+// Eski kod → yeni kod eşlemesi (Control: K-YYYY-NNNN → BTK-XXXX; ControlTest:
+// TST-YYYY-NNNN → YYYY-BTK-XXXX-TN). Tek tablo iki entityType'ı da karşılar —
+// polimorfik FK Prisma'da temiz temsil edilemediği için entityId düz string,
+// doğrulama uygulama katmanında yapılır (bu şemada zaten var olan
+// removedById/outOfScopeById gibi plain-string çapraz referans deseniyle tutarlı).
+model CodeAlias {
+  id         String   @id @default(cuid())
+  entityType String // 'CONTROL' | 'CONTROL_TEST'
+  entityId   String
+  oldCode    String
+  newCode    String
+  source     String   @default("MIGRATION") // 'MIGRATION' | 'MANUAL'
+  mappedAt   DateTime @default(now())
+  mappedById String?
+
+  @@unique([entityType, oldCode])
+  @@index([entityType, entityId])
+  @@index([newCode])
 }
 
 model ControlRiskMapping {
@@ -402,6 +577,24 @@ model ControlTest {
   control   Control @relation(fields: [controlId], references: [id], onDelete: Cascade)
   controlId String
 
+  // Yıllık kapsam ilişkisi — nullable: geçiş öncesi (legacy) kayıtlar güvenilir
+  // şekilde eşleştirilemediyse NULL bırakılır (bkz. migrate-control-scopes.ts),
+  // yeni oluşturulan her task servis katmanında daima scope ile yaratılır.
+  scope   ControlYearScope? @relation(fields: [scopeId], references: [id])
+  scopeId String?
+  year    Int? // denormalize (scope.year) — filtre performansı
+
+  // Dönem (frekansa göre): "YEAR","H1","H2","Q1".."Q4","M01".."M12","W01".."W53","ADHOC"
+  periodKey   String?
+  periodLabel String?
+  periodStart DateTime?
+  periodEnd   DateTime?
+
+  // Kapsamdan çıkarma nedeniyle iptal (bkz. ControlTestStatus.KAPSAM_DISI)
+  outOfScopeAt     DateTime?
+  outOfScopeById   String?
+  outOfScopeReason String?   @db.Text
+
   // Planlama
   plannedDate     DateTime // Test yapılması planlanan tarih
   isAutoGenerated Boolean  @default(false) // Frekansa göre otomatik mi?
@@ -416,11 +609,16 @@ model ControlTest {
   directorateId String?
 
   // İçerik
-  summary         String?
-  description     String?  @db.Text
-  resultText      String?  @db.Text // Kontrol sonucu açıklaması
-  evidenceSummary String?  @db.Text // Kanıt özeti
-  evidenceUrls    String[] // Kanıt URL listesi
+  summary          String?
+  description      String?  @db.Text
+  resultText       String?  @db.Text // Kontrol sonucu açıklaması
+  evidenceSummary  String?  @db.Text // Kanıt özeti
+  evidenceUrls     String[] // Kanıt URL listesi
+  stepObservations Json? // Test adımı bazlı gözlem/kanıt ilişkisi (opsiyonel) — [{index,text,observation,attachmentId?}]
+
+  // İyimser eşzamanlılık — taslak kaydetmede iki sekme/kullanıcının birbirini
+  // sessizce ezmesini önlemek için (bkz. controls/testing/[id] sayfası).
+  contentVersion Int @default(0)
 
   // Statü
   status        ControlTestStatus  @default(BEKLIYOR)
@@ -458,6 +656,7 @@ model ControlTest {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([scopeId, periodKey])
   @@index([controlId])
   @@index([status])
   @@index([plannedDate])
@@ -465,6 +664,8 @@ model ControlTest {
   @@index([assigneeId])
   @@index([secondControllerId])
   @@index([referencedFindingId])
+  @@index([scopeId])
+  @@index([year])
 }
 
 enum ControlTestStatus {
@@ -475,6 +676,7 @@ enum ControlTestStatus {
   GERI_GONDERILDI // 2. kontrolcü düzeltme için geri gönderdi
   ONAYLANDI // 2. kontrolcü onayladı — final
   IPTAL // Final onaydan sonra SYSTEM_ADMIN tarafından iptal edildi
+  KAPSAM_DISI // Kapsamdan çıkarma nedeniyle iptal (IPTAL'den farklı: final onay sonrası admin iptali değil)
 }
 
 enum FindingTestStatus {
@@ -1245,6 +1447,19 @@ enum KnowledgeDocKind {
 }
 
 // ==========================================
+// KAYIT NUMARASI SAYAÇLARI
+// İnsan-okur sıralı kayıt numaraları (A-2026-0007, T-2026-0012 …) için atomik
+// sayaç. "max+1" / random yerine `UPDATE ... value = value + 1 RETURNING` — tek
+// deyim, yarış-koşulu yok, retry gerektirmez, transaction içinde güvenli.
+// ==========================================
+
+model RecordCounter {
+  scope     String   @id // "action" | "followup"
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+// ==========================================
 // AUDIT LOG (System-wide logging)
 // ==========================================
 
@@ -1696,11 +1911,52 @@ model AiEvalSession {
   knowledgeDocIds      String[] // seçilen KnowledgeDoc.id listesi
   knowledgeSnapshot    Json? // kurumsal kaynakların kopyası
 
+  // Kaynak Kataloğu (SourceUnit) — sürümlü, yetkilendirilmiş kaynaklardan seçim.
+  // "Önerilen / kullanıcı onaylı / gerçekte kullanılan" ayrımı için 3 ayrı alan.
+  suggestedSourceUnitIds String[] // RAG'in önerdiği birimler
+  sourceUnitIds          String[] // kullanıcının seçtiği/onayladığı birimler
+  usedSourceUnitIds      String[] // değerlendirmede GERÇEKTEN retrieval'a giren birimler
+  sourceSnapshot         Json? // seçilen birimlerin (sürüm+metin) kopyası
+
   // Yanıt/Kanıt Alanı — kalıcı serbest metin (dosyalara ek olarak)
   evidenceText String? @db.Text
 
+  // Dönem (ör. "Eylül 2026" / "2026 Q3") — başlık ve çoğaltmada kullanılır.
+  period String?
+
   createdById String
+  // Yaşam döngüsü — İŞLEM DURUMUNDAN ayrı (arşiv/çöp kutusu).
   status      AiEvalStatus @default(ACTIVE)
+  trashedAt   DateTime?
+
+  // İŞLEM DURUMU — AI çalışmasının kendisi. AI yanıtı tek başına "tamamlandı"
+  // yapmaz: başarılı çalışma AWAITING_REVIEW, kullanıcı sonuçlandırınca COMPLETED.
+  runStatus       AiEvalRunStatus @default(DRAFT)
+  runStartedAt    DateTime?
+  runProgress     Json? // { phase, filesRead, filesTotal } — GERÇEK sayılar, sahte % yok
+  cancelRequested Boolean         @default(false)
+  // DEĞERLENDİRME SONUCU — incelenmiş sonuçtan (kullanıcı sonuçlandırır).
+  outcome         AiEvalOutcome?
+  completedAt     DateTime?
+  completedById   String?
+
+  // Kullanıcı başlığı elle değiştirdiyse otomatik başlık ONU EZMEZ.
+  titleEditedByUser Boolean @default(false)
+
+  // Optimistic concurrency — autosave yarışı / çok sekme çatışması.
+  contentVersion Int     @default(0)
+  // Girdiler (kontrol/kapsam/kanıt) son değerlendirmeden sonra değişti mi?
+  inputsDirty    Boolean @default(false)
+
+  // Son değerlendirme çıktısı şema doğrulaması / atıf doğrulaması sonrasında
+  // insan incelemesi gerektiriyor mu? (uydurma atıf, şema ihlali, çelişki vb.)
+  needsReview       Boolean @default(false)
+  needsReviewReason String? @db.Text
+
+  // "Yeni dönem için çoğalt" soyağacı.
+  clonedFrom   AiEvalSession?  @relation("AiEvalClone", fields: [clonedFromId], references: [id], onDelete: SetNull)
+  clonedFromId String?
+  clones       AiEvalSession[] @relation("AiEvalClone")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1711,23 +1967,69 @@ model AiEvalSession {
   @@index([createdById])
   @@index([controlRefId])
   @@index([status])
+  @@index([runStatus])
+  @@index([createdById, status, updatedAt])
 }
 
 model AiEvalMessage {
-  id         String        @id @default(cuid())
-  session    AiEvalSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  sessionId  String
-  role       AiEvalRole
-  content    String        @db.Text // kullanıcı mesajı ham metni veya asistan sohbet notu
-  evaluation Json? // asistan turunda yapılandırılmış çıktı: { uyumluAlanlar[], uyumsuzAlanlar[], genelDurum, bulguAdaylari[], eksikBilgi[] }
-  modelName  String?
-  tokensIn   Int?
-  tokensOut  Int?
-  latencyMs  Int?
-  errorText  String?       @db.Text
-  createdAt  DateTime      @default(now())
+  id        String            @id @default(cuid())
+  session   AiEvalSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String
+  role      AiEvalRole
+  // Mesaj türü: tam değerlendirme koşusu / kullanıcı ek sorusu / ek soruya yanıt.
+  // QUESTION+ANSWER, 6 başlıklı raporu YENİDEN ÜRETMEZ (bkz. AiEvalService.askQuestion).
+  kind      AiEvalMessageKind @default(EVALUATION)
+  content   String            @db.Text // kullanıcı mesajı ham metni veya asistan sohbet notu
+
+  // Bu koşuya kanıttan AYRI olarak dahil edilen kullanıcı ek açıklaması (snapshot).
+  additionalNote String? @db.Text
+  // ANSWER mesajları için düz metin yanıt (evaluation JSON'u yok).
+  answerText     String? @db.Text
+
+  // Sürümlü yapılandırılmış çıktı şeması + runtime doğrulama sonucu.
+  schemaVersion    String?
+  schemaValid      Boolean?
+  schemaIssues     Json? // [{ path, message }] — şema/atıf doğrulama bulguları
+  // Otomatik + elle kaynak getirme özeti: { autoSuggested, sent, indexState, notes[] }.
+  retrievalNote    Json?
+  // AI'nin ÖZGÜN çıktısı — kullanıcı düzenlemesi bunu EZMEZ.
+  evaluation       Json? // { uyumluAlanlar[], uyumsuzAlanlar[], genelDurum, bulguAdaylari[], eksikBilgi[] }
+  // Kullanıcının düzenleyip kabul ettiği sürüm + tespit bazında inceleme kararları
+  // (_review: { status: ACCEPTED|EDITED|REJECTED, reviewerId, reviewedAt, reason }).
+  editedEvaluation Json?
+  reviewedById     String?
+  reviewedAt       DateTime?
+
+  modelName     String?
+  promptVersion String?
+  // Bu çalışmanın dayandığı girdi sürümü (session.contentVersion) ve kullanılan kanıtlar.
+  inputVersion  Int?
+  evidenceRefs  Json? // { attachmentIds: string[], evidenceTextHash: string, knowledgeDocIds, regulationArticleIds }
+
+  // ÇALIŞMA SEVİYESİ SNAPSHOT — bu koşuya giren TÜM girdileri yeniden kurabilmek
+  // için (oturum seviyesi yetmez). { contentVersion, controlTextHash, evidenceTextHash,
+  // attachmentHashes[], sourceUnits: [{unitId, versionId, sourceSlug, versionLabel, textHash, truncated}] }
+  runInputSnapshot  Json?
+  // Bu koşuda modele GERÇEKTEN iletilen kaynak birimleri (seçili ∩ geçerli ∩ sınır içi).
+  sentSourceUnitIds String[]
+  // Çıktıda GEÇERLİ ATIF yapılan kaynaklar — her biri gerçek unit/version + konum +
+  // (alıntı varsa) özgün metinle doğrulanır; ilişki insan incelemesine sunulur.
+  // [{ sourceUnitId, sourceVersionId, unitCode, group, index, quote?, textVerified, relationReviewed, reviewerNote }]
+  citedSourceRefs   Json?
+
+  tokensIn  Int?
+  tokensOut Int?
+  latencyMs Int?
+  errorText String? @db.Text
+
+  // İptal edilen / eski girdi sürümüne ait geç gelen sonuç — güncel sonucu EZMEZ.
+  cancelled Boolean @default(false)
+  stale     Boolean @default(false)
+
+  createdAt DateTime @default(now())
 
   @@index([sessionId])
+  @@index([sessionId, createdAt])
 }
 
 model AiEvalAttachment {
@@ -1741,14 +2043,61 @@ model AiEvalAttachment {
   kind          AiEvalAttachmentKind
   extractedText String?              @db.Text // çıkarılan metin (önbellek)
   uploadedById  String?
-  createdAt     DateTime             @default(now())
+
+  // Kullanıcının belirttiği belge meta bilgisi (item 7).
+  docDate         String? // belgedeki tarih/dönem (serbest metin)
+  relatedSystem   String? // ilgili sistem
+  relatedSample   String? // örneklem
+  relatedTestStep String? // ilgili test adımı
+  note            String? @db.Text
+
+  // Okuma durumu — GERÇEK backend sonucundan üretilir.
+  readStatus AiEvalReadStatus @default(PENDING)
+  readNote   String?          @db.Text
+
+  // Sürüm zinciri — "yeni sürüm yükle" eskisini YERİNDE değiştirmez.
+  version        Int               @default(1)
+  active         Boolean           @default(true) // yalnızca aktif sürüm değerlendirmede kullanılır
+  supersededBy   AiEvalAttachment? @relation("AttVersion", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersededById String?           @unique
+  supersedes     AiEvalAttachment? @relation("AttVersion")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([sessionId])
+  @@index([sessionId, active])
+}
+
+enum AiEvalReadStatus {
+  PENDING // Bekliyor
+  READING // Okunuyor
+  READ // Okundu
+  PARTIAL // Kısmen okundu
+  FAILED // Okunamadı
 }
 
 enum AiEvalStatus {
   ACTIVE
   ARCHIVED
+  TRASHED
+}
+
+// İŞLEM DURUMU — AI çalışmasının durumu (yaşam döngüsünden ayrı).
+enum AiEvalRunStatus {
+  DRAFT // Taslak — henüz değerlendirilmedi
+  RUNNING // Değerlendiriliyor — AI çağrısı sürüyor
+  AWAITING_REVIEW // İnceleme bekliyor — AI çalışması başarılı, kullanıcı sonuçlandırmalı
+  COMPLETED // Tamamlandı — kullanıcı sonuçlandırdı
+  ERROR // Hata — AI çağrısı başarısız
+}
+
+// DEĞERLENDİRME SONUCU — incelenmiş sonuçtan kullanıcı belirler.
+enum AiEvalOutcome {
+  MET // Karşılandı
+  PARTIALLY_MET // Kısmen karşılandı
+  NOT_MET // Karşılanmadı
+  INCONCLUSIVE // Değerlendirilemedi
 }
 
 enum AiEvalRole {
@@ -1757,9 +2106,773 @@ enum AiEvalRole {
   SYSTEM
 }
 
+enum AiEvalMessageKind {
+  EVALUATION // tam 6 başlıklı değerlendirme koşusu
+  QUESTION // kullanıcının ek sorusu / açıklaması
+  ANSWER // ek soruya doğrudan yanıt (raporu yeniden üretmez)
+}
+
 enum AiEvalAttachmentKind {
   DOCUMENT
   IMAGE
   EMAIL
   TEXT
+}
+
+// ==========================================
+// KAYNAK KATALOĞU — GENİŞLETİLMİŞ KÜTÜPHANE
+// kaynak → sürüm → birim (madde/kontrol) → eşleştirme → test kartı →
+// kanıt yeterliliği → değerlendirme veri setleri → kalite ölçümü.
+// KnowledgeDoc (mevcut) korunur; bu modeller onun yanında zenginleştirilmiş
+// katmanı sağlar. Özgün metin / çeviri / yorum / kurum içi metodoloji AYRI alanlarda.
+// ==========================================
+
+enum SourceKind {
+  REGULATION // Mevzuat
+  STANDARD_FRAMEWORK // Standart / çerçeve
+  AUDIT_METHODOLOGY // Denetim metodolojisi
+  CORPORATE_POLICY // Kurumsal politika / prosedür
+  PRODUCT_DOC // Teknik ürün dokümantasyonu
+  CONTROL_TEST_CARD // Kontrol test kartı
+  EVIDENCE_GUIDE // Kanıt değerlendirme rehberi
+  PRECEDENT_FINDING // Emsal bulgu
+  TRAINING_EXAMPLE // Eğitim örneği
+  EVAL_SCENARIO // Değerlendirme/test senaryosu
+}
+
+enum SourceConfidentiality {
+  PUBLIC
+  INTERNAL
+  RESTRICTED
+  CONFIDENTIAL
+}
+
+enum SourceApprovalStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  SUPERSEDED
+  WITHDRAWN
+}
+
+// "Bilinmeyen hakkı 'izinli' kabul etme" — UNKNOWN, ALLOWED değildir.
+enum UsagePermission {
+  UNKNOWN
+  ALLOWED
+  DENIED
+}
+
+model Source {
+  id              String                @id @default(cuid())
+  kind            SourceKind
+  slug            String                @unique // kalıcı kısa kimlik: "nist-sp-800-53-r5"
+  title           String
+  publisher       String?
+  officialUrl     String? // resmî adres
+  docCode         String? // doküman kodu
+  language        String                @default("en")
+  owner           String? // sahibi (kurum içi sorumlu)
+  confidentiality SourceConfidentiality @default(PUBLIC)
+  tags            String[]
+
+  // Kullanım hakları — AYRI alanlar. Varsayılan UNKNOWN (izinli değil).
+  rightRefLink  UsagePermission @default(UNKNOWN) // referans/link saklanabilir mi
+  rightFullText UsagePermission @default(UNKNOWN) // tam metin saklanabilir mi
+  rightRag      UsagePermission @default(UNKNOWN) // RAG'de kullanılabilir mi
+  rightFineTune UsagePermission @default(UNKNOWN) // fine-tuning için kullanılabilir mi
+  rightExport   UsagePermission @default(UNKNOWN) // dışa aktarılabilir mi
+  rightsNote    String?         @db.Text
+
+  // KULLANIM HAKKI ONAYI — içerik onayından AYRI. Dayanak + onaylayan saklanır.
+  // Sistem bunu kendiliğinden ALLOWED yapmaz; yalnız yetkili kullanıcı işaretler.
+  rightsVerifiedById String?
+  rightsVerifiedAt   DateTime?
+  rightsBasis        String?   @db.Text // hangi lisans/yazışma/karar; kim onayladı
+
+  // İzole test verisi işareti — fixture'lar üretimde görünmesin diye ayrılır.
+  isTestFixture Boolean @default(false)
+
+  createdById  String
+  reviewedById String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  versions SourceVersion[]
+
+  @@index([kind])
+  @@index([confidentiality])
+  @@index([isTestFixture])
+}
+
+model SourceVersion {
+  id               String               @id @default(cuid())
+  source           Source               @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  sourceId         String
+  versionLabel     String // "Rev.5", "2.0", "2025.09"
+  publishDate      DateTime?
+  effectiveDate    DateTime?
+  validUntil       DateTime? // geçerlilik sonu (yayından kalkma)
+  accessedAt       DateTime? // erişim tarihi
+  contentHash      String? // içerik hash'i (SHA-256, ilk 32)
+  contentRetrieved Boolean              @default(false) // tam metin gerçekten alındı mı
+  fullText         String?              @db.Text // ÖZGÜN tam metin (hak varsa)
+  storageNote      String?              @db.Text // neden alınmadı / kısıt açıklaması
+  approvalStatus   SourceApprovalStatus @default(DRAFT)
+
+  // İÇERİK İNCELEMESİ — kullanım hakkından AYRI. Metin/birimlerin doğru,
+  // eksiksiz ve kullanılabilir olduğunun teyidi.
+  contentReviewedById String?
+  contentReviewedAt   DateTime?
+
+  // RAG İNDEKS DURUMU — "hazır" yalnız READY iken. Job geçmişi SourceIndexJob'da.
+  indexStatus      SourceIndexStatus @default(NONE)
+  indexedAt        DateTime?
+  indexChunkCount  Int               @default(0)
+  indexError       String?           @db.Text
+  indexAttempts    Int               @default(0)
+  // İçerik değişince indeks eskir (STALE) — sessizce "hazır" gösterilmez.
+  contentChangedAt DateTime?
+
+  // Yeni sürüm eskisini EZMEZ; yerine geçme ilişkisi.
+  supersededBy   SourceVersion? @relation("VersionSupersede", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersededById String?        @unique
+  supersedes     SourceVersion? @relation("VersionSupersede")
+
+  units               SourceUnit[]
+  chunks              SourceChunk[]
+  mappings            SourceMapping[]
+  evalScenarioSources EvalScenarioSource[]
+  indexJobs           SourceIndexJob[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sourceId, versionLabel])
+  @@index([sourceId])
+  @@index([approvalStatus])
+}
+
+enum SourceIndexStatus {
+  NONE // hiç indekslenmedi
+  QUEUED // iş oluşturuldu
+  RUNNING
+  READY // güncel indeks var
+  ERROR
+  STALE // içerik değişti, yeniden indeksleme gerekli
+}
+
+// RAG indeksleme işi — başarı/hata/yeniden deneme görünürlüğü için geçmiş kaydı.
+// Modül senkron çalışır (mevcut sağlayıcı, yeni altyapı yok): iş RUNNING→READY/ERROR
+// aynı istekte tamamlanır; ERROR'da "Yeniden dene" yeni bir iş açar.
+model SourceIndexJob {
+  id          String            @id @default(cuid())
+  version     SourceVersion     @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  versionId   String
+  status      SourceIndexStatus @default(QUEUED)
+  attempt     Int               @default(1)
+  chunkCount  Int?
+  error       String?           @db.Text
+  createdById String
+  startedAt   DateTime          @default(now())
+  finishedAt  DateTime?
+
+  @@index([versionId])
+  @@index([status])
+}
+
+model SourceUnit {
+  id            String        @id @default(cuid())
+  version       SourceVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  versionId     String
+  stableKey     String // kalıcı birim ID (sürümler arası izlenebilir): "AC-2", "md.3.1.1.2"
+  unitCode      String // görüntülenen madde/kontrol kodu
+  unitType      String        @default("clause") // "article" | "clause" | "control" | "section"
+  title         String
+  originalText  String        @db.Text // ÖZGÜN metin (birebir alıntı)
+  translationTr String?       @db.Text // Türkçe açıklama/çeviri — AYRI
+  commentaryTr  String?       @db.Text // kurum içi yorum — AYRI
+  locator       Json? // { page, section, sheet, cellRange, heading }
+  scope         String?
+  riskAreas     String[]
+  parentKey     String? // fıkra/bent hiyerarşisi
+
+  mappings         SourceMapping[]
+  chunks           SourceChunk[]
+  evalScenarioRefs EvalScenarioRef[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([versionId, stableKey])
+  @@index([versionId])
+  @@index([stableKey])
+}
+
+// tam karşılar / kısmen karşılar / destekler / ilişkili
+enum MappingMatchType {
+  FULL
+  PARTIAL
+  SUPPORTS
+  RELATED
+}
+
+enum MappingStatus {
+  PENDING // eşleştirme bekliyor
+  AI_DRAFT // AI önerisi (taslak)
+  USER_CONFIRMED // kullanıcı onayladı — resmî uyum haritasına girer
+  REJECTED
+}
+
+enum MappingTargetType {
+  CONTROL
+  CONTROL_TEST_CARD
+  PROCESS_SCOPE_CARD
+  RISK
+}
+
+model SourceMapping {
+  id            String            @id @default(cuid())
+  targetType    MappingTargetType
+  controlId     String?
+  control       Control?          @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  testCardId    String?
+  testCard      ControlTestCard?  @relation(fields: [testCardId], references: [id], onDelete: Cascade)
+  processCardId String?
+  processCard   ProcessScopeCard? @relation(fields: [processCardId], references: [id], onDelete: Cascade)
+
+  version   SourceVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  versionId String
+  unit      SourceUnit?   @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  unitId    String?
+
+  matchType              MappingMatchType
+  status                 MappingStatus    @default(PENDING)
+  rationale              String?          @db.Text
+  bindingType            String? // "binding_obligation" | "good_practice"
+  applicabilityRationale String?          @db.Text
+  approvedById           String?
+  approvedAt             DateTime?
+  createdById            String
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  @@index([controlId])
+  @@index([testCardId])
+  @@index([processCardId])
+  @@index([versionId])
+  @@index([status])
+}
+
+enum TestCardOrigin {
+  AI_DRAFT
+  INTERNAL_METHODOLOGY
+  IMPORTED
+}
+
+enum TestCardStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  SUPERSEDED
+  WITHDRAWN
+}
+
+model ControlTestCard {
+  id      String         @id @default(cuid())
+  code    String         @unique // "TK-BT-01"
+  topicNo Int? // 1..12 (başlangıç konuları)
+  title   String
+  origin  TestCardOrigin @default(AI_DRAFT)
+  status  TestCardStatus @default(DRAFT)
+  version Int            @default(1)
+
+  purposeRisk           String @db.Text // amaç ve risk
+  scopePrereq           String @db.Text // kapsam / önkoşullar
+  method                String @db.Text // inceleme / görüşme / test yöntemi
+  steps                 Json // [{ no: number, text: string }]
+  expectedState         String @db.Text // beklenen durum
+  requestedEvidence     Json // string[]
+  evidenceSufficiency   String @db.Text // kanıt yeterlilik koşulları
+  decisionCriteria      Json // { met, notMet, inconclusive, conflicting }
+  misleadingSignals     String @db.Text // yanlış sonuca götürebilecek durumlar
+  sampleControlResult   String @db.Text // kısa kontrol sonucu örneği
+  sampleEvidenceRequest String @db.Text // eksik kanıt talebi örneği
+
+  relatedControlId String?
+  relatedControl   Control? @relation(fields: [relatedControlId], references: [id], onDelete: SetNull)
+
+  mappings  SourceMapping[]
+  scenarios EvalScenario[]
+
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@index([topicNo])
+}
+
+model ProcessScopeCard {
+  id               String         @id @default(cuid())
+  code             String         @unique // "SK-ISLEM-01"
+  title            String
+  area             String // "trading" | "market_data" | "surveillance" | "connectivity" | "session" | "clock_records"
+  status           TestCardStatus @default(DRAFT)
+  description      String         @db.Text
+  criticalAssets   Json // string[]
+  // RTO/RPO/gecikme toleransı/saklama süresi/işlem limiti — KURUM DOLDURACAK parametreler.
+  paramSpec        Json // [{ key, label, unit, filledValue: null }]
+  linkedControlIds String[] // ilgili genel BT kontrolleri (Control.id)
+
+  mappings SourceMapping[]
+
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model EvidenceSufficiencyRule {
+  id          String         @id @default(cuid())
+  code        String         @unique // "KY-01"
+  category    String // "distinction" (ayrım) | "dimension" (boyut)
+  title       String
+  rule        String         @db.Text
+  goodExample String?        @db.Text
+  badExample  String?        @db.Text
+  scoringSpec Json? // boyut ağırlıkları / hesap yöntemi (sayısal puan verilecekse)
+  status      TestCardStatus @default(DRAFT)
+  orderNo     Int            @default(0)
+
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SourceChunk {
+  id         String        @id @default(cuid())
+  version    SourceVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  versionId  String
+  unit       SourceUnit?   @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  unitId     String?
+  ordinal    Int
+  text       String        @db.Text
+  embedding  Float[] // double precision[] — pgvector yok; bellek-içi kosinüs (mevcut desen)
+  embedModel String?
+  tokenCount Int?
+  createdAt  DateTime      @default(now())
+
+  @@index([versionId])
+  @@index([unitId])
+}
+
+enum EvalDatasetPurpose {
+  RAG_SOURCE // A. RAG kaynakları
+  TRAINING_EXAMPLE // B. Uzman onaylı eğitim örnekleri
+  EVAL_HOLDOUT // C. Eğitimde kullanılmayan değerlendirme seti
+}
+
+model EvalDataset {
+  id          String             @id @default(cuid())
+  code        String             @unique // "DS-A-RAG" | "DS-B-TRAIN" | "DS-C-EVAL"
+  name        String
+  purpose     EvalDatasetPurpose
+  description String?            @db.Text
+
+  scenarios EvalScenario[]
+
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum ScenarioKind {
+  SUFFICIENT_EVIDENCE // yeterli kanıt
+  CONTROL_GAP // açık kontrol eksikliği
+  INSUFFICIENT_EVIDENCE // yetersiz kanıt
+  CONFLICTING_EVIDENCE // çelişkili kanıt
+  WRONG_PERIOD_SCOPE // yanlış dönem/kapsam
+}
+
+enum ScenarioStatus {
+  SYNTHETIC_PENDING_REVIEW // sentetik ve uzman onayı bekliyor
+  EXPERT_APPROVED
+  REJECTED
+}
+
+model EvalScenario {
+  id         String           @id @default(cuid())
+  scenarioId String           @unique // "SEN-TK01-A"
+  familyKey  String // veri sızıntısı önleme — aynı aile train/test'e BÖLÜNMEZ
+  dataset    EvalDataset      @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  datasetId  String
+  testCard   ControlTestCard? @relation(fields: [testCardId], references: [id], onDelete: SetNull)
+  testCardId String?
+
+  kind      ScenarioKind
+  status    ScenarioStatus @default(SYNTHETIC_PENDING_REVIEW)
+  synthetic Boolean        @default(true)
+
+  inputEvidence       Json // [{ name, type, text }]
+  expectedDecision    String // "KARSILANDI" | "KARSILANMADI" | "DOGRULANAMADI" | "CELISKILI"
+  rationale           String @db.Text // kısa kanıtlı gerekçe
+  requiredRefs        Json // string[] — gerekli referanslar
+  forbiddenInferences Json // string[] — yasak çıkarımlar
+  missingEvidence     Json // string[]
+
+  labeledById  String?
+  approvedById String?
+
+  sourceRefs  EvalScenarioRef[]
+  versionRefs EvalScenarioSource[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([datasetId])
+  @@index([familyKey])
+  @@index([status])
+  @@index([testCardId])
+}
+
+model EvalScenarioRef {
+  id         String       @id @default(cuid())
+  scenario   EvalScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  scenarioId String
+  unit       SourceUnit   @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  unitId     String
+
+  @@unique([scenarioId, unitId])
+  @@index([unitId])
+}
+
+model EvalScenarioSource {
+  id         String        @id @default(cuid())
+  scenario   EvalScenario  @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  scenarioId String
+  version    SourceVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  versionId  String
+
+  @@unique([scenarioId, versionId])
+  @@index([versionId])
+}
+
+enum QualityRunStatus {
+  RUNNING
+  DONE
+  ERROR
+}
+
+model QualityRun {
+  id               String           @id @default(cuid())
+  label            String
+  datasetId        String
+  modelName        String?
+  promptVersion    String?
+  retrievalVersion String?
+  status           QualityRunStatus @default(RUNNING)
+  metrics          Json? // { correctRate, falseMet, badRefs, skippedSteps, missedGaps, conflictDetect, humanFixNeeded, latencyMsAvg, costUsd }
+  startedAt        DateTime         @default(now())
+  finishedAt       DateTime?
+  createdById      String
+
+  items QualityRunItem[]
+
+  @@index([datasetId])
+  @@index([status])
+}
+
+model QualityRunItem {
+  id                String     @id @default(cuid())
+  run               QualityRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runId             String
+  scenarioId        String
+  predictedDecision String?
+  expectedDecision  String?
+  correct           Boolean?
+  usedRefs          Json? // string[]
+  issues            Json? // string[]
+  latencyMs         Int?
+  rawOutput         Json?
+  createdAt         DateTime   @default(now())
+
+  @@index([runId])
+}
+
+// ==========================================
+// RİSK SİMÜLASYONU (SIM_METHODOLOGY_V1) — gerçek envanterden tamamen izole
+// karar-destek çalışma alanı. Bu modeller Risk/Control/ControlTest/Action'a
+// hiçbir alan eklemez; snapshot verisi burada, ayrı tutulur. Gerçek envantere
+// yazma yalnızca RiskSimulationTransfer üzerinden, açık onaylı aktarım ile olur.
+// ==========================================
+
+model SimulationMethodology {
+  id         String  @id @default(cuid())
+  version    Int     @unique
+  // calculation-engine.ts::MethodologyConfig serileştirilmiş hali. Her senaryo
+  // oluşturulduğu andaki sürüme sabitlenir — config değişse bile eski senaryolar
+  // sessizce yeniden hesaplanmaz.
+  config     Json
+  isActive   Boolean @default(false)
+  changeNote String? @db.Text
+
+  createdBy   User   @relation("SimMethodologyCreatedBy", fields: [createdById], references: [id])
+  createdById String
+
+  scenarios RiskSimulationScenario[]
+
+  createdAt DateTime @default(now())
+
+  @@index([isActive])
+}
+
+enum RiskSimulationStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model RiskSimulation {
+  id           String               @id @default(cuid())
+  simulationId String               @unique // SIM-YYYY-XXXX
+  name         String
+  description  String?              @db.Text
+  status       RiskSimulationStatus @default(ACTIVE)
+
+  createdBy   User   @relation("RiskSimulationCreatedBy", fields: [createdById], references: [id])
+  createdById String
+
+  scenarios RiskSimulationScenario[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdById])
+}
+
+enum ScenarioSourceType {
+  EXISTING_RISK
+  HYPOTHETICAL
+}
+
+enum SimFinalImpactChoice {
+  BUSINESS
+  INFOSEC
+}
+
+model RiskSimulationScenario {
+  id           String         @id @default(cuid())
+  simulation   RiskSimulation @relation(fields: [simulationId], references: [id], onDelete: Cascade)
+  simulationId String
+  name         String
+
+  methodology          SimulationMethodology @relation(fields: [methodologyVersionId], references: [id])
+  methodologyVersionId String
+
+  // İyimser eşzamanlılık — ControlTest.contentVersion deseni.
+  contentVersion Int @default(0)
+
+  // Kaynak: gerçek bir riskten mi başladı, yoksa tamamen hipotetik mi.
+  // EXISTING_RISK ise sourceRiskId + sourceRiskSnapshot + sourceCaptured* doldurulur.
+  // sourceRiskId kasıtlı olarak FK DEĞİL (snapshot, sonraki envanter değişiklerinden
+  // bağımsız kalmalı) — servis katmanında ayrıca doğrulanır/referanslanır.
+  sourceType            ScenarioSourceType
+  sourceRiskId          String?
+  sourceRiskSnapshot    Json?
+  sourceCapturedVersion Int?
+  sourceCapturedAt      DateTime?
+
+  // Senaryo oluşturulduğu andaki TAM başlangıç durumu (risk girdileri + kontrol
+  // listesi) — kaynak EXISTING_RISK veya HYPOTHETICAL fark etmez. "Reset" işlemi
+  // GERÇEK envanteri değil, yalnızca bu kaydı hedefler.
+  initialStateSnapshot Json
+
+  // Ham risk girdileri (1-5)
+  naturalProbability Int
+
+  // İş etkisi bileşenleri (%30/%30/%20/%20)
+  finansalEtki     Int?
+  itibarEtkisi     Int?
+  regulasyonEtkisi Int?
+  musteriEtkisi    Int?
+
+  // BT/InfoSec etkisi bileşenleri (%35/%30/%35)
+  gizlilikEtkisi        Int?
+  butunlukEtkisi        Int?
+  erisilebilirlikEtkisi Int?
+
+  // İki grup OTOMATİK BİRLEŞTİRİLMEZ — kullanıcı açıkça hangisinin nihai etki
+  // olarak kullanılacağını seçer (eksik metodoloji kararı, bkz. plan).
+  finalImpactChoice SimFinalImpactChoice
+
+  // Artık risk: motor bir ÖNERİ üretir (non-authoritative); kullanıcı gerekçeli
+  // biçimde override edebilir. Öneri her zaman ayrıca saklanır, asla atılmaz.
+  residualOverrideProbability Int?
+  residualOverrideImpact      Int?
+  residualOverrideReason      String? @db.Text
+  residualIsOverridden        Boolean @default(false)
+
+  controls  RiskSimulationControl[]
+  actions   RiskSimulationAction[]
+  transfers RiskSimulationTransfer[]
+
+  createdBy   User   @relation("RiskSimScenarioCreatedBy", fields: [createdById], references: [id])
+  createdById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([simulationId])
+  @@index([sourceRiskId])
+  @@index([methodologyVersionId])
+}
+
+enum SimP1 {
+  MANUEL
+  BT_MANUEL
+  OTOMATIK
+}
+
+enum SimP2 {
+  TESPIT_EDICI
+  DUZELTICI
+  ONLEYICI
+}
+
+enum SimP3 {
+  IZ_KAYDI_YOK
+  KULLANICI_SIFRE_SES_EMAIL
+  SISTEM_LOG_ISLAK_IMZA
+  ELEKTRONIK_IMZA
+}
+
+enum SimP4 {
+  YOK
+  AYNI_EKIP
+  FARKLI_EKIP
+  HER_IKISI
+}
+
+enum SimP5 {
+  YOK
+  DUZENSIZ_UST_AMIR
+  DUZENLI_UST_AMIR
+  FARKLI_BIRIM_GOZETIM
+}
+
+enum SimKtsMode {
+  FROM_TEST
+  MANUAL
+}
+
+enum SimImpactArea {
+  PROBABILITY
+  IMPACT
+  BOTH
+}
+
+model RiskSimulationControl {
+  id         String                 @id @default(cuid())
+  scenario   RiskSimulationScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  scenarioId String
+
+  // Gerçek Control.id referansı (FK DEĞİL — snapshot bağımsızlığı kasıtlı).
+  sourceControlId String?
+  name            String
+  description     String? @db.Text
+
+  p1 SimP1
+  p2 SimP2
+  p3 SimP3
+  p4 SimP4
+  p5 SimP5
+
+  // KTS: gerçek onaylı bir test sonucundan mı, yoksa yalnızca-simülasyon
+  // "hipotetik" bir değerden mi geliyor — ikisi UI'da açıkça ayrılır.
+  ktsMode         SimKtsMode
+  ktsManualValue  Float? // 0-100, ktsMode=MANUAL ise
+  ktsSourceTestId String? // gerçek ControlTest.id referansı, ktsMode=FROM_TEST ise
+
+  // 0-1 oranı. Aynı senaryodaki kontrollerin ağırlık toplamı %100'ü aşamaz;
+  // eksik kalan pay "kontrolsüz pay" olarak ayrı gösterilir, otomatik büyütülmez.
+  weight     Float
+  impactArea SimImpactArea
+
+  sortOrder Int @default(0)
+
+  actions RiskSimulationAction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([scenarioId])
+  @@index([sourceControlId])
+}
+
+enum SimActionEffectMode {
+  P1P5_KTS
+  TARGET_KEP
+}
+
+model RiskSimulationAction {
+  id         String                 @id @default(cuid())
+  scenario   RiskSimulationScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  scenarioId String
+
+  // Gerçek Action.id referansı, aksiyon gerçek bir aksiyondan başladıysa.
+  sourceActionId String?
+
+  targetControl      RiskSimulationControl @relation(fields: [targetControlSimId], references: [id], onDelete: Cascade)
+  targetControlSimId String
+
+  name        String
+  description String? @db.Text
+
+  effectMode SimActionEffectMode
+
+  // effectMode=P1P5_KTS: yalnızca değişecek alanlar doldurulur (null = değişmiyor)
+  targetP1  SimP1?
+  targetP2  SimP2?
+  targetP3  SimP3?
+  targetP4  SimP4?
+  targetP5  SimP5?
+  targetKts Float?
+
+  // effectMode=TARGET_KEP: doğrudan hedef KEP — asla gerçek P1-P5 kaynaklı bir
+  // skormuş gibi sunulmaz, gerekçe zorunlu.
+  targetKep       Float?
+  targetKepReason String? @db.Text
+
+  isApplied Boolean @default(false)
+  // Aynı kontrolün aynı alanını hedefleyen birden fazla aksiyon çakıştığında
+  // çözüm için kullanıcının belirlediği açık öncelik sırası.
+  priority  Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([scenarioId])
+  @@index([targetControlSimId])
+}
+
+model RiskSimulationTransfer {
+  id         String                 @id @default(cuid())
+  scenario   RiskSimulationScenario @relation(fields: [scenarioId], references: [id])
+  scenarioId String
+
+  transferId                String @unique // TRF-YYYY-XXXX
+  // İdempotency: aynı senaryo+sürüm için tekrarlanan/eşzamanlı aktarım isteği
+  // mevcut kaydı döner, mükerrer gerçek kayıt asla oluşturmaz.
+  scenarioVersionAtTransfer Int
+
+  performedBy   User     @relation("RiskSimTransferPerformedBy", fields: [performedById], references: [id])
+  performedById String
+  performedAt   DateTime @default(now())
+
+  // { createdRiskId?, updatedRiskId?, createdControlIds[], updatedControlIds[],
+  //   createdMappingIds[], removedMappingIds[], createdActionIds[], createdFindingIds[] }
+  resultSummary Json
+
+  createdAt DateTime @default(now())
+
+  @@unique([scenarioId, scenarioVersionAtTransfer])
+  @@index([scenarioId])
 }

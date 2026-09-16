@@ -21,8 +21,29 @@ export async function resetDatabase(prisma: PrismaClient) {
 export async function seedRoles(prisma: PrismaClient) {
     const roles = [
         { name: 'SYSTEM_ADMIN', permissions: ['*'] },
-        { name: 'RISK_CONTROL_MANAGER', permissions: ['finding:view', 'finding:create', 'finding:update', 'action:*', 'control:*'] },
-        { name: 'AUDITOR', permissions: ['finding:view', 'finding:create', 'action:view', 'action:create', 'control:view', 'control:test'] },
+        {
+            name: 'RISK_CONTROL_MANAGER',
+            permissions: [
+                'finding:view', 'finding:create', 'finding:update', 'action:*', 'control:*',
+                'report:view', 'report:export', 'report:org',
+            ],
+        },
+        {
+            // AUDITOR varsayılanı SCOPED — report:org ROL'den gelmez (Madde 5).
+            name: 'AUDITOR',
+            permissions: [
+                'finding:view', 'finding:create', 'action:view', 'action:create', 'control:view', 'control:test',
+                'report:view', 'report:export',
+            ],
+        },
+        // İç Kontrol Sistemi Yöneticisi — kapsamlı raporlara erişemez, yalnızca dar
+        // kapsamlı (bulgu-takip / my-work) raporları görebilir.
+        {
+            name: 'IKS_MANAGER',
+            permissions: ['finding:view', 'finding:create', 'finding:update', 'action:create', 'action:update', 'report:view'],
+        },
+        // Denetlenen birim — yalnızca kendine atanmış kayıtların raporları.
+        { name: 'AUDITEE', permissions: ['finding:view', 'action:view', 'action:update', 'report:view'] },
         { name: 'VIEWER', permissions: ['finding:view', 'control:view', 'action:view'] },
     ];
     const created: Record<string, string> = {};

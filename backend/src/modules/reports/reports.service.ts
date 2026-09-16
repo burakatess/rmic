@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
+import { CLOSED_ACTION_STATUSES } from '../../common/util/metric-definitions';
 
 @Injectable()
 export class ReportsService {
@@ -35,10 +36,10 @@ export class ReportsService {
             this.prisma.finding.count({ where: { severity: 'CRITICAL', status: { not: 'CLOSED' } } }),
             // Kritik + Yüksek önem düzeyindeki açık bulgular
             this.prisma.finding.count({ where: { severity: { in: ['CRITICAL', 'HIGH'] }, status: { not: 'CLOSED' } } }),
-            // Overdue actions
+            // Overdue actions — direktörlük kırılımıyla AYNI statü tanımı (Madde 8)
             this.prisma.action.count({
                 where: {
-                    status: { notIn: ['CLOSED', 'COMPLETED'] },
+                    status: { notIn: [...CLOSED_ACTION_STATUSES] },
                     dueDate: { lt: new Date() },
                 },
             }),
@@ -64,7 +65,7 @@ export class ReportsService {
             // Direktörlük bazlı gecikmiş aksiyon sayısı
             this.prisma.action.groupBy({
                 by: ['directorateId'],
-                where: { status: { notIn: ['CLOSED', 'COMPLETED', 'KAPATILDI', 'TAMAMLANDI'] }, dueDate: { lt: new Date() } },
+                where: { status: { notIn: [...CLOSED_ACTION_STATUSES] }, dueDate: { lt: new Date() } },
                 _count: true,
             }),
             // Direktörlük bazlı açık bulgu sayısı
@@ -130,7 +131,7 @@ export class ReportsService {
 
         const levels = { high: 0, medium: 0, low: 0 };
         risks.forEach((r) => {
-            const score = r.residualRiskScore || r.inherentRiskScore;
+            const score = r.residualRiskScore ?? r.inherentRiskScore;
             if (score >= 15) levels.high++;
             else if (score >= 8) levels.medium++;
             else levels.low++;
@@ -139,30 +140,64 @@ export class ReportsService {
         return levels;
     }
 
-    private async getRiskTrend() {
+    private async getRiskTrend(monthsBack = 12) {
         const now = new Date();
 
-        // Tek sorgu — önceden 12 ay için 24 ayrı round-trip yapılıyordu; tüm riskleri
-        // bir kez çekip her ay için kümülatif sayıyı JS'te hesaplıyoruz.
-        const risks = await this.prisma.risk.findMany({
-            select: { createdAt: true, inherentRiskScore: true },
-        });
+        // `total`: o ay sonunda var olan risk sayısı (createdAt'ten — tarihsel, ancak
+        //   silinen/arşivlenen kayıtlar nedeniyle yaklaşık olabilir).
+        // `high`: O AYDAKİ skoru RiskAssessment geçmişinden alınır (bugünkü skor DEĞİL).
+        //   O aya kadar değerlendirmesi olmayan risk `unknownScore` sayılır — bugünkü
+        //   skorla backfill YAPILMAZ.
+        const [risks, assessments] = await Promise.all([
+            this.prisma.risk.findMany({ select: { id: true, createdAt: true } }),
+            this.prisma.riskAssessment.findMany({
+                select: { riskId: true, assessmentDate: true, inherentScore: true, residualScore: true },
+                orderBy: { assessmentDate: 'asc' },
+            }),
+        ]);
+
+        // scoreAt(riskId, endDate): o tarihe kadarki SON değerlendirmenin skoru (yoksa null)
+        const byRisk = new Map<string, { d: Date; score: number }[]>();
+        for (const a of assessments) {
+            const arr = byRisk.get(a.riskId) ?? [];
+            arr.push({ d: a.assessmentDate, score: a.residualScore ?? a.inherentScore });
+            byRisk.set(a.riskId, arr);
+        }
+        const scoreAt = (riskId: string, endDate: Date): number | null => {
+            const arr = byRisk.get(riskId);
+            if (!arr) return null;
+            let s: number | null = null;
+            for (const e of arr) { if (e.d <= endDate) s = e.score; else break; }
+            return s;
+        };
 
         const trend = [];
-        for (let i = 11; i >= 0; i--) {
+        for (let i = monthsBack - 1; i >= 0; i--) {
             const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
             const endDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59, 999);
+            const existing = risks.filter(r => r.createdAt <= endDate);
 
-            const upToMonth = risks.filter(r => r.createdAt <= endDate);
+            let high = 0, unknown = 0;
+            for (const r of existing) {
+                const sc = scoreAt(r.id, endDate);
+                if (sc === null) unknown++;
+                else if (sc >= 15) high++;
+            }
             trend.push({
                 month: date.toLocaleString('default', { month: 'short', year: 'numeric' }),
-                total: upToMonth.length,
-                high: upToMonth.filter(r => r.inherentRiskScore >= 15).length,
+                total: existing.length,
+                high,
+                unknownScore: unknown,
             });
         }
 
         return trend;
     }
+
+    private readonly riskTrendNote =
+        'high değerleri O DÖNEMİN RiskAssessment geçmişinden hesaplanır (bugünkü skor değil); ' +
+        'skoru henüz değerlendirilmemiş riskler unknownScore\'da gösterilir. total, kayıt ' +
+        'silme/arşivleme nedeniyle yaklaşık olabilir.';
 
     async getRiskHeatmapData() {
         const risks = await this.prisma.risk.findMany({
@@ -218,7 +253,7 @@ export class ReportsService {
             let totalScore = 0;
 
             risks.forEach(r => {
-                const score = r.residualRiskScore || r.inherentRiskScore;
+                const score = r.residualRiskScore ?? r.inherentRiskScore;
                 totalScore += score;
                 if (score >= 15) high++;
                 else if (score >= 8) medium++;
@@ -240,7 +275,8 @@ export class ReportsService {
     }
 
     async getRiskTrends(months: number = 12) {
-        return this.getRiskTrend();
+        const clamped = Math.min(36, Math.max(1, Math.floor(Number(months) || 12)));
+        return { months: clamped, series: await this.getRiskTrend(clamped), note: this.riskTrendNote };
     }
 
     async getControlHeatmap() {
@@ -259,7 +295,7 @@ export class ReportsService {
             effectivenessStatus: c.effectivenessStatus,
             riskCount: c.risks.length,
             avgRiskScore: c.risks.length > 0
-                ? c.risks.reduce((sum, r) => sum + (r.risk.residualRiskScore || r.risk.inherentRiskScore), 0) / c.risks.length
+                ? c.risks.reduce((sum, r) => sum + (r.risk.residualRiskScore ?? r.risk.inherentRiskScore), 0) / c.risks.length
                 : 0,
             lastTestResult: c.tests[0]?.findingStatus || 'NOT_TESTED',
         }));
@@ -279,9 +315,9 @@ export class ReportsService {
     async getActionPerformance() {
         const [total, completed, overdue, effective] = await Promise.all([
             this.prisma.action.count(),
-            this.prisma.action.count({ where: { status: { in: ['COMPLETED', 'CLOSED', 'TAMAMLANDI', 'KAPATILDI'] } } }),
+            this.prisma.action.count({ where: { status: { in: [...CLOSED_ACTION_STATUSES] } } }),
             this.prisma.action.count({
-                where: { status: { notIn: ['COMPLETED', 'CLOSED', 'TAMAMLANDI', 'KAPATILDI'] }, dueDate: { lt: new Date() } },
+                where: { status: { notIn: [...CLOSED_ACTION_STATUSES] }, dueDate: { lt: new Date() } },
             }),
             this.prisma.effectivenessReview.count({ where: { isEffective: true } }),
         ]);
@@ -585,9 +621,6 @@ export class ReportsService {
         const end = new Date(year, mon + 1, 0, 23, 59, 59, 999);
         const monthName = start.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
 
-        const user = await this.prisma.user.findUnique({ where: { id: userId } });
-        const fullName = user ? `${user.firstName} ${user.lastName}` : '';
-
         // Ay adı (selectedMonths eşleşmesi için, örn. "Temmuz")
         const trMonth = start.toLocaleDateString('tr-TR', { month: 'long' });
 
@@ -609,14 +642,13 @@ export class ReportsService {
                 || !c.lastTestDate
                 || c.lastTestDate < start,
             )),
-            // Sorumlusu kullanıcı olan açık bulgular
+            // Sorumlusu kullanıcı olan açık bulgular — YALNIZCA ilişkisel assigneeId
+            // eşleşmesi (serbest metin ad-soyad eşleşmesi yetkilendirme dayanağı
+            // olamaz, bkz. Çalışma Panosu Madde 3).
             this.prisma.finding.findMany({
                 where: {
                     status: { not: 'CLOSED' },
-                    OR: [
-                        { assigneeId: userId },
-                        ...(fullName ? [{ responsiblePerson: { contains: fullName, mode: 'insensitive' as any } }] : []),
-                    ],
+                    assigneeId: userId,
                 },
                 select: {
                     id: true, findingId: true, summary: true, severity: true,
@@ -625,11 +657,12 @@ export class ReportsService {
                 },
                 orderBy: { targetResolutionDate: 'asc' },
             }),
-            // Kullanıcıya atanmış açık aksiyonlar
+            // Kullanıcıya atanmış açık aksiyonlar — ortak CLOSED_ACTION_STATUSES
+            // tanımı kullanılır (Madde 8: rapor sayaçlarıyla drift olmasın).
             this.prisma.action.findMany({
                 where: {
                     ownerId: userId,
-                    status: { notIn: ['TAMAMLANDI', 'KAPATILDI'] as any },
+                    status: { notIn: [...CLOSED_ACTION_STATUSES] },
                 },
                 select: {
                     id: true, actionId: true, description: true, status: true, dueDate: true,
@@ -637,23 +670,25 @@ export class ReportsService {
                 },
                 orderBy: { dueDate: 'asc' },
             }),
-            // Ay içinde planlanan takip çalışmaları (kullanıcının bulgu/aksiyonlarıyla ilişkili)
+            // Ay içinde planlanan, kullanıcının bulgusu/aksiyonuyla ilişkili takip
+            // çalışmaları — YALNIZCA ilişkisel eşleşme, WHERE içinde (uygulama
+            // tarafında filtrelemeye gerek yok).
             this.prisma.findingFollowUp.findMany({
                 where: {
                     plannedDate: { gte: start, lte: end },
                     status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] as any },
+                    OR: [
+                        { finding: { assigneeId: userId } },
+                        { action: { ownerId: userId } },
+                    ],
                 },
                 select: {
                     id: true, followUpId: true, status: true, plannedDate: true,
-                    finding: { select: { findingId: true, summary: true, assigneeId: true, responsiblePerson: true } },
+                    finding: { select: { findingId: true, summary: true, assigneeId: true } },
                     action: { select: { actionId: true, ownerId: true } },
                 },
                 orderBy: { plannedDate: 'asc' },
-            }).then(fus => fus.filter(fu =>
-                fu.finding?.assigneeId === userId
-                || (fullName && fu.finding?.responsiblePerson?.toLowerCase().includes(fullName.toLowerCase()))
-                || fu.action?.ownerId === userId,
-            )),
+            }),
         ]);
 
         // Yaklaşan vadeler: ay içi aksiyon vadeleri + takip planları birleşik
@@ -678,9 +713,14 @@ export class ReportsService {
         year?: number; month?: number;
         startDate?: Date; endDate?: Date;
         directorateId?: string;
+        /** Kurum geneli yetkisi olmayan kullanıcı — yalnızca bu kişiye atanmış bulgular. */
+        scopeAssigneeId?: string;
     }) {
         const { start, end, label } = this.resolveMonthlyPeriod(params);
-        const dirFilter = params.directorateId ? { directorateId: params.directorateId } : {};
+        const dirFilter = {
+            ...(params.directorateId ? { directorateId: params.directorateId } : {}),
+            ...(params.scopeAssigneeId ? { assigneeId: params.scopeAssigneeId } : {}),
+        };
 
         // 1. Dönemde tespit edilen bulgular
         const tespitEdilenBulgular = await this.prisma.finding.findMany({
@@ -700,6 +740,7 @@ export class ReportsService {
                 createdAt: { gte: start, lte: end },
                 status: { not: 'BEKLIYOR' as any },
                 ...(params.directorateId ? { directorateId: params.directorateId } : {}),
+                ...(params.scopeAssigneeId ? { finding: { assigneeId: params.scopeAssigneeId } } : {}),
             },
             include: {
                 finding: { select: { findingId: true, summary: true, severity: true } },
@@ -1018,62 +1059,69 @@ export class ReportsService {
     };
 
     async getEK6ReportData(year: number, month?: number) {
-        // Build date filter based on year/month
-        let startDate: Date, endDate: Date;
+        const startDate = month ? new Date(year, month - 1, 1) : new Date(year, 0, 1);
+        const endDate = month ? new Date(year, month, 0, 23, 59, 59, 999) : new Date(year, 11, 31, 23, 59, 59, 999);
 
-        if (month) {
-            startDate = new Date(year, month - 1, 1);
-            endDate = new Date(year, month, 0, 23, 59, 59);
-        } else {
-            startDate = new Date(year, 0, 1);
-            endDate = new Date(year, 11, 31, 23, 59, 59);
-        }
-
-        // Dönemde en az bir testi planlanmış/gerçekleşmiş kontroller
-        // (Not: 'startDate'/'endDate' önceden hesaplanıp hiç kullanılmıyordu — tüm kontroller
-        // dönemden bağımsız dönüyordu. Bu filtre EK-6'nın "Yılında Gerçekleştirilen" anlamını uygular.)
-        const controls = await this.prisma.control.findMany({
+        // "Gerçekleştirilen kontrol" (Madde 7): FİNAL ONAYLI (status=ONAYLANDI) ve
+        // İPTAL EDİLMEMİŞ testler. Dönem filtresi FİİLİ TAMAMLANMA tarihine
+        // (completedAt) uygulanır — planlanan tarihe DEĞİL. Onaylanmamış testler
+        // rapora girmez.
+        const tests = await this.prisma.controlTest.findMany({
             where: {
-                tests: { some: { plannedDate: { gte: startDate, lte: endDate } } },
+                status: 'ONAYLANDI',
+                completedAt: { gte: startDate, lte: endDate },
             },
-            include: {
-                owner: {
+            select: {
+                completedAt: true,
+                control: {
                     select: {
-                        department: true,
-                    }
+                        id: true, controlId: true, description: true, frequency: true,
+                        owner: { select: { department: true } },
+                        directorateRel: { select: { name: true } },
+                    },
                 },
-                findings: {
-                    select: {
-                        findingId: true,
-                    }
-                },
+                findings: { select: { findingId: true } },
             },
-            orderBy: [
-                { owner: { department: 'asc' } },
-                { controlId: 'asc' },
-            ]
         });
 
-        // Transform to report format
-        const reportData = controls.map((control, index) => ({
-            siraNo: index + 1,
-            direktorluk: control.owner?.department || 'Belirtilmemiş',
-            kontrolNo: control.controlId,
-            kontrolSikligi: this.frequencyLabels[control.frequency] || control.frequency,
-            kontrolTanimi: control.description,
-            bulgu: control.findings.length > 0
-                ? control.findings.map(f => f.findingId).join(', ')
-                : 'Bulgu Yok',
-        }));
+        // Aynı kontrolün dönemdeki birden fazla ONAYLI testi TEK satırda birleşir;
+        // bulgu numaraları tekilleştirilir.
+        const byControl = new Map<string, {
+            controlId: string; description: string; frequency: string;
+            direktorluk: string; findings: Set<string>;
+        }>();
+        for (const t of tests) {
+            const c = t.control;
+            const key = c.id;
+            const row = byControl.get(key) ?? {
+                controlId: c.controlId,
+                description: c.description,
+                frequency: c.frequency,
+                direktorluk: c.directorateRel?.name || c.owner?.department || 'Belirtilmemiş',
+                findings: new Set<string>(),
+            };
+            for (const f of t.findings) row.findings.add(f.findingId);
+            byControl.set(key, row);
+        }
+
+        const reportData = [...byControl.values()]
+            .sort((a, b) => (a.direktorluk.localeCompare(b.direktorluk) || a.controlId.localeCompare(b.controlId)))
+            .map((r, index) => ({
+                siraNo: index + 1,
+                direktorluk: r.direktorluk,
+                kontrolNo: r.controlId,
+                kontrolSikligi: this.frequencyLabels[r.frequency] || r.frequency,
+                kontrolTanimi: r.description,
+                bulgu: r.findings.size > 0 ? [...r.findings].sort().join(', ') : 'Bulgu Yok',
+            }));
 
         return {
             title: `EK-6 – ${year} Yılında Gerçekleştirilen Periyodik Kontroller (BT Birimleri)`,
-            period: month
-                ? `${month}/${year}`
-                : `${year}`,
+            period: month ? `${month}/${year}` : `${year}`,
             generatedAt: new Date().toISOString(),
             totalControls: reportData.length,
             data: reportData,
+            note: 'Yalnızca final onaylı (ONAYLANDI) ve iptal edilmemiş, dönem içinde fiilen tamamlanmış kontrol testleri dahildir.',
         };
     }
 

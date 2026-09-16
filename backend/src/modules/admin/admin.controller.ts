@@ -73,6 +73,15 @@ export class AdminController {
         return this.adminService.updateUser(id, body, user.id);
     }
 
+    @Put('users/:id/directorates')
+    async setUserDirectorates(
+        @Param('id') id: string,
+        @Body() body: { directorateIds: string[] },
+        @CurrentUser() user: { id: string },
+    ) {
+        return this.adminService.setUserDirectorates(id, body.directorateIds ?? [], user.id);
+    }
+
     @Post('users/:id/reset-password')
     async resetPassword(
         @Param('id') id: string,
@@ -96,16 +105,18 @@ export class AdminController {
     @Post('roles')
     async createRole(
         @Body() body: { name: string; description?: string; permissions: string[] },
+        @CurrentUser() user: { id: string },
     ) {
-        return this.adminService.createRole(body);
+        return this.adminService.createRole(body, user.id);
     }
 
     @Put('roles/:id')
     async updateRole(
         @Param('id') id: string,
         @Body() body: { name?: string; description?: string; permissions?: string[] },
+        @CurrentUser() user: { id: string },
     ) {
-        return this.adminService.updateRole(id, body);
+        return this.adminService.updateRole(id, body, user.id);
     }
 
     // Parameters

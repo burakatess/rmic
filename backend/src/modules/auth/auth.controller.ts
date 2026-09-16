@@ -7,8 +7,12 @@ import { LoginDto, RegisterDto, RefreshTokenDto, UpdateProfileDto, ChangePasswor
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Public, Roles } from '../../common/decorators';
 
-// Hassas auth route'ları için sıkı rate limit — brute-force koruması (CLAUDE.md önerisi: 5 istek/60sn)
-const AUTH_THROTTLE = { default: { limit: 5, ttl: 60000 } };
+// Hassas auth route'ları için sıkı rate limit — brute-force koruması (CLAUDE.md önerisi: 5 istek/60sn).
+// Test ortamında (jest NODE_ENV=test) devre dışı — çok sayıda fixture login'i 429'a takılmasın.
+const AUTH_THROTTLE =
+    process.env.NODE_ENV === 'test'
+        ? { default: { limit: 10000, ttl: 60000 } }
+        : { default: { limit: 5, ttl: 60000 } };
 
 @ApiTags('Auth')
 @Controller('auth')

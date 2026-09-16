@@ -1,16 +1,16 @@
-# Graph Report - rmic_1  (2026-08-21)
+# Graph Report - rmic_1  (2026-09-07)
 
 ## Corpus Check
-- 322 files · ~448,161 words
+- 373 files · ~818,655 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3953 nodes · 5649 edges · 260 communities (195 shown, 65 thin omitted)
-- Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 72 edges (avg confidence: 0.8)
+- 4305 nodes · 6511 edges · 282 communities (209 shown, 73 thin omitted)
+- Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 81 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a574bf18`
+- Built from commit: `8d3388d6`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -261,13 +261,34 @@
 - [[_COMMUNITY_Community 255|Community 255]]
 - [[_COMMUNITY_Community 256|Community 256]]
 - [[_COMMUNITY_Community 257|Community 257]]
+- [[_COMMUNITY_Community 260|Community 260]]
+- [[_COMMUNITY_Community 261|Community 261]]
+- [[_COMMUNITY_Community 262|Community 262]]
+- [[_COMMUNITY_Community 263|Community 263]]
+- [[_COMMUNITY_Community 264|Community 264]]
+- [[_COMMUNITY_Community 265|Community 265]]
+- [[_COMMUNITY_Community 266|Community 266]]
+- [[_COMMUNITY_Community 267|Community 267]]
+- [[_COMMUNITY_Community 268|Community 268]]
+- [[_COMMUNITY_Community 269|Community 269]]
+- [[_COMMUNITY_Community 270|Community 270]]
+- [[_COMMUNITY_Community 271|Community 271]]
+- [[_COMMUNITY_Community 272|Community 272]]
+- [[_COMMUNITY_Community 273|Community 273]]
+- [[_COMMUNITY_Community 274|Community 274]]
+- [[_COMMUNITY_Community 275|Community 275]]
+- [[_COMMUNITY_Community 277|Community 277]]
+- [[_COMMUNITY_Community 278|Community 278]]
+- [[_COMMUNITY_Community 279|Community 279]]
+- [[_COMMUNITY_Community 280|Community 280]]
+- [[_COMMUNITY_Community 281|Community 281]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `ApiClient` - 145 edges
-2. `useToast()` - 65 edges
-3. `AuditsService` - 59 edges
-4. `PrismaService` - 47 edges
-5. `AuditsController` - 44 edges
+1. `ApiClient` - 170 edges
+2. `useToast()` - 73 edges
+3. `PrismaService` - 72 edges
+4. `AuditsService` - 67 edges
+5. `AuditsController` - 47 edges
 6. `covered_lines` - 43 edges
 7. `num_statements` - 43 edges
 8. `percent_covered` - 43 edges
@@ -281,10 +302,10 @@
   frontend/src/components/auth/AuthProvider.tsx → shared/types/permissions.ts
 - `PermissionGate()` --calls--> `hasAnyPermission()`  [INFERRED]
   frontend/src/components/auth/AuthProvider.tsx → shared/types/permissions.ts
+- `EditAuditPlanPage()` --calls--> `useRouter()`  [INFERRED]
+  frontend/src/app/(dashboard)/audits/plans/[id]/edit/page.tsx → frontend/__tests__/login.test.tsx
 - `NewAuditPlanPage()` --calls--> `useRouter()`  [INFERRED]
   frontend/src/app/(dashboard)/audits/plans/new/page.tsx → frontend/__tests__/login.test.tsx
-- `NewFindingPage()` --calls--> `useRouter()`  [INFERRED]
-  frontend/src/app/(dashboard)/findings/new/page.tsx → frontend/__tests__/login.test.tsx
 
 ## Import Cycles
 - None detected.
@@ -294,7 +315,7 @@
 - **CI Build and Test Pipeline (Backend Job + Frontend Job + Postgres Service)** — workflows_ci_backend_job, workflows_ci_frontend_job, workflows_ci_postgres_service [EXTRACTED 1.00]
 - **GRC Business Module Suite (Risks, Controls, Audits, Findings, Actions, Compliance)** — root_readme_module_risks, root_readme_module_controls, root_readme_module_audits, root_readme_module_findings, root_readme_module_actions, root_readme_module_compliance [EXTRACTED 1.00]
 
-## Communities (260 total, 65 thin omitted)
+## Communities (282 total, 73 thin omitted)
 
 ### Community 1 - "Risk Data Transfer Objects"
 Cohesion: 0.08
@@ -304,29 +325,29 @@ Nodes (11): AssessRiskDto, CreateRiskDto, RiskQueryDto, RiskResponseDto, RiskSta
 Cohesion: 0.05
 Nodes (40): dependencies, autoprefixer, next, @next/swc-darwin-arm64, postcss, react, react-dom, recharts (+32 more)
 
+### Community 3 - "Controls Backend Module"
+Cohesion: 0.06
+Nodes (3): ControlsController, ControlsService, TestsController
+
 ### Community 4 - "Compliance Backend Module"
 Cohesion: 0.07
 Nodes (3): ComplianceController, ComplianceModule, ComplianceService
 
-### Community 5 - "Reports Backend Module"
-Cohesion: 0.06
-Nodes (7): ACTION_STATUS_LABELS, EmptyRow(), MyWorkData, SEVERITY_COLORS, SEVERITY_LABELS, ReportsController, ReportsService
-
 ### Community 6 - "Auth Backend Module"
-Cohesion: 0.10
-Nodes (9): AuthController, AuthModule, AuthService, ChangePasswordDto, LoginDto, RefreshTokenDto, RegisterDto, TokenResponseDto (+1 more)
+Cohesion: 0.08
+Nodes (11): AuthController, AuthModule, AuthService, ChangePasswordDto, LoginDto, RefreshTokenDto, RegisterDto, TokenResponseDto (+3 more)
 
 ### Community 7 - "Backend Dev Config"
 Cohesion: 0.07
 Nodes (28): devDependencies, eslint, eslint-config-prettier, @eslint/eslintrc, @eslint/js, eslint-plugin-prettier, globals, jest (+20 more)
 
 ### Community 8 - "Risk UI Components"
-Cohesion: 0.05
-Nodes (41): ActionEditModal(), ActionEditModalProps, STATUS_OPTIONS, UserOption, categories, DEMO_RISK, regulations, RiskCategory (+33 more)
+Cohesion: 0.06
+Nodes (37): categories, DEMO_RISK, regulations, RiskCategory, RiskEditPage(), UserOption, Action, BadgeVariant (+29 more)
 
 ### Community 9 - "UI Component Library"
-Cohesion: 0.08
-Nodes (29): ColumnFilter, DataTableProps, densityCellPadding, densityLabels, SortDirection, TableDensity, DetailDrawer(), DetailDrawerProps (+21 more)
+Cohesion: 0.24
+Nodes (9): loadControlFindings(), LoadedTest, loadLinkedRisks(), loadPriorTests(), loadRegulations(), loadTest(), MONTHS, periodLabel() (+1 more)
 
 ### Community 11 - "Root Package Config"
 Cohesion: 0.08
@@ -350,27 +371,27 @@ Nodes (21): ActionSource, ActionStatus, ControlAutomation, ControlFrequency, Con
 
 ### Community 18 - "Actions UI Page"
 Cohesion: 0.03
-Nodes (71): Action, ActionsPage(), BadgeVariant, CLOSED_STATUSES, getDaysRemaining(), IN_PROGRESS_STATUSES, sourceLabels, statusLabels (+63 more)
+Nodes (70): Action, ActionsPage(), BadgeVariant, CLOSED_STATUSES, getDaysRemaining(), IN_PROGRESS_STATUSES, sourceLabels, statusLabels (+62 more)
 
 ### Community 19 - "Backend Runtime Dependencies"
-Cohesion: 0.09
-Nodes (23): dependencies, bcrypt, class-transformer, class-validator, docx, @nestjs/common, @nestjs/config, @nestjs/core (+15 more)
+Cohesion: 0.08
+Nodes (26): dependencies, bcrypt, class-transformer, class-validator, docx, @nestjs/common, @nestjs/config, @nestjs/core (+18 more)
 
 ### Community 20 - "Frontend TypeScript Config"
 Cohesion: 0.10
 Nodes (19): compilerOptions, allowJs, esModuleInterop, incremental, isolatedModules, jsx, lib, module (+11 more)
 
 ### Community 21 - "Risk Form Modal"
-Cohesion: 0.06
-Nodes (27): BV, emptyForm, KontrolFormModal(), RiskControl, RiskEntry, RiskManagementControl, SCORE_LABELS, seviyeConfig (+19 more)
+Cohesion: 0.07
+Nodes (26): BV, emptyForm, KontrolFormModal(), RiskControl, RiskEntry, RiskManagementControl, SCORE_LABELS, seviyeConfig (+18 more)
 
 ### Community 22 - "Auth Guards & Prisma Module"
-Cohesion: 0.08
-Nodes (15): ApprovalsController, ControlsModule, AllExceptionsFilter, PrismaExceptionFilter, createTestApp(), PrismaModule, ReportsModule, RiskEntryModule (+7 more)
+Cohesion: 0.13
+Nodes (4): AiAssessmentService, EvidenceReadStageService, ResultDraftStageService, ReviewStageService
 
 ### Community 23 - "Service Dependency Injection"
-Cohesion: 0.09
-Nodes (7): AdminModule, AuditsModule, HealthController, HealthModule, PrismaService, JwtPayload, JwtStrategy
+Cohesion: 0.07
+Nodes (18): ActionsModule, AiModule, AuditsModule, FollowUpSchedulerService, ApprovalsController, ControlsModule, AllExceptionsFilter, PrismaExceptionFilter (+10 more)
 
 ### Community 25 - "Backend Build Scripts"
 Cohesion: 0.09
@@ -378,15 +399,15 @@ Nodes (22): scripts, build, db:clean-domain, db:clean-domain:dry, db:prepare-pil
 
 ### Community 26 - "Findings Detail UI"
 Cohesion: 0.05
-Nodes (36): Action, actionStatusConfig, BV, Finding, fmt(), severityConfig, sourceLabels, statusConfig (+28 more)
+Nodes (37): Action, actionStatusConfig, BV, Finding, fmt(), severityConfig, sourceLabels, statusConfig (+29 more)
 
 ### Community 28 - "Actions Backend Module"
-Cohesion: 0.19
-Nodes (7): AUTH_THROTTLE, CurrentUser, Public(), Roles(), JwtAuthGuard, normalizeRole(), RolesGuard
+Cohesion: 0.16
+Nodes (12): AI_EVAL_ROLES, AI_QUERY_ROLES, AI_REVIEW_ROLES, AI_TEST_ROLES, AUTH_THROTTLE, CurrentUser, Roles(), JwtAuthGuard (+4 more)
 
 ### Community 29 - "Control Agenda Kanban UI"
-Cohesion: 0.10
-Nodes (18): columnConfig, ControlCard, frequencyLabel, KanbanColumn, Control, EFFECTIVENESS_LABELS, Risk, RiskAssessmentPage() (+10 more)
+Cohesion: 0.07
+Nodes (33): ColumnFilter, DataTableProps, densityCellPadding, densityLabels, SortDirection, TableDensity, DetailDrawer(), DetailDrawerProps (+25 more)
 
 ### Community 30 - "Risks UI Components"
 Cohesion: 0.06
@@ -398,51 +419,55 @@ Nodes (42): BM25, detect_domain(), get_cip_brief(), _load_csv(), Load CSV and re
 
 ### Community 32 - "Create Finding Modal"
 Cohesion: 0.05
-Nodes (23): Control, CreateFindingModal(), CreateFindingModalProps, Directorate, findingTypeOptions, severityOptions, statusOptions, User (+15 more)
+Nodes (25): Control, CreateFindingModal(), CreateFindingModalProps, Directorate, findingTypeOptions, severityOptions, statusOptions, User (+17 more)
 
 ### Community 34 - "API & Mapping Layer"
 Cohesion: 0.29
 Nodes (5): Risk, Control, Risk, SEVERITY_COLORS, TYPE_LABELS
 
 ### Community 35 - "App Layout & Metadata"
-Cohesion: 0.04
-Nodes (42): inter, metadata, AuthProvider(), ControlInventoryPage(), Control, ControlEditPage(), Directorate, DIRECTORATES (+34 more)
+Cohesion: 0.06
+Nodes (9): AiController, AiEvalController, AiEvalService, AskQueryDto, EvalAttachmentDto, EvalMessageDto, EvalSessionDto, ReviewAssessmentDto (+1 more)
 
 ### Community 36 - "Permission-Based UI"
-Cohesion: 0.06
-Nodes (40): ActionsContent(), AksiyonFormModal(), AksiyonTablosuPage(), BV, emptyForm, RiskAction, statusConfig, ACTION_LABELS (+32 more)
+Cohesion: 0.03
+Nodes (83): ActionEditModal(), ActionEditModalProps, STATUS_OPTIONS, UserOption, ActionsContent(), AksiyonFormModal(), AksiyonTablosuPage(), BV (+75 more)
 
 ### Community 37 - "Audit Executions UI"
 Cohesion: 0.08
 Nodes (38): bool, int, str, ansi_ljust(), DesignSystemGenerator, _detect_page_type(), format_ascii_box(), format_markdown() (+30 more)
 
 ### Community 38 - "Controls Detail UI"
-Cohesion: 0.14
-Nodes (14): Action, BV, Control, effectivenessConfig, Finding, formatDate(), severityConfig, ControlDetailPage() (+6 more)
+Cohesion: 0.15
+Nodes (5): CreateKnowledgeDocDto, UpdateKnowledgeDocDto, KnowledgeController, KnowledgeModule, KnowledgeService
 
 ### Community 39 - "Risk Control Controller"
 Cohesion: 0.05
 Nodes (43): Arbitrary Values, Aspect Ratio, Background Colors, Border Color, Border Radius, Border Style, Border Width, Borders (+35 more)
 
 ### Community 40 - "Actions Controller Operations"
+Cohesion: 0.11
+Nodes (7): ActionsController, EmptyToUndefined(), ActionStatus, CreateEffectivenessReviewDto, CreateStandaloneActionDto, ExtendActionDto, UpdateStandaloneActionDto
+
+### Community 41 - "Actions Service Layer"
 Cohesion: 0.12
-Nodes (6): ActionsController, ActionStatus, CreateEffectivenessReviewDto, CreateStandaloneActionDto, ExtendActionDto, UpdateStandaloneActionDto
+Nodes (14): categoryLabels, DEMO_OPTIONS, Parameter, RiskCategory, SystemOption, ConfirmDialog(), ConfirmDialogProps, ConfirmVariant (+6 more)
 
 ### Community 42 - "Risk Creation Pages"
 Cohesion: 0.08
 Nodes (36): format_context(), format_result(), main(), Format a single search result for display, Format contextual recommendations for display., BM25, calculate_pattern_break(), detect_domain() (+28 more)
 
 ### Community 43 - "Audit Plan Detail UI"
-Cohesion: 0.05
-Nodes (34): AUDIT_TEAMS, AUDITABLE_UNITS, DEMO_AUDIT, PHASE_OPTIONS, PRIORITY_OPTIONS, RATIONALE_OPTIONS, STATUS_OPTIONS, AuditExecution (+26 more)
+Cohesion: 0.19
+Nodes (6): RequirePermissions(), Public(), PermissionsGuard, hasAllPermissions(), hasAnyPermission(), matchesPermission()
 
 ### Community 44 - "Audit Plans UI"
 Cohesion: 0.05
 Nodes (37): 1. Color Palette, 2. Typography, 3. Logo Usage, 4. Voice & Tone, 5. Imagery Guidelines, 6. Design Components, Accessibility, AI Image Generation (+29 more)
 
 ### Community 45 - "Confirm Dialog Component"
-Cohesion: 0.07
-Nodes (27): Action, FindingFollowUpModal(), FindingFollowUpModalProps, FOLLOW_UP_STATUSES, FollowUp, RESOLUTION_OPTIONS, categoryLabels, DEMO_OPTIONS (+19 more)
+Cohesion: 0.04
+Nodes (42): AUDIT_TEAMS, AUDITABLE_UNITS, DEMO_AUDIT, EditAuditPlanPage(), PHASE_OPTIONS, PRIORITY_OPTIONS, RATIONALE_OPTIONS, STATUS_OPTIONS (+34 more)
 
 ### Community 46 - "Backend Test Configuration"
 Cohesion: 0.22
@@ -453,8 +478,8 @@ Cohesion: 0.15
 Nodes (12): AdminDashboard(), COLORS, CONTROL_COLORS, CONTROL_TEST_STATUS_LABELS, DashboardData, DashboardPage(), FOLLOWUP_RESULT_LABELS, getHeatmapColor() (+4 more)
 
 ### Community 48 - "Findings List UI"
-Cohesion: 0.08
-Nodes (15): BadgeVariant, BV, delayLabels, delayStatusConfig, Finding, findingTypeConfig, iconProps, LinkedControl (+7 more)
+Cohesion: 0.05
+Nodes (26): BadgeVariant, BV, delayLabels, delayStatusConfig, Finding, FindingsContent(), FindingsPage(), findingTypeConfig (+18 more)
 
 ### Community 49 - "Dashboard Layout & Navigation"
 Cohesion: 0.12
@@ -485,8 +510,8 @@ Cohesion: 0.06
 Nodes (32): 1. Mobile-First Design, 2. Consistent Breakpoint Usage, 3. Test at Breakpoint Boundaries, 4. Use Container for Content Width, 5. Progressive Enhancement, 6. Avoid Too Many Breakpoints, Best Practices, Breakpoint System (+24 more)
 
 ### Community 57 - "EK6 Report UI"
-Cohesion: 0.05
-Nodes (35): currentYear, EK6ReportData, EK6Row, months, years, DEMO_INTEGRATIONS, Integration, STATUS_CONFIG (+27 more)
+Cohesion: 0.06
+Nodes (26): columnConfig, ControlCard, frequencyLabel, KanbanColumn, currentYear, EK6ReportData, EK6Row, months (+18 more)
 
 ### Community 58 - "Action Detail UI"
 Cohesion: 0.06
@@ -497,8 +522,8 @@ Cohesion: 0.06
 Nodes (30): Accessibility, Base System, Best Practices, Clean & Modern, Common Font Pairings, Contrast Requirements, CSS Implementation, Editorial (+22 more)
 
 ### Community 60 - "E2E Test Config"
-Cohesion: 0.20
-Nodes (9): globalSetup, globalTeardown, moduleFileExtensions, rootDir, testEnvironment, testRegex, testTimeout, transform (+1 more)
+Cohesion: 0.18
+Nodes (10): globalSetup, globalTeardown, maxWorkers, moduleFileExtensions, rootDir, testEnvironment, testRegex, testTimeout (+2 more)
 
 ### Community 61 - "Risk Treatment UI"
 Cohesion: 0.07
@@ -521,8 +546,8 @@ Cohesion: 0.13
 Nodes (12): ACTION_STATUS_COLOR, ACTION_STATUS_LABEL, CONTROL_STATUS_COLOR, CONTROL_STATUS_LABEL, DEMO_FLOW, FINDING_STATUS_COLOR, FINDING_STATUS_LABEL, FlowItem (+4 more)
 
 ### Community 66 - "New Audit Plan UI"
-Cohesion: 0.14
-Nodes (11): AUDIT_TEAMS, AUDITABLE_UNITS, Control, Directorate, NewAuditPlanPage(), NewFindingPage(), PERIOD_TYPE_MAP, PRIORITY_OPTIONS (+3 more)
+Cohesion: 0.04
+Nodes (51): User, ControlOpt, GENEL_STYLE, KnowledgeChip, ONEM_STYLE, RegArticle, EMPTY_FORM, KIND_BADGE (+43 more)
 
 ### Community 67 - "New Control UI"
 Cohesion: 0.08
@@ -609,20 +634,20 @@ Cohesion: 0.10
 Nodes (14): ACTION_COLORS, ACTION_STATUS_LABELS, CURRENT_YEAR, Directorate, KPI_COLOR_TO_VARIANT, MonthlyAction, MonthlyFinding, MonthlyFollowUp (+6 more)
 
 ### Community 98 - "Community 98"
-Cohesion: 0.10
-Nodes (21): TailwindConfigGenerator.add_breakpoints, TailwindConfigGenerator.add_colors, TailwindConfigGenerator.add_plugins, TailwindConfigGenerator._generate_typescript, functions, excluded_lines, executed_lines, missing_lines (+13 more)
+Cohesion: 0.12
+Nodes (16): TailwindConfigGenerator.add_breakpoints, TailwindConfigGenerator.add_fonts, TailwindConfigGenerator.__init__, functions, excluded_lines, executed_lines, missing_lines, summary (+8 more)
 
 ### Community 99 - "Community 99"
 Cohesion: 0.10
-Nodes (21): TestShadcnInstaller.test_add_components_already_installed, TestShadcnInstaller.test_add_components_no_config, TestShadcnInstaller.test_get_installed_components_empty, TestShadcnInstaller.test_get_installed_components_no_config, functions, excluded_lines, executed_lines, missing_lines (+13 more)
+Nodes (21): TestShadcnInstaller.test_add_components_already_installed, TestShadcnInstaller.test_check_shadcn_config_exists, TestShadcnInstaller.test_get_installed_components_with_files, TestShadcnInstaller.test_init_default_project_root, functions, excluded_lines, executed_lines, missing_lines (+13 more)
 
 ### Community 100 - "Community 100"
 Cohesion: 0.10
 Nodes (20): 1. Uygulama Mimarisi, 2. Doğru İş Akışı, 3. Temel Veri Modeli, 4. API Endpoint Referansı, 5. Kullanıcı Hesapları (Seed), 6. Seed Data Özeti, Action (Düzeltici Aksiyon), Attachment (Polimorfik Ek Dosya) (+12 more)
 
 ### Community 101 - "Community 101"
-Cohesion: 0.10
-Nodes (15): ActionStatus, AttachmentMetaDto, CREATABLE_SEVERITIES, CreateActionDto, CreateFindingDto, FindingResolutionStatus, FindingSeverity, FindingSource (+7 more)
+Cohesion: 0.11
+Nodes (15): ActionStatus, AttachmentMetaDto, CREATABLE_SEVERITIES, CREATABLE_STATUSES, CreateActionDto, FindingResolutionStatus, FindingSeverity, FindingSource (+7 more)
 
 ### Community 102 - "Community 102"
 Cohesion: 0.11
@@ -689,8 +714,8 @@ Cohesion: 0.14
 Nodes (3): DirectoratesController, DirectoratesModule, DirectoratesService
 
 ### Community 118 - "Community 118"
-Cohesion: 0.24
-Nodes (15): createTestControl(), createTestControlTest(), createTestDirectorate(), createTestUser(), E2E_TEST_PASSWORD, resetDatabase(), seedRoles(), addAction() (+7 more)
+Cohesion: 0.18
+Nodes (22): createTestControl(), createTestControlTest(), createTestDirectorate(), createTestUser(), E2E_TEST_PASSWORD, resetDatabase(), seedRoles(), createTestApp() (+14 more)
 
 ### Community 119 - "Community 119"
 Cohesion: 0.15
@@ -781,24 +806,24 @@ Cohesion: 0.15
 Nodes (12): files, tests/test_shadcn_add.py, meta, branch_coverage, format, show_contexts, timestamp, version (+4 more)
 
 ### Community 141 - "Community 141"
-Cohesion: 0.17
-Nodes (7): EmptyToUndefined(), ControlAutomation, ControlFrequency, ControlNature, ControlType, CreateControlDto, UpdateControlDto
+Cohesion: 0.20
+Nodes (6): ControlAutomation, ControlFrequency, ControlNature, ControlType, CreateControlDto, UpdateControlDto
 
 ### Community 142 - "Community 142"
 Cohesion: 0.26
 Nodes (11): adapter, DOMAIN_TABLE_COUNTS, main(), maskDatabaseUrl(), pool, prisma, step1_backupReminder(), step2_migrationStatus() (+3 more)
 
 ### Community 143 - "Community 143"
-Cohesion: 0.24
-Nodes (11): adapter, ensureAdminUser(), main(), maskDatabaseUrl(), pool, prisma, SYSTEM_PARAMETERS, SYSTEM_ROLES (+3 more)
+Cohesion: 0.21
+Nodes (13): adapter, ensureAdminUser(), main(), maskDatabaseUrl(), pool, prisma, STARTER_KNOWLEDGE_DOCS, SYSTEM_PARAMETERS (+5 more)
 
 ### Community 144 - "Community 144"
 Cohesion: 0.18
 Nodes (12): ShadcnInstaller, shadcn_add.py, classes, excluded_lines, executed_lines, missing_lines, summary, excluded_lines (+4 more)
 
 ### Community 145 - "Community 145"
-Cohesion: 0.18
-Nodes (7): CreateFollowUpDto, FindingResolutionOutcome, FollowUpApprovalStatus, FollowUpResult, FollowUpStatus, NewActionInputDto, UpdateFollowUpDto
+Cohesion: 0.15
+Nodes (8): AssignSecondControllerDto, CreateFollowUpDto, FindingResolutionOutcome, FollowUpApprovalStatus, FollowUpResult, FollowUpStatus, NewActionInputDto, UpdateFollowUpDto
 
 ### Community 146 - "Community 146"
 Cohesion: 0.18
@@ -814,19 +839,19 @@ Nodes (11): TailwindConfigGenerator, tailwind_config_gen.py, classes, excluded_l
 
 ### Community 149 - "Community 149"
 Cohesion: 0.18
-Nodes (11): ShadcnInstaller.add_all_components, TestShadcnInstaller.test_init_default_project_root, excluded_lines, executed_lines, missing_lines, summary, covered_lines, excluded_lines (+3 more)
+Nodes (11): ShadcnInstaller.add_all_components, TailwindConfigGenerator.write_config, excluded_lines, executed_lines, missing_lines, summary, covered_lines, excluded_lines (+3 more)
 
 ### Community 150 - "Community 150"
 Cohesion: 0.18
-Nodes (11): ShadcnInstaller.add_components, TailwindConfigGenerator.__init__, excluded_lines, executed_lines, missing_lines, summary, excluded_lines, excluded_lines (+3 more)
+Nodes (11): ShadcnInstaller.add_components, TailwindConfigGenerator.add_spacing, excluded_lines, executed_lines, missing_lines, summary, excluded_lines, excluded_lines (+3 more)
 
 ### Community 151 - "Community 151"
 Cohesion: 0.18
-Nodes (11): ShadcnInstaller.__init__, TailwindConfigGenerator.generate_config_string, excluded_lines, executed_lines, missing_lines, summary, percent_covered, excluded_lines (+3 more)
+Nodes (11): ShadcnInstaller.__init__, TailwindConfigGenerator._generate_typescript, excluded_lines, executed_lines, missing_lines, summary, percent_covered, excluded_lines (+3 more)
 
 ### Community 152 - "Community 152"
 Cohesion: 0.18
-Nodes (11): ShadcnInstaller.list_installed, TailwindConfigGenerator._default_content_paths, excluded_lines, executed_lines, missing_lines, summary, num_statements, excluded_lines (+3 more)
+Nodes (11): ShadcnInstaller.list_installed, TailwindConfigGenerator._generate_javascript, excluded_lines, executed_lines, missing_lines, summary, num_statements, excluded_lines (+3 more)
 
 ### Community 153 - "Community 153"
 Cohesion: 0.18
@@ -845,7 +870,7 @@ Cohesion: 0.29
 Nodes (9): enhance_prompt(), generate_batch(), generate_logo(), load_env(), main(), Enhance the logo prompt with style and industry modifiers, Generate a logo using Gemini models with image generation      Args:         asp, Generate multiple logo variants with different styles (+1 more)
 
 ### Community 157 - "Community 157"
-Cohesion: 0.24
+Cohesion: 0.27
 Nodes (4): NotificationsController, NotificationsModule, NotificationItem, NotificationsService
 
 ### Community 158 - "Community 158"
@@ -857,8 +882,8 @@ Cohesion: 0.20
 Nodes (9): Common Structures, Duarte Sparkline Pattern, Matching Strategy to Context, Product Demo (6 slides), Sales Pitch (9 slides), Search Commands, Slide Strategies, Strategy Selection (+1 more)
 
 ### Community 160 - "Community 160"
-Cohesion: 0.22
-Nodes (5): ALLOWED_EXT, ALLOWED_MIME, UPLOAD_ROOT, UploadsController, UploadsModule
+Cohesion: 0.12
+Nodes (13): AttachmentLike, DEFERRED_EXT, ExtractedDoc, ExtractKind, IMAGE_EXT, { PDFParse }, pdfToText(), SHEET_EXT (+5 more)
 
 ### Community 161 - "Community 161"
 Cohesion: 0.22
@@ -933,12 +958,12 @@ Cohesion: 0.40
 Nodes (5): TailwindConfigGenerator.add_color_palette, excluded_lines, executed_lines, missing_lines, summary
 
 ### Community 180 - "Community 180"
-Cohesion: 0.40
-Nodes (5): TailwindConfigGenerator.add_fonts, excluded_lines, executed_lines, missing_lines, summary
+Cohesion: 0.14
+Nodes (5): AiQueryService, FOLLOWUP_APPROVER_ROLES, PrismaLike, PrismaService, QUERY
 
 ### Community 181 - "Community 181"
-Cohesion: 0.40
-Nodes (5): TailwindConfigGenerator.add_spacing, excluded_lines, executed_lines, missing_lines, summary
+Cohesion: 0.21
+Nodes (13): APPLY, args, Article, clean(), main(), parseCbddo(), parseSpk(), { PDFParse } (+5 more)
 
 ### Community 182 - "Community 182"
 Cohesion: 0.40
@@ -953,8 +978,8 @@ Cohesion: 0.40
 Nodes (5): TailwindConfigGenerator._format_plugins, excluded_lines, executed_lines, missing_lines, summary
 
 ### Community 185 - "Community 185"
-Cohesion: 0.40
-Nodes (5): TailwindConfigGenerator._generate_javascript, excluded_lines, executed_lines, missing_lines, summary
+Cohesion: 0.33
+Nodes (5): Control, Directorate, NewFindingPage(), Risk, UserOption
 
 ### Community 186 - "Community 186"
 Cohesion: 0.40
@@ -969,8 +994,8 @@ Cohesion: 0.40
 Nodes (5): TailwindConfigGenerator.validate_config, excluded_lines, executed_lines, missing_lines, summary
 
 ### Community 189 - "Community 189"
-Cohesion: 0.40
-Nodes (5): TailwindConfigGenerator.write_config, excluded_lines, executed_lines, missing_lines, summary
+Cohesion: 0.17
+Nodes (11): AiTier, loadAiConfig(), AiEmbeddingService, CreateEvalSessionDto, EvalKind, AiChatRequest, AiChatResponse, AiImagePart (+3 more)
 
 ### Community 190 - "Community 190"
 Cohesion: 0.40
@@ -984,17 +1009,9 @@ Nodes (5): TestShadcnInstaller.test_add_components_no_components, excluded_lines
 Cohesion: 0.40
 Nodes (5): TestShadcnInstaller.test_add_components_with_overwrite, excluded_lines, executed_lines, missing_lines, summary
 
-### Community 193 - "Community 193"
-Cohesion: 0.40
-Nodes (5): TestShadcnInstaller.test_check_shadcn_config_exists, excluded_lines, executed_lines, missing_lines, summary
-
 ### Community 194 - "Community 194"
 Cohesion: 0.40
 Nodes (5): TestShadcnInstaller.test_check_shadcn_config_not_exists, excluded_lines, executed_lines, missing_lines, summary
-
-### Community 195 - "Community 195"
-Cohesion: 0.40
-Nodes (5): TestShadcnInstaller.test_get_installed_components_with_files, excluded_lines, executed_lines, missing_lines, summary
 
 ### Community 196 - "Community 196"
 Cohesion: 0.40
@@ -1020,25 +1037,81 @@ Nodes (3): Deploy on Vercel, Getting Started, Learn More
 Cohesion: 0.50
 Nodes (3): dotenv, { execSync }, path
 
+### Community 236 - "Community 236"
+Cohesion: 0.40
+Nodes (5): TailwindConfigGenerator.add_colors, excluded_lines, executed_lines, missing_lines, summary
+
+### Community 237 - "Community 237"
+Cohesion: 0.40
+Nodes (5): TailwindConfigGenerator.add_plugins, excluded_lines, executed_lines, missing_lines, summary
+
+### Community 238 - "Community 238"
+Cohesion: 0.40
+Nodes (5): TailwindConfigGenerator._default_content_paths, excluded_lines, executed_lines, missing_lines, summary
+
+### Community 239 - "Community 239"
+Cohesion: 0.40
+Nodes (5): TailwindConfigGenerator.generate_config_string, excluded_lines, executed_lines, missing_lines, summary
+
+### Community 242 - "Community 242"
+Cohesion: 0.40
+Nodes (5): TestShadcnInstaller.test_add_components_no_config, excluded_lines, executed_lines, missing_lines, summary
+
+### Community 243 - "Community 243"
+Cohesion: 0.40
+Nodes (5): TestShadcnInstaller.test_get_installed_components_empty, excluded_lines, executed_lines, missing_lines, summary
+
+### Community 244 - "Community 244"
+Cohesion: 0.40
+Nodes (5): TestShadcnInstaller.test_get_installed_components_no_config, excluded_lines, executed_lines, missing_lines, summary
+
+### Community 267 - "Community 267"
+Cohesion: 0.13
+Nodes (14): Kind, RecordResultInput, Status, EVAL, EVAL_VISION, EVIDENCE_IMAGE, EVIDENCE_TEXT, EvidenceTextItem (+6 more)
+
+### Community 268 - "Community 268"
+Cohesion: 0.13
+Nodes (3): ReportPeriodQueryDto, RiskTrendsQueryDto, ReportsController
+
+### Community 269 - "Community 269"
+Cohesion: 0.22
+Nodes (6): normalizeRole(), createWithSequentialId(), formatRecordId(), isUniqueViolation(), nextCounterValue(), RawClient
+
+### Community 270 - "Community 270"
+Cohesion: 0.15
+Nodes (13): Control, EFFECTIVENESS_LABELS, Risk, RiskAssessmentPage(), TYPE_LABELS, BadgeSize, BadgeVariant, dotColors (+5 more)
+
+### Community 271 - "Community 271"
+Cohesion: 0.14
+Nodes (14): Action, BV, Control, effectivenessConfig, Finding, formatDate(), severityConfig, ControlDetailPage() (+6 more)
+
+### Community 274 - "Community 274"
+Cohesion: 0.22
+Nodes (5): ALLOWED_EXT, ALLOWED_MIME, UPLOAD_ROOT, UploadsController, UploadsModule
+
+### Community 277 - "Community 277"
+Cohesion: 0.25
+Nodes (4): ACTION_STATUS_LABELS, MyWorkData, SEVERITY_COLORS, SEVERITY_LABELS
+
 ## Knowledge Gaps
-- **1820 isolated node(s):** `version`, `configurations`, `allow`, `Path`, `Any` (+1815 more)
+- **1880 isolated node(s):** `version`, `configurations`, `allow`, `Path`, `Any` (+1875 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **65 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **73 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `RiskAssessmentPage()` connect `Control Agenda Kanban UI` to `Risk Data Transfer Objects`, `Permission-Based UI`?**
+- **Why does `PrismaService` connect `Community 180` to `Risk Data Transfer Objects`, `Controls Backend Module`, `Compliance Backend Module`, `Reports Backend Module`, `Auth Backend Module`, `UI Component Library`, `Community 267`, `Risk Entry Backend Module`, `Admin Service Layer`, `Community 269`, `Community 272`, `Community 278`, `Community 279`, `Service Dependency Injection`, `Auth Guards & Prisma Module`, `Risk Control Scoring Service`, `Actions Backend Module`, `Community 157`, `Community 160`, `Controls Detail UI`, `Community 189`, `Community 94`, `Community 95`, `Community 117`, `Community 118`, `Community 119`?**
+  _High betweenness centrality (0.050) - this node is a cross-community bridge._
+- **Why does `RisksService` connect `Risk Data Transfer Objects` to `Community 180`, `Actions Backend Module`?**
   _High betweenness centrality (0.044) - this node is a cross-community bridge._
-- **Why does `PrismaService` connect `Service Dependency Injection` to `Risk Data Transfer Objects`, `Compliance Backend Module`, `Reports Backend Module`, `Auth Backend Module`, `Actions Service Layer`, `Risk Entry Backend Module`, `Admin Service Layer`, `Community 117`, `Auth Guards & Prisma Module`, `Community 119`, `Community 118`, `Actions Backend Module`, `Community 157`, `Community 94`, `Community 95`?**
-  _High betweenness centrality (0.039) - this node is a cross-community bridge._
-- **Are the 12 inferred relationships involving `useToast()` (e.g. with `ActionsContent()` and `AksiyonTablosuPage()`) actually correct?**
-  _`useToast()` has 12 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `RiskAssessmentPage()` connect `Community 270` to `Risk Data Transfer Objects`, `Permission-Based UI`?**
+  _High betweenness centrality (0.044) - this node is a cross-community bridge._
+- **Are the 13 inferred relationships involving `useToast()` (e.g. with `ActionsContent()` and `AksiyonTablosuPage()`) actually correct?**
+  _`useToast()` has 13 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `version`, `configurations`, `allow` to the rest of the system?**
-  _2018 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _2078 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Frontend API Client Layer` be split into smaller, more focused modules?**
-  _Cohesion score 0.02898239587805925 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.0249980097126025 - nodes in this community are weakly interconnected._
 - **Should `Risk Data Transfer Objects` be split into smaller, more focused modules?**
-  _Cohesion score 0.07918367346938776 - nodes in this community are weakly interconnected._
-- **Should `Frontend Dependencies Config` be split into smaller, more focused modules?**
-  _Cohesion score 0.04878048780487805 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.07712765957446809 - nodes in this community are weakly interconnected._

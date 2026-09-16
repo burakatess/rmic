@@ -3,7 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ControlsService } from './controls.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
-import { CreateControlDto, UpdateControlDto } from './dto';
+import { CreateControlDto, UpdateControlDto, SaveTestDraftDto } from './dto';
 
 @ApiTags('Controls')
 @ApiBearerAuth('JWT-Auth')
@@ -23,6 +23,18 @@ export class ControlsController {
     @Get('tests')
     async getAllTests(@Query() query: any) {
         return this.controlsService.getAllTests(query);
+    }
+
+    // Kontrol Testi çalışma sayfası — tekil, tam detaylı kayıt (deep link/yenileme için)
+    @Get('tests/:testId')
+    async getTestById(@Param('testId') testId: string) {
+        return this.controlsService.getTestById(testId);
+    }
+
+    @Patch('tests/:testId/draft')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    async saveDraft(@Param('testId') testId: string, @Body() data: SaveTestDraftDto, @CurrentUser('id') userId: string) {
+        return this.controlsService.saveDraft(testId, data, userId);
     }
 
     @Patch('tests/:testId/start')
@@ -125,11 +137,8 @@ export class ControlsController {
         return this.controlsService.passivate(id, userId);
     }
 
-    @Delete(':id')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async delete(@Param('id') id: string, @CurrentUser('id') userId: string) {
-        return this.controlsService.delete(id, userId);
-    }
+    // Kalıcı silme endpoint'i kaldırıldı — Control ana envanterdir, yerine
+    // PATCH :id/passivate kullanılır (bkz. plan "KONTROL ENVANTERİ").
 
     @Post(':id/map-risk')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
@@ -154,12 +163,6 @@ export class ControlsController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async createTest(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
         return this.controlsService.createTest(id, data, userId);
-    }
-
-    @Post(':id/generate-tests')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async generateTests(@Param('id') id: string, @CurrentUser('id') userId: string) {
-        return this.controlsService.generateTestsForControl(id);
     }
 
     // Legacy: POST :id/test — backward compat

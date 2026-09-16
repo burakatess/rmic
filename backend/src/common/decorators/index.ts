@@ -2,3 +2,4 @@ export * from './roles.decorator';
 export * from './public.decorator';
 export * from './current-user.decorator';
 export * from './empty-to-undefined.decorator';
+export * from './permissions.decorator';

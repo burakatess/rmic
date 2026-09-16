@@ -109,6 +109,42 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
         return res.body;
     }
 
+    // İki aktörlü takip onayı (Madde 3): admin değerlendirir + ikinci kontrolcü (manager)
+    // atar; ardından manager onaylar. `status: 'ONAYLANDI'` yalnızca onay adımında,
+    // manager tarafından gönderilir (kendi değerlendirmesini onaylayamaz kuralı).
+    async function recordFollowUp(findingId: string, followUpId: string, payload: Record<string, any>) {
+        const { status, secondControllerId, ...rest } = payload;
+        void status; void secondControllerId;
+        return request(app.getHttpServer())
+            .put(`/findings/${findingId}/follow-ups/${followUpId}`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send(rest);
+    }
+    async function assignSecondController(findingId: string, followUpId: string, controllerId = managerUserId) {
+        return request(app.getHttpServer())
+            .post(`/findings/${findingId}/follow-ups/${followUpId}/second-controller`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ secondControllerId: controllerId, reason: 'e2e ikinci kontrolcü ataması' });
+    }
+    async function approveFollowUp(findingId: string, followUpId: string, extra: Record<string, any> = {}) {
+        return request(app.getHttpServer())
+            .put(`/findings/${findingId}/follow-ups/${followUpId}`)
+            .set('Authorization', `Bearer ${managerToken}`)
+            .send({ status: 'ONAYLANDI', ...extra });
+    }
+    /** Değerlendir + ikinci kontrolcü ata + onayla. YENI_AKSIYON_GEREKLI'de newAction
+     *  onay adımında da iletilir (yeni Action onayda oluşturulur). */
+    async function recordAndApprove(findingId: string, followUpId: string, payload: Record<string, any>) {
+        const { status, ...rest } = payload;
+        void status;
+        const r1 = await recordFollowUp(findingId, followUpId, rest);
+        expect(r1.status).toBe(200);
+        expect((await assignSecondController(findingId, followUpId)).status).toBe(201);
+        const r2 = await approveFollowUp(findingId, followUpId, rest.newAction ? { newAction: rest.newAction } : {});
+        expect(r2.status).toBe(200);
+        return r2;
+    }
+
     describe('Ana Workflow Zinciri (Test → Bulgu → Mutabakat → Aksiyon → Takip)', () => {
         let controlId: string;
         let controlTestId: string;
@@ -239,17 +275,11 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
         });
 
         it('9. FollowUp sonucu YETERLI → bağlı Action KAPATILDI olur', async () => {
-            const res = await request(app.getHttpServer())
-                .put(`/findings/${findingId}/follow-ups/${followUpId}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    currentStatusDetail: 'Düzeltme uygulandı ve doğrulandı.',
-                    result: 'YETERLI',
-                    resolutionOutcome: 'KAPATILDI',
-                })
-                .expect(200);
-            expect(res.body.result).toBe('YETERLI');
+            await recordAndApprove(findingId, followUpId, {
+                currentStatusDetail: 'Düzeltme uygulandı ve doğrulandı.',
+                result: 'YETERLI',
+                resolutionOutcome: 'KAPATILDI',
+            });
 
             const action = await request(app.getHttpServer())
                 .get(`/findings/${findingId}/actions`)
@@ -310,15 +340,10 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
         it('FollowUp sonucu YETERSIZ → bağlı Action YETERSIZ olur', async () => {
             const { findingId: fId, actionId: aId, followUpId: fuId } = await setupFindingWithAction();
 
-            await request(app.getHttpServer())
-                .put(`/findings/${fId}/follow-ups/${fuId}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    currentStatusDetail: 'Düzeltme yetersiz bulundu.',
-                    result: 'YETERSIZ',
-                })
-                .expect(200);
+            await recordAndApprove(fId, fuId, {
+                currentStatusDetail: 'Düzeltme yetersiz bulundu.',
+                result: 'YETERSIZ',
+            });
 
             const action = await request(app.getHttpServer())
                 .get(`/findings/${fId}/actions`)
@@ -333,16 +358,11 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             // newAction.description/ownerId/dueDate zorunludur, sistem placeholder üretmez.
             const { findingId: fId, actionId: originalActionId, followUpId: fuId } = await setupFindingWithAction();
 
-            await request(app.getHttpServer())
-                .put(`/findings/${fId}/follow-ups/${fuId}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    currentStatusDetail: 'Ek düzeltici aksiyon gerekiyor.',
-                    result: 'YENI_AKSIYON_GEREKLI',
-                    resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
-                })
-                .expect(400);
+            await recordFollowUp(fId, fuId, {
+                currentStatusDetail: 'Ek düzeltici aksiyon gerekiyor.',
+                result: 'YENI_AKSIYON_GEREKLI',
+                resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
+            }).then((r) => expect(r.status).toBe(400));
 
             // Hiçbir yeni Action oluşmamış olmalı (yalnızca orijinal aksiyon var)
             const actions = await request(app.getHttpServer())
@@ -358,22 +378,17 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             const otherUser = await createTestUser(prisma, roleIds['SYSTEM_ADMIN'], { email: `owner-${Date.now()}@e2e.local` });
             const dueDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-            await request(app.getHttpServer())
-                .put(`/findings/${fId}/follow-ups/${fuId}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    currentStatusDetail: 'Ek düzeltici aksiyon gerekiyor.',
-                    result: 'YENI_AKSIYON_GEREKLI',
-                    resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
-                    newAction: {
-                        description: 'Kullanıcının girdiği gerçek yeni aksiyon açıklaması metni',
-                        ownerId: otherUser.id,
-                        dueDate,
-                        notes: 'Kullanıcı notu',
-                    },
-                })
-                .expect(200);
+            await recordAndApprove(fId, fuId, {
+                currentStatusDetail: 'Ek düzeltici aksiyon gerekiyor.',
+                result: 'YENI_AKSIYON_GEREKLI',
+                resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
+                newAction: {
+                    description: 'Kullanıcının girdiği gerçek yeni aksiyon açıklaması metni',
+                    ownerId: otherUser.id,
+                    dueDate,
+                    notes: 'Kullanıcı notu',
+                },
+            });
 
             const actions = await request(app.getHttpServer())
                 .get(`/findings/${fId}/actions`)
@@ -483,17 +498,11 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             const followUp = await getFollowUpForAction(findingId, action.id);
             expect(followUp).toBeDefined();
 
-            const res = await request(app.getHttpServer())
-                .put(`/findings/${findingId}/follow-ups/${followUp.id}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    currentStatusDetail: 'Düzeltme uygulandı ve doğrulandı.',
-                    result: 'YETERLI',
-                    resolutionOutcome: 'KAPATILDI',
-                })
-                .expect(200);
-            expect(res.body.result).toBe('YETERLI');
+            await recordAndApprove(findingId, followUp.id, {
+                currentStatusDetail: 'Düzeltme uygulandı ve doğrulandı.',
+                result: 'YETERLI',
+                resolutionOutcome: 'KAPATILDI',
+            });
 
             const finding = await getFinding(findingId);
             expect(finding.status).toBe('CLOSED');
@@ -520,16 +529,11 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             expect(followUp1).toBeDefined();
 
             // Yalnız 1. aksiyonun takibini YETERLI/KAPATILDI ile kapat
-            await request(app.getHttpServer())
-                .put(`/findings/${findingId}/follow-ups/${followUp1.id}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    currentStatusDetail: 'Birinci aksiyon tamamlandı.',
-                    result: 'YETERLI',
-                    resolutionOutcome: 'KAPATILDI',
-                })
-                .expect(200);
+            await recordAndApprove(findingId, followUp1.id, {
+                currentStatusDetail: 'Birinci aksiyon tamamlandı.',
+                result: 'YETERLI',
+                resolutionOutcome: 'KAPATILDI',
+            });
 
             let finding = await getFinding(findingId);
             const act1After = finding.actions.find((a: any) => a.id === action1.id);
@@ -542,16 +546,11 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
 
             // 2. aksiyonun takibini de kapat
             const followUp2 = await getFollowUpForAction(findingId, action2.id);
-            await request(app.getHttpServer())
-                .put(`/findings/${findingId}/follow-ups/${followUp2.id}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    currentStatusDetail: 'İkinci aksiyon da tamamlandı.',
-                    result: 'YETERLI',
-                    resolutionOutcome: 'KAPATILDI',
-                })
-                .expect(200);
+            await recordAndApprove(findingId, followUp2.id, {
+                currentStatusDetail: 'İkinci aksiyon da tamamlandı.',
+                result: 'YETERLI',
+                resolutionOutcome: 'KAPATILDI',
+            });
 
             // Şimdi TÜM aksiyonlar kapandığı için bulgu kapanabilmeli
             finding = await getFinding(findingId);
@@ -566,16 +565,11 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
 
             const followUp1 = await getFollowUpForAction(findingId, action1.id);
 
-            await request(app.getHttpServer())
-                .put(`/findings/${findingId}/follow-ups/${followUp1.id}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    currentStatusDetail: 'Bir aksiyon tamamlandı, diğeri devam ediyor.',
-                    result: 'YETERLI',
-                    resolutionOutcome: 'KISMEN_KAPATILDI',
-                })
-                .expect(200);
+            await recordAndApprove(findingId, followUp1.id, {
+                currentStatusDetail: 'Bir aksiyon tamamlandı, diğeri devam ediyor.',
+                result: 'YETERLI',
+                resolutionOutcome: 'KISMEN_KAPATILDI',
+            });
 
             const finding = await getFinding(findingId);
             expect(finding.status).toBe('PARTIALLY_CLOSED');
@@ -604,16 +598,11 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 .set('Authorization', `Bearer ${adminToken}`)
                 .expect(200);
 
-            await request(app.getHttpServer())
-                .put(`/findings/${findingId}/follow-ups/${followUp.id}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    currentStatusDetail: 'Test tarihi ertelendi, ek süre gerekiyor.',
-                    resolutionOutcome: 'ERTELENDI',
-                    newFollowUpDate: newDate,
-                })
-                .expect(200);
+            await recordFollowUp(findingId, followUp.id, {
+                currentStatusDetail: 'Test tarihi ertelendi, ek süre gerekiyor.',
+                resolutionOutcome: 'ERTELENDI',
+                newFollowUpDate: newDate,
+            }).then((r) => expect(r.status).toBe(200));
 
             const finding = await getFinding(findingId);
             expect(finding.status).not.toBe('CLOSED');
@@ -632,14 +621,10 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             const action = await addAction(findingId);
             const followUp = await getFollowUpForAction(findingId, action.id);
 
-            const res = await request(app.getHttpServer())
-                .put(`/findings/${findingId}/follow-ups/${followUp.id}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    currentStatusDetail: 'Ertelenmek isteniyor ama tarih unutuldu.',
-                    resolutionOutcome: 'ERTELENDI',
-                });
+            const res = await recordFollowUp(findingId, followUp.id, {
+                currentStatusDetail: 'Ertelenmek isteniyor ama tarih unutuldu.',
+                resolutionOutcome: 'ERTELENDI',
+            });
 
             expect(res.status).toBe(400);
 
@@ -712,23 +697,18 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             const otherUser = await createTestUser(prisma, roleIds['SYSTEM_ADMIN'], { email: `owner-${Date.now()}@e2e.local` });
             const dueDate = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-            await request(app.getHttpServer())
-                .put(`/findings/${findingId}/follow-ups/${followUp.id}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    currentStatusDetail: 'Ek düzeltici aksiyon gerekiyor.',
-                    result: 'YENI_AKSIYON_GEREKLI',
-                    resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
-                    newAction: {
-                        description: 'Zorunlu alan testi — gerçek kullanıcı girdisi açıklama',
-                        ownerId: otherUser.id,
-                        dueDate,
-                        responsibleDepartment: 'BT Operasyon',
-                        notes: 'Test notu',
-                    },
-                })
-                .expect(200);
+            await recordAndApprove(findingId, followUp.id, {
+                currentStatusDetail: 'Ek düzeltici aksiyon gerekiyor.',
+                result: 'YENI_AKSIYON_GEREKLI',
+                resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
+                newAction: {
+                    description: 'Zorunlu alan testi — gerçek kullanıcı girdisi açıklama',
+                    ownerId: otherUser.id,
+                    dueDate,
+                    responsibleDepartment: 'BT Operasyon',
+                    notes: 'Test notu',
+                },
+            });
 
             const finding = await getFinding(findingId);
             const newAction = finding.actions.find((a: any) => a.id !== originalAction.id);
@@ -753,10 +733,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             const action = await addAction(findingId);
             const followUp = await getFollowUpForAction(findingId, action.id);
 
-            const res = await request(app.getHttpServer())
-                .put(`/findings/${findingId}/follow-ups/${followUp.id}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ status: 'ONAYLANDI', result: 'YENI_AKSIYON_GEREKLI' });
+            const res = await recordFollowUp(findingId, followUp.id, { result: 'YENI_AKSIYON_GEREKLI' });
 
             expect(res.status).toBe(400);
         });
@@ -767,14 +744,10 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             const followUp = await getFollowUpForAction(findingId, action.id);
             const dueDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-            const res = await request(app.getHttpServer())
-                .put(`/findings/${findingId}/follow-ups/${followUp.id}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    result: 'YENI_AKSIYON_GEREKLI',
-                    newAction: { ownerId: adminUserId, dueDate },
-                });
+            const res = await recordFollowUp(findingId, followUp.id, {
+                result: 'YENI_AKSIYON_GEREKLI',
+                newAction: { ownerId: adminUserId, dueDate },
+            });
 
             expect(res.status).toBe(400);
         });
@@ -785,14 +758,10 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             const followUp = await getFollowUpForAction(findingId, action.id);
             const dueDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-            const res = await request(app.getHttpServer())
-                .put(`/findings/${findingId}/follow-ups/${followUp.id}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    result: 'YENI_AKSIYON_GEREKLI',
-                    newAction: { description: 'Sorumlusu eksik aksiyon açıklaması', dueDate },
-                });
+            const res = await recordFollowUp(findingId, followUp.id, {
+                result: 'YENI_AKSIYON_GEREKLI',
+                newAction: { description: 'Sorumlusu eksik aksiyon açıklaması', dueDate },
+            });
 
             expect(res.status).toBe(400);
         });
@@ -802,14 +771,10 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             const action = await addAction(findingId);
             const followUp = await getFollowUpForAction(findingId, action.id);
 
-            const res = await request(app.getHttpServer())
-                .put(`/findings/${findingId}/follow-ups/${followUp.id}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({
-                    status: 'ONAYLANDI',
-                    result: 'YENI_AKSIYON_GEREKLI',
-                    newAction: { description: 'Tarihi eksik aksiyon açıklaması', ownerId: adminUserId },
-                });
+            const res = await recordFollowUp(findingId, followUp.id, {
+                result: 'YENI_AKSIYON_GEREKLI',
+                newAction: { description: 'Tarihi eksik aksiyon açıklaması', ownerId: adminUserId },
+            });
 
             expect(res.status).toBe(400);
         });

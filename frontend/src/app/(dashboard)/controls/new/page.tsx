@@ -14,6 +14,12 @@ interface User {
     department?: string;
 }
 
+interface Directorate {
+    id: string;
+    name: string;
+    isActive: boolean;
+}
+
 const FREQUENCIES = [
     { value: 'DAILY', label: 'Günlük' },
     { value: 'WEEKLY', label: 'Haftalık' },
@@ -25,14 +31,13 @@ const FREQUENCIES = [
 ];
 
 const GMY_LIST = ['GM', 'GMY1', 'GMY2', 'GMY3', 'GMY4', 'GMY5', 'GMY6', 'GMY7'];
-const MONTHS = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
-const DIRECTORATES = ['BT Ağ Yönetimi', 'Bilgi Güvenliği', 'Altyapı', 'Uygulama Geliştirme', 'Operasyon', 'İç Kontrol', 'Risk Yönetimi'];
 
 export default function NewControlPage() {
     const router = useRouter();
     const { success: toastSuccess, error: toastError } = useToast();
     const [loading, setLoading] = useState(false);
     const [users, setUsers] = useState<User[]>([]);
+    const [directorates, setDirectorates] = useState<Directorate[]>([]);
 
     // Collapsible cards state
     const [collapsed, setCollapsed] = useState({
@@ -48,12 +53,9 @@ export default function NewControlPage() {
         mehaz: '',
         testSteps: '',
         gmy: '',
-        directorate: '',
+        directorateId: '',
         contactPersonId: '',
-        assigneeId: '',
-        secondControllerId: '',
         frequency: 'MONTHLY',
-        months: [] as string[],
         dueDate: '',
         status: 'ACTIVE',
         notes: '',
@@ -64,6 +66,7 @@ export default function NewControlPage() {
 
     useEffect(() => {
         loadUsers();
+        api.getDirectorates({ isActive: 'true' }).then(setDirectorates).catch(() => { });
     }, []);
 
     const loadUsers = async () => {
@@ -77,81 +80,35 @@ export default function NewControlPage() {
         }
     };
 
-    const validateNaming = (summary: string, frequency: string) => {
-        if (!summary) return 'Kontrol Summary / Kodu zorunludur.';
-
-        if (frequency === 'AD_HOC') {
-            const parts = summary.split('-');
-            if (parts.length !== 3 || !MONTHS.includes(parts[0]) || parts[1] !== 'Arızi' || isNaN(Number(parts[2]))) {
-                return 'Arızi kontrol ismi "AyAdı-Arızi-N" formatında olmalıdır. Örn: Şubat-Arızi-1';
-            }
-        } else {
-            const regex = /^20\d{2}\.(KBT|KİB)-\d+$/;
-            if (!regex.test(summary)) {
-                return 'Periyodik kontrol kodu "YYYY.KBT-XX" veya "YYYY.KİB-XX" formatında olmalıdır. Örn: 2026.KBT-01';
-            }
+    // Gerçek kontrol kodu formatı backend'in generateControlId()'sinin ürettiği
+    // "K-YYYY-NNNN" — frekanstan bağımsız (controls.service.ts'e bakınız).
+    const validateNaming = (summary: string) => {
+        if (!summary) return 'Kontrol Kodu zorunludur.';
+        const regex = /^K-20\d{2}-\d+$/;
+        if (!regex.test(summary)) {
+            return 'Kontrol kodu "K-YYYY-NNNN" formatında olmalıdır. Örn: K-2026-0001';
         }
         return '';
     };
 
     const handleSummaryChange = (val: string) => {
         setFormData(prev => ({ ...prev, summary: val }));
-        setSummaryError(validateNaming(val, formData.frequency));
+        setSummaryError(validateNaming(val));
     };
 
     const handleFrequencyChange = (val: string) => {
-        setFormData(prev => {
-            const newMonths = ['DAILY', 'WEEKLY', 'MONTHLY'].includes(val) ? [] : prev.months;
-            return { ...prev, frequency: val, months: newMonths };
-        });
-        if (formData.summary) {
-            setSummaryError(validateNaming(formData.summary, val));
-        }
-    };
-
-    const toggleMonth = (month: string) => {
-        const currentMonths = formData.months || [];
-        const hasMonth = currentMonths.includes(month);
-
-        if (!hasMonth) {
-            if (formData.frequency === 'ANNUAL' && currentMonths.length >= 1) {
-                toastError('Limit Aşımı', 'Yıllık kontrol için en fazla 1 ay seçilebilir.');
-                return;
-            }
-            if (formData.frequency === 'SEMI_ANNUAL' && currentMonths.length >= 2) {
-                toastError('Limit Aşımı', '6 Aylık kontrol için en fazla 2 ay seçilebilir.');
-                return;
-            }
-            if (formData.frequency === 'QUARTERLY' && currentMonths.length >= 4) {
-                toastError('Limit Aşımı', '3 Aylık kontrol için en fazla 4 ay seçilebilir.');
-                return;
-            }
-            if (formData.frequency === 'AD_HOC') {
-                setFormData(prev => ({ ...prev, months: [month] }));
-                return;
-            }
-        }
-
-        setFormData(prev => {
-            const m = new Set(prev.months);
-            if (m.has(month)) {
-                m.delete(month);
-            } else {
-                m.add(month);
-            }
-            return { ...prev, months: Array.from(m) };
-        });
+        setFormData(prev => ({ ...prev, frequency: val }));
     };
 
     const handleSave = async (isDraft: boolean) => {
-        const err = validateNaming(formData.summary, formData.frequency);
+        const err = validateNaming(formData.summary);
         if (err) {
             setSummaryError(err);
             toastError('Hata', 'Lütfen kontrol kodu formatını düzeltin.');
             return;
         }
 
-        if (!formData.directorate) {
+        if (!formData.directorateId) {
             toastError('Eksik Alan', 'Lütfen ilgili direktörlüğü seçin.');
             return;
         }
@@ -166,19 +123,20 @@ export default function NewControlPage() {
                 mehaz: formData.mehaz,
                 testSteps: formData.testSteps,
                 gmy: formData.gmy,
-                directorate: formData.directorate,
+                directorateId: formData.directorateId,
                 frequency: formData.frequency,
-                months: formData.months,
                 // Not: "dueDate" (pasife alınacağı tarih) alanının backend karşılığı yok — göndermiyoruz.
+                // Uygulama ayı/yıllık kapsam artık burada seçilmiyor — Kontrol
+                // Yönetimi → Yıllık Plan'dan yönetiliyor (Madde 10).
                 notes: formData.notes,
                 isActive: formData.status === 'ACTIVE',
-                ownerId: formData.assigneeId || null,
-                testPerformerId: formData.contactPersonId || null,
-                reviewerId: formData.secondControllerId || null,
+                // ownerId artık kaydı oluşturan kişiyle backend'de sabitlenir, buradan
+                // gönderilmez. Atanan Kontrolcü/İkinci Kontrolcü Yıllık Plan'da seçilir.
+                contactPersonId: formData.contactPersonId || null,
                 status: isDraft ? 'DRAFT' : 'ACTIVE'
             });
 
-            toastSuccess('Başarılı', isDraft ? 'Taslak başarıyla kaydedildi.' : 'Kontrol başarıyla oluşturuldu.');
+            toastSuccess('Başarılı', isDraft ? 'Taslak başarıyla kaydedildi.' : 'Kontrol başarıyla oluşturuldu. Yıllık kapsama almak için Yıllık Plan sayfasını kullanın.');
             router.push('/controls');
         } catch (error) {
             console.error('Failed to create control:', error);
@@ -187,9 +145,6 @@ export default function NewControlPage() {
             setLoading(false);
         }
     };
-
-    const showMonths = ['QUARTERLY', 'SEMI_ANNUAL', 'ANNUAL', 'AD_HOC'].includes(formData.frequency);
-    const isArizi = formData.frequency === 'AD_HOC';
 
     return (
         <div className="min-h-screen bg-slate-50/50 max-w-5xl mx-auto py-8 px-4 pb-24 space-y-6">
@@ -230,19 +185,17 @@ export default function NewControlPage() {
                         <div className="p-6 space-y-5">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="col-span-1">
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Summary (Kontrol No / Başlık) <span className="text-red-500">*</span></label>
+                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Kontrol Kodu <span className="text-red-500">*</span></label>
                                     <input
                                         type="text"
                                         required
                                         value={formData.summary}
                                         onChange={(e) => handleSummaryChange(e.target.value)}
                                         className={`w-full px-4 py-2.5 border rounded-xl outline-none focus:ring-2 transition-all text-sm font-semibold ${summaryError ? 'border-rose-300 focus:ring-rose-500/10 focus:border-rose-500' : 'border-slate-200 focus:ring-blue-500/10 focus:border-blue-500'}`}
-                                        placeholder={isArizi ? "Şubat-Arızi-1" : "2026.KBT-01"}
+                                        placeholder="K-2026-0001"
                                     />
                                     {summaryError && <p className="text-xs font-semibold text-rose-600 mt-1.5 flex items-center gap-1">❌ {summaryError}</p>}
-                                    <p className="text-[10px] text-slate-400 mt-1">
-                                        Format: {isArizi ? 'AyAdı-Arızi-N' : 'YYYY.KBT-XX veya YYYY.KİB-XX'}
-                                    </p>
+                                    <p className="text-[10px] text-slate-400 mt-1">Format: K-YYYY-NNNN</p>
                                 </div>
 
                                 <div className="col-span-1">
@@ -256,37 +209,12 @@ export default function NewControlPage() {
                                     </select>
                                 </div>
 
-                                {/* Dynamic Months MultiSelect */}
-                                {showMonths && (
-                                    <div className="col-span-2">
-                                        <div className="border border-slate-100 rounded-2xl p-4 bg-slate-50/50">
-                                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">
-                                                Kontrol Gerçekleştirilecek Ay{isArizi ? ' (Arızi - Sadece Tek Seçim)' : 'lar'} <span className="text-red-500">*</span>
-                                            </label>
-                                            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                                                {MONTHS.map(m => {
-                                                    const isSelected = formData.months.includes(m);
-                                                    return (
-                                                        <button
-                                                            type="button"
-                                                            key={m}
-                                                            onClick={() => toggleMonth(m)}
-                                                            className={`px-3 py-2 text-xs font-bold rounded-xl border transition-all ${isSelected
-                                                                ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10'
-                                                                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                                                                }`}
-                                                        >
-                                                            {m}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                            <p className="text-[10px] text-slate-400 mt-3.5">
-                                                Seçilen aylar, GRC operasyon çalışma alanında otomatik periyodik test kayıtları (TestRecord) oluşturacaktır.
-                                            </p>
-                                        </div>
-                                    </div>
-                                )}
+                                <div className="col-span-2">
+                                    <p className="text-[11px] text-slate-400 bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5">
+                                        Uygulama ayı/takvimi ve yıllık kapsam artık burada seçilmiyor — kontrolü oluşturduktan sonra{' '}
+                                        <span className="font-semibold text-slate-500">Kontrol Yönetimi → Yıllık Plan</span> sayfasından planlayın.
+                                    </p>
+                                </div>
 
                                 <div className="col-span-2">
                                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Description (Kontrol Tanımı)</label>
@@ -368,15 +296,15 @@ export default function NewControlPage() {
                                 </div>
 
                                 <div className="col-span-1">
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">İlgili Direktörlük (LDAP) <span className="text-red-500">*</span></label>
+                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">İlgili Direktörlük <span className="text-red-500">*</span></label>
                                     <select
                                         required
-                                        value={formData.directorate}
-                                        onChange={(e) => setFormData(prev => ({ ...prev, directorate: e.target.value }))}
+                                        value={formData.directorateId}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, directorateId: e.target.value }))}
                                         className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm font-semibold"
                                     >
                                         <option value="">Direktörlük Seçin</option>
-                                        {DIRECTORATES.map(d => <option key={d} value={d}>{d}</option>)}
+                                        {directorates.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                                     </select>
                                 </div>
 
@@ -391,31 +319,12 @@ export default function NewControlPage() {
                                         {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName} ({u.email})</option>)}
                                     </select>
                                 </div>
-
-                                <div className="col-span-1">
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Assignee (Kontrolü Gerçekleştirecek Kişi)</label>
-                                    <select
-                                        value={formData.assigneeId}
-                                        onChange={(e) => setFormData(prev => ({ ...prev, assigneeId: e.target.value }))}
-                                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm font-semibold"
-                                    >
-                                        <option value="">Kontrol Sahibi Seçin</option>
-                                        {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName} ({u.department || 'Genel'})</option>)}
-                                    </select>
-                                </div>
-
-                                <div className="col-span-1">
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">2. Kontrolcü (İkinci Sorumlu Onaycı)</label>
-                                    <select
-                                        value={formData.secondControllerId}
-                                        onChange={(e) => setFormData(prev => ({ ...prev, secondControllerId: e.target.value }))}
-                                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm font-semibold"
-                                    >
-                                        <option value="">2. Kontrolcü Seçin</option>
-                                        {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
-                                    </select>
-                                </div>
                             </div>
+                            <p className="text-xs text-slate-400 mt-3">
+                                Atanan Kontrolcü ve İkinci Kontrolcü artık burada seçilmez — bu atamalar yıldan
+                                yıla değişebildiği için Kontrol Yönetimi → Yıllık Plan → Kontrolcü Atamaları
+                                sekmesinden, yıl bazında yapılır.
+                            </p>
                         </div>
                     )}
                 </div>
@@ -462,6 +371,12 @@ export default function NewControlPage() {
                                 </div>
 
 
+
+                                <div className="col-span-2">
+                                    <p className="text-[11px] text-slate-400 bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5">
+                                        Kapsam yılı seçimi kaldırıldı — kontrolü oluşturduktan sonra <Link href="/controls/annual-plan" className="text-emerald-600 hover:underline font-semibold">Yıllık Plan</Link> sayfasından yıllık kapsama alın.
+                                    </p>
+                                </div>
 
                                 <div className="col-span-2">
                                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Kontrolör Ek Notu</label>

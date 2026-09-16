@@ -1,0 +1,163 @@
+{
+  "generatedAt": "2026-09-16T14:53:46.637Z",
+  "mode": "APPLY",
+  "summary": {
+    "totalControls": 30,
+    "alreadyMigrated": 30,
+    "newlyMapped": 0,
+    "conflicts": 0
+  },
+  "mapping": [
+    {
+      "controlId": "cmu480aif000yxuvw4zt6csu4",
+      "oldCode": "BTK-0001",
+      "newCode": "BTK-0001"
+    },
+    {
+      "controlId": "cmu480aii000zxuvw0bzpcwer",
+      "oldCode": "BTK-0002",
+      "newCode": "BTK-0002"
+    },
+    {
+      "controlId": "cmu480aij0010xuvwgnqlzlma",
+      "oldCode": "BTK-0003",
+      "newCode": "BTK-0003"
+    },
+    {
+      "controlId": "cmu480ail0011xuvwk3w91mab",
+      "oldCode": "BTK-0004",
+      "newCode": "BTK-0004"
+    },
+    {
+      "controlId": "cmu480aim0012xuvwkztympdu",
+      "oldCode": "BTK-0005",
+      "newCode": "BTK-0005"
+    },
+    {
+      "controlId": "cmu480aio0013xuvwbyz4w099",
+      "oldCode": "BTK-0006",
+      "newCode": "BTK-0006"
+    },
+    {
+      "controlId": "cmu480aiq0014xuvwy0kk78y2",
+      "oldCode": "BTK-0007",
+      "newCode": "BTK-0007"
+    },
+    {
+      "controlId": "cmu480air0015xuvw9568sc5s",
+      "oldCode": "BTK-0008",
+      "newCode": "BTK-0008"
+    },
+    {
+      "controlId": "cmu480ais0016xuvw4ub5j5u5",
+      "oldCode": "BTK-0009",
+      "newCode": "BTK-0009"
+    },
+    {
+      "controlId": "cmu480aiu0017xuvwsn8nujd4",
+      "oldCode": "BTK-0010",
+      "newCode": "BTK-0010"
+    },
+    {
+      "controlId": "cmu480aiv0018xuvwa7rt4vwp",
+      "oldCode": "BTK-0011",
+      "newCode": "BTK-0011"
+    },
+    {
+      "controlId": "cmu480aiw0019xuvwalmkjuot",
+      "oldCode": "BTK-0012",
+      "newCode": "BTK-0012"
+    },
+    {
+      "controlId": "cmu480aix001axuvwt7xwtffr",
+      "oldCode": "BTK-0013",
+      "newCode": "BTK-0013"
+    },
+    {
+      "controlId": "cmu480aiy001bxuvwlz29yjmn",
+      "oldCode": "BTK-0014",
+      "newCode": "BTK-0014"
+    },
+    {
+      "controlId": "cmu480aj0001cxuvwxg7ta9vf",
+      "oldCode": "BTK-0015",
+      "newCode": "BTK-0015"
+    },
+    {
+      "controlId": "cmu480aj1001dxuvwfvtp9s6t",
+      "oldCode": "BTK-0016",
+      "newCode": "BTK-0016"
+    },
+    {
+      "controlId": "cmu480aj2001exuvwynxvdh1k",
+      "oldCode": "BTK-0017",
+      "newCode": "BTK-0017"
+    },
+    {
+      "controlId": "cmu480aj3001fxuvw0var7pmu",
+      "oldCode": "BTK-0018",
+      "newCode": "BTK-0018"
+    },
+    {
+      "controlId": "cmu480aj5001gxuvw1rub3vdj",
+      "oldCode": "BTK-0019",
+      "newCode": "BTK-0019"
+    },
+    {
+      "controlId": "cmu480aj6001hxuvw0qlfhfu6",
+      "oldCode": "BTK-0020",
+      "newCode": "BTK-0020"
+    },
+    {
+      "controlId": "cmu480aj8001ixuvw7ustwtoz",
+      "oldCode": "BTK-0021",
+      "newCode": "BTK-0021"
+    },
+    {
+      "controlId": "cmu480aj9001jxuvwdz94wpfx",
+      "oldCode": "BTK-0022",
+      "newCode": "BTK-0022"
+    },
+    {
+      "controlId": "cmu480aja001kxuvwf8bm6toe",
+      "oldCode": "BTK-0023",
+      "newCode": "BTK-0023"
+    },
+    {
+      "controlId": "cmu480ajd001lxuvw6huhuwd5",
+      "oldCode": "BTK-0024",
+      "newCode": "BTK-0024"
+    },
+    {
+      "controlId": "cmu480ajg001mxuvwd1060leu",
+      "oldCode": "BTK-0025",
+      "newCode": "BTK-0025"
+    },
+    {
+      "controlId": "cmu480ajh001nxuvwuu38e819",
+      "oldCode": "BTK-0026",
+      "newCode": "BTK-0026"
+    },
+    {
+      "controlId": "cmu480ajj001oxuvwbryqqjad",
+      "oldCode": "BTK-0027",
+      "newCode": "BTK-0027"
+    },
+    {
+      "controlId": "cmu480ajk001pxuvw75yg5nd1",
+      "oldCode": "BTK-0028",
+      "newCode": "BTK-0028"
+    },
+    {
+      "controlId": "cmu480ajl001qxuvw28h6mf7s",
+      "oldCode": "BTK-0029",
+      "newCode": "BTK-0029"
+    },
+    {
+      "controlId": "cmu480ajm001rxuvwfm89j1i1",
+      "oldCode": "BTK-0030",
+      "newCode": "BTK-0030"
+    }
+  ],
+  "conflicts": []
+}
