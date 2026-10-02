@@ -1,11 +1,12 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { ControlFrequency } from '@prisma/client';
+import { ControlFrequency, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma';
 import { DirectorateScopeService } from '../../common/services/directorate-scope.service';
 import { ControlScopeService } from './control-scope.service';
 import { computeScopePeriods, computeMonthGroup, monthNumbersToLabels } from './control-period.util';
 import {
     AnnualPlanDraftItemPatchDto, AnnualPlanWorkspaceQueryDto, ApplyPlanDto, BulkDraftActionDto, SaveDraftItemsDto,
+    AnnualPlanTransitionDto, AnnualPlanDecisionDto,
 } from './dto/annual-plan.dto';
 
 interface WorkloadRow {
@@ -141,6 +142,24 @@ export class AnnualPlanService {
         private controlScopeService: ControlScopeService,
     ) { }
 
+    private assertDraftEditable(draft: { status: string }) {
+        if (draft.status === 'PENDING_APPROVAL') {
+            throw new ConflictException('Plan onay beklerken düzenlenemez. Önce değişiklik talep edilmelidir.');
+        }
+        if (draft.status === 'APPROVED') {
+            throw new ConflictException('Onaylanmış plan düzenlenemez. Önce değişiklik talep edilmelidir.');
+        }
+    }
+
+    private draftMutationData(userId: string) {
+        return {
+            revision: { increment: 1 }, updatedById: userId, status: 'OPEN' as const,
+            submittedAt: null, submittedById: null, approvedAt: null, approvedById: null,
+            approvedRevision: null, decisionNote: null, decidedById: null,
+            assignmentDecisions: Prisma.DbNull,
+        };
+    }
+
     private async resolveAndAssertControlsInScope(
         userId: string, permissions: string[], requested: { scope?: any; directorateId?: string[] },
         controlIds: string[], year?: number,
@@ -184,6 +203,7 @@ export class AnnualPlanService {
 
     async getDraft(year: number, userId: string) {
         const draft = await this.getOrCreateDraft(year, userId);
+        this.assertDraftEditable(draft);
         const items = await this.prisma.annualPlanDraftItem.findMany({ where: { draftId: draft.id } });
         return { ...draft, items };
     }
@@ -196,7 +216,7 @@ export class AnnualPlanService {
         return this.prisma.$transaction(async (tx) => {
             const claim = await tx.annualPlanDraft.updateMany({
                 where: { id: draft.id, revision: dto.expectedRevision },
-                data: { revision: { increment: 1 }, updatedById: userId },
+                data: this.draftMutationData(userId),
             });
             if (claim.count === 0) {
                 throw new ConflictException('Taslak başka bir kullanıcı tarafından güncellendi. Sayfayı yenileyip tekrar deneyin.');
@@ -259,6 +279,7 @@ export class AnnualPlanService {
     async bulkDraftAction(year: number, userId: string, permissions: string[], dto: BulkDraftActionDto, requestedScope: { scope?: any; directorateId?: string[] }) {
         await this.resolveAndAssertControlsInScope(userId, permissions, requestedScope, dto.controlIds, year);
         const draft = await this.getOrCreateDraft(year, userId);
+        this.assertDraftEditable(draft);
         const controls = await this.prisma.control.findMany({ where: { id: { in: dto.controlIds } } });
 
         if (dto.action === 'ASSIGN') {
@@ -268,7 +289,7 @@ export class AnnualPlanService {
         return this.prisma.$transaction(async (tx) => {
             const claim = await tx.annualPlanDraft.updateMany({
                 where: { id: draft.id, revision: dto.expectedRevision },
-                data: { revision: { increment: 1 }, updatedById: userId },
+                data: this.draftMutationData(userId),
             });
             if (claim.count === 0) {
                 throw new ConflictException('Taslak başka bir kullanıcı tarafından güncellendi. Sayfayı yenileyip tekrar deneyin.');
@@ -310,8 +331,11 @@ export class AnnualPlanService {
             const realScope = realScopeByControl.get(controlId);
             const currentAssignee = draftItem?.assigneeId ?? realScope?.assigneeId ?? null;
             const currentSecond = draftItem?.secondControllerId ?? realScope?.secondControllerId ?? null;
-            const hasExisting = !!currentAssignee || !!currentSecond;
-            if (dto.onlyMissing && hasExisting) continue;
+            // Eksiklik yalnızca istekte hedeflenen rol için değerlendirilir.
+            const changesAssignee = assigneeId !== undefined && (!dto.onlyMissing || !currentAssignee);
+            const changesSecond = secondControllerId !== undefined && (!dto.onlyMissing || !currentSecond);
+            if (!changesAssignee && !changesSecond) continue;
+            const hasExisting = (changesAssignee && !!currentAssignee) || (changesSecond && !!currentSecond);
             if (hasExisting) willOverwrite.push({ controlId, from: { assigneeId: currentAssignee, secondControllerId: currentSecond } });
             else willSet.push(controlId);
         }
@@ -324,7 +348,7 @@ export class AnnualPlanService {
         return this.prisma.$transaction(async (tx) => {
             const claim = await tx.annualPlanDraft.updateMany({
                 where: { id: draft.id, revision: dto.expectedRevision },
-                data: { revision: { increment: 1 }, updatedById: userId },
+                data: this.draftMutationData(userId),
             });
             if (claim.count === 0) {
                 throw new ConflictException('Taslak başka bir kullanıcı tarafından güncellendi. Sayfayı yenileyip tekrar deneyin.');
@@ -335,8 +359,10 @@ export class AnnualPlanService {
                 return {
                     controlId: c.id,
                     inScope: draftItem ? draftItem.inScope : !!realScope,
-                    ...(assigneeId !== undefined ? { assigneeId: assigneeId ?? '' } : {}),
-                    ...(secondControllerId !== undefined ? { secondControllerId: secondControllerId ?? '' } : {}),
+                    assigneeId: assigneeId !== undefined && (!dto.onlyMissing || !(draftItem?.assigneeId ?? realScope?.assigneeId))
+                        ? assigneeId ?? '' : draftItem?.assigneeId ?? realScope?.assigneeId ?? '',
+                    secondControllerId: secondControllerId !== undefined && (!dto.onlyMissing || !(draftItem?.secondControllerId ?? realScope?.secondControllerId))
+                        ? secondControllerId ?? '' : draftItem?.secondControllerId ?? realScope?.secondControllerId ?? '',
                 };
             });
             await this.upsertItems(tx, draft.id, items);
@@ -346,37 +372,94 @@ export class AnnualPlanService {
                     newValue: { year, assigneeId, secondControllerId, affectedCount: items.length },
                 },
             });
-            return tx.annualPlanDraft.findUniqueOrThrow({ where: { id: draft.id }, include: { items: true } });
+            const fullDraft = await tx.annualPlanDraft.findUniqueOrThrow({ where: { id: draft.id }, include: { items: true } });
+            // `items` burada TÜM taslağın satırları (draft'ın tamamı) — bu toplu
+            // işlemden GERÇEKTEN etkilenen kontrol sayısı `affectedCount`'tur.
+            // Frontend "N kontrole atama uygulandı" mesajında bunu kullanmalı,
+            // `items.length`'i değil (aksi halde her zaman taslağın toplam
+            // satır sayısı gösterilirdi).
+            return { ...fullDraft, affectedCount: items.length };
         });
     }
 
     // ─── Önceki yıldan taslağa tohumla (yalnızca eksikleri doldurur — mevcut
     // taslak satırlarının üzerine YAZMAZ; Madde 14 "ekleme ile değiştirme farkı"). ──
-    async copyFromYear(year: number, fromYear: number, userId: string, permissions: string[], requestedScope: { scope?: any; directorateId?: string[] }) {
+    /**
+     * "Önceki Yıldan Kopyala" — üç bağımsız anahtar (madde 18):
+     * - copyScope (vars. açık): kaynak yılın kapsamındaki kontrolleri bu yılın
+     *   taslağına ekler (inScope=true). Bu kapalıysa hiçbir şey yapılmaz.
+     * - copyCalendar (vars. açık): frequency/referenceMonth/selectedMonths/
+     *   controlDate kaynak scope'tan kopyalanır; kapalıysa kontrolün kendi
+     *   varsayılan frekansı kullanılır (referenceMonth/controlDate boş kalır).
+     * - copyAssignments (vars. KAPALI): assigneeId/secondControllerId de
+     *   kopyalanır — ama her kullanıcı `validateAssignment` ile yeniden
+     *   doğrulanır; pasif/geçersizse o alan SESSİZCE düşürülür (hata vermez).
+     */
+    async copyFromYear(
+        year: number, fromYear: number, userId: string, permissions: string[],
+        requestedScope: { scope?: any; directorateId?: string[] },
+        options: { copyScope?: boolean; copyCalendar?: boolean; copyAssignments?: boolean } = {},
+    ) {
+        const copyScope = options.copyScope ?? true;
+        const copyCalendar = options.copyCalendar ?? true;
+        const copyAssignments = options.copyAssignments ?? false;
+
+        if (!copyScope) {
+            const draft = await this.getOrCreateDraft(year, userId);
+            return { draft: { ...draft, items: [] }, seeded: 0, skippedAlreadyInDraft: 0, assignmentsDroppedInactive: 0 };
+        }
+
         const resolved = await this.scopeService.resolveScope(userId, permissions, requestedScope);
         const scopeWhere: any = { year: fromYear, status: 'ACTIVE' };
         if (resolved.appliedScope === 'UNIT') scopeWhere.control = { directorateId: { in: resolved.directorateIds! } };
 
         const sourceScopes = await this.prisma.controlYearScope.findMany({ where: scopeWhere, include: { control: true } });
         const draft = await this.getOrCreateDraft(year, userId);
+        this.assertDraftEditable(draft);
         const existingItems = await this.prisma.annualPlanDraftItem.findMany({ where: { draftId: draft.id }, select: { controlId: true } });
         const alreadyTouched = new Set(existingItems.map(i => i.controlId));
 
         const toSeed = sourceScopes.filter(s => !alreadyTouched.has(s.controlId) && s.control.status === 'ACTIVE');
 
+        let assignmentsDroppedInactive = 0;
         const result = await this.prisma.$transaction(async (tx) => {
             const claim = await tx.annualPlanDraft.updateMany({
                 where: { id: draft.id, revision: draft.revision },
-                data: { revision: { increment: 1 }, updatedById: userId },
+                data: this.draftMutationData(userId),
             });
             if (claim.count === 0) {
                 throw new ConflictException('Taslak başka bir kullanıcı tarafından güncellendi. Sayfayı yenileyip tekrar deneyin.');
             }
-            const items: AnnualPlanDraftItemPatchDto[] = toSeed.map(s => ({
-                controlId: s.controlId, inScope: true,
-                frequency: s.frequency as ControlFrequency, selectedMonths: s.selectedMonths,
-                reason: `${fromYear} yılından kopyalandı`,
-            }));
+            const items: AnnualPlanDraftItemPatchDto[] = [];
+            for (const s of toSeed) {
+                const item: AnnualPlanDraftItemPatchDto = {
+                    controlId: s.controlId, inScope: true,
+                    reason: `${fromYear} yılından kopyalandı`,
+                };
+                if (copyCalendar) {
+                    item.frequency = s.frequency as ControlFrequency;
+                    item.referenceMonth = s.referenceMonth ?? undefined;
+                    item.selectedMonths = s.selectedMonths;
+                    item.controlDate = s.controlDate ? s.controlDate.toISOString() : undefined;
+                } else {
+                    item.frequency = s.control.frequency as ControlFrequency;
+                }
+                if (copyAssignments) {
+                    let assigneeId = s.assigneeId ?? undefined;
+                    let secondControllerId = s.secondControllerId ?? undefined;
+                    if (assigneeId) {
+                        const u = await tx.user.findUnique({ where: { id: assigneeId }, select: { isActive: true } });
+                        if (!u?.isActive) { assigneeId = undefined; assignmentsDroppedInactive++; }
+                    }
+                    if (secondControllerId) {
+                        const u = await tx.user.findUnique({ where: { id: secondControllerId }, select: { isActive: true } });
+                        if (!u?.isActive) { secondControllerId = undefined; assignmentsDroppedInactive++; }
+                    }
+                    if (assigneeId) item.assigneeId = assigneeId;
+                    if (secondControllerId) item.secondControllerId = secondControllerId;
+                }
+                items.push(item);
+            }
             await this.upsertItems(tx, draft.id, items);
             return tx.annualPlanDraft.findUniqueOrThrow({ where: { id: draft.id }, include: { items: true } });
         });
@@ -385,15 +468,17 @@ export class AnnualPlanService {
             draft: result,
             seeded: toSeed.length,
             skippedAlreadyInDraft: sourceScopes.length - toSeed.length,
+            assignmentsDroppedInactive,
         };
     }
 
     // ─── Taslağı gerçek duruma sıfırla ("Değişiklikleri Geri Al") ────────────
     async discardDraft(year: number, userId: string) {
         const draft = await this.getOrCreateDraft(year, userId);
+        this.assertDraftEditable(draft);
         return this.prisma.$transaction(async (tx) => {
             await tx.annualPlanDraftItem.deleteMany({ where: { draftId: draft.id } });
-            return tx.annualPlanDraft.update({ where: { id: draft.id }, data: { revision: { increment: 1 }, updatedById: userId } });
+            return tx.annualPlanDraft.update({ where: { id: draft.id }, data: this.draftMutationData(userId) });
         });
     }
 
@@ -518,6 +603,9 @@ export class AnnualPlanService {
         return {
             year, draftId: draft.id, draftRevision: draft.revision, draftStatus: draft.status,
             draftUpdatedAt: draft.updatedAt, draftLastAppliedAt: draft.lastAppliedAt,
+            submittedAt: draft.submittedAt, submittedById: draft.submittedById,
+            approvedAt: draft.approvedAt, approvedById: draft.approvedById,
+            approvedRevision: draft.approvedRevision, decisionNote: draft.decisionNote,
             scope: { applied: resolved.appliedScope, directorateIds: resolved.directorateIds, options: scopeOptions },
             workload, changedCount,
             page, pageSize, totalCount,
@@ -564,13 +652,23 @@ export class AnnualPlanService {
             directorateId = control?.directorateId ?? null;
         }
 
+        // İç Kontrol çalışanları (IKS_EMPLOYEE/IKS_MANAGER) ve sistem yöneticisi
+        // (SYSTEM_ADMIN), kontrolcü atama listesinde birim (UNIT) kapsamı
+        // daraltmasından ETKİLENMEZ — bunlar zaten kurum genelinde kontrol
+        // test/onay sorumluluğu taşıyan org-wide roller, her birimin
+        // kontrolcü listesinde her zaman görünmeli.
+        const ALWAYS_ELIGIBLE_ROLES = ['IKS_EMPLOYEE', 'IKS_MANAGER', 'SYSTEM_ADMIN'];
+
         const where: any = { isActive: true };
         if (resolved.appliedScope === 'UNIT') {
-            where.directorateMemberships = { some: { directorateId: { in: resolved.directorateIds! } } };
+            where.OR = [
+                { directorateMemberships: { some: { directorateId: { in: resolved.directorateIds! } } } },
+                { role: { name: { in: ALWAYS_ELIGIBLE_ROLES } } },
+            ];
         }
 
         const users = await this.prisma.user.findMany({
-            where, select: { id: true, firstName: true, lastName: true, email: true, role: { select: { permissions: true } } },
+            where, select: { id: true, firstName: true, lastName: true, email: true, role: { select: { name: true, permissions: true } } },
             orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
         });
 
@@ -664,7 +762,7 @@ export class AnnualPlanService {
             } else if (!item.inScope && realActive) {
                 const pending = await this.controlScopeService.getOngoingTasksRequiringDecision(realScope!.id, [], this.prisma);
                 if (pending.length > 0) {
-                    conflicts.push({ controlId: control.id, controlCode: control.controlId, name: control.name, reason: 'Devam eden task(lar) için karar gerekli', ongoingTasks: pending });
+                    conflicts.push({ controlId: control.id, controlCode: control.controlId, name: control.name, type: 'SCOPE_REMOVAL', reason: 'Devam eden task(lar) için karar gerekli', ongoingTasks: pending });
                     continue;
                 }
                 const pendingTaskCount = await this.prisma.controlTest.count({ where: { scopeId: realScope!.id, status: 'BEKLIYOR' } });
@@ -674,12 +772,11 @@ export class AnnualPlanService {
                 if (assignmentChanged) {
                     const liveAuto = await this.prisma.controlTest.findMany({
                         where: { scopeId: realScope!.id, isAutoGenerated: true, status: { in: ['DEVAM_EDIYOR', 'TAMAMLANDI', 'GERI_GONDERILDI'] } },
-                        select: { id: true, testNo: true, status: true, assigneeId: true, secondControllerId: true },
+                        select: { id: true, testNo: true, periodLabel: true, status: true, assigneeId: true, secondControllerId: true },
                     });
                     const needsDecision = liveAuto.filter(t => t.assigneeId !== effAssigneeId || t.secondControllerId !== effSecondControllerId);
                     if (needsDecision.length > 0) {
-                        conflicts.push({ controlId: control.id, controlCode: control.controlId, name: control.name, reason: 'Atama değişikliği için devam eden/onay bekleyen task kararı gerekli', ongoingTasks: needsDecision });
-                        continue;
+                        conflicts.push({ controlId: control.id, controlCode: control.controlId, name: control.name, type: 'ASSIGNMENT', reason: 'Atama değişikliği için devam eden/onay bekleyen görev kararı gerekli', assigneeId: effAssigneeId, secondControllerId: effSecondControllerId, ongoingTasks: needsDecision });
                     }
                 }
                 const newPeriods = computeScopePeriods(frequency, year, { selectedMonths, controlDate: item.controlDate, referenceMonth });
@@ -699,6 +796,22 @@ export class AnnualPlanService {
             }
         }
 
+        const assignmentConflicts = conflicts.filter(c => c.type === 'ASSIGNMENT');
+        const userIds = [...new Set<string>(assignmentConflicts.flatMap(c => [
+            c.assigneeId, c.secondControllerId,
+            ...c.ongoingTasks.flatMap((t: { assigneeId: string | null; secondControllerId: string | null }) => [t.assigneeId, t.secondControllerId]),
+        ]).filter(Boolean))];
+        if (userIds.length > 0) {
+            const users = await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, firstName: true, lastName: true } });
+            const names = new Map(users.map(u => [u.id, `${u.firstName} ${u.lastName}`]));
+            const label = (id: string | null) => id ? names.get(id) ?? 'Kullanıcı bulunamadı' : 'Atanmamış';
+            for (const conflict of assignmentConflicts) {
+                conflict.assigneeName = label(conflict.assigneeId);
+                conflict.secondControllerName = label(conflict.secondControllerId);
+                conflict.ongoingTasks = conflict.ongoingTasks.map((t: { id: string; testNo: string; status: string; assigneeId: string | null; secondControllerId: string | null }) => ({ ...t, assigneeName: label(t.assigneeId), secondControllerName: label(t.secondControllerId) }));
+            }
+        }
+
         return {
             toAdd, toRemove, toModify, conflicts, missingSchedule, assignmentBlocked,
             taskSummary: { toCreate: taskToCreate, toCancel: taskToCancel, protectedCount: taskProtected },
@@ -706,15 +819,130 @@ export class AnnualPlanService {
         };
     }
 
+    async submitForApproval(year: number, userId: string, permissions: string[], dto: AnnualPlanTransitionDto) {
+        const draft = await this.getOrCreateDraft(year, userId);
+        if (!['OPEN', 'CHANGES_REQUESTED', 'APPLIED'].includes(draft.status)) {
+            throw new ConflictException(`Plan ${draft.status} durumundayken yeniden onaya gönderilemez.`);
+        }
+        if (draft.revision !== dto.expectedRevision) {
+            throw new ConflictException('Taslak başka bir kullanıcı tarafından güncellendi. Sayfayı yenileyin.');
+        }
+        const preview = await this.previewApply(year, userId, permissions);
+        const decisions = dto.assignmentDecisions ?? [];
+        const expectedTasks = new Map<string, string>();
+        for (const conflict of preview.conflicts.filter(c => c.type === 'ASSIGNMENT')) {
+            for (const task of conflict.ongoingTasks) expectedTasks.set(task.id, conflict.controlId);
+        }
+        const decided = new Set<string>();
+        for (const decision of decisions) {
+            if (!['KEEP', 'REASSIGN'].includes(decision.action) || decided.has(decision.taskId) || expectedTasks.get(decision.taskId) !== decision.controlId) {
+                throw new BadRequestException('Görev kararı geçersiz veya önizleme güncelliğini yitirdi.');
+            }
+            decided.add(decision.taskId);
+        }
+        const unresolved = preview.conflicts.some(c => c.type !== 'ASSIGNMENT' || c.ongoingTasks.some((t: { id: string }) => !decided.has(t.id)));
+        if (unresolved || preview.missingSchedule.length > 0 || preview.assignmentBlocked.length > 0) {
+            throw new BadRequestException({
+                code: 'ANNUAL_PLAN_PREVIEW_BLOCKED',
+                message: 'Plan onaya gönderilemedi: eksik takvim, atama veya çözümlenmemiş görev kararı var.',
+                preview,
+            });
+        }
+
+        return this.prisma.$transaction(async (tx) => {
+            const claim = await tx.annualPlanDraft.updateMany({
+                where: { id: draft.id, revision: dto.expectedRevision, status: draft.status },
+                data: {
+                    status: 'PENDING_APPROVAL', submittedAt: new Date(), submittedById: userId,
+                    approvedAt: null, approvedById: null, approvedRevision: null,
+                    assignmentDecisions: decisions as any,
+                    decisionNote: dto.note?.trim() || null, decidedById: null,
+                },
+            });
+            if (claim.count === 0) throw new ConflictException('Plan durumu değişti. Sayfayı yenileyin.');
+            await tx.auditLog.create({
+                data: { userId, action: 'ANNUAL_PLAN_SUBMIT', entityType: 'AnnualPlanDraft', entityId: draft.id, newValue: { year, revision: draft.revision, note: dto.note?.trim() || null } },
+            });
+            return tx.annualPlanDraft.findUniqueOrThrow({ where: { id: draft.id } });
+        });
+    }
+
+    async approve(year: number, userId: string, dto: AnnualPlanDecisionDto) {
+        const draft = await this.getOrCreateDraft(year, userId);
+        if (draft.status !== 'PENDING_APPROVAL') throw new ConflictException('Yalnız onay bekleyen plan onaylanabilir.');
+        if (draft.revision !== dto.expectedRevision) throw new ConflictException('Plan revision değişti. Sayfayı yenileyin.');
+        if (draft.submittedById === userId) throw new ForbiddenException('Onaya gönderdiğiniz planı kendiniz onaylayamazsınız.');
+
+        return this.prisma.$transaction(async (tx) => {
+            const claim = await tx.annualPlanDraft.updateMany({
+                where: { id: draft.id, revision: dto.expectedRevision, status: 'PENDING_APPROVAL' },
+                data: {
+                    status: 'APPROVED', approvedAt: new Date(), approvedById: userId,
+                    approvedRevision: dto.expectedRevision, decisionNote: dto.note?.trim() || null, decidedById: userId,
+                },
+            });
+            if (claim.count === 0) throw new ConflictException('Plan durumu değişti. Sayfayı yenileyin.');
+            await tx.auditLog.create({
+                data: { userId, action: 'ANNUAL_PLAN_APPROVE', entityType: 'AnnualPlanDraft', entityId: draft.id, newValue: { year, revision: draft.revision, note: dto.note?.trim() || null } },
+            });
+            return tx.annualPlanDraft.findUniqueOrThrow({ where: { id: draft.id } });
+        });
+    }
+
+    async requestChanges(year: number, userId: string, dto: AnnualPlanDecisionDto) {
+        const note = dto.note?.trim();
+        if (!note) throw new BadRequestException('Değişiklik talebi gerekçesi zorunludur.');
+        const draft = await this.getOrCreateDraft(year, userId);
+        if (!['PENDING_APPROVAL', 'APPROVED'].includes(draft.status)) {
+            throw new ConflictException('Yalnız onay bekleyen veya onaylanmış plan için değişiklik istenebilir.');
+        }
+        if (draft.revision !== dto.expectedRevision) throw new ConflictException('Plan revision değişti. Sayfayı yenileyin.');
+
+        return this.prisma.$transaction(async (tx) => {
+            const claim = await tx.annualPlanDraft.updateMany({
+                where: { id: draft.id, revision: dto.expectedRevision, status: draft.status },
+                data: {
+                    status: 'CHANGES_REQUESTED', approvedAt: null, approvedById: null,
+                    approvedRevision: null, decisionNote: note, decidedById: userId,
+                },
+            });
+            if (claim.count === 0) throw new ConflictException('Plan durumu değişti. Sayfayı yenileyin.');
+            await tx.auditLog.create({
+                data: { userId, action: 'ANNUAL_PLAN_REQUEST_CHANGES', entityType: 'AnnualPlanDraft', entityId: draft.id, newValue: { year, revision: draft.revision, note } },
+            });
+            return tx.annualPlanDraft.findUniqueOrThrow({ where: { id: draft.id } });
+        });
+    }
+
     // ─── Planı Uygula: TEK transaction, tümü ya da hiçbiri ───────────────────
     async applyPlan(year: number, userId: string, permissions: string[], dto: ApplyPlanDto) {
         const draft = await this.getOrCreateDraft(year, userId);
+        if (draft.status !== 'APPROVED' || draft.approvedRevision !== dto.expectedRevision) {
+            throw new ConflictException({
+                code: 'ANNUAL_PLAN_NOT_APPROVED',
+                message: 'Yalnız onaylanmış ve değişmemiş plan revision uygulanabilir.',
+            });
+        }
         if (draft.revision !== dto.expectedRevision) {
             throw new ConflictException('Taslak son önizlemeden sonra değişmiş. Lütfen yeniden önizleyin.');
         }
 
         const preview = await this.previewApply(year, userId, permissions);
-        if (preview.blocked) {
+        // Kararlar yalnızca seçili yılın güncel önizlemesindeki görevlere aittir.
+        const decisions = (dto.assignmentDecisions?.length ? dto.assignmentDecisions : (Array.isArray(draft.assignmentDecisions) ? draft.assignmentDecisions : [])) as any[];
+        const expectedTasks = new Map<string, string>();
+        for (const conflict of preview.conflicts.filter(c => c.type === 'ASSIGNMENT')) {
+            for (const task of conflict.ongoingTasks) expectedTasks.set(task.id, conflict.controlId);
+        }
+        const decided = new Set<string>();
+        for (const decision of decisions) {
+            if (!['KEEP', 'REASSIGN'].includes(decision.action) || decided.has(decision.taskId) || expectedTasks.get(decision.taskId) !== decision.controlId) {
+                throw new BadRequestException('Görev kararı geçersiz veya önizleme güncelliğini yitirdi. Önizlemeyi yeniden açın.');
+            }
+            decided.add(decision.taskId);
+        }
+        const unresolved = preview.conflicts.some(c => c.type !== 'ASSIGNMENT' || c.ongoingTasks.some((t: { id: string }) => !decided.has(t.id)));
+        if (unresolved || preview.missingSchedule.length > 0 || preview.assignmentBlocked.length > 0) {
             return { applied: false, requiresDecision: true, ...preview };
         }
 
@@ -726,7 +954,7 @@ export class AnnualPlanService {
 
         const result = await this.prisma.$transaction(async (tx) => {
             const claim = await tx.annualPlanDraft.updateMany({
-                where: { id: draft.id, revision: dto.expectedRevision },
+                where: { id: draft.id, revision: dto.expectedRevision, status: 'APPROVED', approvedRevision: dto.expectedRevision },
                 data: { revision: { increment: 1 }, status: 'APPLIED', lastAppliedAt: new Date(), lastAppliedById: userId, updatedById: userId },
             });
             if (claim.count === 0) {
@@ -765,6 +993,7 @@ export class AnnualPlanService {
                         frequency: item.frequency, referenceMonth: item.referenceMonth ?? undefined,
                         selectedMonths: item.selectedMonths.length > 0 ? item.selectedMonths : undefined,
                         assigneeId: effAssigneeId ?? undefined, secondControllerId: effSecondControllerId ?? undefined,
+                        assignmentDecisions: decisions.filter(d => d.controlId === item.controlId).map(({ taskId, action }) => ({ taskId, action })),
                         reason: item.reason || 'Yıllık Plan uygulaması',
                     } as any, userId, tx);
                     // previewApply zaten bu durumu conflicts'e alıp bloklamış olmalı — burası
@@ -780,7 +1009,7 @@ export class AnnualPlanService {
             await tx.auditLog.create({
                 data: {
                     userId, action: 'ANNUAL_PLAN_APPLY', entityType: 'AnnualPlanDraft', entityId: draft.id,
-                    newValue: { year, added, removed, modified, tasksCreated, itemCount: items.length },
+                    newValue: { year, added, removed, modified, tasksCreated, itemCount: items.length, assignmentDecisions: decisions.map(d => ({ controlId: d.controlId, taskId: d.taskId, action: d.action })) },
                 },
             });
 

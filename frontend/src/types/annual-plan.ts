@@ -58,9 +58,15 @@ export interface AnnualPlanWorkspace {
     year: number;
     draftId: string;
     draftRevision: number;
-    draftStatus: 'OPEN' | 'APPLIED';
+    draftStatus: 'OPEN' | 'PENDING_APPROVAL' | 'CHANGES_REQUESTED' | 'APPROVED' | 'APPLIED';
     draftUpdatedAt: string;
     draftLastAppliedAt: string | null;
+    submittedAt?: string | null;
+    submittedById?: string | null;
+    approvedAt?: string | null;
+    approvedById?: string | null;
+    approvedRevision?: number | null;
+    decisionNote?: string | null;
     scope: {
         applied: AnnualPlanScope;
         directorateIds: string[] | null;
@@ -89,6 +95,22 @@ export interface AnnualPlanDraftItem {
     reason: string | null;
 }
 
+export interface AnnualPlanAssignmentDecision {
+    controlId: string;
+    taskId: string;
+    action: 'KEEP' | 'REASSIGN';
+}
+
+export interface AnnualPlanConflict {
+    type?: 'ASSIGNMENT' | 'SCOPE_REMOVAL';
+    controlId: string; controlCode: string; name: string; reason: string;
+    assigneeName?: string; secondControllerName?: string;
+    ongoingTasks: {
+        id: string; testNo: string; periodLabel?: string; status: string;
+        assigneeName?: string; secondControllerName?: string;
+    }[];
+}
+
 export interface AnnualPlanPreview {
     toAdd: { controlId: string; controlCode: string; name: string; frequency: string; periodCount: number; assigneeId: string | null; secondControllerId: string | null }[];
     toRemove: { controlId: string; controlCode: string; name: string }[];
@@ -98,7 +120,7 @@ export interface AnnualPlanPreview {
         assigneeChange: { from: string | null; to: string | null } | null;
         secondControllerChange: { from: string | null; to: string | null } | null;
     }[];
-    conflicts: { controlId: string; controlCode: string; name: string; reason: string; ongoingTasks: any[] }[];
+    conflicts: AnnualPlanConflict[];
     missingSchedule: { controlId: string; controlCode: string; name: string }[];
     assignmentBlocked: { controlId: string; controlCode: string; name: string }[];
     taskSummary: { toCreate: number; toCancel: number; protectedCount: number };

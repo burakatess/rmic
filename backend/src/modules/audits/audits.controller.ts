@@ -1,11 +1,12 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AuditsService } from './audits.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
+import { CreateAttachmentDto, UpdateAttachmentDto } from '../../common/dto/attachment.dto';
 import {
     CreateFindingDto, UpdateFindingDto, CreateActionDto, UpdateActionDto,
-    CreateFollowUpDto, UpdateFollowUpDto, AssignSecondControllerDto,
+    CreateFollowUpDto, UpdateFollowUpDto, AssignSecondControllerDto, WorkflowReasonDto,
 } from './dto';
 
 @ApiTags('Findings')
@@ -61,8 +62,8 @@ export class AuditsController {
     // ─── Findings ────────────────────────────────────────────────────────────
 
     @Get('findings')
-    async findAllFindings(@Query() query: any) {
-        return this.auditsService.findAllFindings(query);
+    async findAllFindings(@Query() query: any, @CurrentUser('id') userId: string) {
+        return this.auditsService.findAllFindings(query, userId);
     }
 
     @Get('findings/:id/relations')
@@ -125,7 +126,7 @@ export class AuditsController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
     async mutabakatGeriGonder(
         @Param('id') id: string,
-        @Body() body: { reason: string },
+        @Body() body: WorkflowReasonDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.auditsService.mutabakatGeriGonder(id, body.reason, userId);
@@ -135,7 +136,7 @@ export class AuditsController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
     async iptalEt(
         @Param('id') id: string,
-        @Body() body: { reason: string },
+        @Body() body: WorkflowReasonDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.auditsService.iptalEt(id, body.reason, userId);
@@ -146,7 +147,7 @@ export class AuditsController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
     async closeFinding(
         @Param('id') id: string,
-        @Body() body: { reason: string },
+        @Body() body: WorkflowReasonDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.auditsService.closeFinding(id, body?.reason, userId);
@@ -157,7 +158,7 @@ export class AuditsController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
     async reopenFinding(
         @Param('id') id: string,
-        @Body() body: { reason: string },
+        @Body() body: WorkflowReasonDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.auditsService.reopenFinding(id, body?.reason, userId);
@@ -324,10 +325,16 @@ export class AuditsController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async addFindingAttachment(
         @Param('id') id: string,
-        @Body() meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number },
+        @Body() meta: CreateAttachmentDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.auditsService.addFindingAttachment(id, meta, userId);
+    }
+
+    @Patch('findings/:id/attachments/:attachmentId')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    updateFindingAttachment(@Param('id') id: string, @Param('attachmentId') attachmentId: string, @Body() dto: UpdateAttachmentDto, @CurrentUser('id') userId: string) {
+        return this.auditsService.updateAttachmentMetadata('finding', id, attachmentId, dto, userId);
     }
 
     @Delete('findings/:id/attachments/:attachmentId')
@@ -347,10 +354,16 @@ export class AuditsController {
     async addActionAttachment(
         @Param('id') id: string,
         @Param('actionId') actionId: string,
-        @Body() meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number },
+        @Body() meta: CreateAttachmentDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.auditsService.addActionAttachment(id, actionId, meta, userId);
+    }
+
+    @Patch('findings/:id/actions/:actionId/attachments/:attachmentId')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    updateActionAttachment(@Param('id') id: string, @Param('actionId') actionId: string, @Param('attachmentId') attachmentId: string, @Body() dto: UpdateAttachmentDto, @CurrentUser('id') userId: string) {
+        return this.auditsService.updateAttachmentMetadata('action', id, attachmentId, dto, userId, actionId);
     }
 
     @Delete('findings/:id/actions/:actionId/attachments/:attachmentId')
@@ -371,10 +384,16 @@ export class AuditsController {
     async addFollowUpAttachment(
         @Param('id') id: string,
         @Param('followUpId') followUpId: string,
-        @Body() meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number },
+        @Body() meta: CreateAttachmentDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.auditsService.addFollowUpAttachment(id, followUpId, meta, userId);
+    }
+
+    @Patch('findings/:id/follow-ups/:followUpId/attachments/:attachmentId')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    updateFollowUpAttachment(@Param('id') id: string, @Param('followUpId') followUpId: string, @Param('attachmentId') attachmentId: string, @Body() dto: UpdateAttachmentDto, @CurrentUser('id') userId: string) {
+        return this.auditsService.updateAttachmentMetadata('follow-up', id, attachmentId, dto, userId, followUpId);
     }
 
     @Delete('findings/:id/follow-ups/:followUpId/attachments/:attachmentId')
@@ -391,7 +410,7 @@ export class AuditsController {
     // ─── Bağımsız Follow-Ups Listesi ─────────────────────────────────────────
 
     @Get('follow-ups')
-    async findAllFollowUps(@Query() query: any) {
-        return this.auditsService.findAllFollowUps(query);
+    async findAllFollowUps(@Query() query: any, @CurrentUser('id') userId: string) {
+        return this.auditsService.findAllFollowUps(query, userId);
     }
 }

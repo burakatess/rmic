@@ -129,13 +129,38 @@ const BoltIcon = ({ className = 'w-4 h-4' }: { className?: string }) => (
 export default function FollowUpsPage() {
     const { success, error: showError } = useToast();
     const [followUps, setFollowUps] = useState<FollowUp[]>([]);
+    const [totalCount, setTotalCount] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [users, setUsers] = useState<Array<{ id: string; firstName: string; lastName: string; isActive?: boolean }>>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
     const [colFilters, setColFilters] = useState<Record<string, string>>({});
     const [quickFilter, setQuickFilter] = useState<string | null>(null);
     const [page, setPage] = useState(1);
+    const [urlReady, setUrlReady] = useState(false);
     const pageSize = 25;
+
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const keys = ['ownerIds', 'evaluatorIds', 'secondControllerIds', 'status', 'resolutionOutcome', 'severity', 'relatedDepartment', 'month', 'year'];
+        setActiveFilters(Object.fromEntries(keys.map(k => [k, params.get(k)]).filter(([, v]) => v)) as Record<string, string>);
+        setSearchQuery(params.get('search') || '');
+        setQuickFilter(params.get('quick'));
+        const urlPage = Number(params.get('page'));
+        if (Number.isInteger(urlPage) && urlPage > 0) setPage(urlPage);
+        setUrlReady(true);
+    }, []);
+
+    useEffect(() => {
+        if (!urlReady) return;
+        const params = new URLSearchParams();
+        if (searchQuery) params.set('search', searchQuery);
+        Object.entries(activeFilters).forEach(([key, value]) => { if (value && value !== 'all') params.set(key, value); });
+        if (quickFilter) params.set('quick', quickFilter);
+        if (page > 1) params.set('page', String(page));
+        const query = params.toString();
+        window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+    }, [urlReady, searchQuery, activeFilters, quickFilter, page]);
 
     // Toplu seçim
     const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
@@ -145,18 +170,25 @@ export default function FollowUpsPage() {
     const load = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await api.getAllFollowUps({ limit: 500 }) as { data: FollowUp[] };
+            const query: Record<string, string | number> = { page, limit: pageSize };
+            if (searchQuery) query.search = searchQuery;
+            ['ownerIds', 'evaluatorIds', 'secondControllerIds', 'status', 'resolutionOutcome', 'severity', 'relatedDepartment', 'month', 'year'].forEach(key => { if (activeFilters[key] && activeFilters[key] !== 'all') query[key] = activeFilters[key]; });
+            if (quickFilter === 'gecikmis') query.overdue = 'true';
+            if (quickFilter === 'yeni-aksiyon') query.newActionRequired = 'true';
+            const res = await api.getAllFollowUps(query) as { data: FollowUp[]; pagination?: { total: number } };
             setFollowUps(res?.data || []);
+            setTotalCount(res.pagination?.total || 0);
         } catch {
             showError('Hata', 'Takip çalışmaları yüklenemedi.');
-            setFollowUps([]);
+            setFollowUps([]); setTotalCount(0);
         } finally {
             setLoading(false);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [activeFilters, searchQuery, quickFilter, page]);
 
     useEffect(() => { load(); }, [load]);
+    useEffect(() => { api.getUserOptions({ limit: 500 }).then(r => setUsers(r.data)).catch(() => setUsers([])); }, []);
 
     // ── KPIs ─────────────────────────────────────────────────────────────────
 
@@ -248,7 +280,8 @@ export default function FollowUpsPage() {
             onChange: (v: string) => { setActiveFilters(p => ({ ...p, year: v })); setPage(1); },
             options: YEARS.map(y => ({ value: y, label: y })),
         },
-    ], [activeFilters]);
+        ...(['ownerIds:Aksiyon Sorumlusu', 'evaluatorIds:Değerlendiren', 'secondControllerIds:İkinci Kontrolcü'] as const).map(entry => { const [key, label] = entry.split(':'); return { type: 'multiselect' as const, key, label, value: (activeFilters[key] || '').split(',').filter(Boolean), onChange: (v: string[]) => { setActiveFilters(p => ({ ...p, [key]: v.join(',') })); setPage(1); }, options: [{ value: '__MINE__', label: 'Bana atananlar' }, { value: '__UNASSIGNED__', label: 'Atanmamış' }, ...users.map(u => ({ value: u.id, label: `${u.firstName} ${u.lastName}${u.isActive === false ? ' (pasif)' : ''}` }))] }; }),
+    ], [activeFilters, users]);
 
     // ── Columns ───────────────────────────────────────────────────────────────
 
@@ -387,7 +420,7 @@ export default function FollowUpsPage() {
         );
     }, [filtered, colFilters, columns]);
 
-    const paginated = useMemo(() => colFiltered.slice((page - 1) * pageSize, page * pageSize), [colFiltered, page]);
+    const paginated = colFiltered;
 
     // ── Toplu Seçim ───────────────────────────────────────────────────────────
 
@@ -548,7 +581,7 @@ export default function FollowUpsPage() {
                 selectedRows={selectedRows}
                 onRowSelect={handleRowSelect}
                 onSelectAll={handleSelectAll}
-                totalCount={colFiltered.length}
+                totalCount={Object.values(colFilters).some(Boolean) ? colFiltered.length : totalCount}
                 page={page}
                 pageSize={pageSize}
                 onPageChange={setPage}

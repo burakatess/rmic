@@ -6,9 +6,10 @@ import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import {
     DetailShell, DetailHeader, DetailSection, StatusBadge, Button,
-    LoadingState, EmptyState,
+    LoadingState, EmptyState, ConfirmDialog,
 } from '@/components/ui';
-import { PermissionGate } from '@/components/auth/AuthProvider';
+import { PermissionGate, useAuth } from '@/components/auth/AuthProvider';
+import { useToast } from '@/components/ui/Toast';
 import ActionEditModal from '@/components/actions/ActionEditModal';
 
 type BadgeVariant = 'neutral' | 'warning' | 'info' | 'success' | 'critical' | 'primary';
@@ -35,9 +36,13 @@ function fmt(d?: string | null) {
 export default function ActionDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
     const router = useRouter();
+    const { user } = useAuth();
+    const { success, error: showError } = useToast();
     const [action, setAction] = useState<any | null>(null);
     const [loading, setLoading] = useState(true);
     const [editOpen, setEditOpen] = useState(false);
+    const [completeOpen, setCompleteOpen] = useState(false);
+    const [completing, setCompleting] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -77,6 +82,23 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
     const statusCfg = statusLabels[action.status] ?? { label: action.status, variant: 'neutral' as const };
     const overdue = action.dueDate && new Date(action.dueDate) < new Date()
         && !['TAMAMLANDI', 'KAPATILDI', 'COMPLETED', 'CLOSED'].includes(action.status);
+    const role = user?.role?.name;
+    const canComplete = !['TAMAMLANDI', 'KAPATILDI', 'COMPLETED', 'CLOSED'].includes(action.status)
+        && (role === 'SYSTEM_ADMIN' || role === 'AUDITOR' || (role === 'AUDITEE' && action.owner?.id === user?.id));
+
+    const handleComplete = async () => {
+        setCompleting(true);
+        try {
+            await api.completeAction(action.id);
+            success('Tamamlandı', 'Aksiyon tamamlandı; takip doğrulaması ve ikinci kontrolcü onayı bekleniyor.');
+            setCompleteOpen(false);
+            await load();
+        } catch (err) {
+            showError('Tamamlanamadı', err instanceof Error ? err.message : 'Aksiyon tamamlanamadı.');
+        } finally {
+            setCompleting(false);
+        }
+    };
 
     return (
         <DetailShell>
@@ -101,13 +123,16 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
                     </>
                 }
                 actions={
-                    <PermissionGate permission="action:update">
-                        <Button variant="primary" size="sm" onClick={() => setEditOpen(true)}
-                            icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>}
-                        >
-                            Düzenle
-                        </Button>
-                    </PermissionGate>
+                    <div className="flex items-center gap-2">
+                        {canComplete && <Button variant="success" size="sm" onClick={() => setCompleteOpen(true)}>Aksiyonu Tamamla</Button>}
+                        <PermissionGate permission="action:update">
+                            <Button variant="primary" size="sm" onClick={() => setEditOpen(true)}
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>}
+                            >
+                                Düzenle
+                            </Button>
+                        </PermissionGate>
+                    </div>
                 }
             />
 
@@ -184,6 +209,16 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
                 onClose={() => setEditOpen(false)}
                 onSuccess={load}
                 action={action}
+            />
+            <ConfirmDialog
+                open={completeOpen}
+                onClose={() => setCompleteOpen(false)}
+                onConfirm={handleComplete}
+                title="Aksiyonu Tamamla"
+                message="Aksiyon tamamlandı olarak işaretlenecek. Nihai kapanış, takip değerlendirmesi ve ikinci kontrolcü onayından sonra yapılır."
+                confirmLabel="Tamamlandı Olarak İşaretle"
+                loading={completing}
+                variant="warning"
             />
         </DetailShell>
     );

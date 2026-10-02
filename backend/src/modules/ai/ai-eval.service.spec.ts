@@ -4,6 +4,7 @@ import { AiProviderService } from './ai-provider.service';
 import { AiEmbeddingService } from './ai-embedding.service';
 import { TextExtractService } from './text-extract.service';
 import { PrismaService } from '../../prisma';
+import { EvalSourceRetrievalService } from './eval-v3/eval-source-retrieval.service';
 
 describe('AiEvalService — kaynak & emsal katmanı', () => {
     let service: AiEvalService;
@@ -27,6 +28,7 @@ describe('AiEvalService — kaynak & emsal katmanı', () => {
                 { provide: AiProviderService, useValue: {} },
                 { provide: AiEmbeddingService, useValue: embeddings },
                 { provide: TextExtractService, useValue: {} },
+                { provide: EvalSourceRetrievalService, useValue: {} },
             ],
         }).compile();
 

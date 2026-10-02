@@ -14,11 +14,37 @@ export class AiEmbeddingService {
         return loadAiConfig().enabled;
     }
 
-    async embed(texts: string[]): Promise<number[][]> {
+    /**
+     * `inputType`: asimetrik modellerde (NIM embedqa) sorgu ile pasaj AYRI olmalıdır.
+     * Uzun listeler sağlayıcı sınırına takılmasın diye BATCH_SIZE'lık parçalara bölünür.
+     */
+    async embed(texts: string[], inputType: 'query' | 'passage' = 'passage'): Promise<number[][]> {
         const cfg = loadAiConfig();
         if (!cfg.enabled) throw new ServiceUnavailableException('Yapay zeka modülü devre dışı');
         if (texts.length === 0) return [];
 
+        const out: number[][] = [];
+        for (let i = 0; i < texts.length; i += AiEmbeddingService.BATCH_SIZE) {
+            out.push(...(await this.embedBatch(texts.slice(i, i + AiEmbeddingService.BATCH_SIZE), inputType)));
+        }
+        return out;
+    }
+
+    /** Tek bir sorgu metni için (retrieval). */
+    async embedQuery(text: string): Promise<number[]> {
+        const [v] = await this.embed([text], 'query');
+        return v ?? [];
+    }
+
+    static readonly BATCH_SIZE = 32;
+
+    /** Yapılandırılmış embedding modelinin adı (chunk kaydında saklanır). */
+    get modelName(): string {
+        return loadAiConfig().embedModel;
+    }
+
+    private async embedBatch(texts: string[], inputType: 'query' | 'passage'): Promise<number[][]> {
+        const cfg = loadAiConfig();
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
         try {
@@ -32,7 +58,7 @@ export class AiEmbeddingService {
                     model: cfg.embedModel,
                     input: texts,
                     // NVIDIA NIM embedqa modelleri input_type ister (query|passage)
-                    input_type: 'passage',
+                    input_type: inputType,
                     encoding_format: 'float',
                 }),
                 signal: ctrl.signal,

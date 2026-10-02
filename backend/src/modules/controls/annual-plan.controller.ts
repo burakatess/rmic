@@ -4,7 +4,8 @@ import { AnnualPlanService } from './annual-plan.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { CurrentUser, Roles, RequirePermissions } from '../../common/decorators';
 import {
-    AnnualPlanWorkspaceQueryDto, ApplyPlanDto, BulkDraftActionDto, EligibleControllersQueryDto, SaveDraftItemsDto,
+    AnnualPlanWorkspaceQueryDto, ApplyPlanDto, BulkDraftActionDto, CopyFromYearDto, EligibleControllersQueryDto, SaveDraftItemsDto,
+    AnnualPlanTransitionDto, AnnualPlanDecisionDto,
 } from './dto/annual-plan.dto';
 
 // Kontrol Yönetimi — Yıllık Plan. Erişim, mevcut ControlScopeController ile
@@ -96,8 +97,9 @@ export class AnnualPlanController {
         @CurrentUser('id') userId: string,
         @CurrentUser('permissions') permissions: string[],
         @Query() query: AnnualPlanWorkspaceQueryDto,
+        @Body() dto: CopyFromYearDto,
     ) {
-        return this.service.copyFromYear(year, fromYear, userId, permissions || [], { scope: query.scope, directorateId: query.directorateId });
+        return this.service.copyFromYear(year, fromYear, userId, permissions || [], { scope: query.scope, directorateId: query.directorateId }, dto ?? {});
     }
 
     @Post(':year/draft/discard')
@@ -112,6 +114,34 @@ export class AnnualPlanController {
         @CurrentUser('permissions') permissions: string[],
     ) {
         return this.service.previewApply(year, userId, permissions || []);
+    }
+
+    @Post(':year/submit')
+    async submitForApproval(
+        @Param('year', ParseIntPipe) year: number,
+        @CurrentUser('id') userId: string,
+        @CurrentUser('permissions') permissions: string[],
+        @Body() dto: AnnualPlanTransitionDto,
+    ) {
+        return this.service.submitForApproval(year, userId, permissions || [], dto);
+    }
+
+    @Post(':year/approve')
+    async approve(
+        @Param('year', ParseIntPipe) year: number,
+        @CurrentUser('id') userId: string,
+        @Body() dto: AnnualPlanDecisionDto,
+    ) {
+        return this.service.approve(year, userId, dto);
+    }
+
+    @Post(':year/request-changes')
+    async requestChanges(
+        @Param('year', ParseIntPipe) year: number,
+        @CurrentUser('id') userId: string,
+        @Body() dto: AnnualPlanDecisionDto,
+    ) {
+        return this.service.requestChanges(year, userId, dto);
     }
 
     @Post(':year/apply')

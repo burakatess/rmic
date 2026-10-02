@@ -71,7 +71,12 @@ export class RetrievalService {
             const raw: { text: string; unitId: string | null }[] = [];
             if (version.units.length) {
                 for (const u of version.units) {
-                    raw.push({ text: `${u.unitCode} — ${u.title}\n${u.originalText}`.slice(0, 4000), unitId: u.id });
+                    // Denetim sorusu (varsa) da aranabilir/gömülebilir metne katılır.
+                    const q = ((u.metadata ?? {}) as { denetimSorusu?: string }).denetimSorusu;
+                    raw.push({
+                        text: `${u.unitCode} — ${u.title}\n${u.originalText}${q ? `\nDenetim sorusu: ${q}` : ''}`.slice(0, 4000),
+                        unitId: u.id,
+                    });
                 }
             } else if (version.fullText?.trim()) {
                 const txt = version.fullText.trim();
@@ -81,23 +86,25 @@ export class RetrievalService {
             }
             if (raw.length === 0) throw new Error('İndekslenecek metin yok (birim veya tam metin ekleyin).');
 
-            const vectors = await this.embeddings.embed(raw.map((r) => r.text));
-            await this.prisma.$transaction(async (tx) => {
-                await tx.sourceChunk.deleteMany({ where: { versionId } });
-                for (let i = 0; i < raw.length; i++) {
-                    await tx.sourceChunk.create({
-                        data: {
-                            versionId,
-                            unitId: raw[i].unitId,
-                            ordinal: i,
-                            text: raw[i].text,
-                            embedding: vectors[i] ?? [],
-                            embedModel: this.embeddings.enabled ? 'configured' : null,
-                            tokenCount: Math.round(raw[i].text.length / 4),
-                        },
+            // Sağlayıcı sınırına takılmamak için embedding çağrısı parçalı yapılır (AiEmbeddingService.BATCH_SIZE).
+            const vectors = await this.embeddings.embed(raw.map((r) => r.text), 'passage');
+            if (vectors.length !== raw.length) {
+                throw new Error(`Embedding sayısı (${vectors.length}) metin sayısıyla (${raw.length}) uyuşmuyor.`);
+            }
+            const embedModel = this.embeddings.modelName;
+            // İdempotent: eski chunk'lar silinip yenileri TEK transaction'da yazılır (yarım indeks kalmaz).
+            await this.prisma.$transaction(
+                async (tx) => {
+                    await tx.sourceChunk.deleteMany({ where: { versionId } });
+                    await tx.sourceChunk.createMany({
+                        data: raw.map((r, i) => ({
+                            versionId, unitId: r.unitId, ordinal: i, text: r.text,
+                            embedding: vectors[i], embedModel, tokenCount: Math.round(r.text.length / 4),
+                        })),
                     });
-                }
-            });
+                },
+                { timeout: 120_000, maxWait: 10_000 },
+            );
 
             await this.prisma.sourceIndexJob.update({
                 where: { id: job.id },

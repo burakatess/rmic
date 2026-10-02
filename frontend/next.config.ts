@@ -25,6 +25,7 @@ const csp = [
   `script-src 'self' 'unsafe-inline' ${isProd ? '' : "'unsafe-eval'"}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
+  "frame-src 'self' blob:",
   "font-src 'self' data:",
   `connect-src 'self' ${apiOrigin}${sentryOrigin ? ` ${sentryOrigin}` : ''}`,
   "frame-ancestors 'none'",
@@ -43,6 +44,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   output: 'standalone',
   async headers() {
     return [

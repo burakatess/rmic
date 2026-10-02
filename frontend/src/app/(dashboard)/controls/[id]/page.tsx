@@ -73,7 +73,6 @@ interface Control {
     directorate: string;
     frequency: string;
     notes: string;
-    dueDate: string;
     effectivenessStatus: string;
     lastTestDate: string;
     nextTestDate: string;
@@ -86,6 +85,8 @@ interface Control {
     linkedTestRecords: TestRecord[];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     yearScopes: any[];
+    displayStatus?: string;
+    statusReason?: string;
 }
 
 type BV = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'success' | 'warning' | 'neutral' | 'primary';
@@ -154,7 +155,6 @@ export default function ControlDetailPage() {
                     directorate: String(data.directorate || ''),
                     frequency: String(data.frequency || 'MONTHLY'),
                     notes: String(data.notes || ''),
-                    dueDate: String(data.dueDate || ''),
                     owner: data.owner ? {
                         id: data.owner.id,
                         firstName: data.owner.firstName,
@@ -217,6 +217,8 @@ export default function ControlDetailPage() {
                         };
                     }),
                     yearScopes: data.yearScopes || [],
+                    displayStatus: data.displayStatus,
+                    statusReason: data.statusReason,
                 });
             }
         } catch (err) {
@@ -454,8 +456,8 @@ export default function ControlDetailPage() {
                                         </div>
                                         <div className="flex justify-between items-center">
                                             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Durum:</span>
-                                            <StatusBadge variant={control.effectivenessStatus === 'ACTIVE' || control.dueDate === '' ? 'success' : 'neutral'}>
-                                                {control.effectivenessStatus === 'ACTIVE' || control.dueDate === '' ? 'Aktif Kontrol' : 'Pasif Kontrol'}
+                                            <StatusBadge variant={control.displayStatus === 'AKTIF' ? 'success' : 'neutral'}>
+                                                {control.displayStatus === 'AKTIF' ? 'Aktif Kontrol' : 'Pasif Kontrol'}
                                             </StatusBadge>
                                         </div>
                                     </div>

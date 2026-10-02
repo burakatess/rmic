@@ -17,7 +17,7 @@ import type {
     DashboardApprovals, DashboardCriticalIssue, DashboardAnnualPlan, DashboardUpcoming,
 } from '@/types/dashboard';
 import type {
-    AnnualPlanWorkspace, AnnualPlanDraftItem, AnnualPlanPreview, AnnualPlanApplyResult,
+    AnnualPlanWorkspace, AnnualPlanDraftItem, AnnualPlanPreview, AnnualPlanApplyResult, AnnualPlanAssignmentDecision,
     EligibleController, WorkloadByAssignee,
 } from '@/types/annual-plan';
 
@@ -236,8 +236,12 @@ class ApiClient {
         return this.request<any[]>('/admin/users');
     }
 
+    async getUserOptions(params?: { search?: string; page?: number; limit?: number }) {
+        return this.request<{ data: Array<{ id: string; firstName: string; lastName: string; isActive: boolean }>; pagination: { total: number; page: number; limit: number; totalPages: number } }>(`/admin/users/options${buildQuery(params)}`);
+    }
+
     // ─── Dosya Yükleme / İndirme ──────────────────────────────────────────────
-    async uploadFile(file: File): Promise<{ fileName: string; originalName: string; mimeType: string; sizeBytes: number }> {
+    async uploadFile(file: File): Promise<{ uploadId: string; fileName: string; originalName: string; mimeType: string; sizeBytes: number }> {
         const token = this.getToken();
         const form = new FormData();
         form.append('file', file);
@@ -254,7 +258,7 @@ class ApiClient {
     }
 
     /** XHR tabanlı yükleme — gerçek ilerleme yüzdesi için (fetch upload-progress'i güvenilir desteklemiyor). */
-    uploadFileWithProgress(file: File, onProgress: (pct: number) => void): { promise: Promise<{ fileName: string; originalName: string; mimeType: string; sizeBytes: number }>; abort: () => void } {
+    uploadFileWithProgress(file: File, onProgress: (pct: number) => void): { promise: Promise<{ uploadId: string; fileName: string; originalName: string; mimeType: string; sizeBytes: number }>; abort: () => void } {
         const token = this.getToken();
         const xhr = new XMLHttpRequest();
         const promise = new Promise<any>((resolve, reject) => {
@@ -280,10 +284,9 @@ class ApiClient {
     }
 
     /** Kanıt önizleme için blob URL — çağıran taraf işi bitince URL.revokeObjectURL etmeli. */
-    async getAttachmentBlobUrl(fileName: string, originalName: string): Promise<string> {
+    async getAttachmentBlobUrl(kind: 'control-test' | 'finding' | 'action' | 'follow-up', attachmentId: string): Promise<string> {
         const token = this.getToken();
-        const q = new URLSearchParams({ file: fileName, name: originalName });
-        const res = await fetch(`${this.baseUrl}/uploads/download?${q}`, {
+        const res = await fetch(`${this.baseUrl}/uploads/attachments/${kind}/${attachmentId}`, {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (!res.ok) throw new ApiError('Kanıt yüklenemedi', res.status);
@@ -291,7 +294,7 @@ class ApiClient {
         return URL.createObjectURL(blob);
     }
 
-    async addControlTestAttachment(testId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
+    async addControlTestAttachment(testId: string, meta: { uploadId: string; fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
         return this.request<any>(`/controls/tests/${testId}/attachments`, { method: 'POST', body: meta });
     }
 
@@ -299,10 +302,13 @@ class ApiClient {
         return this.request<any>(`/controls/tests/${testId}/attachments/${attachmentId}`, { method: 'DELETE' });
     }
 
-    async downloadAttachment(fileName: string, originalName: string): Promise<void> {
+    async updateControlTestAttachment(testId: string, attachmentId: string, body: { displayName?: string; description?: string }) {
+        return this.request<any>(`/controls/tests/${testId}/attachments/${attachmentId}`, { method: 'PATCH', body });
+    }
+
+    async downloadAttachment(kind: 'control-test' | 'finding' | 'action' | 'follow-up', attachmentId: string, originalName: string): Promise<void> {
         const token = this.getToken();
-        const q = new URLSearchParams({ file: fileName, name: originalName });
-        const res = await fetch(`${this.baseUrl}/uploads/download?${q}`, {
+        const res = await fetch(`${this.baseUrl}/uploads/attachments/${kind}/${attachmentId}?download=true`, {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (!res.ok) throw new ApiError('Dosya indirilemedi', res.status);
@@ -470,6 +476,21 @@ class ApiClient {
         return this.request<any>(`/controls/dashboard${query}`);
     }
 
+    // Dönem Kontrolleri — kontrol×yıl bazlı liste (eski "Kontrol Takip Panosu").
+    async getPeriodControls(params?: Record<string, string | number | boolean>) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request<any>(`/controls/scope/period-controls${query}`);
+    }
+
+    async applyControlVersion(controlId: string, year: number, data: { confirmOngoing?: boolean; dryRun?: boolean }) {
+        return this.request<any>(`/controls/${controlId}/scope/${year}/apply-new-version`, { method: 'POST', body: data });
+    }
+
+    // Dönem Kontrolü Detayı — tek bir ControlYearScope kaydının tam görünümü.
+    async getPeriodControlDetail(scopeId: string) {
+        return this.request<any>(`/controls/scope/period-controls/${scopeId}`);
+    }
+
     async addControlScope(controlId: string, data: {
         years: number[]; frequency?: string; selectedMonths?: string[]; controlDate?: string;
         includePastPeriods?: boolean; dryRun?: boolean;
@@ -537,8 +558,12 @@ class ApiClient {
         return this.request<WorkloadByAssignee>(`/controls/annual-plan/${year}/workload-by-assignee${buildQuery(scopeParams)}`);
     }
 
-    async copyAnnualPlanFromYear(year: number, fromYear: number, scopeParams?: Record<string, unknown>) {
-        return this.request(`/controls/annual-plan/${year}/draft/copy-from/${fromYear}${buildQuery(scopeParams)}`, { method: 'POST' });
+    async copyAnnualPlanFromYear(
+        year: number, fromYear: number,
+        options: { copyScope?: boolean; copyCalendar?: boolean; copyAssignments?: boolean } = {},
+        scopeParams?: Record<string, unknown>,
+    ) {
+        return this.request(`/controls/annual-plan/${year}/draft/copy-from/${fromYear}${buildQuery(scopeParams)}`, { method: 'POST', body: options });
     }
 
     async discardAnnualPlanDraft(year: number) {
@@ -549,8 +574,36 @@ class ApiClient {
         return this.request<AnnualPlanPreview>(`/controls/annual-plan/${year}/preview`, { method: 'POST' });
     }
 
-    async applyAnnualPlan(year: number, expectedRevision: number): Promise<AnnualPlanApplyResult> {
-        return this.request<AnnualPlanApplyResult>(`/controls/annual-plan/${year}/apply`, { method: 'POST', body: { expectedRevision } });
+    async applyAnnualPlan(year: number, expectedRevision: number, assignmentDecisions: AnnualPlanAssignmentDecision[] = []): Promise<AnnualPlanApplyResult> {
+        return this.request<AnnualPlanApplyResult>(`/controls/annual-plan/${year}/apply`, { method: 'POST', body: { expectedRevision, assignmentDecisions } });
+    }
+
+    async submitAnnualPlan(year: number, expectedRevision: number, note?: string, assignmentDecisions: AnnualPlanAssignmentDecision[] = []) {
+        return this.request(`/controls/annual-plan/${year}/submit`, { method: 'POST', body: { expectedRevision, note, assignmentDecisions } });
+    }
+
+    async approveAnnualPlan(year: number, expectedRevision: number, note?: string) {
+        return this.request(`/controls/annual-plan/${year}/approve`, { method: 'POST', body: { expectedRevision, note } });
+    }
+
+    async requestAnnualPlanChanges(year: number, expectedRevision: number, note: string) {
+        return this.request(`/controls/annual-plan/${year}/request-changes`, { method: 'POST', body: { expectedRevision, note } });
+    }
+
+    async previewControlVersionImpact(controlId: string) {
+        return this.request<any>(`/controls/${controlId}/version-impact/preview`, { method: 'POST' });
+    }
+
+    async applyControlVersionImpact(controlId: string, expectedControlVersion: number, decisions: { year: number; action: string }[]) {
+        return this.request<any>(`/controls/${controlId}/version-impact/apply`, { method: 'POST', body: { expectedControlVersion, decisions } });
+    }
+
+    async getWorkflowHealthSummary(params?: Record<string, unknown>) {
+        return this.request<any>(`/workflow-health/summary${buildQuery(params)}`);
+    }
+
+    async getWorkflowHealthItems(params?: Record<string, unknown>) {
+        return this.request<any>(`/workflow-health/items${buildQuery(params)}`);
     }
 
     async mapControlRisk(controlId: string, riskId: string, mappingType?: string) {
@@ -636,8 +689,8 @@ class ApiClient {
         return this.request(`/findings/${findingId}/actions`, { method: 'POST', body: data });
     }
 
-    async completeAction(id: string) {
-        return this.request(`/actions/${id}/complete`, { method: 'POST' });
+    async completeAction(id: string, evidenceIds: string[] = []) {
+        return this.request(`/actions/${id}/complete`, { method: 'POST', body: { evidenceIds } });
     }
 
     // ── Risk Controls (RYK Kontrol Alanı) ───────────────────────────────────────
@@ -949,7 +1002,7 @@ class ApiClient {
 
     // ── Finding Attachments ───────────────────────────────────────────────────
 
-    async addFindingAttachment(findingId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
+    async addFindingAttachment(findingId: string, meta: { uploadId: string; fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
         return this.request(`/findings/${findingId}/attachments`, { method: 'POST', body: meta });
     }
 
@@ -957,9 +1010,13 @@ class ApiClient {
         return this.request(`/findings/${findingId}/attachments/${attachmentId}`, { method: 'DELETE' });
     }
 
+    async updateFindingAttachment(findingId: string, attachmentId: string, body: { displayName?: string; description?: string }) {
+        return this.request(`/findings/${findingId}/attachments/${attachmentId}`, { method: 'PATCH', body });
+    }
+
     // ── Action Attachments ────────────────────────────────────────────────────
 
-    async addActionAttachment(findingId: string, actionId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
+    async addActionAttachment(findingId: string, actionId: string, meta: { uploadId: string; fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
         return this.request(`/findings/${findingId}/actions/${actionId}/attachments`, { method: 'POST', body: meta });
     }
 
@@ -967,14 +1024,22 @@ class ApiClient {
         return this.request(`/findings/${findingId}/actions/${actionId}/attachments/${attachmentId}`, { method: 'DELETE' });
     }
 
+    async updateActionAttachment(findingId: string, actionId: string, attachmentId: string, body: { displayName?: string; description?: string }) {
+        return this.request(`/findings/${findingId}/actions/${actionId}/attachments/${attachmentId}`, { method: 'PATCH', body });
+    }
+
     // ── FollowUp Attachments ──────────────────────────────────────────────────
 
-    async addFollowUpAttachment(findingId: string, followUpId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
+    async addFollowUpAttachment(findingId: string, followUpId: string, meta: { uploadId: string; fileName: string; originalName: string; mimeType: string; sizeBytes: number }) {
         return this.request(`/findings/${findingId}/follow-ups/${followUpId}/attachments`, { method: 'POST', body: meta });
     }
 
     async removeFollowUpAttachment(findingId: string, followUpId: string, attachmentId: string) {
         return this.request(`/findings/${findingId}/follow-ups/${followUpId}/attachments/${attachmentId}`, { method: 'DELETE' });
+    }
+
+    async updateFollowUpAttachment(findingId: string, followUpId: string, attachmentId: string, body: { displayName?: string; description?: string }) {
+        return this.request(`/findings/${findingId}/follow-ups/${followUpId}/attachments/${attachmentId}`, { method: 'PATCH', body });
     }
 
     // ── Bağımsız Follow-Ups Listesi ───────────────────────────────────────────
@@ -1230,7 +1295,7 @@ class ApiClient {
     }
 
     async reviewAiEvalFinding(id: string, body: {
-        group: 'uyumsuzAlanlar' | 'bulguAdaylari' | 'uyumluAlanlar' | 'findingAssessment' | 'requirementAssessments';
+        group: 'uyumsuzAlanlar' | 'bulguAdaylari' | 'uyumluAlanlar' | 'findingAssessment' | 'requirementAssessments' | 'finding';
         index: number;
         status: 'ACCEPTED' | 'EDITED' | 'REJECTED';
         reason?: string;
@@ -1478,6 +1543,3 @@ class ApiClient {
 
 export const api = new ApiClient(API_BASE_URL);
 export default api;
-
-
-

@@ -10,6 +10,12 @@ export const EVAL_OUTPUT_SCHEMA_VERSION = '2026-09-10.1';
 // Bu şema sürümünü üreten prompt şablonunun sürümü (denetim izinde saklanır).
 export const EVAL_PROMPT_VERSION = '2026-09-10.1';
 
+// Kontrol & Kanıt Değerlendirme v3 — denetim metodolojisine uygun yedi bölümlü,
+// doğrulanmış JSON çıktı (Gereklilik/Uygulanabilirlik/Sonuç/Gerekçe tablosu YOK).
+// Eski v2 kayıtları kendi schemaVersion'ıyla açılmaya devam eder (salt-okunur).
+export const EVAL_V3_SCHEMA_VERSION = 'eval-v3.1';
+export const EVAL_V3_PROMPT_VERSION = '2026-09-21.2';
+
 export type AiTier = 'heavy' | 'light' | 'vision';
 
 export interface AiRuntimeConfig {

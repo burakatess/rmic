@@ -1,0 +1,230 @@
+{
+  "generatedAt": "2026-09-21T11:45:12.746Z",
+  "db": "grc_sys_src_verify",
+  "report": [
+    {
+      "scenario": "A",
+      "label": "Şifreleme doğrulanamıyor",
+      "sessionId": "cmub6c1dt00000zvw0z412nbp",
+      "ms": 89920,
+      "status": "INSUFFICIENT_EVIDENCE",
+      "controlResultText": "Yapılan incelemelerde yönetim beyanı incelenmiş ve sunucu üzerinden alınan ağ trafiği örneği incelenmiştir; yönetim beyanı şifreli iletişim olduğunu belirtmiş ancak ağ trafiği örneğinde şifreleme bilgisi tespit edilememiştir.",
+      "finding": {
+        "title": "",
+        "exists": false,
+        "explanation": "",
+        "relatedReferenceIds": []
+      },
+      "references": [
+        "BIGR-4.5.2.10 [RELEVANT] p.184 skor=0.7312",
+        "BIGR-3.2.9.1 [RELEVANT] p.110 skor=0.627",
+        "BIGR-5.2.1.21 [RELEVANT] p.204 skor=0.532",
+        "BIGR-3.2.11.1 [RELEVANT] p.115 skor=0.5316",
+        "BIGR-4.3.1.3 [RELEVANT] p.168 skor=0.6335"
+      ],
+      "rejectedReferences": [],
+      "additionalEvidenceRequired": [
+        "Ağ trafiği paketlerinin şifreleme bilgisi içeren detaylı analizi (TLS handshake, şifreli uygulama verisi)",
+        "Yapılandırma belgeleri ve şifreli protokol etkinleştirme kanıtları (konfigürasyon dosyaları, sertifika yönetimi)",
+        "Ağ cihazlarında SSL/TLS yapılandırma denetimi raporu"
+      ],
+      "reEvaluation": null,
+      "retrieval": {
+        "method": "HYBRID",
+        "sent": 8,
+        "top": [
+          "BIGR-4.5.2.10:0.731",
+          "BIGR-4.3.1.3:0.634",
+          "BIGR-3.2.9.1:0.627",
+          "BIGR-4.4.2.7:0.608",
+          "BIGR-3.1.6.34:0.571"
+        ]
+      },
+      "needsReview": false,
+      "needsReviewReason": null,
+      "violations": []
+    },
+    {
+      "scenario": "B",
+      "label": "TCP/389 + Kerberos (LDAP signing/sealing)",
+      "sessionId": "cmub6dys300040zvw7gp7osr1",
+      "ms": 62728,
+      "status": "INSUFFICIENT_EVIDENCE",
+      "controlResultText": "Yapılan incelemelerde ağ trafiği incelendiğinde istemci → DC bağlantılarının TCP/389 üzerinden görüldüğü, GPO ayarlarının LDAP sunucu imzalama gerektirdiği ve ağ güvenliği LDAP istemci imzalama gerektirmesi Negotiate signing/Require signing olarak yapılandırıldığı, kimlik doğrulamasının Kerberos (GSS-API) ile SASL sealing etkin olduğu tespit edilmiştir; ancak bu kanıtlar bağlantının şifreli/güvenli kanal üzerinden gerçekleştiğini doğrulamamıştır.",
+      "finding": {
+        "title": "",
+        "exists": false,
+        "explanation": "",
+        "relatedReferenceIds": []
+      },
+      "references": [
+        "BIGR-5.1.3.10 [NON_COMPLIANT] p.200 skor=0.7729",
+        "BIGR-3.2.1.4 [NEEDS_CONFIRMATION] p.89 skor=0.4214",
+        "BIGR-3.1.12.16 [NEEDS_CONFIRMATION] p.75 skor=0.556"
+      ],
+      "rejectedReferences": [],
+      "additionalEvidenceRequired": [
+        "LDAP üzerinden yapılan kimlik doğrulama ve sorgulama bağlantılarının şifreli olup olmadığını doğrulamak için ağ paketi yakalama (Wireshark vb.) ile LDAP trafiğinin içeriği incelenmesi ve şifreleme kontrolü.",
+        "LDAPS (TCP/636) kullanımının yapılandırma denetimi ve bağlantı noktası üzerinden gerçekleşen bağlantılarının ağ izleme ile doğrulanması."
+      ],
+      "reEvaluation": null,
+      "retrieval": {
+        "method": "HYBRID",
+        "sent": 8,
+        "top": [
+          "BIGR-5.1.3.10:0.773",
+          "BIGR-3.1.12.16:0.556",
+          "BIGR-3.2.11.3:0.443",
+          "BIGR-3.4.5.7:0.427",
+          "BIGR-3.2.1.4:0.421"
+        ]
+      },
+      "needsReview": false,
+      "needsReviewReason": null,
+      "violations": []
+    },
+    {
+      "scenario": "C",
+      "label": "Eski yazılım sürümü",
+      "sessionId": "cmub6fb6s00080zvwhn3bijdd",
+      "ms": 24115,
+      "status": "INSUFFICIENT_EVIDENCE",
+      "controlResultText": "Yapılan incelemelerde envanter kaydı incelenerek Apache HTTP Server 2.4.41 sürümünün kurulu olduğu ve üretici tarafından daha yeni 2.4.62 sürümünün yayımlan olduğu gözlemlenmiş; ancak güvenlik yamalarının uygulanıp uygulanmadığı, üretici desteğinin sürüp sürmediği veya kurum yama politikası ile ilişkisine dair bir kanıta rastlanmamıştır.",
+      "finding": {
+        "title": "",
+        "exists": false,
+        "explanation": "",
+        "relatedReferenceIds": []
+      },
+      "references": [
+        "BIGR-5.3.1.1 [NEEDS_CONFIRMATION] p.207 skor=0.728",
+        "BIGR-3.1.3.1 [NEEDS_CONFIRMATION] p.44 skor=0.4614"
+      ],
+      "rejectedReferences": [],
+      "additionalEvidenceRequired": [
+        "Güvenlik yamalarının uygulanıp uygulanmadığını gösteren yama kayıtları veya raporlar",
+        "Üretici tarafından Apache HTTP Server 2.4.41 için destek süresinin devam ettiğini gösteren resmi duyuru veya yaşam döngüsü bilgisi",
+        "Kurum yama politikası ile uyumluluğu gösteren içsel yama takibi belgeleri"
+      ],
+      "reEvaluation": null,
+      "retrieval": {
+        "method": "HYBRID",
+        "sent": 8,
+        "top": [
+          "BIGR-5.3.1.1:0.728",
+          "BIGR-3.2.6.8:0.61",
+          "BIGR-3.1.5.1:0.5",
+          "BIGR-5.3.2.1:0.472",
+          "BIGR-3.2.1.6:0.47"
+        ]
+      },
+      "needsReview": false,
+      "needsReviewReason": null,
+      "violations": []
+    },
+    {
+      "scenario": "D",
+      "label": "Log yönetimi",
+      "sessionId": "cmub6ftt0000c0zvwiv0xe2ex",
+      "ms": 52989,
+      "status": "NON_COMPLIANT",
+      "controlResultText": "Yapılan incelemelerde uygulama sunucusundaki log dizini ekran görüntüsü incelendiğinde, kayıtların yerel disk üzerinde tutulduğu ve merkezi log sistemine gönderim yapılandırmasının bulunmadığı tespit edilmiştir; haftalık log inceleme tutanağı incelendiğinde ise hangi kaynakların incelendiği belirtilmediği gözlemlenmiştir. Bu durumda sistem ve uygulama iz kayıtlarının merkezi bir kayıt yönetim sisteminde toplanıp düzenli olarak incelenmesi beklentisi karşılanmamıştır.",
+      "finding": {
+        "title": "Merkezi log yönetimi ve düzenli inceleme eksikliği",
+        "exists": true,
+        "explanation": "İncelenen kanıtlar, uygulama sunucusundaki logların yerel diskte tutulduğu ve merkezi log sistemine gönderim yapılandırmasının bulunmadığını göstermektedir; haftalık log inceleme tutanağı ise hangi kaynakların incelendiği konusunda ayrıntı sağlamamaktadır. Bu durum, kontrolün beklentisi olan merkezi bir kayıt yönetim sisteminde toplanıp düzenli incelenen iz kayıtları gereksinimini karşılamamaktadır.",
+        "relatedReferenceIds": [
+          "REF1",
+          "REF2",
+          "REF3",
+          "REF4",
+          "REF5"
+        ]
+      },
+      "references": [
+        "BIGR-5.1.1.17 [NON_COMPLIANT] p.194 skor=0.8726",
+        "BIGR-3.1.8.6 [NON_COMPLIANT] p.63 skor=0.6998",
+        "BIGR-5.3.1.19 [NON_COMPLIANT] p.208 skor=0.566",
+        "BIGR-3.1.8.2 [NON_COMPLIANT] p.63 skor=0.5198",
+        "BIGR-5.1.1.16 [COMPLIANT] p.194 skor=0.5039"
+      ],
+      "rejectedReferences": [],
+      "additionalEvidenceRequired": [
+        "Merkezi log yönetim sistemine log gönderimini gösteren yapılandırma dosyaları veya agent logları",
+        "Tüm kritik sistemlerden (web, veritabanı, IP telefon, sanal makine vb.) log toplama raporları",
+        "Kaynak bazlı ve zaman damgalı detaylı log inceleme tutanakları",
+        "Uyarı mekanizmalarının etkin ve test edilmiş olmasını gösteren kanıt"
+      ],
+      "reEvaluation": null,
+      "retrieval": {
+        "method": "HYBRID",
+        "sent": 8,
+        "top": [
+          "BIGR-5.1.1.17:0.873",
+          "BIGR-3.1.8.6:0.7",
+          "BIGR-5.3.1.19:0.566",
+          "BIGR-3.1.6.13:0.529",
+          "BIGR-3.1.8.2:0.52"
+        ]
+      },
+      "needsReview": false,
+      "needsReviewReason": null,
+      "violations": []
+    },
+    {
+      "scenario": "E",
+      "label": "A yeniden değerlendirme",
+      "sessionId": "cmub6c1dt00000zvw0z412nbp",
+      "ms": 35451,
+      "status": "PARTIALLY_COMPLIANT",
+      "controlResultText": "Yapılan incelemelerde yönetim beyanı, sunucu TLS yapılandırma çıktısı ve sertifika doğrulaması incelenmiştir; bu kanıtlar TLSv1.2 ve TLSv1.3 protokollerinin yapılandırıldığını ve sertifika zincirinin geçerli olduğunu göstermektedir; ancak iletişimin şifreli olarak gerçekleştiği kanıtı ve yapılandırmanın belgelenmesi tespit edilememiştir.",
+      "finding": {
+        "title": "",
+        "exists": false,
+        "explanation": "",
+        "relatedReferenceIds": []
+      },
+      "references": [
+        "BIGR-3.2.9.1 [RELEVANT] p.110 skor=0.8361",
+        "BIGR-3.2.9.2 [RELEVANT] p.110 skor=0.5303"
+      ],
+      "rejectedReferences": [],
+      "additionalEvidenceRequired": [
+        "Ağ trafiği paketlerinin detaylı analizi (TLS handshake ve şifreli uygulama verisi) ile şifrelemenin aktif olduğunun kanıtı",
+        "Yapılandırma gerekliliğinin resmi politika veya prosedür belgelerinde dokümante edilmiş kanıt",
+        "Sertifika yönetimi ve iptal denetimi süreçlerinin düzenli raporları"
+      ],
+      "reEvaluation": {
+        "changed": true,
+        "explanation": "Yeni kanıt (TLS yapılandırma ve sertifika doğrulama) ile şifreli protokol yapılandırmasının varlığı gösterildiği için kontrol sonucu INSUFFICIENT_EVIDENCE'den PARTIALLY_COMPLIANT'e güncellenmiş; ancak ağ trafiğinin şifreli iletişim kanıtı ve yapılandırmanın belgelenmesi hâlâ gösterilemediği için tam uyum sağlanamamıştır.",
+        "changedPoints": [
+          "controlResult.status",
+          "controlResult.text",
+          "evaluatedEvidence[0].observation",
+          "evaluatedEvidence[0].limitations"
+        ],
+        "unchangedPoints": [
+          "expectedState",
+          "impact",
+          "recommendation",
+          "finding.exists"
+        ]
+      },
+      "retrieval": {
+        "method": "HYBRID",
+        "sent": 8,
+        "top": [
+          "BIGR-3.2.9.1:0.836",
+          "BIGR-4.5.2.10:0.689",
+          "BIGR-3.2.11.1:0.599",
+          "BIGR-3.1.4.12:0.585",
+          "BIGR-3.1.6.34:0.555"
+        ]
+      },
+      "needsReview": false,
+      "needsReviewReason": null,
+      "violations": [],
+      "differsFromFirst": true
+    }
+  ]
+}

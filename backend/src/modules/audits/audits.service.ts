@@ -2,12 +2,19 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma';
 import { nextCounterValue, formatRecordId } from '../../common/util/sequential-id';
+import { projectActionStatus, projectFindingStatus, projectFollowUpStatus } from '../../common/workflow/workflow-projection';
+import { personFieldWhere } from '../../common/util/person-filter';
 
 // Takip değerlendirmesini onaylayabilecek roller (ikinci kontrolcü) — mutabakat
 // onayıyla aynı yetki seviyesi (bkz. audits.controller.ts::mutabakatOnayla).
 const FOLLOWUP_APPROVER_ROLES = new Set(['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER']);
 const normalizeRole = (r?: string): string =>
     ({ ADMIN: 'SYSTEM_ADMIN', RISK_MANAGER: 'RISK_CONTROL_MANAGER' }[r ?? ''] ?? r ?? '');
+const isFutureIstanbulDate = (value: string): boolean => {
+    const day = value.slice(0, 10);
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    return /^\d{4}-\d{2}-\d{2}$/.test(day) && !Number.isNaN(new Date(`${day}T00:00:00+03:00`).getTime()) && day > today;
+};
 
 // Prisma client VEYA transaction client — yardımcı metotlar ikisini de kabul eder
 // (onay zinciri tek transaction içinde aynı tx istemcisini kullanır, Madde 1).
@@ -194,8 +201,8 @@ export class AuditsService {
 
     // ─── Findings ────────────────────────────────────────────────────────────
 
-    async findAllFindings(query: any) {
-        const { search, riskId, controlId, severity, status, findingType, auditPlanId, sortBy, sortOrder } = query;
+    async findAllFindings(query: any, currentUserId?: string) {
+        const { search, riskId, controlId, severity, status, findingType, auditPlanId, sortBy, sortOrder, assigneeIds, workflowStatus, resolutionStatus, delayStatus, thisMonth } = query;
         const page = parseInt(query.page, 10) || 1;
         const limit = parseInt(query.limit, 10) || 50;
         const skip = (page - 1) * limit;
@@ -214,7 +221,16 @@ export class AuditsService {
         if (severity) where.severity = severity;
         if (status) where.status = status;
         if (findingType) where.findingType = findingType;
+        if (workflowStatus) where.workflowStatus = workflowStatus;
+        if (resolutionStatus) where.resolutionStatus = resolutionStatus;
+        const now = new Date();
+        if (thisMonth === 'true') where.targetResolutionDate = { gte: new Date(now.getFullYear(), now.getMonth(), 1), lt: new Date(now.getFullYear(), now.getMonth() + 1, 1) };
+        if (delayStatus === 'OVERDUE') where.targetResolutionDate = { lt: now };
+        if (delayStatus === 'APPROACHING') where.targetResolutionDate = { gte: now, lte: new Date(now.getTime() + 14 * 86400000) };
+        if (delayStatus === 'ON_TIME') where.targetResolutionDate = { gt: new Date(now.getTime() + 14 * 86400000) };
         if (auditPlanId) where.auditExecution = { auditPlanId };
+        const assigneeFilter = personFieldWhere('assigneeId', assigneeIds, currentUserId);
+        if (assigneeFilter) where.AND = [...(where.AND || []), assigneeFilter];
 
         const [findings, total] = await Promise.all([
             this.prisma.finding.findMany({
@@ -232,7 +248,11 @@ export class AuditsService {
             this.prisma.finding.count({ where }),
         ]);
 
-        return { data: findings, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+        const data = findings.map(f => ({
+            ...f,
+            ...projectFindingStatus(f.workflowStatus, f.resolutionStatus, Array.from({ length: f._count.actions }, () => ({ status: 'UNKNOWN' }))),
+        }));
+        return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
     }
 
     async createFinding(data: any, userId: string) {
@@ -353,43 +373,20 @@ export class AuditsService {
             },
         });
 
-        // Create actions if passed
+        // Create actions through the shared domain path so inline finding actions
+        // receive the same automatic follow-up, target-date and audit behaviour as
+        // actions created later from the action screens.
         if (actions && Array.isArray(actions) && actions.length > 0) {
             for (const act of actions) {
-                const createdAction = await this.prisma.action.create({
-                    data: {
-                        actionId: await this.generateActionId(),
-                        findingId: finding.id,
-                        description: act.description,
-                        ownerId: act.ownerId,
-                        responsibleDepartment: act.responsibleDepartment || null,
-                        dueDate: new Date(act.dueDate),
-                        notes: act.notes || null,
-
-                        status: act.status || 'BEKLIYOR',
-                        controlId: finding.controlId,
-
-                        riskId: finding.riskId,
-                    }
-                });
+                const createdAction = await this.createAction(finding.id, act, userId, this.prisma);
 
                 // Aksiyona yüklenen dosya eklerini bağla
                 if (Array.isArray(act.attachments) && act.attachments.length > 0) {
-                    await this.prisma.actionAttachment.createMany({
-                        data: act.attachments
-                            .filter((a: any) => a?.fileName)
-                            .map((a: any) => ({
-                                actionId: createdAction.id,
-                                fileName: a.fileName,
-                                originalName: a.originalName,
-                                mimeType: a.mimeType,
-                                sizeBytes: a.sizeBytes,
-                                uploadedBy: userId,
-                            })),
-                    });
+                    for (const attachment of act.attachments.filter((a: any) => a?.uploadId)) {
+                        await this.addActionAttachment(finding.id, createdAction.id, attachment, userId);
+                    }
                 }
             }
-            await this.recalculateFindingTargetDate(finding.id);
         }
 
         // Madde 7: testDate'in bulunduğu ay için otomatik bir FollowUp oluştur
@@ -583,7 +580,12 @@ export class AuditsService {
             },
         });
         if (!finding) throw new NotFoundException(`Finding with ID ${id} not found`);
-        return finding;
+        return {
+            ...finding,
+            ...projectFindingStatus(finding.workflowStatus, finding.resolutionStatus, finding.actions),
+            actions: finding.actions.map(action => ({ ...action, ...projectActionStatus(action.status, action.dueDate) })),
+            followUps: finding.followUps.map(followUp => ({ ...followUp, ...projectFollowUpStatus(followUp.status, followUp.approvalStatus) })),
+        };
     }
 
     async getFindingRelations(id: string) {
@@ -742,12 +744,85 @@ export class AuditsService {
 
     // Herhangi → IPTAL (yalnızca Business Owner / Admin)
     async iptalEt(id: string, reason: string, userId: string) {
+        if (!reason?.trim()) throw new BadRequestException('İptal gerekçesi zorunludur.');
         const finding = await this.prisma.finding.findUnique({ where: { id }, select: { workflowStatus: true } });
         if (!finding) throw new NotFoundException(`Finding ${id} not found`);
         if (finding.workflowStatus === 'IPTAL') {
             throw new BadRequestException('Bulgu zaten iptal edilmiş.');
         }
-        return this.transitionWorkflow(id, 'IPTAL', userId, `İptal gerekçesi: ${reason}`);
+
+        return this.prisma.$transaction(async (tx) => {
+            const [openActions, openFollowUps] = await Promise.all([
+                tx.action.findMany({
+                    where: { findingId: id, status: { notIn: ['KAPATILDI', 'CLOSED', 'IPTAL'] } },
+                    select: { id: true, status: true },
+                }),
+                tx.findingFollowUp.findMany({
+                    where: { findingId: id, status: { notIn: ['ONAYLANDI', 'IPTAL'] } },
+                    select: { id: true, status: true },
+                }),
+            ]);
+
+            const updated = await tx.finding.update({
+                where: { id },
+                data: { workflowStatus: 'IPTAL' },
+            });
+            if (openActions.length > 0) {
+                await tx.action.updateMany({
+                    where: { id: { in: openActions.map((action) => action.id) } },
+                    data: { status: 'IPTAL' },
+                });
+            }
+            if (openFollowUps.length > 0) {
+                await tx.findingFollowUp.updateMany({
+                    where: { id: { in: openFollowUps.map((followUp) => followUp.id) } },
+                    data: { status: 'IPTAL' },
+                });
+            }
+
+            await tx.findingStatusHistory.create({
+                data: {
+                    findingId: id,
+                    evaluator: userId,
+                    changeType: 'WORKFLOW_CHANGE',
+                    workflowStatus: 'IPTAL',
+                    previousWorkflowStatus: finding.workflowStatus,
+                    explanation: `İptal gerekçesi: ${reason.trim()}`,
+                },
+            });
+            for (const action of openActions) {
+                await tx.auditLog.create({
+                    data: {
+                        userId, action: 'CANCEL', entityType: 'Action', entityId: action.id,
+                        oldValue: { status: action.status }, newValue: { status: 'IPTAL', reason: reason.trim() },
+                    },
+                });
+            }
+            for (const followUp of openFollowUps) {
+                await tx.auditLog.create({
+                    data: {
+                        userId, action: 'CANCEL', entityType: 'FindingFollowUp', entityId: followUp.id,
+                        oldValue: { status: followUp.status }, newValue: { status: 'IPTAL', reason: reason.trim() },
+                    },
+                });
+            }
+            await tx.auditLog.create({
+                data: {
+                    userId,
+                    action: 'CANCEL',
+                    entityType: 'Finding',
+                    entityId: id,
+                    oldValue: { workflowStatus: finding.workflowStatus },
+                    newValue: {
+                        workflowStatus: 'IPTAL',
+                        reason: reason.trim(),
+                        cancelledActionCount: openActions.length,
+                        cancelledFollowUpCount: openFollowUps.length,
+                    },
+                },
+            });
+            return updated;
+        });
     }
 
     // ── Onaylı kapanış (Madde 3) ─────────────────────────────────────────────
@@ -854,9 +929,12 @@ export class AuditsService {
     async createFollowUp(findingId: string, data: any, userId: string) {
         const finding = await this.prisma.finding.findUnique({
             where: { id: findingId },
-            select: { id: true, findingId: true, findingType: true },
+            select: { id: true, findingId: true, findingType: true, status: true, workflowStatus: true },
         });
         if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
+        if (finding.status === 'CLOSED' || finding.workflowStatus === 'IPTAL') {
+            throw new BadRequestException('Kapalı veya iptal edilmiş bulguya yeni takip çalışması eklenemez.');
+        }
 
         const {
             birimCevabi, currentStatusDetail, internalControlAssessment,
@@ -947,9 +1025,53 @@ export class AuditsService {
 
         const recordingEvaluation = result !== undefined && result !== null && result !== '';
         const effectiveEvaluatorId = recordingEvaluation ? userId : followUp.evaluatorId;
+        const effectiveResult = recordingEvaluation ? result : followUp.result;
         const alreadyApproved =
             followUp.approvalStatus === 'ONAYLANDI' || followUp.status === 'ONAYLANDI';
         const approvalRequestedNow = approvalStatus === 'ONAYLANDI' || status === 'ONAYLANDI';
+        const rejectionRequestedNow = approvalStatus === 'REDDEDILDI';
+        const standaloneReschedule = newFollowUpDate !== undefined && !recordingEvaluation && !resolutionOutcome && !approvalRequestedNow;
+
+        if (standaloneReschedule) {
+            if (!newFollowUpDate || !isFutureIstanbulDate(newFollowUpDate)) throw new BadRequestException('Yeni takip tarihi Europe/Istanbul takvimine göre bugünden sonra olmalıdır.');
+            if (!explanation?.trim()) throw new BadRequestException('Tarih değişikliği gerekçesi zorunludur.');
+            const nextDate = new Date(`${newFollowUpDate.slice(0, 10)}T00:00:00+03:00`);
+            if (alreadyApproved || ['TAMAMLANDI', 'ONAYLANDI'].includes(followUp.status)) {
+                return this.prisma.$transaction(async tx => {
+                    const existing = await tx.findingFollowUp.findFirst({ where: { findingId, actionId: followUp.actionId, plannedDate: nextDate, status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] } } });
+                    const next = existing || await tx.findingFollowUp.create({ data: { followUpId: await this.generateFollowUpId(tx), findingId, actionId: followUp.actionId, plannedDate: nextDate, status: 'BEKLIYOR', notes: explanation.trim() } });
+                    await this.recordAuditTrail({ findingId, followUpId: next.id, actionId: followUp.actionId || undefined, operation: 'TEST_DATE_CHANGED', userId, explanation: explanation.trim(), oldValue: { sourceFollowUpId: followUp.id, plannedDate: followUp.plannedDate }, newValue: { plannedDate: nextDate } }, tx);
+                    await tx.auditLog.create({ data: { userId, action: 'FOLLOWUP_RESCHEDULE', entityType: 'FindingFollowUp', entityId: next.id, oldValue: { sourceFollowUpId: followUp.id }, newValue: { plannedDate: nextDate, reason: explanation.trim() } } });
+                    return { ...next, createdAction: null };
+                });
+            }
+            return this.prisma.$transaction(async tx => {
+                const updated = await tx.findingFollowUp.update({ where: { id: followUpId }, data: { plannedDate: nextDate, newFollowUpDate: nextDate, explanation: explanation.trim() } });
+                await this.recordAuditTrail({ findingId, followUpId, actionId: followUp.actionId || undefined, operation: 'TEST_DATE_CHANGED', userId, explanation: explanation.trim(), oldValue: { plannedDate: followUp.plannedDate }, newValue: { plannedDate: nextDate } }, tx);
+                await tx.auditLog.create({ data: { userId, action: 'FOLLOWUP_RESCHEDULE', entityType: 'FindingFollowUp', entityId: followUpId, oldValue: { plannedDate: followUp.plannedDate }, newValue: { plannedDate: nextDate, reason: explanation.trim() } } });
+                return { ...updated, createdAction: null };
+            });
+        }
+
+        if (resolutionOutcome && !effectiveResult) {
+            throw new BadRequestException('Bulgu sonucu kaydetmek için değerlendirme sonucu zorunludur.');
+        }
+
+        if (result === 'YETERSIZ' && resolutionOutcome && !['DEVAM_EDIYOR', 'ERTELENDI'].includes(resolutionOutcome)) {
+            throw new BadRequestException(
+                `YETERSIZ değerlendirme yalnızca DEVAM_EDIYOR veya ERTELENDI sonucu ile kaydedilebilir: ${resolutionOutcome}`,
+            );
+        }
+        if (result === 'YETERLI' && resolutionOutcome) {
+            throw new BadRequestException(
+                'YETERLI değerlendirmede bulgu sonucu kullanıcı tarafından seçilemez; açık aksiyonlara göre sistem belirler.',
+            );
+        }
+        if (result === 'YENI_AKSIYON_GEREKLI' && resolutionOutcome !== 'YENI_AKSIYON_GEREKLI') {
+            throw new BadRequestException(
+                `YENI_AKSIYON_GEREKLI değerlendirme yalnızca YENI_AKSIYON_GEREKLI sonucu ile kaydedilebilir: ${resolutionOutcome || 'boş'}`,
+            );
+        }
 
         // ── Onaylı kayıt: kilitli ────────────────────────────────────────────────
         if (alreadyApproved) {
@@ -996,6 +1118,10 @@ export class AuditsService {
         }
 
         const wantsNewAction = result === 'YENI_AKSIYON_GEREKLI' || resolutionOutcome === 'YENI_AKSIYON_GEREKLI';
+        const persistedNewAction = followUp.newActionDraft && typeof followUp.newActionDraft === 'object'
+            ? followUp.newActionDraft as Record<string, unknown>
+            : undefined;
+        const effectiveNewAction = newAction || persistedNewAction;
         if (wantsNewAction) {
             if (!newAction || !newAction.description || !newAction.ownerId || !newAction.dueDate) {
                 throw new BadRequestException(
@@ -1007,6 +1133,40 @@ export class AuditsService {
         }
         if (resolutionOutcome === 'ERTELENDI' && !newFollowUpDate) {
             throw new BadRequestException('ERTELENDI seçildiğinde newFollowUpDate zorunludur.');
+        }
+        if (resolutionOutcome === 'ERTELENDI' && newFollowUpDate && !isFutureIstanbulDate(newFollowUpDate)) {
+            throw new BadRequestException('Erteleme tarihi Europe/Istanbul takvimine göre bugünden sonra olmalıdır.');
+        }
+
+        if (rejectionRequestedNow) {
+            if (!explanation?.trim()) throw new BadRequestException('Ret gerekçesi zorunludur.');
+            if (!followUp.result) throw new BadRequestException('Reddedilecek bir değerlendirme sonucu yoktur.');
+            if (followUp.evaluatorId === userId) throw new ForbiddenException('Kendi değerlendirmenizi reddedemezsiniz');
+            if (!FOLLOWUP_APPROVER_ROLES.has(normalizeRole(userRole))) {
+                throw new ForbiddenException('Takip değerlendirmesini reddetme yetkiniz yok');
+            }
+            if (!followUp.secondControllerId || followUp.secondControllerId !== userId) {
+                throw new ForbiddenException('Bu takibi yalnızca atanmış ikinci kontrolcü reddedebilir.');
+            }
+
+            return this.prisma.$transaction(async (tx) => {
+                const updated = await tx.findingFollowUp.update({
+                    where: { id: followUpId },
+                    data: {
+                        status: 'DEVAM_EDIYOR', approvalStatus: 'REDDEDILDI',
+                        approvedBy: null, approvedAt: null, explanation: explanation.trim(),
+                    },
+                });
+                await this.recordAuditTrail({
+                    findingId, followUpId, operation: 'FOLLOWUP_REJECTED', userId,
+                    explanation: `Takip değerlendirmesi reddedildi: ${explanation.trim()}`,
+                    newValue: { status: 'DEVAM_EDIYOR', approvalStatus: 'REDDEDILDI' },
+                }, tx);
+                await tx.auditLog.create({
+                    data: { userId, action: 'REJECT', entityType: 'FindingFollowUp', entityId: followUpId, newValue: updated },
+                });
+                return { ...updated, createdAction: null };
+            });
         }
 
         if (approvalRequestedNow) {
@@ -1066,15 +1226,24 @@ export class AuditsService {
                     actionId: actionId !== undefined ? (actionId || null) : undefined,
                     evaluatorId: (recordingEvaluation && !approvalRequestedNow) ? userId : undefined,
                     evaluatedAt: (recordingEvaluation && !approvalRequestedNow) ? new Date() : undefined,
+                    approvalStatus: recordingEvaluation && followUp.approvalStatus === 'REDDEDILDI' ? 'BEKLIYOR' : undefined,
                     result: result !== undefined ? (result || null) : undefined,
                     explanation: explanation !== undefined ? (explanation || null) : undefined,
                     resolutionOutcome: resolutionOutcome !== undefined ? (resolutionOutcome || null) : undefined,
                     newFollowUpDate: newFollowUpDate !== undefined ? (newFollowUpDate ? new Date(newFollowUpDate) : null) : undefined,
                     newActionRequired: !!wantsNewAction,
+                    // Taslak değerlendirme anında doğrulanır ve onaya kadar saklanır.
+                    // Onay isteğinin istemciden aynı veriyi tekrar göndermesine güvenilmez.
+                    newActionDraft: wantsNewAction && newAction ? newAction : undefined,
                 },
             });
 
-            const effectiveResolution = resolutionOutcome || (result === 'YETERLI' ? 'KAPATILDI' : undefined);
+            // Değerlendirmenin kaydedilmesi tek başına bulgu/aksiyon yan etkisi
+            // üretmez. Çözüm durumu yalnız atanmış ikinci kontrolcünün onayıyla
+            // yürürlüğe girer.
+            const effectiveResolution = approvalRequestedNow && wonApprovalRace
+                ? (updated.resolutionOutcome || (updated.result === 'YETERLI' ? 'KAPATILDI' : undefined))
+                : undefined;
 
             if (effectiveResolution) {
                 const findingUpdate: any = { resolutionStatus: effectiveResolution };
@@ -1106,23 +1275,24 @@ export class AuditsService {
                 } else if (resolvedResult === 'YETERSIZ') {
                     await tx.action.update({ where: { id: updated.actionId }, data: { status: 'YETERSIZ' } });
                     await this.recordAuditTrail({ findingId, actionId: updated.actionId, operation: 'ACTION_UPDATED', userId, explanation: 'Takip sonucu yetersiz — aksiyon durumu güncellendi.' }, tx);
+                    if (updated.resolutionOutcome === 'ERTELENDI' && updated.newFollowUpDate) {
+                        const existing = await tx.findingFollowUp.findFirst({ where: { findingId, actionId: updated.actionId, plannedDate: updated.newFollowUpDate, status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] } } });
+                        if (!existing) await tx.findingFollowUp.create({ data: { followUpId: await this.generateFollowUpId(tx), findingId, actionId: updated.actionId, plannedDate: updated.newFollowUpDate, status: 'BEKLIYOR', notes: updated.explanation } });
+                    }
                 } else if (resolvedResult === 'YENI_AKSIYON_GEREKLI') {
-                    if (!newAction || !newAction.description || !newAction.ownerId || !newAction.dueDate) {
+                    if (!effectiveNewAction || !effectiveNewAction.description || !effectiveNewAction.ownerId || !effectiveNewAction.dueDate) {
                         throw new BadRequestException(
-                            'YENI_AKSIYON_GEREKLI takibi onaylanırken newAction.description, newAction.ownerId ve newAction.dueDate zorunludur.',
+                            'YENI_AKSIYON_GEREKLI takibinde onaylanacak yeni aksiyon taslağı bulunamadı.',
                         );
                     }
                     createdAction = await this.createAction(findingId, {
-                        description: newAction.description, ownerId: newAction.ownerId,
-                        responsibleDepartment: newAction.responsibleDepartment, dueDate: newAction.dueDate,
-                        notes: newAction.notes, status: 'BEKLIYOR',
+                        description: effectiveNewAction.description, ownerId: effectiveNewAction.ownerId,
+                        responsibleDepartment: effectiveNewAction.responsibleDepartment,
+                        dueDate: effectiveNewAction.dueDate,
+                        notes: effectiveNewAction.notes, status: 'BEKLIYOR',
                     }, userId, tx);
                     await this.recordAuditTrail({ findingId, followUpId: updated.id, operation: 'FOLLOWUP_COMPLETED', userId, explanation: 'Yeni düzeltici aksiyon otomatik oluşturuldu.' }, tx);
                 }
-            }
-
-            if (effectiveResolution === 'KAPATILDI' && !approvalRequestedNow) {
-                await this.checkAndCloseFindinIfAllActionsClosed(findingId, userId, tx);
             }
 
             await tx.auditLog.create({
@@ -1238,6 +1408,9 @@ export class AuditsService {
         const run = async (tx: PrismaLike) => {
             const finding = await tx.finding.findUnique({ where: { id: findingId } });
             if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
+            if (finding.status === 'CLOSED' || finding.workflowStatus === 'IPTAL') {
+                throw new BadRequestException('Kapalı veya iptal edilmiş bulguya yeni aksiyon eklenemez.');
+            }
 
             if (data.ownerId) {
                 const ownerExists = await tx.user.findUnique({ where: { id: data.ownerId }, select: { id: true } });
@@ -1414,6 +1587,11 @@ export class AuditsService {
                     where: { id: findingId },
                     data: { targetResolutionDate: maxDate },
                 });
+            } else {
+                await db.finding.update({
+                    where: { id: findingId },
+                    data: { targetResolutionDate: null },
+                });
             }
         }
     }
@@ -1431,9 +1609,25 @@ export class AuditsService {
                 where: { id: findingId },
                 data: { status: 'CLOSED', resolutionStatus: 'KAPATILDI', closedDate: new Date() },
             });
+            // Aksiyondan bağımsız eski/genel takipler de açık bırakılmamalı;
+            // kapalı bulgu yeni çalışma kabul etmediği için bunlar artık uygulanamaz.
+            await db.findingFollowUp.updateMany({
+                where: { findingId, status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR', 'TAMAMLANDI'] } },
+                data: { status: 'IPTAL' },
+            });
 
             await this.appendStatusHistory(findingId, {
                 explanation: 'Tüm düzeltici aksiyonlar başarıyla kapatıldığı için bulgu otomatik olarak kapatıldı.',
+                evaluator: 'Sistem',
+            }, userId, db);
+        } else if (actions.some(a => CLOSED.has(a.status))) {
+            await db.finding.update({
+                where: { id: findingId },
+                data: { status: 'PARTIALLY_CLOSED', resolutionStatus: 'KISMEN_KAPATILDI', closedDate: null },
+            });
+
+            await this.appendStatusHistory(findingId, {
+                explanation: 'En az bir düzeltici aksiyon kapatıldı; açık aksiyonlar nedeniyle bulgu kısmen kapatıldı.',
                 evaluator: 'Sistem',
             }, userId, db);
         }
@@ -1460,11 +1654,14 @@ export class AuditsService {
             }
         });
 
-        // Move action status to DEVAM_EDIYOR
-        await this.prisma.action.update({
-            where: { id: actionId },
-            data: { status: 'DEVAM_EDIYOR' },
-        });
+        // Tamamlanmış aksiyon doğrulama beklerken geriye "devam ediyor" durumuna
+        // çekilmez. Yalnız henüz tamamlanmamış aksiyonlar başlatılır.
+        if (!['TAMAMLANDI', 'COMPLETED', 'KAPATILDI', 'CLOSED'].includes(action.status)) {
+            await this.prisma.action.update({
+                where: { id: actionId },
+                data: { status: 'DEVAM_EDIYOR' },
+            });
+        }
 
         await this.prisma.auditLog.create({
             data: { userId, action: 'CREATE', entityType: 'FindingFollowUp', entityId: followUp.id, newValue: followUp },
@@ -1503,10 +1700,14 @@ export class AuditsService {
             const actionsDue = await tx.action.findMany({
                 where: {
                     dueDate: { lte: now },
-                    status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR', 'YETERSIZ'] },
+                    status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR', 'YETERSIZ', 'TAMAMLANDI', 'COMPLETED'] },
+                    finding: {
+                        status: { not: 'CLOSED' },
+                        workflowStatus: { not: 'IPTAL' },
+                    },
                     followUps: { none: { status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] } } },
                 },
-                select: { id: true, findingId: true, dueDate: true },
+                select: { id: true, findingId: true, dueDate: true, status: true },
             });
 
             // Numara üretimi atomik sayaçtan (P2002 riski yok); herhangi bir kayıt
@@ -1527,7 +1728,9 @@ export class AuditsService {
                         plannedDate: action.dueDate,
                     },
                 });
-                await tx.action.update({ where: { id: action.id }, data: { status: 'DEVAM_EDIYOR' } });
+                if (!['TAMAMLANDI', 'COMPLETED'].includes(action.status)) {
+                    await tx.action.update({ where: { id: action.id }, data: { status: 'DEVAM_EDIYOR' } });
+                }
                 count++;
             }
             return { generatedCount: count, errorCount: 0, errors: [] as string[], skipped: false as const };
@@ -1635,15 +1838,26 @@ export class AuditsService {
 
     // ─── Attachment CRUD (metadata-only) ─────────────────────────────────────
 
+    private async claimUploadedFile(meta: any, userId: string, db: PrismaLike) {
+        const ticket = await db.uploadTicket.findFirst({ where: { id: meta.uploadId, uploadedById: userId, claimedAt: null, expiresAt: { gt: new Date() } } });
+        if (!ticket || ticket.fileName !== meta.fileName || ticket.originalName !== meta.originalName || ticket.mimeType !== meta.mimeType || ticket.sizeBytes !== meta.sizeBytes) {
+            throw new BadRequestException('Yükleme kaydı geçersiz, süresi dolmuş veya bu kullanıcıya ait değil.');
+        }
+        const claim = await db.uploadTicket.updateMany({ where: { id: ticket.id, claimedAt: null }, data: { claimedAt: new Date() } });
+        if (claim.count !== 1) throw new BadRequestException('Bu yükleme daha önce kullanılmış.');
+    }
+
     async addFindingAttachment(findingId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }, userId: string) {
         const finding = await this.prisma.finding.findUnique({ where: { id: findingId }, select: { id: true } });
         if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
 
-        const att = await this.prisma.findingAttachment.create({
-            data: { findingId, ...meta, uploadedBy: userId, url: null },
+        return this.prisma.$transaction(async tx => {
+            await this.claimUploadedFile(meta, userId, tx);
+            const { uploadId: _uploadId, ...safeMeta } = meta as any;
+            const att = await tx.findingAttachment.create({ data: { findingId, ...safeMeta, displayName: safeMeta.displayName?.trim() || meta.originalName, description: safeMeta.description?.trim() || null, uploadedBy: userId, url: null } });
+            await this.recordAuditTrail({ findingId, operation: 'FILE_UPLOADED', userId, explanation: `Dosya yüklendi: ${meta.originalName}`, newValue: { fileName: meta.originalName, mimeType: meta.mimeType } }, tx);
+            return att;
         });
-        await this.recordAuditTrail({ findingId, operation: 'FILE_UPLOADED', userId, explanation: `Dosya yüklendi: ${meta.originalName}`, newValue: { fileName: meta.originalName, mimeType: meta.mimeType } });
-        return att;
     }
 
     async removeFindingAttachment(findingId: string, attachmentId: string, userId: string) {
@@ -1658,11 +1872,13 @@ export class AuditsService {
         const action = await this.prisma.action.findFirst({ where: { id: actionId, findingId } });
         if (!action) throw new NotFoundException(`Action ${actionId} not found`);
 
-        const att = await this.prisma.actionAttachment.create({
-            data: { actionId, ...meta, uploadedBy: userId, url: null },
+        return this.prisma.$transaction(async tx => {
+            await this.claimUploadedFile(meta, userId, tx);
+            const { uploadId: _uploadId, ...safeMeta } = meta as any;
+            const att = await tx.actionAttachment.create({ data: { actionId, ...safeMeta, displayName: safeMeta.displayName?.trim() || meta.originalName, description: safeMeta.description?.trim() || null, uploadedBy: userId, url: null } });
+            await this.recordAuditTrail({ findingId, actionId, operation: 'FILE_UPLOADED', userId, explanation: `Aksiyon dosyası yüklendi: ${meta.originalName}` }, tx);
+            return att;
         });
-        await this.recordAuditTrail({ findingId, actionId, operation: 'FILE_UPLOADED', userId, explanation: `Aksiyon dosyası yüklendi: ${meta.originalName}` });
-        return att;
     }
 
     async removeActionAttachment(findingId: string, actionId: string, attachmentId: string, userId: string) {
@@ -1677,11 +1893,13 @@ export class AuditsService {
         const fu = await this.prisma.findingFollowUp.findFirst({ where: { id: followUpId, findingId } });
         if (!fu) throw new NotFoundException(`FollowUp ${followUpId} not found`);
 
-        const att = await this.prisma.followUpAttachment.create({
-            data: { followUpId, ...meta, uploadedBy: userId, url: null },
+        return this.prisma.$transaction(async tx => {
+            await this.claimUploadedFile(meta, userId, tx);
+            const { uploadId: _uploadId, ...safeMeta } = meta as any;
+            const att = await tx.followUpAttachment.create({ data: { followUpId, ...safeMeta, displayName: safeMeta.displayName?.trim() || meta.originalName, description: safeMeta.description?.trim() || null, uploadedBy: userId, url: null } });
+            await this.recordAuditTrail({ findingId, followUpId, operation: 'FILE_UPLOADED', userId, explanation: `Takip dosyası yüklendi: ${meta.originalName}` }, tx);
+            return att;
         });
-        await this.recordAuditTrail({ findingId, followUpId, operation: 'FILE_UPLOADED', userId, explanation: `Takip dosyası yüklendi: ${meta.originalName}` });
-        return att;
     }
 
     async removeFollowUpAttachment(findingId: string, followUpId: string, attachmentId: string, userId: string) {
@@ -1692,12 +1910,33 @@ export class AuditsService {
         return { message: 'Dosya silindi' };
     }
 
+    async updateAttachmentMetadata(kind: 'finding' | 'action' | 'follow-up', findingId: string, attachmentId: string, dto: { displayName?: string; description?: string }, userId: string, parentId?: string) {
+        const finding = await this.prisma.finding.findUnique({ where: { id: findingId }, select: { id: true } });
+        if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
+        const repo: any = kind === 'finding' ? this.prisma.findingAttachment : kind === 'action' ? this.prisma.actionAttachment : this.prisma.followUpAttachment;
+        const parentField = kind === 'finding' ? 'findingId' : kind === 'action' ? 'actionId' : 'followUpId';
+        const parentValue = kind === 'finding' ? findingId : parentId;
+        const old = await repo.findFirst({ where: { id: attachmentId, [parentField]: parentValue } });
+        if (!old) throw new NotFoundException('Kanıt bulunamadı');
+        if (kind === 'follow-up') {
+            const followUp = await this.prisma.findingFollowUp.findFirst({ where: { id: parentId, findingId }, select: { status: true, approvalStatus: true } });
+            if (!followUp) throw new NotFoundException('Takip çalışması bulunamadı');
+            if (followUp.status === 'ONAYLANDI' || followUp.approvalStatus === 'ONAYLANDI') throw new BadRequestException('Onaylanmış takip çalışmasının kanıtları değiştirilemez.');
+        }
+        const updated = await repo.update({ where: { id: attachmentId }, data: {
+            displayName: dto.displayName !== undefined ? (dto.displayName.trim() || old.originalName) : undefined,
+            description: dto.description !== undefined ? (dto.description.trim() || null) : undefined,
+        } });
+        await this.recordAuditTrail({ findingId, actionId: kind === 'action' ? parentId : undefined, followUpId: kind === 'follow-up' ? parentId : undefined, operation: 'FILE_METADATA_UPDATED', userId, fieldName: 'attachmentMetadata', oldValue: { displayName: old.displayName, description: old.description }, newValue: { displayName: updated.displayName, description: updated.description } });
+        return updated;
+    }
+
     // ─── Bağımsız Follow-Ups Listesi ─────────────────────────────────────────
 
-    async findAllFollowUps(query: any) {
+    async findAllFollowUps(query: any, currentUserId?: string) {
         const {
             search, status, findingType, relatedDepartment,
-            ownerId, month, year, severity,
+            ownerId, ownerIds, evaluatorIds, secondControllerIds, month, year, severity, resolutionOutcome, overdue, newActionRequired,
         } = query;
         const page = parseInt(query.page, 10) || 1;
         const limit = parseInt(query.limit, 10) || 50;
@@ -1706,6 +1945,12 @@ export class AuditsService {
         const where: any = {};
 
         if (status && status !== 'all') where.status = status;
+        if (resolutionOutcome) where.resolutionOutcome = resolutionOutcome;
+        if (newActionRequired === 'true') where.newActionRequired = true;
+        if (overdue === 'true') {
+            where.AND = [...(where.AND || []), { plannedDate: { lt: new Date() } }];
+            where.status = { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] };
+        }
 
         if (relatedDepartment) {
             where.finding = { relatedDepartment: { contains: relatedDepartment, mode: 'insensitive' } };
@@ -1716,9 +1961,10 @@ export class AuditsService {
         if (findingType) {
             where.finding = { ...(where.finding || {}), findingType };
         }
-        if (ownerId) {
-            where.action = { ownerId };
-        }
+        const ownerField = personFieldWhere('ownerId', ownerIds || ownerId, currentUserId);
+        if (ownerField) where.action = ownerField;
+        const followUpPeople = [personFieldWhere('evaluatorId', evaluatorIds, currentUserId), personFieldWhere('secondControllerId', secondControllerIds, currentUserId)].filter(Boolean);
+        if (followUpPeople.length) where.AND = [...(where.AND || []), ...followUpPeople];
         if (month && year) {
             const startDate = new Date(parseInt(year), parseInt(month) - 1, 1);
             const endDate   = new Date(parseInt(year), parseInt(month), 1);
@@ -1752,7 +1998,7 @@ export class AuditsService {
                             owner: { select: { id: true, firstName: true, lastName: true, department: true } },
                         },
                     },
-                    attachments: { select: { id: true, originalName: true, mimeType: true, sizeBytes: true } },
+                    attachments: { select: { id: true, fileName: true, originalName: true, displayName: true, description: true, mimeType: true, sizeBytes: true } },
                 },
                 skip,
                 take: limit,

@@ -53,6 +53,7 @@ export enum ActionStatus {
 }
 
 class AttachmentMetaDto {
+    @IsString() @IsNotEmpty() uploadId: string;
     @IsString() @IsNotEmpty() fileName: string;
     @IsString() @IsNotEmpty() originalName: string;
     @IsString() @IsNotEmpty() mimeType: string;
@@ -155,5 +156,10 @@ export class UpdateActionDto {
     @IsOptional() @IsString() responsibleDepartment?: string;
     @IsOptional() @IsDateString() dueDate?: string;
     @IsOptional() @IsString() notes?: string;
-    @IsOptional() @IsEnum(ActionStatus) status?: ActionStatus;
+    // TAMAMLANDI özel /actions/:id/complete; KAPATILDI yalnız onaylı takip yan etkisidir.
+    @IsOptional() @IsIn(['BEKLIYOR', 'DEVAM_EDIYOR', 'YETERSIZ', 'OPEN', 'IN_PROGRESS']) status?: ActionStatus;
+}
+
+export class WorkflowReasonDto {
+    @IsString() @IsNotEmpty() @MaxLength(2000) reason: string;
 }

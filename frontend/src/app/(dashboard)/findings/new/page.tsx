@@ -409,10 +409,8 @@ export default function NewFindingPage() {
                             </label>
                             <div className="flex gap-2">
                                 {[
-                                    { value: 'LOW', label: 'Düşük', color: 'border-green-500 bg-green-50 text-green-700' },
-                                    { value: 'MEDIUM', label: 'Orta', color: 'border-yellow-500 bg-yellow-50 text-yellow-700' },
-                                    { value: 'HIGH', label: 'Yüksek', color: 'border-orange-500 bg-orange-50 text-orange-700' },
-                                    { value: 'CRITICAL', label: 'Kritik', color: 'border-red-500 bg-red-50 text-red-700' },
+                                    { value: 'CRITICAL', label: 'KZ', color: 'border-rose-500 bg-rose-50 text-rose-700' },
+                                    { value: 'HIGH', label: 'KD', color: 'border-orange-500 bg-orange-50 text-orange-700' },
                                 ].map((severity) => (
                                     <button
                                         key={severity.value}

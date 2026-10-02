@@ -1,162 +1,380 @@
 {
-  "generatedAt": "2026-09-16T14:53:46.637Z",
-  "mode": "APPLY",
+  "generatedAt": "2026-09-17T10:56:45.793Z",
+  "mode": "DRY-RUN",
   "summary": {
-    "totalControls": 30,
-    "alreadyMigrated": 30,
-    "newlyMapped": 0,
-    "conflicts": 0
+    "totalControls": 31,
+    "alreadyMigrated": 0,
+    "newlyMapped": 31,
+    "conflicts": 0,
+    "periodCodesUpdated": 26
   },
   "mapping": [
     {
-      "controlId": "cmu480aif000yxuvw4zt6csu4",
-      "oldCode": "BTK-0001",
-      "newCode": "BTK-0001"
+      "controlId": "cmtla8308000yd3vwtxrluvce",
+      "oldCode": "K-2026-0001",
+      "newCode": "BTK.0001",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyfe000erxvw1di1kf2m",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0001",
+          "newPeriodCode": "2026.BTK.0001"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aii000zxuvw0bzpcwer",
-      "oldCode": "BTK-0002",
-      "newCode": "BTK-0002"
+      "controlId": "cmtla830c000zd3vws2fj8q3k",
+      "oldCode": "K-2026-0002",
+      "newCode": "BTK.0002",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gybp0000rxvwtixdppnq",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0002",
+          "newPeriodCode": "2026.BTK.0002"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aij0010xuvwgnqlzlma",
-      "oldCode": "BTK-0003",
-      "newCode": "BTK-0003"
+      "controlId": "cmtla830d0010d3vwenvyorrz",
+      "oldCode": "K-2026-0003",
+      "newCode": "BTK.0003",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyct0001rxvwtt7iaiqv",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0003",
+          "newPeriodCode": "2026.BTK.0003"
+        },
+        {
+          "scopeId": "cmu45yu300004zkvwqk0hbm1w",
+          "year": 2027,
+          "oldPeriodCode": "2027.K-2026-0003",
+          "newPeriodCode": "2027.BTK.0003"
+        }
+      ]
     },
     {
-      "controlId": "cmu480ail0011xuvwk3w91mab",
-      "oldCode": "BTK-0004",
-      "newCode": "BTK-0004"
+      "controlId": "cmtla830f0011d3vwkv6b7zfh",
+      "oldCode": "K-2026-0004",
+      "newCode": "BTK.0004",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyd40002rxvwtto4dfmw",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0004",
+          "newPeriodCode": "2026.BTK.0004"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aim0012xuvwkztympdu",
-      "oldCode": "BTK-0005",
-      "newCode": "BTK-0005"
+      "controlId": "cmtla830h0012d3vwdic3n062",
+      "oldCode": "K-2026-0005",
+      "newCode": "BTK.0005",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyde0003rxvwv83zdsxr",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0005",
+          "newPeriodCode": "2026.BTK.0005"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aio0013xuvwbyz4w099",
-      "oldCode": "BTK-0006",
-      "newCode": "BTK-0006"
+      "controlId": "cmtla830i0013d3vw6jam1lq9",
+      "oldCode": "K-2026-0006",
+      "newCode": "BTK.0006",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyfm000frxvwt9gn5xn6",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0006",
+          "newPeriodCode": "2026.BTK.0006"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aiq0014xuvwy0kk78y2",
-      "oldCode": "BTK-0007",
-      "newCode": "BTK-0007"
+      "controlId": "cmtla830k0014d3vwnz0v27pf",
+      "oldCode": "K-2026-0007",
+      "newCode": "BTK.0007",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gydr0004rxvwzxl3nvmn",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0007",
+          "newPeriodCode": "2026.BTK.0007"
+        }
+      ]
     },
     {
-      "controlId": "cmu480air0015xuvw9568sc5s",
-      "oldCode": "BTK-0008",
-      "newCode": "BTK-0008"
+      "controlId": "cmtla830m0015d3vwpixu06aw",
+      "oldCode": "K-2026-0008",
+      "newCode": "BTK.0008",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gydv0005rxvw5s7b9ux7",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0008",
+          "newPeriodCode": "2026.BTK.0008"
+        }
+      ]
     },
     {
-      "controlId": "cmu480ais0016xuvw4ub5j5u5",
-      "oldCode": "BTK-0009",
-      "newCode": "BTK-0009"
+      "controlId": "cmtla830o0016d3vwlkja1ubp",
+      "oldCode": "K-2026-0009",
+      "newCode": "BTK.0009",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gydz0006rxvw8gm6o76g",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0009",
+          "newPeriodCode": "2026.BTK.0009"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aiu0017xuvwsn8nujd4",
-      "oldCode": "BTK-0010",
-      "newCode": "BTK-0010"
+      "controlId": "cmtla830p0017d3vwap8e12lf",
+      "oldCode": "K-2026-0010",
+      "newCode": "BTK.0010",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gye30007rxvwqvrqvjsr",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0010",
+          "newPeriodCode": "2026.BTK.0010"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aiv0018xuvwa7rt4vwp",
-      "oldCode": "BTK-0011",
-      "newCode": "BTK-0011"
+      "controlId": "cmtla830r0018d3vwt2raym2f",
+      "oldCode": "K-2026-0011",
+      "newCode": "BTK.0011",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gye50008rxvwoco6up3q",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0011",
+          "newPeriodCode": "2026.BTK.0011"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aiw0019xuvwalmkjuot",
-      "oldCode": "BTK-0012",
-      "newCode": "BTK-0012"
+      "controlId": "cmtla830t0019d3vwg3x82aic",
+      "oldCode": "K-2026-0012",
+      "newCode": "BTK.0012",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyee0009rxvwvpn0h84f",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0012",
+          "newPeriodCode": "2026.BTK.0012"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aix001axuvwt7xwtffr",
-      "oldCode": "BTK-0013",
-      "newCode": "BTK-0013"
+      "controlId": "cmtla830u001ad3vwvsigvstn",
+      "oldCode": "K-2026-0013",
+      "newCode": "BTK.0013",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyem000arxvw1563hz99",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0013",
+          "newPeriodCode": "2026.BTK.0013"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aiy001bxuvwlz29yjmn",
-      "oldCode": "BTK-0014",
-      "newCode": "BTK-0014"
+      "controlId": "cmtla830v001bd3vwma8b4wne",
+      "oldCode": "K-2026-0014",
+      "newCode": "BTK.0014",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyeu000brxvwc1welup9",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0014",
+          "newPeriodCode": "2026.BTK.0014"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aj0001cxuvwxg7ta9vf",
-      "oldCode": "BTK-0015",
-      "newCode": "BTK-0015"
+      "controlId": "cmtla830x001cd3vwmqoh1wk4",
+      "oldCode": "K-2026-0015",
+      "newCode": "BTK.0015",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyf2000crxvwettg8pzj",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0015",
+          "newPeriodCode": "2026.BTK.0015"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aj1001dxuvwfvtp9s6t",
-      "oldCode": "BTK-0016",
-      "newCode": "BTK-0016"
+      "controlId": "cmtla830y001dd3vwkhcfsco4",
+      "oldCode": "K-2026-0016",
+      "newCode": "BTK.0016",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyfa000drxvwlvf3lke4",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0016",
+          "newPeriodCode": "2026.BTK.0016"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aj2001exuvwynxvdh1k",
-      "oldCode": "BTK-0017",
-      "newCode": "BTK-0017"
+      "controlId": "cmtla8310001ed3vwqrmd2grq",
+      "oldCode": "K-2026-0017",
+      "newCode": "BTK.0017",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyh9000nrxvw8q79ntkh",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0017",
+          "newPeriodCode": "2026.BTK.0017"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aj3001fxuvw0var7pmu",
-      "oldCode": "BTK-0018",
-      "newCode": "BTK-0018"
+      "controlId": "cmtla8312001fd3vwshofr0au",
+      "oldCode": "K-2026-0018",
+      "newCode": "BTK.0018",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyfp000grxvwkcenpilb",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0018",
+          "newPeriodCode": "2026.BTK.0018"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aj5001gxuvw1rub3vdj",
-      "oldCode": "BTK-0019",
-      "newCode": "BTK-0019"
+      "controlId": "cmtla8314001gd3vw1rs9as0z",
+      "oldCode": "K-2026-0019",
+      "newCode": "BTK.0019",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyft000hrxvwaog6zjfy",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0019",
+          "newPeriodCode": "2026.BTK.0019"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aj6001hxuvw0qlfhfu6",
-      "oldCode": "BTK-0020",
-      "newCode": "BTK-0020"
+      "controlId": "cmtla8315001hd3vw448qcn72",
+      "oldCode": "K-2026-0020",
+      "newCode": "BTK.0020",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyfv000irxvwudyv8zkf",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0020",
+          "newPeriodCode": "2026.BTK.0020"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aj8001ixuvw7ustwtoz",
-      "oldCode": "BTK-0021",
-      "newCode": "BTK-0021"
+      "controlId": "cmtla8317001id3vwbbb626nw",
+      "oldCode": "K-2026-0021",
+      "newCode": "BTK.0021",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyfy000jrxvwwlmb9f7w",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0021",
+          "newPeriodCode": "2026.BTK.0021"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aj9001jxuvwdz94wpfx",
-      "oldCode": "BTK-0022",
-      "newCode": "BTK-0022"
+      "controlId": "cmtla8318001jd3vwsrvk86n7",
+      "oldCode": "K-2026-0022",
+      "newCode": "BTK.0022",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyg0000krxvwc8p904w9",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0022",
+          "newPeriodCode": "2026.BTK.0022"
+        }
+      ]
     },
     {
-      "controlId": "cmu480aja001kxuvwf8bm6toe",
-      "oldCode": "BTK-0023",
-      "newCode": "BTK-0023"
+      "controlId": "cmtla8319001kd3vw1ttuxlih",
+      "oldCode": "K-2026-0023",
+      "newCode": "BTK.0023",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyg1000lrxvwfeyb3kfi",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0023",
+          "newPeriodCode": "2026.BTK.0023"
+        }
+      ]
     },
     {
-      "controlId": "cmu480ajd001lxuvw6huhuwd5",
-      "oldCode": "BTK-0024",
-      "newCode": "BTK-0024"
+      "controlId": "cmtla831b001ld3vwtngsr0s0",
+      "oldCode": "K-2026-0024",
+      "newCode": "BTK.0024",
+      "periodCodesUpdated": []
     },
     {
-      "controlId": "cmu480ajg001mxuvwd1060leu",
-      "oldCode": "BTK-0025",
-      "newCode": "BTK-0025"
+      "controlId": "cmtla831c001md3vwqs61t0fq",
+      "oldCode": "K-2026-0025",
+      "newCode": "BTK.0025",
+      "periodCodesUpdated": []
     },
     {
-      "controlId": "cmu480ajh001nxuvwuu38e819",
-      "oldCode": "BTK-0026",
-      "newCode": "BTK-0026"
+      "controlId": "cmtla831e001nd3vwlc2cvp5c",
+      "oldCode": "K-2026-0026",
+      "newCode": "BTK.0026",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gyhd000orxvwjhdczj51",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0026",
+          "newPeriodCode": "2026.BTK.0026"
+        }
+      ]
     },
     {
-      "controlId": "cmu480ajj001oxuvwbryqqjad",
-      "oldCode": "BTK-0027",
-      "newCode": "BTK-0027"
+      "controlId": "cmtla831g001od3vwxm9lwae5",
+      "oldCode": "K-2026-0027",
+      "newCode": "BTK.0027",
+      "periodCodesUpdated": [
+        {
+          "scopeId": "cmu14gygd000mrxvwquhms0z3",
+          "year": 2026,
+          "oldPeriodCode": "2026.K-2026-0027",
+          "newPeriodCode": "2026.BTK.0027"
+        }
+      ]
     },
     {
-      "controlId": "cmu480ajk001pxuvw75yg5nd1",
-      "oldCode": "BTK-0028",
-      "newCode": "BTK-0028"
+      "controlId": "cmtla831i001pd3vwj5b4yesf",
+      "oldCode": "K-2026-0028",
+      "newCode": "BTK.0028",
+      "periodCodesUpdated": []
     },
     {
-      "controlId": "cmu480ajl001qxuvw28h6mf7s",
-      "oldCode": "BTK-0029",
-      "newCode": "BTK-0029"
+      "controlId": "cmtla831k001qd3vwxd3k6vcf",
+      "oldCode": "K-2026-0029",
+      "newCode": "BTK.0029",
+      "periodCodesUpdated": []
     },
     {
-      "controlId": "cmu480ajm001rxuvwfm89j1i1",
-      "oldCode": "BTK-0030",
-      "newCode": "BTK-0030"
+      "controlId": "cmtla831l001rd3vwkxe72qgc",
+      "oldCode": "K-2026-0030",
+      "newCode": "BTK.0030",
+      "periodCodesUpdated": []
+    },
+    {
+      "controlId": "cmu2owe5e0007auvwu8cbwlaj",
+      "oldCode": "K-2026-0031",
+      "newCode": "BTK.0031",
+      "periodCodesUpdated": []
     }
   ],
   "conflicts": []

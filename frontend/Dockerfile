@@ -15,6 +15,9 @@ COPY . .
 # NEXT_PUBLIC_* derleme anında gömülür — compose build args'tan gelir.
 ARG NEXT_PUBLIC_API_URL=http://localhost:3001/api
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# Varsayılan "false" — gerçek bir prod dağıtımında asla "true" set edilmemeli.
+ARG NEXT_PUBLIC_SHOW_DEMO_LOGIN=false
+ENV NEXT_PUBLIC_SHOW_DEMO_LOGIN=$NEXT_PUBLIC_SHOW_DEMO_LOGIN
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build

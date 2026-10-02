@@ -11,8 +11,9 @@ export class SourcesService {
     constructor(private prisma: PrismaService) {}
 
     // ─── Kaynak ────────────────────────────────────────────────────────────
-    async list(params: { q?: string; kind?: string; confidentiality?: string }) {
-        const where: Prisma.SourceWhereInput = {};
+    async list(params: { q?: string; kind?: string; confidentiality?: string; includeArchived?: boolean }) {
+        // Arşivlenmiş (isActive=false) kaynaklar aktif katalogda görünmez; geçmiş atıflar için kayıt korunur.
+        const where: Prisma.SourceWhereInput = params.includeArchived ? {} : { isActive: true };
         if (params.kind) where.kind = params.kind as Prisma.SourceWhereInput['kind'];
         if (params.confidentiality) {
             where.confidentiality = params.confidentiality as Prisma.SourceWhereInput['confidentiality'];

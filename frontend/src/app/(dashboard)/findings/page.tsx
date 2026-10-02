@@ -184,7 +184,9 @@ function FindingsContent() {
     const searchParams = useSearchParams();
 
     const [findings, setFindings] = useState<Finding[]>([]);
+    const [totalCount, setTotalCount] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [users, setUsers] = useState<Array<{ id: string; firstName: string; lastName: string; isActive?: boolean }>>([]);
     const [isCreateFindingOpen, setIsCreateFindingOpen] = useState(false);
     const [activeView, setActiveView] = useState<string>('all');
 
@@ -198,6 +200,7 @@ function FindingsContent() {
     const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
     const [colFilters, setColFilters] = useState<Record<string, string>>({});
     const [page, setPage] = useState(1);
+    const [urlReady, setUrlReady] = useState(false);
     const pageSize = 20;
 
     // Dashboard linkleri (?severity=CRITICAL) filtre olarak uygulanır
@@ -206,27 +209,49 @@ function FindingsContent() {
         if (sev && severityConfig[sev]) {
             setActiveFilters(prev => ({ ...prev, severity: sev }));
         }
+        const filterKeys = ['assigneeIds', 'status', 'findingType', 'workflowStatus', 'resolutionStatus', 'delayStatus', 'thisMonth'];
+        setActiveFilters(prev => ({ ...prev, ...Object.fromEntries(filterKeys.map(k => [k, searchParams.get(k)]).filter(([, v]) => v)) }));
+        const search = searchParams.get('search');
+        const urlPage = Number(searchParams.get('page'));
+        if (search) setSearchQuery(search);
+        if (Number.isInteger(urlPage) && urlPage > 0) setPage(urlPage);
+        setUrlReady(true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    useEffect(() => {
+        if (!urlReady) return;
+        const params = new URLSearchParams();
+        if (searchQuery) params.set('search', searchQuery);
+        Object.entries(activeFilters).forEach(([key, value]) => { if (value && value !== 'all') params.set(key, value); });
+        if (page > 1) params.set('page', String(page));
+        const query = params.toString();
+        window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+    }, [urlReady, searchQuery, activeFilters, page]);
 
     // ── Fetch ─────────────────────────────────────────────────────────────────
 
     const loadFindings = useCallback(async () => {
         setLoading(true);
         try {
-            const result = await api.getFindings({ limit: 200 }) as { data: Finding[] };
+            const query: Record<string, string | number> = { page, limit: pageSize };
+            if (searchQuery) query.search = searchQuery;
+            ['assigneeIds', 'status', 'severity', 'findingType', 'workflowStatus', 'resolutionStatus', 'delayStatus', 'thisMonth'].forEach(key => { if (activeFilters[key] && activeFilters[key] !== 'all') query[key] = activeFilters[key]; });
+            const result = await api.getFindings(query) as { data: Finding[]; pagination?: { total: number } };
             setFindings(result.data || []);
+            setTotalCount(result.pagination?.total || 0);
         } catch (err) {
             console.error('Failed to load findings:', err);
             showError('Hata', 'Bulgular yüklenemedi.');
-            setFindings([]);
+            setFindings([]); setTotalCount(0);
         } finally {
             setLoading(false);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [activeFilters, searchQuery, page]);
 
     useEffect(() => { loadFindings(); }, [loadFindings]);
+    useEffect(() => { api.getUserOptions({ limit: 500 }).then(r => setUsers(r.data)).catch(() => setUsers([])); }, []);
 
     // ── Saved View activation ──────────────────────────────────────────────────
 
@@ -367,7 +392,8 @@ function FindingsContent() {
                 { value: 'OVERDUE', label: 'Gecikmiş' },
             ],
         },
-    ], [activeFilters]);
+        { type: 'multiselect', key: 'assigneeIds', label: 'Bulgu Sahibi', value: (activeFilters.assigneeIds || '').split(',').filter(Boolean), onChange: (v: string[]) => { setActiveFilters(p => ({ ...p, assigneeIds: v.join(',') })); setPage(1); }, options: [{ value: '__MINE__', label: 'Bana atananlar' }, { value: '__UNASSIGNED__', label: 'Atanmamış' }, ...users.map(u => ({ value: u.id, label: `${u.firstName} ${u.lastName}${u.isActive === false ? ' (pasif)' : ''}` }))] },
+    ], [activeFilters, users]);
 
     // ── Columns ───────────────────────────────────────────────────────────────
 
@@ -541,10 +567,7 @@ function FindingsContent() {
         );
     }, [baseFilteredFindings, colFilters, columns]);
 
-    const paginatedFindings = useMemo(() => {
-        const start = (page - 1) * pageSize;
-        return filteredFindings.slice(start, start + pageSize);
-    }, [filteredFindings, page]);
+    const paginatedFindings = filteredFindings;
 
     // ── Quick filter chip'leri (kayıtlı görünümler, canlı sayaçlarla) ─────────
 
@@ -710,7 +733,7 @@ function FindingsContent() {
                 selectedRows={selectedRows}
                 onRowSelect={handleRowSelect}
                 onSelectAll={handleSelectAll}
-                totalCount={filteredFindings.length}
+                totalCount={Object.values(colFilters).some(Boolean) ? filteredFindings.length : totalCount}
                 page={page}
                 pageSize={pageSize}
                 onPageChange={setPage}

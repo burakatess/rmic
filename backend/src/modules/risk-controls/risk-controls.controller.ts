@@ -2,7 +2,7 @@ import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } fro
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { RiskControlsService } from './risk-controls.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
-import { Roles } from '../../common/decorators';
+import { Roles, CurrentUser } from '../../common/decorators';
 
 @ApiTags('Risk Controls')
 @ApiBearerAuth('JWT-Auth')
@@ -35,8 +35,8 @@ export class RiskControlsController {
 
     @Delete(':id')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    remove(@Param('id') id: string) {
-        return this.service.delete(id);
+    remove(@Param('id') id: string, @CurrentUser('id') userId: string) {
+        return this.service.delete(id, userId);
     }
 
     @Post(':id/link-risk/:riskId')

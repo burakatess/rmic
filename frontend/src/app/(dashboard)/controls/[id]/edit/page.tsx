@@ -60,8 +60,6 @@ export default function ControlEditPage() {
         directorateId: '',
         contactPersonId: '',
         frequency: 'MONTHLY',
-        dueDate: '',
-        status: 'ACTIVE',
         notes: '',
         attachment: null as File | null,
     });
@@ -69,6 +67,10 @@ export default function ControlEditPage() {
     const [summaryError, setSummaryError] = useState('');
     // Salt-okunur özet — düzenleme burada yapılmıyor, yalnızca gösteriliyor (Madde 10).
     const [scopeYears, setScopeYears] = useState<number[]>([]);
+    const [displayStatus, setDisplayStatus] = useState<'AKTIF' | 'PASIF'>('PASIF');
+    const [versionImpact, setVersionImpact] = useState<any>(null);
+    const [versionDecisions, setVersionDecisions] = useState<Record<number, string>>({});
+    const [applyingVersion, setApplyingVersion] = useState(false);
 
     useEffect(() => {
         const loadInitialData = async () => {
@@ -103,12 +105,11 @@ export default function ControlEditPage() {
                         directorateId: cData.directorateId || '',
                         frequency: cData.frequency || 'MONTHLY',
                         contactPersonId: cData.contactPersonId || '',
-                        dueDate: cData.dueDate ? cData.dueDate.split('T')[0] : '',
-                        status: cData.isActive ? 'ACTIVE' : 'INACTIVE',
                         notes: cData.notes || '',
                         attachment: null
                     });
                     setScopeYears(Array.isArray(cData.scopeYears) ? cData.scopeYears : []);
+                    setDisplayStatus(cData.displayStatus === 'AKTIF' ? 'AKTIF' : 'PASIF');
                 }
             } catch (error) {
                 console.error('Failed to load control edit data:', error);
@@ -124,13 +125,16 @@ export default function ControlEditPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [params.id]);
 
-    // Gerçek kontrol kodu formatı backend'in generateControlId()'sinin ürettiği
-    // "K-YYYY-NNNN" — frekanstan bağımsız (controls.service.ts'e bakınız).
+    // Gerçek kontrol kodu formatı backend'in generateControlCode()'unun ürettiği
+    // "BTK.XXXX" (nokta ayıracı, tire yok — control-code.util.ts). Eski
+    // "K-YYYY-NNNN" kayıtları da hâlâ geçerli kabul edilir (geçiş tamamlanana
+    // kadar iki format bir arada var olabilir — bkz. migrate-btk-codes.ts).
     const validateNaming = (summary: string) => {
         if (!summary) return 'Kontrol Kodu zorunludur.';
-        const regex = /^K-20\d{2}-\d+$/;
-        if (!regex.test(summary)) {
-            return 'Kontrol kodu "K-YYYY-NNNN" formatında olmalıdır. Örn: K-2026-0001';
+        const btkRegex = /^BTK\.\d{4,}$/;
+        const legacyRegex = /^K-20\d{2}-\d+$/;
+        if (!btkRegex.test(summary) && !legacyRegex.test(summary)) {
+            return 'Kontrol kodu "BTK.XXXX" formatında olmalıdır. Örn: BTK.0001';
         }
         return '';
     };
@@ -169,8 +173,6 @@ export default function ControlEditPage() {
                 directorateId: formData.directorateId,
                 frequency: formData.frequency,
                 notes: formData.notes,
-                isActive: formData.status === 'ACTIVE',
-                status: isDraft ? 'DRAFT' : 'ACTIVE',
             };
             // ownerId/testPerformerId/secondControllerId artık ana kontrolden yazılamaz
             // (bkz. backend dto/control.dto.ts) — Atanan Kontrolcü/İkinci Kontrolcü
@@ -180,6 +182,16 @@ export default function ControlEditPage() {
             await api.updateControl(params.id as string, payload);
 
             toastSuccess('Başarılı', 'Kontrol başarıyla güncellendi.');
+            try {
+                const impact = await api.previewControlVersionImpact(params.id as string);
+                if (impact.outdatedPeriodCount > 0) {
+                    setVersionImpact(impact);
+                    setVersionDecisions(Object.fromEntries(impact.periods.filter((p: any) => p.outdated).map((p: any) => [p.year, p.recommendedAction])));
+                    return;
+                }
+            } catch {
+                toastError('Etki analizi alınamadı', 'Kontrol kaydedildi; dönem sürümü kararını Dönem Kontrolü ekranından daha sonra verebilirsiniz.');
+            }
             router.push(`/controls/${params.id}`);
             router.refresh();
         } catch (error) {
@@ -188,6 +200,20 @@ export default function ControlEditPage() {
         } finally {
             setSaving(false);
         }
+    };
+
+    const applyVersionImpact = async () => {
+        if (!versionImpact) return;
+        setApplyingVersion(true);
+        try {
+            const decisions = versionImpact.periods.filter((p: any) => p.outdated).map((p: any) => ({ year: p.year, action: versionDecisions[p.year] || 'KEEP_CURRENT' }));
+            await api.applyControlVersionImpact(params.id as string, versionImpact.control.version, decisions);
+            toastSuccess('Sürüm kararları uygulandı', 'Seçilen Dönem Kontrolleri güncellendi; final görevler korundu.');
+            router.push(`/controls/${params.id}`);
+            router.refresh();
+        } catch (error) {
+            toastError('Hata', error instanceof Error ? error.message : 'Sürüm kararları uygulanamadı.');
+        } finally { setApplyingVersion(false); }
     };
 
     if (loading) {
@@ -246,10 +272,10 @@ export default function ControlEditPage() {
                                         value={formData.summary}
                                         onChange={(e) => handleSummaryChange(e.target.value)}
                                         className={`w-full px-4 py-2.5 border rounded-xl outline-none focus:ring-2 transition-all text-sm font-semibold ${summaryError ? 'border-rose-300 focus:ring-rose-500/10 focus:border-rose-500' : 'border-slate-200 focus:ring-blue-500/10 focus:border-blue-500'}`}
-                                        placeholder="K-2026-0001"
+                                        placeholder="BTK.0001"
                                     />
                                     {summaryError && <p className="text-xs font-semibold text-rose-600 mt-1.5 flex items-center gap-1">❌ {summaryError}</p>}
-                                    <p className="text-[10px] text-slate-400 mt-1">Format: K-YYYY-NNNN</p>
+                                    <p className="text-[10px] text-slate-400 mt-1">Format: BTK.XXXX (eski K-YYYY-NNNN kayıtları da geçerli)</p>
                                 </div>
 
                                 <div className="col-span-1">
@@ -398,26 +424,12 @@ export default function ControlEditPage() {
                     {!collapsed.planning && (
                         <div className="p-6 space-y-5">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="col-span-1">
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Durum <span className="text-red-500">*</span></label>
-                                    <select
-                                        value={formData.status}
-                                        onChange={(e) => setFormData(prev => ({ ...prev, status: e.target.value }))}
-                                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm font-semibold"
-                                    >
-                                        <option value="ACTIVE">Aktif (Test Görevi Üretir)</option>
-                                        <option value="INACTIVE">Pasif (Test Görevi Durdurulur)</option>
-                                    </select>
-                                </div>
-
-                                <div className="col-span-1">
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Due Date (Pasife Alınacağı Tarih)</label>
-                                    <input
-                                        type="date"
-                                        value={formData.dueDate}
-                                        onChange={(e) => setFormData(prev => ({ ...prev, dueDate: e.target.value }))}
-                                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm font-semibold"
-                                    />
+                                <div className="col-span-2">
+                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Durum</label>
+                                    <div className={`w-full px-4 py-2.5 border rounded-xl text-sm font-semibold ${displayStatus === 'AKTIF' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`} aria-label="Kontrol durumu">
+                                        {displayStatus === 'AKTIF' ? 'Aktif' : 'Pasif'}
+                                    </div>
+                                    <p className="mt-1.5 text-[11px] text-slate-400">Durum, mevcut yılın aktif Yıllık Plan kapsamından otomatik hesaplanır ve bu ekrandan değiştirilemez.</p>
                                 </div>
 
                                 <div className="col-span-2">
@@ -517,6 +529,37 @@ export default function ControlEditPage() {
                     {saving ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
                 </button>
             </div>
+
+            {versionImpact && (
+                <div className="fixed inset-0 z-[70] bg-slate-950/40 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto p-6">
+                        <h2 className="text-lg font-extrabold text-slate-900">Kontrol Sürümü Etki Analizi</h2>
+                        <p className="text-sm text-slate-500 mt-1">Ana Kontrol sürüm {versionImpact.control.version} olarak kaydedildi. Geçmiş dönemler sessizce değiştirilmedi.</p>
+                        <div className="mt-5 space-y-3">
+                            {versionImpact.periods.filter((p: any) => p.outdated).map((period: any) => (
+                                <div key={period.year} className="border border-slate-200 rounded-xl p-4">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <div>
+                                            <p className="font-bold text-slate-800">{period.year} Dönem Kontrolü · v{period.fromVersion} → v{period.toVersion}</p>
+                                            <p className="text-xs text-slate-500 mt-1">{period.notStartedTasks.length} başlamamış · {period.ongoingTasks.length} devam eden/onay bekleyen · {period.finalTasks.length} final görev</p>
+                                        </div>
+                                        <select value={versionDecisions[period.year] || 'KEEP_CURRENT'} onChange={e => setVersionDecisions(prev => ({ ...prev, [period.year]: e.target.value }))} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                                            <option value="KEEP_CURRENT">Mevcut sürümü koru</option>
+                                            <option value="APPLY_TO_NOT_STARTED" disabled={period.ongoingTasks.length > 0}>Yeni sürümü uygula</option>
+                                            {period.ongoingTasks.length > 0 && <option value="APPLY_WITH_CONFIRMATION">Devam edenleri bilerek uygula</option>}
+                                        </select>
+                                    </div>
+                                    {period.finalTasks.length > 0 && <p className="text-xs text-emerald-700 bg-emerald-50 rounded-lg p-2 mt-3">Final görevlerin sonuç ve kanıt içerikleri her durumda korunur.</p>}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
+                            <button onClick={() => router.push(`/controls/${params.id}`)} className="px-4 py-2 text-sm font-semibold text-slate-600">Şimdilik Koru</button>
+                            <button onClick={applyVersionImpact} disabled={applyingVersion} className="px-5 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold disabled:opacity-50">{applyingVersion ? 'Uygulanıyor...' : 'Kararları Uygula'}</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

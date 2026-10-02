@@ -96,14 +96,15 @@ async function main() {
     console.log('✅ Temizlik tamamlandı');
 
     // ── 2. Roller ────────────────────────────────────────────────────────────
-    const [adminRole, managerRole, auditorRole, analystRole, viewerRole] = await Promise.all([
+    const [adminRole, managerRole, auditorRole, analystRole, auditeeRole, viewerRole] = await Promise.all([
         prisma.role.create({ data: { name: 'SYSTEM_ADMIN',         permissions: ['*'] } }),
         prisma.role.create({ data: { name: 'RISK_CONTROL_MANAGER', permissions: ['dashboard:view','finding:view','finding:create','finding:update','action:*','control:*','report:view','report:export','report:org','risk:sim:view','risk:sim:create','risk:sim:edit','risk:sim:archive','risk:sim:transfer'] } }),
         prisma.role.create({ data: { name: 'AUDITOR',              permissions: ['dashboard:view','finding:view','finding:create','action:view','action:create','control:view','control:test','report:view','report:export'] } }),
         prisma.role.create({ data: { name: 'RISK_ANALYST',         permissions: ['dashboard:view','finding:view','control:view','risk:sim:view','risk:sim:create','risk:sim:edit'] } }),
+        prisma.role.create({ data: { name: 'AUDITEE',              permissions: ['dashboard:view','finding:view','action:view','action:update','report:view'] } }),
         prisma.role.create({ data: { name: 'VIEWER',               permissions: ['dashboard:view','finding:view','control:view','action:view'] } }),
     ]);
-    console.log('✅ 5 rol');
+    console.log('✅ 6 rol');
 
     // ── 3. Direktörlükler ────────────────────────────────────────────────────
     const [dirBTAg, dirBG, dirUG, dirAO, dirISY] = await Promise.all([
@@ -128,7 +129,7 @@ async function main() {
         prisma.user.create({ data: { email: 'aud3@rmic.com',    passwordHash: pw, firstName: 'Ali',    lastName: 'Öztürk',  department: 'İç Kontrol',      roleId: auditorRole.id, isActive: true } }),
         prisma.user.create({ data: { email: 'ana1@rmic.com',    passwordHash: pw, firstName: 'Ayşe',   lastName: 'Şahin',   department: 'Risk Yönetimi',   roleId: analystRole.id, isActive: true } }),
         prisma.user.create({ data: { email: 'ana2@rmic.com',    passwordHash: pw, firstName: 'Emre',   lastName: 'Arslan',  department: 'Risk Yönetimi',   roleId: analystRole.id, isActive: true } }),
-        prisma.user.create({ data: { email: 'birim@rmic.com',   passwordHash: pw, firstName: 'Selin',  lastName: 'Doğan',   department: 'BT Ağ Yönetimi', roleId: viewerRole.id,  isActive: true } }),
+        prisma.user.create({ data: { email: 'birim@rmic.com',   passwordHash: pw, firstName: 'Selin',  lastName: 'Doğan',   department: 'BT Ağ Yönetimi', roleId: auditeeRole.id, isActive: true } }),
     ]);
     const auditors = [uAud1, uAud2, uAud3];
     const managers = [uMgr1, uMgr2];

@@ -22,7 +22,6 @@ import type { ColumnDef, ActiveFilterChip, QuickFilterItem, AdvancedFilterField 
 import { useToast } from '@/components/ui/Toast';
 import ImportControlModal from '@/components/modals/ImportControlModal';
 import ScopeAddModal from '@/components/modals/ScopeAddModal';
-import CopyScopeModal from '@/components/modals/CopyScopeModal';
 import { PermissionGate } from '@/components/auth/AuthProvider';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -96,10 +95,6 @@ export default function ControlInventoryPage() {
     const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
     const [importModalOpen, setImportModalOpen] = useState(false);
     const [scopeModalOpen, setScopeModalOpen] = useState(false);
-    const [copyModalOpen, setCopyModalOpen] = useState(false);
-    const [yearFilter, setYearFilter] = useState<number | 'all'>('all');
-    const [availableYears, setAvailableYears] = useState<number[]>([]);
-    const [togglingId, setTogglingId] = useState<string | null>(null);
 
     // Filtering states
     const [searchQuery, setSearchQuery] = useState('');
@@ -116,8 +111,11 @@ export default function ControlInventoryPage() {
     const fetchControls = useCallback(async () => {
         try {
             setLoading(true);
+            // Kontrol Envanteri artık zaman bağımsız kalıcı bir havuz — yıl
+            // filtresi olmadan tüm kaynak kontroller getirilir. Yıllık kapsam
+            // seçimi Yıllık Plan / Dönem Kontrolleri modüllerinde yapılır.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const data = await api.getControls(yearFilter === 'all' ? undefined : { year: yearFilter }) as any;
+            const data = await api.getControls() as any;
             const list = Array.isArray(data) ? data : (data.data || []);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const transformed: Control[] = list.map((c: any) => ({
@@ -143,7 +141,7 @@ export default function ControlInventoryPage() {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 linkedFindings: (c.findings || []).map((f: any) => ({ id: f.id, findingId: f.findingId })).filter((f: any) => f.id && f.findingId),
                 linkedActions: [],
-                status: (c.status || 'ACTIVE') as 'ACTIVE' | 'PASSIVE',
+                status: (c.displayStatus === 'AKTIF' ? 'ACTIVE' : 'PASSIVE') as 'ACTIVE' | 'PASSIVE',
                 scopeYears: Array.isArray(c.scopeYears) ? c.scopeYears : [],
             }));
             setControls(transformed);
@@ -153,14 +151,9 @@ export default function ControlInventoryPage() {
         } finally {
             setLoading(false);
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [yearFilter]);
+    }, []);
 
     useEffect(() => { fetchControls(); }, [fetchControls]);
-
-    useEffect(() => {
-        api.getScopeYears().then(r => setAvailableYears(r.years)).catch(() => { });
-    }, []);
 
     // ── Quick filter predicate'leri (eski preset mantığı birebir korunur) ─────
 
@@ -381,20 +374,6 @@ export default function ControlInventoryPage() {
     const handleSelectAll = () => {
         setSelectedRows(prev => prev.size === filteredControls.length ? new Set() : new Set(filteredControls.map(c => c.id)));
     };
-    const handleToggleStatus = async (c: Control) => {
-        setTogglingId(c.id);
-        try {
-            if (c.status === 'ACTIVE') await api.passivateControl(c.id);
-            else await api.activateControl(c.id);
-            setControls(prev => prev.map(x => x.id === c.id ? { ...x, status: x.status === 'ACTIVE' ? 'PASSIVE' : 'ACTIVE' } : x));
-            success('Başarılı', c.status === 'ACTIVE' ? 'Kontrol pasifleştirildi.' : 'Kontrol aktifleştirildi.');
-        } catch {
-            showError('Hata', 'Durum güncellenemedi.');
-        } finally {
-            setTogglingId(null);
-        }
-    };
-
     // ── Columns ───────────────────────────────────────────────────────────────
     const columns: ColumnDef<Control>[] = useMemo(() => [
         {
@@ -410,6 +389,19 @@ export default function ControlInventoryPage() {
             key: 'name', header: 'Kontrol Adı', sortable: true, defaultWidth: 220,
             filter: { type: 'text', placeholder: 'Ad ara...' },
             render: (c) => <span className="font-medium text-slate-800 truncate block max-w-[200px]" title={c.name}>{c.name}</span>,
+        },
+        {
+            key: 'type', header: 'Tip', defaultWidth: 100, hideable: true,
+            filter: {
+                type: 'select', options: [
+                    { value: 'BT', label: 'BT' },
+                    { value: 'BT_DISI', label: 'BT Dışı' },
+                ],
+            },
+            render: (c) => {
+                const isBt = ['IT_GENERAL', 'IT_APPLICATION', 'BT'].includes(c.type);
+                return <StatusBadge variant={isBt ? 'info' : 'neutral'}>{isBt ? 'BT' : 'BT Dışı'}</StatusBadge>;
+            },
         },
         {
             key: 'mehaz', header: 'Mehaz', defaultWidth: 140, hideable: true, defaultHidden: true,
@@ -523,22 +515,10 @@ export default function ControlInventoryPage() {
                     <Link href={`/controls/${c.id}/edit`} className="p-1.5 rounded text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors" title="Düzenle">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                     </Link>
-                    <PermissionGate permission="control:*">
-                        <button
-                            onClick={() => handleToggleStatus(c)}
-                            disabled={togglingId === c.id}
-                            className="p-1.5 rounded text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors disabled:opacity-40"
-                            title={c.status === 'ACTIVE' ? 'Pasifleştir' : 'Aktifleştir'}
-                        >
-                            {c.status === 'ACTIVE'
-                                ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
-                                : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
-                        </button>
-                    </PermissionGate>
                 </div>
             ),
         },
-    ], [togglingId]);
+    ], []);
 
     return (
         <PageShell>
@@ -556,11 +536,6 @@ export default function ControlInventoryPage() {
                                 </Button>
                             </PermissionGate>
                         )}
-                        <PermissionGate permission="control:*">
-                            <Button variant="outline" onClick={() => setCopyModalOpen(true)} icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>}>
-                                Önceki Yıldan Kopyala
-                            </Button>
-                        </PermissionGate>
                         <Button variant="outline" onClick={() => setImportModalOpen(true)} icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>}>
                             Dışarıdan Yükle
                         </Button>
@@ -572,28 +547,6 @@ export default function ControlInventoryPage() {
                     </div>
                 }
             />
-
-            {/* Yıl kapsamı seçici — "Tüm Envanter" = filtresiz kalıcı ana envanter */}
-            <div className="flex items-center gap-2 -mt-2">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Kapsam:</span>
-                <div className="flex flex-wrap gap-1.5">
-                    <button
-                        onClick={() => setYearFilter('all')}
-                        className={`px-3 py-1 rounded-lg text-xs font-bold border transition-colors ${yearFilter === 'all' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}
-                    >
-                        Tüm Envanter
-                    </button>
-                    {availableYears.map(y => (
-                        <button
-                            key={y}
-                            onClick={() => setYearFilter(y)}
-                            className={`px-3 py-1 rounded-lg text-xs font-bold border transition-colors ${yearFilter === y ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300'}`}
-                        >
-                            {y}
-                        </button>
-                    ))}
-                </div>
-            </div>
 
             {/* KPI'lar — click-to-filter */}
             <KpiGrid columns={5}>
@@ -690,12 +643,6 @@ export default function ControlInventoryPage() {
                 onClose={() => setScopeModalOpen(false)}
                 controlIds={Array.from(selectedRows)}
                 onSuccess={() => { setSelectedRows(new Set()); fetchControls(); }}
-            />
-
-            <CopyScopeModal
-                open={copyModalOpen}
-                onClose={() => setCopyModalOpen(false)}
-                onSuccess={fetchControls}
             />
 
             <ImportControlModal

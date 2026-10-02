@@ -272,9 +272,13 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
                 .body.find((f: any) => f.actionId === action.id);
             await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ status: 'TAMAMLANDI', result: 'YENI_AKSIYON_GEREKLI',
+                    resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
                     newAction: { description: 'Geçici — geçersiz tarihle rollback', ownerId: adminId, dueDate } }).expect(200);
             await request(app.getHttpServer()).post(`/findings/${fId}/follow-ups/${fu.id}/second-controller`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ secondControllerId: managerId, reason: 'e2e' }).expect(201);
+            const completedHistoryBeforeApproval = await prisma.findingStatusHistory.count({
+                where: { findingId: fId, operation: 'FOLLOWUP_COMPLETED' },
+            });
 
             // Onayda newAction.dueDate GEÇERSİZ → createAction tx içinde patlar → tüm zincir rollback
             await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${managerToken}`)
@@ -285,7 +289,8 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
             expect(fuAfter?.approvalStatus).not.toBe('ONAYLANDI');
             expect(fuAfter?.status).not.toBe('ONAYLANDI');
             expect(await prisma.action.count({ where: { findingId: fId } })).toBe(1); // yalnız orijinal
-            expect(await prisma.findingStatusHistory.count({ where: { findingId: fId, operation: 'FOLLOWUP_COMPLETED' } })).toBe(0);
+            expect(await prisma.findingStatusHistory.count({ where: { findingId: fId, operation: 'FOLLOWUP_COMPLETED' } }))
+                .toBe(completedHistoryBeforeApproval);
 
             // Retry — geçerli tarihle → başarı
             const goodDate = new Date(Date.now() + 20 * 86400000).toISOString().split('T')[0];
@@ -309,6 +314,7 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
                 .body.find((f: any) => f.actionId === action.id);
             await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ status: 'TAMAMLANDI', result: 'YENI_AKSIYON_GEREKLI',
+                    resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
                     newAction: { description: 'y', ownerId: adminId, dueDate } }).expect(200);
             await request(app.getHttpServer()).post(`/findings/${fId}/follow-ups/${fu.id}/second-controller`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ secondControllerId: managerId, reason: 'e2e' }).expect(201);

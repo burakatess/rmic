@@ -1,0 +1,195 @@
+{
+  "generatedAt": "2026-09-17T10:54:06.567Z",
+  "mode": "APPLY",
+  "summary": {
+    "totalMissingCode": 26,
+    "alreadyFilled": 0,
+    "backfilled": 26,
+    "conflicts": 0
+  },
+  "backfilled": [
+    {
+      "scopeId": "cmu14gyfe000erxvw1di1kf2m",
+      "controlId": "cmtla8308000yd3vwtxrluvce",
+      "controlCode": "K-2026-0001",
+      "year": 2026,
+      "code": "2026.K-2026-0001"
+    },
+    {
+      "scopeId": "cmu14gybp0000rxvwtixdppnq",
+      "controlId": "cmtla830c000zd3vws2fj8q3k",
+      "controlCode": "K-2026-0002",
+      "year": 2026,
+      "code": "2026.K-2026-0002"
+    },
+    {
+      "scopeId": "cmu14gyct0001rxvwtt7iaiqv",
+      "controlId": "cmtla830d0010d3vwenvyorrz",
+      "controlCode": "K-2026-0003",
+      "year": 2026,
+      "code": "2026.K-2026-0003"
+    },
+    {
+      "scopeId": "cmu14gyd40002rxvwtto4dfmw",
+      "controlId": "cmtla830f0011d3vwkv6b7zfh",
+      "controlCode": "K-2026-0004",
+      "year": 2026,
+      "code": "2026.K-2026-0004"
+    },
+    {
+      "scopeId": "cmu14gyde0003rxvwv83zdsxr",
+      "controlId": "cmtla830h0012d3vwdic3n062",
+      "controlCode": "K-2026-0005",
+      "year": 2026,
+      "code": "2026.K-2026-0005"
+    },
+    {
+      "scopeId": "cmu14gyfm000frxvwt9gn5xn6",
+      "controlId": "cmtla830i0013d3vw6jam1lq9",
+      "controlCode": "K-2026-0006",
+      "year": 2026,
+      "code": "2026.K-2026-0006"
+    },
+    {
+      "scopeId": "cmu14gydr0004rxvwzxl3nvmn",
+      "controlId": "cmtla830k0014d3vwnz0v27pf",
+      "controlCode": "K-2026-0007",
+      "year": 2026,
+      "code": "2026.K-2026-0007"
+    },
+    {
+      "scopeId": "cmu14gydv0005rxvw5s7b9ux7",
+      "controlId": "cmtla830m0015d3vwpixu06aw",
+      "controlCode": "K-2026-0008",
+      "year": 2026,
+      "code": "2026.K-2026-0008"
+    },
+    {
+      "scopeId": "cmu14gydz0006rxvw8gm6o76g",
+      "controlId": "cmtla830o0016d3vwlkja1ubp",
+      "controlCode": "K-2026-0009",
+      "year": 2026,
+      "code": "2026.K-2026-0009"
+    },
+    {
+      "scopeId": "cmu14gye30007rxvwqvrqvjsr",
+      "controlId": "cmtla830p0017d3vwap8e12lf",
+      "controlCode": "K-2026-0010",
+      "year": 2026,
+      "code": "2026.K-2026-0010"
+    },
+    {
+      "scopeId": "cmu14gye50008rxvwoco6up3q",
+      "controlId": "cmtla830r0018d3vwt2raym2f",
+      "controlCode": "K-2026-0011",
+      "year": 2026,
+      "code": "2026.K-2026-0011"
+    },
+    {
+      "scopeId": "cmu14gyee0009rxvwvpn0h84f",
+      "controlId": "cmtla830t0019d3vwg3x82aic",
+      "controlCode": "K-2026-0012",
+      "year": 2026,
+      "code": "2026.K-2026-0012"
+    },
+    {
+      "scopeId": "cmu14gyem000arxvw1563hz99",
+      "controlId": "cmtla830u001ad3vwvsigvstn",
+      "controlCode": "K-2026-0013",
+      "year": 2026,
+      "code": "2026.K-2026-0013"
+    },
+    {
+      "scopeId": "cmu14gyeu000brxvwc1welup9",
+      "controlId": "cmtla830v001bd3vwma8b4wne",
+      "controlCode": "K-2026-0014",
+      "year": 2026,
+      "code": "2026.K-2026-0014"
+    },
+    {
+      "scopeId": "cmu14gyf2000crxvwettg8pzj",
+      "controlId": "cmtla830x001cd3vwmqoh1wk4",
+      "controlCode": "K-2026-0015",
+      "year": 2026,
+      "code": "2026.K-2026-0015"
+    },
+    {
+      "scopeId": "cmu14gyfa000drxvwlvf3lke4",
+      "controlId": "cmtla830y001dd3vwkhcfsco4",
+      "controlCode": "K-2026-0016",
+      "year": 2026,
+      "code": "2026.K-2026-0016"
+    },
+    {
+      "scopeId": "cmu14gyh9000nrxvw8q79ntkh",
+      "controlId": "cmtla8310001ed3vwqrmd2grq",
+      "controlCode": "K-2026-0017",
+      "year": 2026,
+      "code": "2026.K-2026-0017"
+    },
+    {
+      "scopeId": "cmu14gyfp000grxvwkcenpilb",
+      "controlId": "cmtla8312001fd3vwshofr0au",
+      "controlCode": "K-2026-0018",
+      "year": 2026,
+      "code": "2026.K-2026-0018"
+    },
+    {
+      "scopeId": "cmu14gyft000hrxvwaog6zjfy",
+      "controlId": "cmtla8314001gd3vw1rs9as0z",
+      "controlCode": "K-2026-0019",
+      "year": 2026,
+      "code": "2026.K-2026-0019"
+    },
+    {
+      "scopeId": "cmu14gyfv000irxvwudyv8zkf",
+      "controlId": "cmtla8315001hd3vw448qcn72",
+      "controlCode": "K-2026-0020",
+      "year": 2026,
+      "code": "2026.K-2026-0020"
+    },
+    {
+      "scopeId": "cmu14gyfy000jrxvwwlmb9f7w",
+      "controlId": "cmtla8317001id3vwbbb626nw",
+      "controlCode": "K-2026-0021",
+      "year": 2026,
+      "code": "2026.K-2026-0021"
+    },
+    {
+      "scopeId": "cmu14gyg0000krxvwc8p904w9",
+      "controlId": "cmtla8318001jd3vwsrvk86n7",
+      "controlCode": "K-2026-0022",
+      "year": 2026,
+      "code": "2026.K-2026-0022"
+    },
+    {
+      "scopeId": "cmu14gyg1000lrxvwfeyb3kfi",
+      "controlId": "cmtla8319001kd3vw1ttuxlih",
+      "controlCode": "K-2026-0023",
+      "year": 2026,
+      "code": "2026.K-2026-0023"
+    },
+    {
+      "scopeId": "cmu14gyhd000orxvwjhdczj51",
+      "controlId": "cmtla831e001nd3vwlc2cvp5c",
+      "controlCode": "K-2026-0026",
+      "year": 2026,
+      "code": "2026.K-2026-0026"
+    },
+    {
+      "scopeId": "cmu14gygd000mrxvwquhms0z3",
+      "controlId": "cmtla831g001od3vwxm9lwae5",
+      "controlCode": "K-2026-0027",
+      "year": 2026,
+      "code": "2026.K-2026-0027"
+    },
+    {
+      "scopeId": "cmu45yu300004zkvwqk0hbm1w",
+      "controlId": "cmtla830d0010d3vwenvyorrz",
+      "controlCode": "K-2026-0003",
+      "year": 2027,
+      "code": "2027.K-2026-0003"
+    }
+  ],
+  "conflicts": []
+}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import api from '@/lib/api';
 import { Button, Modal, Select, StatusBadge } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
@@ -18,6 +19,7 @@ interface YearScope {
     year: number;
     status: 'ACTIVE' | 'REMOVED';
     frequency: string;
+    code?: string | null; // Dönem Kontrolü kodu — "2027.BTK.0042"
     addedBy?: { firstName: string; lastName: string } | null;
     addedAt?: string;
     removedBy?: { firstName: string; lastName: string } | null;
@@ -142,6 +144,11 @@ export default function ControlScopePanel({ controlId, yearScopes, onChanged }: 
                         <div>
                             <div className="flex items-center gap-2">
                                 <span className="font-black text-slate-800">{s.year}</span>
+                                {s.code && (
+                                    <Link href={`/controls/agenda/${s.id}`} target="_blank" className="font-mono text-xs font-bold text-emerald-700 bg-white border border-emerald-200 px-2 py-0.5 rounded hover:underline">
+                                        {s.code} →
+                                    </Link>
+                                )}
                                 <StatusBadge variant={s.status === 'ACTIVE' ? 'success' : 'neutral'}>{s.status === 'ACTIVE' ? 'Kapsamda' : 'Kapsam Dışı'}</StatusBadge>
                                 <span className="text-xs font-bold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded">{frequencyLabel[s.frequency] || s.frequency}</span>
                                 <span className="text-xs text-slate-400">{s._count?.tasks ?? 0} task</span>

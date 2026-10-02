@@ -41,35 +41,26 @@ const FOLLOW_UP_STATUSES = [
     { value: 'TAMAMLANDI',   label: 'Tamamlandı' },
 ];
 
-// 4 sonuç seçeneği (Madde 6)
+const RESULT_OPTIONS = [
+    { value: 'YETERLI', label: 'Yeterli', desc: 'Kanıt ve uygulama aksiyonun yeterli olduğunu gösteriyor.' },
+    { value: 'YETERSIZ', label: 'Yetersiz', desc: 'Düzeltme sürmeli veya yeni bir tarihe ertelenmeli.' },
+    { value: 'YENI_AKSIYON_GEREKLI', label: 'Yeni Aksiyon Gerekli', desc: 'Ek bir düzeltici aksiyon tanımlanmalı.' },
+];
+
+// Yalnız YETERSIZ değerlendirmesinde kullanıcı devam/erteleme kararını verir.
+// YETERLI kapanışı açık aksiyonlara göre ikinci kontrolcü onayında sistem türetir.
 const RESOLUTION_OPTIONS = [
-    {
-        value: 'KAPATILDI',
-        label: 'Bulgu Kapatıldı',
-        icon: '✅',
-        desc: 'Aksiyon tamamlandı, kanıtlar yeterli.',
-        color: { border: 'border-emerald-400', bg: 'bg-emerald-50', text: 'text-emerald-800', dot: 'bg-emerald-500' },
-    },
     {
         value: 'DEVAM_EDIYOR',
         label: 'Devam Ediyor',
-        icon: '🔄',
         desc: 'Aksiyon sürüyor, bulgu açık.',
         color: { border: 'border-amber-400', bg: 'bg-amber-50', text: 'text-amber-800', dot: 'bg-amber-500' },
     },
     {
-        value: 'KISMEN_KAPATILDI',
-        label: 'Kısmen Kapatıldı',
-        icon: '⏳',
-        desc: 'Bir kısmı tamamlandı, izleme devam ediyor.',
+        value: 'ERTELENDI',
+        label: 'Ertelendi',
+        desc: 'Takip gelecekteki yeni tarihte tekrar değerlendirilecek.',
         color: { border: 'border-blue-400', bg: 'bg-blue-50', text: 'text-blue-800', dot: 'bg-blue-500' },
-    },
-    {
-        value: 'YENI_AKSIYON_GEREKLI',
-        label: 'Yeni Aksiyon Gerekli',
-        icon: '⚡',
-        desc: 'Yeni düzeltici aksiyon tanımlanmalı.',
-        color: { border: 'border-orange-400', bg: 'bg-orange-50', text: 'text-orange-800', dot: 'bg-orange-500' },
     },
 ];
 
@@ -145,8 +136,21 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
     const setNA = (key: keyof typeof newActionForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
         setNewActionForm(p => ({ ...p, [key]: e.target.value }));
 
-    const showNewActionForm = form.resolutionOutcome === 'YENI_AKSIYON_GEREKLI';
-    const showNewDate = form.resolutionOutcome === 'DEVAM_EDIYOR' || form.resolutionOutcome === 'KISMEN_KAPATILDI';
+    const showNewActionForm = form.result === 'YENI_AKSIYON_GEREKLI';
+    const showNewDate = form.resolutionOutcome === 'ERTELENDI';
+
+    const chooseResult = (result: string) => {
+        setForm(p => ({
+            ...p,
+            result,
+            resolutionOutcome: result === 'YENI_AKSIYON_GEREKLI'
+                ? 'YENI_AKSIYON_GEREKLI'
+                : result === 'YETERSIZ'
+                    ? (['DEVAM_EDIYOR', 'ERTELENDI'].includes(p.resolutionOutcome) ? p.resolutionOutcome : 'DEVAM_EDIYOR')
+                    : '',
+            newFollowUpDate: result === 'YETERSIZ' ? p.newFollowUpDate : '',
+        }));
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -156,22 +160,30 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
             showError('Zorunlu Alan', 'Güncel Durum Açıklaması zorunludur.');
             return;
         }
-        if (form.resolutionOutcome === 'YENI_AKSIYON_GEREKLI' && !newActionForm.description.trim()) {
+        if (form.status === 'TAMAMLANDI' && !form.result) {
+            showError('Zorunlu Alan', 'Tamamlanan takip için değerlendirme sonucu seçiniz.');
+            return;
+        }
+        if (form.resolutionOutcome === 'ERTELENDI' && !form.newFollowUpDate) {
+            showError('Zorunlu Alan', 'Ertelenen takip için yeni takip tarihi seçiniz.');
+            return;
+        }
+        if (form.result === 'YENI_AKSIYON_GEREKLI' && !newActionForm.description.trim()) {
             showError('Zorunlu Alan', 'Yeni aksiyon açıklaması giriniz.');
             return;
         }
-        if (form.resolutionOutcome === 'YENI_AKSIYON_GEREKLI' && !newActionForm.ownerId) {
+        if (form.result === 'YENI_AKSIYON_GEREKLI' && !newActionForm.ownerId) {
             showError('Zorunlu Alan', 'Yeni aksiyon için sorumlu kişi seçiniz.');
             return;
         }
-        if (form.resolutionOutcome === 'YENI_AKSIYON_GEREKLI' && !newActionForm.dueDate) {
+        if (form.result === 'YENI_AKSIYON_GEREKLI' && !newActionForm.dueDate) {
             showError('Zorunlu Alan', 'Yeni aksiyon için hedef tarih giriniz.');
             return;
         }
 
         setSaving(true);
         try {
-            const isNewActionCase = form.resolutionOutcome === 'YENI_AKSIYON_GEREKLI'
+            const isNewActionCase = form.result === 'YENI_AKSIYON_GEREKLI'
                 && newActionForm.description && newActionForm.ownerId && newActionForm.dueDate;
 
             const payload: Record<string, any> = {
@@ -187,7 +199,7 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                 targetResolutionDate:      form.targetResolutionDate || null,
                 explanation:               form.explanation || null,
                 notes:                     form.notes || null,
-                newActionRequired:         form.resolutionOutcome === 'YENI_AKSIYON_GEREKLI',
+                newActionRequired:         form.result === 'YENI_AKSIYON_GEREKLI',
                 // Backend, YENI_AKSIYON_GEREKLI sonucunda bu bilgiyle (veya boşsa fallback ile)
                 // aynı istekte otomatik yeni Action + FollowUp oluşturur — ayrı bir çağrı gerekmez.
                 ...(isNewActionCase ? {
@@ -214,7 +226,9 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                 // Mesaj, formun doluluğuna göre DEĞİL, backend'in gerçek sonucuna göre (Madde 7).
                 success('Güncellendi', res?.createdAction
                     ? `Takip çalışması güncellendi. Yeni düzeltici aksiyon oluşturuldu: ${res.createdAction.actionId}`
-                    : 'Takip çalışması güncellendi.');
+                    : form.status === 'TAMAMLANDI'
+                        ? 'Takip tamamlandı, ikinci kontrolcü onayı bekleniyor.'
+                        : 'Takip çalışması güncellendi.');
             } else {
                 await api.createFollowUp(findingId, payload);
                 success('Oluşturuldu', 'Takip çalışması oluşturuldu.');
@@ -312,12 +326,34 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                                     className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-violet-300 outline-none resize-none" />
                             </div>
 
-                            {/* Sonuç — 4 kart */}
+                            {/* Değerlendirme sonucu */}
                             <div>
                                 <label className="text-xs font-semibold text-slate-700 uppercase tracking-wide block mb-2">
-                                    Kapanış Kararı
+                                    Değerlendirme Sonucu
                                 </label>
-                                <div className="grid grid-cols-2 gap-2">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                    {RESULT_OPTIONS.map(opt => {
+                                        const isSelected = form.result === opt.value;
+                                        return (
+                                            <button key={opt.value} type="button" onClick={() => chooseResult(opt.value)}
+                                                className={`p-3 rounded-xl border-2 text-left transition-all ${
+                                                    isSelected ? 'border-violet-400 bg-violet-50' : 'border-slate-200 bg-white hover:border-slate-300'
+                                                }`}>
+                                                <p className={`text-sm font-semibold ${isSelected ? 'text-violet-800' : 'text-slate-700'}`}>{opt.label}</p>
+                                                <p className="text-[10px] text-slate-500 mt-1 leading-tight">{opt.desc}</p>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                <p className="mt-2 text-[11px] text-slate-400">Sonuç, atanmış ikinci kontrolcünün onayından sonra aksiyon ve bulgu durumuna uygulanır.</p>
+                            </div>
+
+                            {form.result === 'YETERSIZ' && (
+                                <div>
+                                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-wide block mb-2">
+                                        Yetersiz Sonrası Karar
+                                    </label>
+                                    <div className="grid grid-cols-2 gap-2">
                                     {RESOLUTION_OPTIONS.map(opt => {
                                         const isSelected = form.resolutionOutcome === opt.value;
                                         return (
@@ -334,27 +370,29 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                                                 </div>
                                                 <div className="min-w-0">
                                                     <p className={`text-sm font-semibold leading-tight ${isSelected ? opt.color.text : 'text-slate-700'}`}>
-                                                        {opt.icon} {opt.label}
+                                                        {opt.label}
                                                     </p>
                                                     <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">{opt.desc}</p>
                                                 </div>
                                             </button>
                                         );
                                     })}
-                                </div>
-                            </div>
-
-                            {/* Devam/Kısmen → yeni takip tarihi */}
-                            {showNewDate && (
-                                <div className="grid grid-cols-2 gap-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                                    <div>
-                                        <label className="text-xs font-semibold text-amber-800 uppercase block mb-1.5">Yeni Bulgu Test Tarihi</label>
-                                        <input type="date" value={form.testDate} onChange={set('testDate')}
-                                            className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-300 bg-white" />
                                     </div>
+                                </div>
+                            )}
+
+                            {form.result === 'YETERLI' && (
+                                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+                                    Kapanış kararı elle seçilmez. Onay sırasında tüm aksiyonlar kapandıysa bulgu kapanır; açık aksiyon varsa kısmen kapalı kalır.
+                                </div>
+                            )}
+
+                            {/* Erteleme → zorunlu yeni takip tarihi */}
+                            {showNewDate && (
+                                <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
                                     <div>
-                                        <label className="text-xs font-semibold text-amber-800 uppercase block mb-1.5">Öngörülen Tamamlanma</label>
-                                        <input type="date" value={form.targetResolutionDate} onChange={set('targetResolutionDate')}
+                                        <label className="text-xs font-semibold text-amber-800 uppercase block mb-1.5">Yeni Takip Tarihi *</label>
+                                        <input type="date" aria-label="Yeni Takip Tarihi *" value={form.newFollowUpDate} onChange={set('newFollowUpDate')}
                                             className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-300 bg-white" />
                                     </div>
                                 </div>
@@ -399,7 +437,6 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                         {showNewActionForm && (
                             <div className="border-2 border-orange-300 rounded-xl p-5 bg-orange-50 space-y-4">
                                 <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-base">⚡</span>
                                     <h4 className="text-sm font-bold text-orange-800">Yeni Düzeltici Aksiyon</h4>
                                 </div>
                                 <p className="text-xs text-orange-700">Bu takip tamamlandığında sistem otomatik olarak aşağıdaki aksiyonu oluşturacak.</p>
@@ -447,15 +484,16 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                         )}
 
                         {/* Güncelleme özeti */}
-                        {form.resolutionOutcome && (
+                        {form.result && (
                             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-600">
-                                <p className="font-semibold mb-1">Ana bulguda otomatik güncellenecek:</p>
+                                <p className="font-semibold mb-1">İkinci kontrolcü onayından sonra uygulanacak:</p>
                                 <ul className="space-y-0.5 list-disc list-inside">
-                                    <li>Çözüm Durumu → <strong>{RESOLUTION_OPTIONS.find(o => o.value === form.resolutionOutcome)?.label}</strong></li>
+                                    <li>Değerlendirme → <strong>{RESULT_OPTIONS.find(o => o.value === form.result)?.label}</strong></li>
+                                    {form.result === 'YETERLI' && <li>Bulgu sonucu açık aksiyonlara göre sistem tarafından türetilir</li>}
+                                    {form.result === 'YETERSIZ' && <li>Çözüm Durumu → <strong>{RESOLUTION_OPTIONS.find(o => o.value === form.resolutionOutcome)?.label}</strong></li>}
                                     {form.currentStatusDetail && <li>Güncel Durum log'una yeni satır eklenir</li>}
-                                    {form.resolutionOutcome === 'KAPATILDI' && <li>Kapanma Tarihi → <strong>Bugün</strong>, Test Tarihi temizlenir</li>}
-                                    {form.testDate && <li>Bulgu Test Tarihi → <strong>{form.testDate}</strong></li>}
-                                    {showNewActionForm && <li className="text-orange-700 font-semibold">⚡ Yeni aksiyon oluşturulur</li>}
+                                    {form.newFollowUpDate && <li>Yeni takip tarihi → <strong>{form.newFollowUpDate}</strong></li>}
+                                    {showNewActionForm && <li className="text-orange-700 font-semibold">Yeni aksiyon oluşturulur</li>}
                                 </ul>
                             </div>
                         )}

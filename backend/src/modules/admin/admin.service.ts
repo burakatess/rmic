@@ -29,6 +29,22 @@ export class AdminService {
         return users.map(({ passwordHash, ...user }) => user);
     }
 
+    async findUserOptions(params: { search?: string; page: number; limit: number }) {
+        const where = params.search ? { OR: [
+            { firstName: { contains: params.search, mode: 'insensitive' as const } },
+            { lastName: { contains: params.search, mode: 'insensitive' as const } },
+        ] } : {};
+        const [data, total] = await Promise.all([
+            this.prisma.user.findMany({
+                where, skip: (params.page - 1) * params.limit, take: params.limit,
+                select: { id: true, firstName: true, lastName: true, isActive: true },
+                orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+            }),
+            this.prisma.user.count({ where }),
+        ]);
+        return { data, pagination: { total, page: params.page, limit: params.limit, totalPages: Math.ceil(total / params.limit) } };
+    }
+
     async findUserById(id: string) {
         const user = await this.prisma.user.findUnique({
             where: { id },

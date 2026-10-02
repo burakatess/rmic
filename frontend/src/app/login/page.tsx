@@ -109,9 +109,11 @@ export default function LoginPage() {
                         </Button>
                     </form>
 
-                    {/* Demo giriş kısayolları — yalnızca development ortamında gösterilir.
-                        Gerçek e-posta/şifre bilgisi production build'inde asla render edilmez. */}
-                    {process.env.NODE_ENV !== 'production' && (
+                    {/* Demo giriş kısayolları — development'ta otomatik, production'da ise
+                        yalnızca derleme anında açıkça NEXT_PUBLIC_SHOW_DEMO_LOGIN=true verilmişse
+                        görünür (örn. kendi local docker-compose kurulumunuz). Gerçek bir prod
+                        dağıtımında bu bayrak set EDİLMEMELİDİR. */}
+                    {(process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN === 'true') && (
                         <>
                             <div className="flex items-center gap-4 my-8">
                                 <div className="flex-1 h-px bg-slate-700" />

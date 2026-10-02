@@ -67,6 +67,9 @@ export function Modal({
       {/* Dialog */}
       <div
         ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         className={`
           relative w-full ${sizeClasses[size]}
           bg-white rounded-xl shadow-xl
@@ -83,6 +86,7 @@ export function Modal({
             </div>
             <button
               onClick={onClose}
+              aria-label="Kapat"
               className="p-1 -mr-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

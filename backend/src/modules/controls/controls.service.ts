@@ -3,10 +3,22 @@ import { PrismaService } from '../../prisma';
 import { getLastBusinessDay, getFridaysInYear, TURKISH_MONTH_INDEX } from './control-period.util';
 import { generateControlCode } from './control-code.util';
 import { nextTestCode } from './test-code.util';
+import { projectControlStatus } from '../../common/workflow/workflow-projection';
+import { personFieldWhere } from '../../common/util/person-filter';
 
 @Injectable()
 export class ControlsService {
     constructor(private prisma: PrismaService) { }
+
+    private duplicateControlCode(controlId: string) {
+        return new ConflictException({
+            statusCode: 409,
+            error: 'Conflict',
+            code: 'CONTROL_CODE_ALREADY_EXISTS',
+            message: `${controlId} Kontrol Kodu zaten kullanılıyor`,
+            field: 'controlId',
+        });
+    }
 
     // ─── Controls CRUD ────────────────────────────────────────────────────────
 
@@ -59,7 +71,11 @@ export class ControlsService {
             this.prisma.control.count({ where }),
         ]);
 
-        const data = controls.map((c: any) => ({ ...c, scopeYears: c.yearScopes.map((s: any) => s.year) }));
+        const currentYear = new Date().getFullYear();
+        const data = controls.map((c: any) => {
+            const scopeYears = c.yearScopes.map((s: any) => s.year);
+            return { ...c, scopeYears, ...projectControlStatus(scopeYears.includes(currentYear), currentYear) };
+        });
 
         return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
     }
@@ -98,7 +114,9 @@ export class ControlsService {
             },
         });
         if (!control) throw new NotFoundException(`Control with ID ${id} not found`);
-        return { ...control, scopeYears: control.yearScopes.filter(s => s.status === 'ACTIVE').map(s => s.year) };
+        const scopeYears = control.yearScopes.filter(s => s.status === 'ACTIVE').map(s => s.year);
+        const currentYear = new Date().getFullYear();
+        return { ...control, scopeYears, ...projectControlStatus(scopeYears.includes(currentYear), currentYear) };
     }
 
     async create(data: any, userId: string) {
@@ -119,26 +137,50 @@ export class ControlsService {
 
         const controlId = data.controlId || await generateControlCode(this.prisma);
 
-        const control = await this.prisma.control.create({
-            data: {
-                ...rest,
-                controlId,
-                name: data.name || controlId,
-                description: data.description || '',
-                type: data.type || 'BT',
-                nature: data.nature || 'PREVENTIVE',
-                automation: data.automation || 'MANUAL',
-                frequency: data.frequency || 'MONTHLY',
-                selectedMonths: months || [],
-                status: controlStatus,
-                ownerId: userId, // kaydı oluşturan — artık "atanan kontrolcü" değil, DTO'dan kabul edilmez
-                directorateId: data.directorateId || null,
-            },
-            include: {
-                owner: { select: { id: true, firstName: true, lastName: true, email: true } },
-                directorateRel: { select: { id: true, name: true, code: true } },
-            },
-        });
+        if (data.controlId) {
+            const existingControl = await this.prisma.control.findUnique({
+                where: { controlId },
+                select: { id: true },
+            });
+            if (existingControl) throw this.duplicateControlCode(controlId);
+        }
+
+        let control: any;
+        try {
+            control = await this.prisma.control.create({
+                data: {
+                    ...rest,
+                    controlId,
+                    name: data.name || controlId,
+                    description: data.description || '',
+                    type: data.type || 'BT',
+                    nature: data.nature || 'PREVENTIVE',
+                    automation: data.automation || 'MANUAL',
+                    frequency: data.frequency || 'MONTHLY',
+                    selectedMonths: months || [],
+                    status: controlStatus,
+                    ownerId: userId, // kaydı oluşturan — artık "atanan kontrolcü" değil, DTO'dan kabul edilmez
+                    directorateId: data.directorateId || null,
+                },
+                include: {
+                    owner: { select: { id: true, firstName: true, lastName: true, email: true } },
+                    directorateRel: { select: { id: true, name: true, code: true } },
+                },
+            });
+        } catch (error) {
+            // Ön kontrol kullanıcıya erken ve açık geri bildirim sağlar; bu yakalama
+            // ise aynı kodla eşzamanlı iki isteğin yarışma durumunu güvenle kapatır.
+            if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
+                const target = 'meta' in error && error.meta && typeof error.meta === 'object' && 'target' in error.meta
+                    ? error.meta.target
+                    : undefined;
+                const fields = Array.isArray(target) ? target : typeof target === 'string' ? [target] : [];
+                if (fields.length === 0 || fields.includes('controlId')) {
+                    throw this.duplicateControlCode(controlId);
+                }
+            }
+            throw error;
+        }
 
         await this.prisma.auditLog.create({
             data: { userId, action: 'CREATE', entityType: 'Control', entityId: control.id, newValue: control },
@@ -192,6 +234,15 @@ export class ControlsService {
         if (data.selectedMonths !== undefined) updateData.selectedMonths = data.selectedMonths;
         if (controlStatus !== undefined) updateData.status = controlStatus;
         if (data.directorateId !== undefined) updateData.directorateId = data.directorateId || null;
+
+        // Kontrol SÜRÜMÜ — yalnızca tanım/test adımları/mehaz/ad GERÇEKTEN
+        // değiştiyse artar (madde 17). Bu, uygulanmış Dönem Kontrollerinin
+        // "kaynak kontrolde yeni sürüm var" göstergesinin dayanağıdır — geçmiş
+        // dönemler sessizce değişmez, yalnızca açık "Yeni sürümü uygula"
+        // işlemiyle (control-scope.service.ts::applyNewVersion) güncellenir.
+        const VERSION_FIELDS = ['name', 'description', 'testSteps', 'mehaz'] as const;
+        const definitionChanged = VERSION_FIELDS.some(f => updateData[f] !== undefined && updateData[f] !== (existing as any)[f]);
+        if (definitionChanged) updateData.version = { increment: 1 };
 
         const control = await this.prisma.control.update({
             where: { id },
@@ -281,10 +332,10 @@ export class ControlsService {
 
     // ─── ControlTest CRUD ─────────────────────────────────────────────────────
 
-    async getAllTests(query: any) {
+    async getAllTests(query: any, currentUserId?: string) {
         const {
-            status, controlId, directorateId, assigneeId, findingStatus, sortBy, sortOrder,
-            year, period, frequency, overdue, includeOutOfScope,
+            status, controlId, directorateId, assigneeId, assigneeIds, secondControllerIds, findingStatus, sortBy, sortOrder,
+            year, month, period, frequency, overdue, includeOutOfScope, search,
         } = query;
         const page = parseInt(query.page, 10) || 1;
         const limit = parseInt(query.limit, 10) || 50;
@@ -294,9 +345,22 @@ export class ControlsService {
         if (status) where.status = status;
         if (controlId) where.controlId = controlId;
         if (directorateId) where.directorateId = directorateId;
-        if (assigneeId) where.assigneeId = assigneeId;
+        const personAnd = [personFieldWhere('assigneeId', assigneeIds || assigneeId, currentUserId), personFieldWhere('secondControllerId', secondControllerIds, currentUserId)].filter(Boolean);
+        if (personAnd.length) where.AND = personAnd;
         if (findingStatus) where.findingStatus = findingStatus;
         if (year && year !== 'all') where.year = parseInt(year, 10);
+        if (month) {
+            const filterYear = year && year !== 'all' ? parseInt(year, 10) : new Date().getFullYear();
+            const filterMonth = parseInt(month, 10);
+            where.plannedDate = { gte: new Date(filterYear, filterMonth - 1, 1), lt: new Date(filterYear, filterMonth, 1) };
+        }
+        if (search) where.AND = [...(where.AND || []), { OR: [
+            { testNo: { contains: search, mode: 'insensitive' } },
+            { summary: { contains: search, mode: 'insensitive' } },
+            { control: { controlId: { contains: search, mode: 'insensitive' } } },
+            { control: { name: { contains: search, mode: 'insensitive' } } },
+            { directorate: { name: { contains: search, mode: 'insensitive' } } },
+        ] }];
         if (period) where.periodKey = period;
         if (frequency) {
             where.OR = [
@@ -363,6 +427,8 @@ export class ControlsService {
                 findings: { select: { id: true, findingId: true, severity: true, resolutionStatus: true, summary: true, status: true } },
                 referencedFinding: { select: { id: true, findingId: true, status: true, summary: true } },
                 attachments: { orderBy: { createdAt: 'desc' } },
+                // Dönem Kontrolü çapraz bağlantısı için (madde 16) — "Dönem Kontrolü: 2027.BTK.0042".
+                scope: { select: { id: true, code: true, year: true } },
             },
         });
         if (!test) throw new NotFoundException(`Test ${testId} bulunamadı`);
@@ -453,7 +519,7 @@ export class ControlsService {
     // ─── ControlTest Kanıt Ekleri ─────────────────────────────────────────────
     async addControlTestAttachment(
         testId: string,
-        meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number },
+        meta: { uploadId: string; fileName: string; originalName: string; mimeType: string; sizeBytes: number; displayName?: string; description?: string },
         userId: string,
     ) {
         const test = await this.prisma.controlTest.findUnique({ where: { id: testId }, select: { id: true, status: true } });
@@ -462,22 +528,40 @@ export class ControlsService {
             throw new BadRequestException('Onaylanmış testin kanıtları değiştirilemez. Önce SYSTEM_ADMIN final onayı iptal etmeli.');
         }
 
-        const att = await this.prisma.controlTestAttachment.create({
-            data: {
+        return this.prisma.$transaction(async tx => {
+            const ticket = await tx.uploadTicket.findFirst({ where: { id: meta.uploadId, uploadedById: userId, claimedAt: null, expiresAt: { gt: new Date() } } });
+            if (!ticket || ticket.fileName !== meta.fileName || ticket.originalName !== meta.originalName || ticket.mimeType !== meta.mimeType || ticket.sizeBytes !== meta.sizeBytes) throw new BadRequestException('Yükleme kaydı geçersiz, süresi dolmuş veya bu kullanıcıya ait değil.');
+            const claim = await tx.uploadTicket.updateMany({ where: { id: ticket.id, claimedAt: null }, data: { claimedAt: new Date() } });
+            if (claim.count !== 1) throw new BadRequestException('Bu yükleme daha önce kullanılmış.');
+            const att = await tx.controlTestAttachment.create({ data: {
                 controlTestId: testId,
                 fileName: meta.fileName,
                 originalName: meta.originalName,
+                displayName: (meta as any).displayName?.trim() || meta.originalName,
+                description: (meta as any).description?.trim() || null,
                 mimeType: meta.mimeType,
                 sizeBytes: meta.sizeBytes,
                 uploadedBy: userId,
-            },
-        });
+            } });
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'FILE_UPLOADED', entityType: 'ControlTestAttachment', entityId: att.id, newValue: { testId, originalName: meta.originalName } },
-        });
+            await tx.auditLog.create({ data: { userId, action: 'FILE_UPLOADED', entityType: 'ControlTestAttachment', entityId: att.id, newValue: { testId, originalName: meta.originalName } } });
 
-        return att;
+            return att;
+        });
+    }
+
+    async updateControlTestAttachment(testId: string, attachmentId: string, dto: { displayName?: string; description?: string }, userId: string) {
+        const test = await this.prisma.controlTest.findUnique({ where: { id: testId }, select: { status: true } });
+        if (!test) throw new NotFoundException(`Test ${testId} not found`);
+        if (test.status === 'ONAYLANDI') throw new BadRequestException('Onaylanmış testin kanıtları değiştirilemez.');
+        const old = await this.prisma.controlTestAttachment.findFirst({ where: { id: attachmentId, controlTestId: testId } });
+        if (!old) throw new NotFoundException('Ek bulunamadı');
+        const updated = await this.prisma.controlTestAttachment.update({ where: { id: attachmentId }, data: {
+            displayName: dto.displayName !== undefined ? (dto.displayName.trim() || old.originalName) : undefined,
+            description: dto.description !== undefined ? (dto.description.trim() || null) : undefined,
+        } });
+        await this.prisma.auditLog.create({ data: { userId, action: 'FILE_METADATA_UPDATED', entityType: 'ControlTestAttachment', entityId: attachmentId, oldValue: { displayName: old.displayName, description: old.description }, newValue: { displayName: updated.displayName, description: updated.description } } });
+        return updated;
     }
 
     async removeControlTestAttachment(testId: string, attachmentId: string, userId: string) {
@@ -619,21 +703,7 @@ export class ControlsService {
             data: { status: 'ONAYLANDI', approvedAt: new Date(), approvedById: userId },
         });
 
-        // Kontrol etkinlik durumunu güncelle
-        const effectivenessMap: Record<string, 'EFFECTIVE' | 'INEFFECTIVE' | 'PARTIALLY_EFFECTIVE'> = {
-            BULGUSU_YOK: 'EFFECTIVE',
-            BULGUSU_VAR: 'INEFFECTIVE',
-        };
-        const effectiveness = test.findingStatus ? (effectivenessMap[test.findingStatus] || 'NOT_TESTED') : 'NOT_TESTED';
-
-        await this.prisma.control.update({
-            where: { id: test.controlId },
-            data: {
-                lastTestDate: test.completedAt || new Date(),
-                lastTestResult: effectiveness as any,
-                effectivenessStatus: effectiveness as any,
-            },
-        });
+        await this.recalculateControlTestSummary(test.controlId);
 
         await this.prisma.auditLog.create({
             data: { userId, action: 'APPROVE_TEST', entityType: 'ControlTest', entityId: testId },
@@ -691,11 +761,38 @@ export class ControlsService {
             },
         });
 
+        await this.recalculateControlTestSummary(test.controlId);
+
         await this.prisma.auditLog.create({
             data: { userId, action: 'CANCEL_FINAL_APPROVAL', entityType: 'ControlTest', entityId: testId, newValue: { reason } },
         });
 
         return updated;
+    }
+
+    /** Kontrol özeti, onaylama sırasına değil tamamlanma tarihine göre en yeni
+     * onaylı teste dayanır. Final onay iptalinde bir önceki onaylı teste döner. */
+    private async recalculateControlTestSummary(controlId: string) {
+        const latestApproved = await this.prisma.controlTest.findFirst({
+            where: { controlId, status: 'ONAYLANDI' },
+            orderBy: [{ completedAt: 'desc' }, { approvedAt: 'desc' }],
+            select: { findingStatus: true, completedAt: true, approvedAt: true },
+        });
+        const effectivenessMap: Record<string, 'EFFECTIVE' | 'INEFFECTIVE' | 'PARTIALLY_EFFECTIVE'> = {
+            BULGUSU_YOK: 'EFFECTIVE',
+            BULGUSU_VAR: 'INEFFECTIVE',
+        };
+        const effectiveness = latestApproved?.findingStatus
+            ? (effectivenessMap[latestApproved.findingStatus] || 'NOT_TESTED')
+            : 'NOT_TESTED';
+        await this.prisma.control.update({
+            where: { id: controlId },
+            data: {
+                lastTestDate: latestApproved?.completedAt || latestApproved?.approvedAt || null,
+                lastTestResult: latestApproved ? effectiveness as any : null,
+                effectivenessStatus: effectiveness as any,
+            },
+        });
     }
 
     // ─── Merkezi Onay Sayfası ──────────────────────────────────────────────────

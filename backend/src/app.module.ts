@@ -27,6 +27,7 @@ import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 import { LibraryModule } from './modules/library/library.module';
 import { RiskSimulationModule } from './modules/risk-simulation/risk-simulation.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { WorkflowHealthModule } from './modules/workflow-health/workflow-health.module';
 import { JwtAuthGuard, PermissionsGuard } from './common/guards';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -66,6 +67,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     LibraryModule,
     RiskSimulationModule,
     DashboardModule,
+    WorkflowHealthModule,
   ],
   providers: [
     // Rate limit önce, sonra JWT auth

@@ -137,6 +137,10 @@ export class EvalMessageDto {
 export class EvalRunDto extends EvalSessionDto {
     @IsOptional() @IsString() @MaxLength(10000)
     additionalNote?: string | null;
+
+    /** Yeniden değerlendirmeye eklenecek kullanıcı sorusu (ayrıca "Ek soru" ile sorulanlar da otomatik eklenir). */
+    @IsOptional() @IsString() @MaxLength(4000)
+    followUpQuestion?: string | null;
 }
 
 /** "Ek soru sor" — 6 başlıklı raporu yeniden üretmez, soruya doğrudan yanıt verir. */
@@ -169,7 +173,7 @@ export class EvalAttachmentMetaDto {
 /** Tespit bazında insan incelemesi (item 9). */
 export class EvalFindingReviewDto {
     /** Değerlendirmedeki grup ve indeks. v1: uyumsuzAlanlar|bulguAdaylari; v2: findingAssessment|requirementAssessments. */
-    @IsIn(['uyumsuzAlanlar', 'bulguAdaylari', 'uyumluAlanlar', 'findingAssessment', 'requirementAssessments'])
+    @IsIn(['uyumsuzAlanlar', 'bulguAdaylari', 'uyumluAlanlar', 'findingAssessment', 'requirementAssessments', 'finding'])
     group!: string;
     @Type(() => Number) @IsInt() @Min(0) index!: number;
     @IsIn(['ACCEPTED', 'EDITED', 'REJECTED']) status!: string;

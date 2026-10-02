@@ -4,6 +4,7 @@ import { ActionsService } from './actions.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
 import { CreateStandaloneActionDto, UpdateStandaloneActionDto, ExtendActionDto, CreateEffectivenessReviewDto } from './dto';
+import { CompleteActionDto } from '../../common/dto/attachment.dto';
 
 @ApiTags('Actions')
 @ApiBearerAuth('JWT-Auth')
@@ -13,8 +14,8 @@ export class ActionsController {
     constructor(private actionsService: ActionsService) { }
 
     @Get()
-    async findAll(@Query() query: any) {
-        return this.actionsService.findAll(query);
+    async findAll(@Query() query: any, @CurrentUser('id') userId: string) {
+        return this.actionsService.findAll(query, userId);
     }
 
     @Get(':id/relations')
@@ -54,10 +55,11 @@ export class ActionsController {
     @Roles('SYSTEM_ADMIN', 'AUDITOR', 'AUDITEE')
     async complete(
         @Param('id') id: string,
+        @Body() data: CompleteActionDto,
         @CurrentUser('id') userId: string,
         @CurrentUser('role') role: string,
     ) {
-        return this.actionsService.complete(id, userId, role);
+        return this.actionsService.complete(id, data, userId, role);
     }
 
     @Post(':id/extend')

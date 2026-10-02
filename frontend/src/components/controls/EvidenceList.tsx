@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import api from '@/lib/api';
 import { useToast } from '@/components/ui/Toast';
+import { FILE_UPLOAD_ACCEPT, validateUploadFile } from '@/lib/file-upload-policy';
 
 export interface EvidenceItem {
     id: string;
@@ -10,6 +11,8 @@ export interface EvidenceItem {
     originalName: string;
     mimeType: string;
     sizeBytes: number;
+    displayName?: string | null;
+    description?: string | null;
     createdAt?: string;
     uploader?: { firstName: string; lastName: string } | null;
 }
@@ -34,13 +37,14 @@ const formatDate = (d?: string) => {
 };
 
 export function EvidenceList({
-    testId, attachments, selectedId, onSelect, onUploaded, onRemoved, disabled, disabledReason,
+    testId, attachments, selectedId, onSelect, onUploaded, onUpdated, onRemoved, disabled, disabledReason,
 }: {
     testId: string;
     attachments: EvidenceItem[];
     selectedId: string | null;
     onSelect: (a: EvidenceItem) => void;
     onUploaded: (a: EvidenceItem) => void;
+    onUpdated: (a: EvidenceItem) => void;
     onRemoved: (id: string) => void;
     disabled?: boolean;
     disabledReason?: string;
@@ -48,10 +52,18 @@ export function EvidenceList({
     const { error: showError, success } = useToast();
     const [tasks, setTasks] = useState<UploadTask[]>([]);
     const [removingId, setRemovingId] = useState<string | null>(null);
+    const [editing, setEditing] = useState<EvidenceItem | null>(null);
+    const [editName, setEditName] = useState('');
+    const [editDescription, setEditDescription] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
     const abortRef = useRef<Map<string, () => void>>(new Map());
 
     const startUpload = (file: File) => {
+        const validationError = validateUploadFile(file);
+        if (validationError) {
+            showError('Dosya yüklenemedi', validationError);
+            return;
+        }
         const key = `${file.name}-${Date.now()}-${Math.random()}`;
         setTasks(prev => [...prev, { key, file, progress: 0, status: 'uploading' }]);
 
@@ -110,8 +122,8 @@ export function EvidenceList({
                         onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
                     >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                        Kanıt Yükle (sürükle-bırak veya seç)
-                        <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => handleFiles(e.target.files)} />
+                        Kanıt Yükle (PDF, DOCX, XLSX, PNG, JPEG — en fazla 15 MB)
+                        <input ref={inputRef} type="file" multiple accept={FILE_UPLOAD_ACCEPT} className="hidden" onChange={(e) => handleFiles(e.target.files)} />
                     </label>
                 )}
             </div>
@@ -152,7 +164,9 @@ export function EvidenceList({
                     >
                         <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
-                                <p className="text-xs font-semibold text-slate-700 truncate">{a.originalName}</p>
+                                <p className="text-xs font-semibold text-slate-700 truncate">{a.displayName || a.originalName}</p>
+                                <p className="text-[10px] text-slate-400 truncate">Özgün: {a.originalName}</p>
+                                {a.description && <p className="text-[10px] text-slate-500 mt-0.5 line-clamp-2">{a.description}</p>}
                                 <p className="text-[10px] text-slate-400 mt-0.5">
                                     {a.mimeType} · {formatSize(a.sizeBytes)}
                                 </p>
@@ -161,10 +175,11 @@ export function EvidenceList({
                                 </p>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
+                                {!disabled && <span role="button" tabIndex={0} title="Ad ve açıklamayı düzenle" onClick={(e) => { e.stopPropagation(); setEditing(a); setEditName(a.displayName || a.originalName); setEditDescription(a.description || ''); }} className="p-1 rounded text-slate-400 hover:text-indigo-600">✎</span>}
                                 <span
                                     role="button"
                                     tabIndex={0}
-                                    onClick={(e) => { e.stopPropagation(); api.downloadAttachment(a.fileName, a.originalName); }}
+                                    onClick={(e) => { e.stopPropagation(); api.downloadAttachment('control-test', a.id, a.displayName || a.originalName); }}
                                     className="p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50"
                                     title="İndir"
                                 >
@@ -188,6 +203,12 @@ export function EvidenceList({
                     </button>
                 ))}
             </div>
+            {editing && <div className="border-t border-slate-200 p-3 space-y-2 bg-white">
+                <p className="text-[10px] text-slate-400">Özgün dosya: {editing.originalName}</p>
+                <input value={editName} maxLength={255} onChange={e => setEditName(e.target.value)} aria-label="Görünen ad" className="w-full text-xs border rounded px-2 py-1.5" />
+                <textarea value={editDescription} maxLength={2000} onChange={e => setEditDescription(e.target.value)} aria-label="Kanıt açıklaması" className="w-full text-xs border rounded px-2 py-1.5" rows={2} />
+                <div className="flex justify-end gap-2"><button className="text-xs" onClick={() => setEditing(null)}>İptal</button><button className="text-xs font-bold text-blue-700" onClick={async () => { try { const updated = await api.updateControlTestAttachment(testId, editing.id, { displayName: editName, description: editDescription }); onUpdated(updated); setEditing(null); success('Kaydedildi', 'Kanıt adı ve açıklaması güncellendi.'); } catch (e) { showError('Kaydedilemedi', e instanceof Error ? e.message : 'Kanıt güncellenemedi.'); } }}>Kaydet</button></div>
+            </div>}
         </div>
     );
 }

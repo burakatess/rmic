@@ -2,7 +2,8 @@
 
 export type SourceKind =
     | 'REGULATION' | 'STANDARD_FRAMEWORK' | 'AUDIT_METHODOLOGY' | 'CORPORATE_POLICY' | 'PRODUCT_DOC'
-    | 'CONTROL_TEST_CARD' | 'EVIDENCE_GUIDE' | 'PRECEDENT_FINDING' | 'TRAINING_EXAMPLE' | 'EVAL_SCENARIO';
+    | 'CONTROL_TEST_CARD' | 'EVIDENCE_GUIDE' | 'PRECEDENT_FINDING' | 'TRAINING_EXAMPLE' | 'EVAL_SCENARIO'
+    | 'OFFICIAL_GUIDE' | 'INTERNAL_METHODOLOGY';
 
 export const SOURCE_KIND_LABEL: Record<SourceKind, string> = {
     REGULATION: 'Mevzuat',
@@ -15,6 +16,8 @@ export const SOURCE_KIND_LABEL: Record<SourceKind, string> = {
     PRECEDENT_FINDING: 'Emsal Bulgu',
     TRAINING_EXAMPLE: 'Eğitim Örneği',
     EVAL_SCENARIO: 'Değerlendirme Senaryosu',
+    OFFICIAL_GUIDE: 'Resmî Rehber',
+    INTERNAL_METHODOLOGY: 'Kurumsal Metodoloji',
 };
 
 export type UsagePermission = 'UNKNOWN' | 'ALLOWED' | 'DENIED';

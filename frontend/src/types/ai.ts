@@ -587,3 +587,95 @@ export interface BulkEvalResult {
     ok: number;
     failed: { id: string; reason: string }[];
 }
+
+// ─── Yapılandırılmış çıktı v3 (schemaVersion 'eval-v3.1') ────────────────────
+// Yedi bölüm: Beklenen Durum · Kanıtlar · Kontrol Sonucu · Mevzuat/Rehber Maddeleri · Etki · Öneri · Bulgu.
+// Gereklilik/Uygulanabilirlik/Sonuç/Gerekçe tablosu YOKTUR.
+
+export const EVAL_V3_SCHEMA_VERSION = 'eval-v3.1';
+
+export type EvalV3Status = 'COMPLIANT' | 'PARTIALLY_COMPLIANT' | 'NON_COMPLIANT' | 'INSUFFICIENT_EVIDENCE';
+export type EvalV3RefSourceType = 'REGULATION' | 'OFFICIAL_GUIDE' | 'INTERNAL_POLICY';
+export type EvalV3RefAssessment = 'COMPLIANT' | 'NON_COMPLIANT' | 'RELEVANT' | 'NEEDS_CONFIRMATION';
+
+export interface EvalV3Evidence {
+    evidenceId: string;
+    name: string;
+    type: string;
+    observation: string;
+    limitations: string;
+    /** Backend: modelin değerlendirmesinde yer aldı mı? false = kullanılmadı. */
+    used?: boolean;
+    attachmentId?: string | null;
+    readStatus?: 'READ' | 'PARTIAL' | 'FAILED';
+}
+
+export interface EvalV3Reference {
+    refId: string;
+    sourceType: EvalV3RefSourceType;
+    sourceName: string;
+    version: string;
+    articleNumber: string;
+    articleTitle: string;
+    page: number | null;
+    sourceUnitId: string;
+    relation: string;
+    assessment: EvalV3RefAssessment;
+    // Backend doğrulaması (değerlendirme anındaki snapshot — kaynak sonradan değişse de korunur)
+    sourceId?: string;
+    sourceVersionId?: string;
+    snapshotText?: string;
+    snapshotHash?: string;
+    retrievalScore?: number | null;
+    retrievalRank?: number | null;
+    retrievalMethod?: string | null;
+    bindingNote?: string | null;
+    corrected?: boolean;
+    verified?: true;
+}
+
+export interface EvalV3Finding {
+    exists: boolean;
+    title: string;
+    explanation: string;
+    relatedReferenceIds: string[];
+    /** İnsan incelemesi (reviewFinding group='finding', index=0). */
+    _review?: { status: 'ACCEPTED' | 'EDITED' | 'REJECTED'; reviewerId?: string; reviewedAt?: string; reason?: string | null };
+}
+
+export interface EvalOutputV3 {
+    expectedState: string;
+    evaluatedEvidence: EvalV3Evidence[];
+    controlResult: { status: EvalV3Status; text: string };
+    references: EvalV3Reference[];
+    impact: string;
+    recommendation: string;
+    finding: EvalV3Finding;
+    additionalEvidenceRequired: string[];
+    usedSourceUnitIds: string[];
+    reEvaluation?: { changed: boolean; changedPoints: string[]; unchangedPoints: string[]; explanation: string } | null;
+    /** Kaynak bulunamadıysa sabit ifade. */
+    referencesNote?: string | null;
+    rejectedReferences?: { refId: string; claimed: string; reason: string }[];
+    scopeNotes?: string[];
+}
+
+/** retrievalNote (AiEvalMessage) — otomatik kaynak taraması özeti. */
+export interface EvalRetrievalNoteV3 {
+    method: 'HYBRID' | 'LEXICAL_ONLY' | 'NONE';
+    semanticUsed: boolean;
+    semanticUnavailableReason: string | null;
+    poolSize: number;
+    thresholds: { minScore: number; topK: number };
+    candidates: { unitId: string; unitCode: string; title: string; lexical: number; semantic: number | null; fused: number; rank: number | null; sent: boolean }[];
+    selectedByUser: string[];
+    sentUnitIds: string[];
+    notes: string[];
+    unchangedInput?: boolean;
+}
+
+export function isV3Eval(e: unknown, schemaVersion?: string | null): e is EvalOutputV3 {
+    if (schemaVersion === EVAL_V3_SCHEMA_VERSION) return !!e;
+    const o = e as Partial<EvalOutputV3> | null;
+    return !!o && typeof o.expectedState === 'string' && !!o.finding && typeof o.finding === 'object' && !Array.isArray(o.finding);
+}

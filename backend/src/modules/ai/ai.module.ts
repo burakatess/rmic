@@ -13,6 +13,7 @@ import { ReviewStageService } from './stages/review.service';
 import { AiQueryService } from './ai-query.service';
 import { AiEvalController } from './ai-eval.controller';
 import { AiEvalService } from './ai-eval.service';
+import { EvalSourceRetrievalService } from './eval-v3/eval-source-retrieval.service';
 
 /**
  * Yapay Zeka Destekli Modüller — Kontrol Testi Asistanı.
@@ -35,6 +36,7 @@ import { AiEvalService } from './ai-eval.service';
         ReviewStageService,
         AiQueryService,
         AiEvalService,
+        EvalSourceRetrievalService,
     ],
     exports: [AiProviderService, AiAssessmentService, AiEmbeddingService],
 })
