@@ -113,3 +113,17 @@ Frontend sayfa/component eklemeden önce:
 - `AuthProvider` demo-fallback (`/auth/me` başarısızsa hardcoded ADMIN kullanıcı) **production'a gitmemeli** — kullanıcıya asla '*' permission verilmemeli.
 - Rate limit `@nestjs/throttler` eklenmedi.
 - CSP header'ları eklenmedi.
+
+## Agent skills
+
+### Issue tracker
+
+Kontrol–Test–Bulgu–Aksiyon–Takip geliştirmeleri repo içindeki test sonuçları ve çalışma planı üzerinden takip edilir. Bkz. `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Test çalışmaları `GEÇTİ`, `KALDI`, `KISMİ`, `OTOMASYON YOK` ve `KARAR GEREKLİ` durumlarıyla izlenir. Bkz. `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Repo tek ortak domain bağlamı kullanır. Bkz. `docs/agents/domain.md`.
