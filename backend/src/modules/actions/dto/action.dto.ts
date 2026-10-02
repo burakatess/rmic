@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsEnum, IsDateString, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsEnum, IsDateString, IsIn, MaxLength } from 'class-validator';
 import { EmptyToUndefined } from '../../../common/decorators';
 
 export enum ActionStatus {
@@ -15,7 +15,7 @@ export class CreateStandaloneActionDto {
     @IsOptional() @IsString() findingId?: string;
     @IsOptional() @IsString() controlId?: string;
     @IsDateString() dueDate: string;
-    @IsOptional() @IsEnum(ActionStatus) status?: ActionStatus;
+    @IsOptional() @IsIn(['BEKLIYOR', 'DEVAM_EDIYOR', 'YETERSIZ', 'OPEN', 'IN_PROGRESS']) status?: ActionStatus;
     @IsOptional() @IsString() source?: string;
 }
 
@@ -25,7 +25,7 @@ export class UpdateStandaloneActionDto {
     @IsOptional() @IsString() @MaxLength(2000) description?: string;
     @IsOptional() @IsString() ownerId?: string;
     @IsOptional() @EmptyToUndefined() @IsDateString() dueDate?: string;
-    @IsOptional() @IsEnum(ActionStatus) status?: ActionStatus;
+    @IsOptional() @IsIn(['BEKLIYOR', 'DEVAM_EDIYOR', 'YETERSIZ', 'OPEN', 'IN_PROGRESS']) status?: ActionStatus;
 }
 
 export class ExtendActionDto {

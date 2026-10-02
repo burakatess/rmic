@@ -1,0 +1,543 @@
+{
+  "generatedAt": "2026-09-21T12:38:31.450Z",
+  "mode": "APPLY",
+  "database": "grc_db",
+  "sourceCount": 13,
+  "usageDataComplete": true,
+  "schemaNotes": [],
+  "sources": [
+    {
+      "id": "cmtsjs0qn0000mdvwqhiw15mp",
+      "slug": "spk-mevzuat",
+      "title": "SPK Mevzuatı — Sermaye Piyasası Kurulu",
+      "kind": "REGULATION",
+      "isSystemManaged": false,
+      "isActive": true,
+      "versions": [
+        {
+          "versionLabel": "portal",
+          "approvalStatus": "DRAFT"
+        }
+      ],
+      "rightRag": "UNKNOWN",
+      "facts": {
+        "slug": "spk-mevzuat",
+        "isSystemManaged": false,
+        "unitCount": 0,
+        "chunkCount": 0,
+        "embeddedChunkCount": 0,
+        "mappingCount": 0,
+        "evalScenarioSourceCount": 0,
+        "evalScenarioRefCount": 0,
+        "aiEvalSessionCount": 0,
+        "aiEvalMessageCount": 0,
+        "hasHistoricalSnapshots": false,
+        "replacementSourceExistsOrPlanned": true,
+        "usageDataIncomplete": false
+      },
+      "usage": {
+        "sessionsSelected": 0,
+        "sessionsUsed": 0,
+        "sessionsSuggested": 0,
+        "sessionsSnapshot": 0,
+        "messagesSent": 0,
+        "messagesCited": 0,
+        "messagesRunSnapshot": 0
+      },
+      "recommendation": "SISTEM_KAYNAGIYLA_DEGISTIR",
+      "reason": "Eski yalnız-üst-veri SPK kaydı; yeni sistem Tebliğ kaynağı ile değiştirilmeli."
+    },
+    {
+      "id": "cmtsjs0qz0002mdvwlvtdlyxv",
+      "slug": "nist-sp-800-53-r5",
+      "title": "NIST SP 800-53 — Security and Privacy Controls for Information Systems and Organizations",
+      "kind": "STANDARD_FRAMEWORK",
+      "isSystemManaged": false,
+      "isActive": true,
+      "versions": [
+        {
+          "versionLabel": "Rev.5",
+          "approvalStatus": "DRAFT"
+        }
+      ],
+      "rightRag": "UNKNOWN",
+      "facts": {
+        "slug": "nist-sp-800-53-r5",
+        "isSystemManaged": false,
+        "unitCount": 0,
+        "chunkCount": 0,
+        "embeddedChunkCount": 0,
+        "mappingCount": 0,
+        "evalScenarioSourceCount": 0,
+        "evalScenarioRefCount": 0,
+        "aiEvalSessionCount": 0,
+        "aiEvalMessageCount": 0,
+        "hasHistoricalSnapshots": false,
+        "replacementSourceExistsOrPlanned": true,
+        "usageDataIncomplete": false
+      },
+      "usage": {
+        "sessionsSelected": 0,
+        "sessionsUsed": 0,
+        "sessionsSuggested": 0,
+        "sessionsSnapshot": 0,
+        "messagesSent": 0,
+        "messagesCited": 0,
+        "messagesRunSnapshot": 0
+      },
+      "recommendation": "SILINEBILIR",
+      "reason": "Birim, parça, eşleştirme, senaryo ve kullanım yok; bağımlılık bulunmuyor."
+    },
+    {
+      "id": "cmtsjs0r30004mdvw8zs7hb3q",
+      "slug": "nist-sp-800-53a-r5",
+      "title": "NIST SP 800-53A — Assessing Security and Privacy Controls",
+      "kind": "AUDIT_METHODOLOGY",
+      "isSystemManaged": false,
+      "isActive": true,
+      "versions": [
+        {
+          "versionLabel": "Rev.5",
+          "approvalStatus": "DRAFT"
+        }
+      ],
+      "rightRag": "UNKNOWN",
+      "facts": {
+        "slug": "nist-sp-800-53a-r5",
+        "isSystemManaged": false,
+        "unitCount": 0,
+        "chunkCount": 0,
+        "embeddedChunkCount": 0,
+        "mappingCount": 0,
+        "evalScenarioSourceCount": 0,
+        "evalScenarioRefCount": 0,
+        "aiEvalSessionCount": 0,
+        "aiEvalMessageCount": 0,
+        "hasHistoricalSnapshots": false,
+        "replacementSourceExistsOrPlanned": true,
+        "usageDataIncomplete": false
+      },
+      "usage": {
+        "sessionsSelected": 0,
+        "sessionsUsed": 0,
+        "sessionsSuggested": 0,
+        "sessionsSnapshot": 0,
+        "messagesSent": 0,
+        "messagesCited": 0,
+        "messagesRunSnapshot": 0
+      },
+      "recommendation": "SILINEBILIR",
+      "reason": "Birim, parça, eşleştirme, senaryo ve kullanım yok; bağımlılık bulunmuyor."
+    },
+    {
+      "id": "cmtsjs0r60006mdvwptpw40rs",
+      "slug": "nist-csf-2-0",
+      "title": "NIST Cybersecurity Framework (CSF) 2.0",
+      "kind": "STANDARD_FRAMEWORK",
+      "isSystemManaged": false,
+      "isActive": true,
+      "versions": [
+        {
+          "versionLabel": "2.0",
+          "approvalStatus": "DRAFT"
+        }
+      ],
+      "rightRag": "UNKNOWN",
+      "facts": {
+        "slug": "nist-csf-2-0",
+        "isSystemManaged": false,
+        "unitCount": 0,
+        "chunkCount": 0,
+        "embeddedChunkCount": 0,
+        "mappingCount": 0,
+        "evalScenarioSourceCount": 0,
+        "evalScenarioRefCount": 0,
+        "aiEvalSessionCount": 0,
+        "aiEvalMessageCount": 0,
+        "hasHistoricalSnapshots": false,
+        "replacementSourceExistsOrPlanned": true,
+        "usageDataIncomplete": false
+      },
+      "usage": {
+        "sessionsSelected": 0,
+        "sessionsUsed": 0,
+        "sessionsSuggested": 0,
+        "sessionsSnapshot": 0,
+        "messagesSent": 0,
+        "messagesCited": 0,
+        "messagesRunSnapshot": 0
+      },
+      "recommendation": "SILINEBILIR",
+      "reason": "Birim, parça, eşleştirme, senaryo ve kullanım yok; bağımlılık bulunmuyor."
+    },
+    {
+      "id": "cmtsjs0r90008mdvwi881frub",
+      "slug": "cpmi-iosco-cyber-fmi",
+      "title": "CPMI-IOSCO — Guidance on cyber resilience for financial market infrastructures",
+      "kind": "STANDARD_FRAMEWORK",
+      "isSystemManaged": false,
+      "isActive": true,
+      "versions": [
+        {
+          "versionLabel": "2016",
+          "approvalStatus": "DRAFT"
+        }
+      ],
+      "rightRag": "UNKNOWN",
+      "facts": {
+        "slug": "cpmi-iosco-cyber-fmi",
+        "isSystemManaged": false,
+        "unitCount": 0,
+        "chunkCount": 0,
+        "embeddedChunkCount": 0,
+        "mappingCount": 0,
+        "evalScenarioSourceCount": 0,
+        "evalScenarioRefCount": 0,
+        "aiEvalSessionCount": 0,
+        "aiEvalMessageCount": 0,
+        "hasHistoricalSnapshots": false,
+        "replacementSourceExistsOrPlanned": true,
+        "usageDataIncomplete": false
+      },
+      "usage": {
+        "sessionsSelected": 0,
+        "sessionsUsed": 0,
+        "sessionsSuggested": 0,
+        "sessionsSnapshot": 0,
+        "messagesSent": 0,
+        "messagesCited": 0,
+        "messagesRunSnapshot": 0
+      },
+      "recommendation": "SILINEBILIR",
+      "reason": "Birim, parça, eşleştirme, senaryo ve kullanım yok; bağımlılık bulunmuyor."
+    },
+    {
+      "id": "cmtsjs0re000amdvws0jhdlgz",
+      "slug": "owasp-asvs",
+      "title": "OWASP Application Security Verification Standard (ASVS)",
+      "kind": "STANDARD_FRAMEWORK",
+      "isSystemManaged": false,
+      "isActive": true,
+      "versions": [
+        {
+          "versionLabel": "4.0.3",
+          "approvalStatus": "DRAFT"
+        }
+      ],
+      "rightRag": "UNKNOWN",
+      "facts": {
+        "slug": "owasp-asvs",
+        "isSystemManaged": false,
+        "unitCount": 0,
+        "chunkCount": 0,
+        "embeddedChunkCount": 0,
+        "mappingCount": 0,
+        "evalScenarioSourceCount": 0,
+        "evalScenarioRefCount": 0,
+        "aiEvalSessionCount": 0,
+        "aiEvalMessageCount": 0,
+        "hasHistoricalSnapshots": false,
+        "replacementSourceExistsOrPlanned": true,
+        "usageDataIncomplete": false
+      },
+      "usage": {
+        "sessionsSelected": 0,
+        "sessionsUsed": 0,
+        "sessionsSuggested": 0,
+        "sessionsSnapshot": 0,
+        "messagesSent": 0,
+        "messagesCited": 0,
+        "messagesRunSnapshot": 0
+      },
+      "recommendation": "SILINEBILIR",
+      "reason": "Birim, parça, eşleştirme, senaryo ve kullanım yok; bağımlılık bulunmuyor."
+    },
+    {
+      "id": "cmtsjs0ri000cmdvwzhc1b4fe",
+      "slug": "owasp-llm-prompt-injection",
+      "title": "OWASP — LLM Prompt Injection Prevention Cheat Sheet",
+      "kind": "STANDARD_FRAMEWORK",
+      "isSystemManaged": false,
+      "isActive": true,
+      "versions": [
+        {
+          "versionLabel": "current",
+          "approvalStatus": "DRAFT"
+        }
+      ],
+      "rightRag": "UNKNOWN",
+      "facts": {
+        "slug": "owasp-llm-prompt-injection",
+        "isSystemManaged": false,
+        "unitCount": 0,
+        "chunkCount": 0,
+        "embeddedChunkCount": 0,
+        "mappingCount": 0,
+        "evalScenarioSourceCount": 0,
+        "evalScenarioRefCount": 0,
+        "aiEvalSessionCount": 0,
+        "aiEvalMessageCount": 0,
+        "hasHistoricalSnapshots": false,
+        "replacementSourceExistsOrPlanned": true,
+        "usageDataIncomplete": false
+      },
+      "usage": {
+        "sessionsSelected": 0,
+        "sessionsUsed": 0,
+        "sessionsSuggested": 0,
+        "sessionsSnapshot": 0,
+        "messagesSent": 0,
+        "messagesCited": 0,
+        "messagesRunSnapshot": 0
+      },
+      "recommendation": "SILINEBILIR",
+      "reason": "Birim, parça, eşleştirme, senaryo ve kullanım yok; bağımlılık bulunmuyor."
+    },
+    {
+      "id": "cmtsjs0rp000emdvwecqfaqa3",
+      "slug": "nist-oscal",
+      "title": "NIST OSCAL — Open Security Controls Assessment Language",
+      "kind": "STANDARD_FRAMEWORK",
+      "isSystemManaged": false,
+      "isActive": true,
+      "versions": [
+        {
+          "versionLabel": "1.1",
+          "approvalStatus": "DRAFT"
+        }
+      ],
+      "rightRag": "UNKNOWN",
+      "facts": {
+        "slug": "nist-oscal",
+        "isSystemManaged": false,
+        "unitCount": 0,
+        "chunkCount": 0,
+        "embeddedChunkCount": 0,
+        "mappingCount": 0,
+        "evalScenarioSourceCount": 0,
+        "evalScenarioRefCount": 0,
+        "aiEvalSessionCount": 0,
+        "aiEvalMessageCount": 0,
+        "hasHistoricalSnapshots": false,
+        "replacementSourceExistsOrPlanned": true,
+        "usageDataIncomplete": false
+      },
+      "usage": {
+        "sessionsSelected": 0,
+        "sessionsUsed": 0,
+        "sessionsSuggested": 0,
+        "sessionsSnapshot": 0,
+        "messagesSent": 0,
+        "messagesCited": 0,
+        "messagesRunSnapshot": 0
+      },
+      "recommendation": "SILINEBILIR",
+      "reason": "Birim, parça, eşleştirme, senaryo ve kullanım yok; bağımlılık bulunmuyor."
+    },
+    {
+      "id": "cmtsjs0rv000gmdvw1aqzal5g",
+      "slug": "iia-global-internal-audit-standards-2024",
+      "title": "IIA — Global Internal Audit Standards (2024)",
+      "kind": "AUDIT_METHODOLOGY",
+      "isSystemManaged": false,
+      "isActive": true,
+      "versions": [
+        {
+          "versionLabel": "2024",
+          "approvalStatus": "DRAFT"
+        }
+      ],
+      "rightRag": "UNKNOWN",
+      "facts": {
+        "slug": "iia-global-internal-audit-standards-2024",
+        "isSystemManaged": false,
+        "unitCount": 0,
+        "chunkCount": 0,
+        "embeddedChunkCount": 0,
+        "mappingCount": 0,
+        "evalScenarioSourceCount": 0,
+        "evalScenarioRefCount": 0,
+        "aiEvalSessionCount": 0,
+        "aiEvalMessageCount": 0,
+        "hasHistoricalSnapshots": false,
+        "replacementSourceExistsOrPlanned": true,
+        "usageDataIncomplete": false
+      },
+      "usage": {
+        "sessionsSelected": 0,
+        "sessionsUsed": 0,
+        "sessionsSuggested": 0,
+        "sessionsSnapshot": 0,
+        "messagesSent": 0,
+        "messagesCited": 0,
+        "messagesRunSnapshot": 0
+      },
+      "recommendation": "SILINEBILIR",
+      "reason": "Birim, parça, eşleştirme, senaryo ve kullanım yok; bağımlılık bulunmuyor."
+    },
+    {
+      "id": "cmtsjs0s0000imdvwskmvmlz9",
+      "slug": "cisa-kev",
+      "title": "CISA — Known Exploited Vulnerabilities (KEV) Catalog",
+      "kind": "STANDARD_FRAMEWORK",
+      "isSystemManaged": false,
+      "isActive": true,
+      "versions": [
+        {
+          "versionLabel": "live",
+          "approvalStatus": "DRAFT"
+        }
+      ],
+      "rightRag": "UNKNOWN",
+      "facts": {
+        "slug": "cisa-kev",
+        "isSystemManaged": false,
+        "unitCount": 0,
+        "chunkCount": 0,
+        "embeddedChunkCount": 0,
+        "mappingCount": 0,
+        "evalScenarioSourceCount": 0,
+        "evalScenarioRefCount": 0,
+        "aiEvalSessionCount": 0,
+        "aiEvalMessageCount": 0,
+        "hasHistoricalSnapshots": false,
+        "replacementSourceExistsOrPlanned": true,
+        "usageDataIncomplete": false
+      },
+      "usage": {
+        "sessionsSelected": 0,
+        "sessionsUsed": 0,
+        "sessionsSuggested": 0,
+        "sessionsSnapshot": 0,
+        "messagesSent": 0,
+        "messagesCited": 0,
+        "messagesRunSnapshot": 0
+      },
+      "recommendation": "SILINEBILIR",
+      "reason": "Birim, parça, eşleştirme, senaryo ve kullanım yok; bağımlılık bulunmuyor."
+    },
+    {
+      "id": "cmub86k0x00008hvwry3vi0t7",
+      "slug": "kurumsal-denetim-kontrol-sonucu-yazim-metodolojisi",
+      "title": "Kurumsal Denetim ve Kontrol Sonucu Yazım Metodolojisi",
+      "kind": "INTERNAL_METHODOLOGY",
+      "isSystemManaged": true,
+      "isActive": true,
+      "versions": [
+        {
+          "versionLabel": "1.0",
+          "approvalStatus": "APPROVED"
+        }
+      ],
+      "rightRag": "ALLOWED",
+      "facts": {
+        "slug": "kurumsal-denetim-kontrol-sonucu-yazim-metodolojisi",
+        "isSystemManaged": true,
+        "unitCount": 1,
+        "chunkCount": 0,
+        "embeddedChunkCount": 0,
+        "mappingCount": 0,
+        "evalScenarioSourceCount": 0,
+        "evalScenarioRefCount": 0,
+        "aiEvalSessionCount": 0,
+        "aiEvalMessageCount": 0,
+        "hasHistoricalSnapshots": false,
+        "replacementSourceExistsOrPlanned": true,
+        "usageDataIncomplete": false
+      },
+      "usage": {
+        "sessionsSelected": 0,
+        "sessionsUsed": 0,
+        "sessionsSuggested": 0,
+        "sessionsSnapshot": 0,
+        "messagesSent": 0,
+        "messagesCited": 0,
+        "messagesRunSnapshot": 0
+      },
+      "recommendation": "KORU",
+      "reason": "Sistem tarafından yönetilen kaynak; elle değiştirilmez."
+    },
+    {
+      "id": "cmub86k1q00048hvwkqp267jb",
+      "slug": "spk-bilgi-sistemleri-yonetimi-tebligi-vii-128-10",
+      "title": "Bilgi Sistemleri Yönetimine İlişkin Usul ve Esaslar Tebliği (VII-128.10)",
+      "kind": "REGULATION",
+      "isSystemManaged": true,
+      "isActive": true,
+      "versions": [
+        {
+          "versionLabel": "2025-03-13",
+          "approvalStatus": "APPROVED"
+        }
+      ],
+      "rightRag": "ALLOWED",
+      "facts": {
+        "slug": "spk-bilgi-sistemleri-yonetimi-tebligi-vii-128-10",
+        "isSystemManaged": true,
+        "unitCount": 230,
+        "chunkCount": 0,
+        "embeddedChunkCount": 0,
+        "mappingCount": 0,
+        "evalScenarioSourceCount": 0,
+        "evalScenarioRefCount": 0,
+        "aiEvalSessionCount": 0,
+        "aiEvalMessageCount": 0,
+        "hasHistoricalSnapshots": false,
+        "replacementSourceExistsOrPlanned": true,
+        "usageDataIncomplete": false
+      },
+      "usage": {
+        "sessionsSelected": 0,
+        "sessionsUsed": 0,
+        "sessionsSuggested": 0,
+        "sessionsSnapshot": 0,
+        "messagesSent": 0,
+        "messagesCited": 0,
+        "messagesRunSnapshot": 0
+      },
+      "recommendation": "KORU",
+      "reason": "Sistem tarafından yönetilen kaynak; elle değiştirilmez."
+    },
+    {
+      "id": "cmub86k5a006l8hvwo0gualu2",
+      "slug": "siber-guvenlik-baskanligi-bilgi-ve-iletisim-guvenligi-rehberi",
+      "title": "Bilgi ve İletişim Güvenliği Rehberi",
+      "kind": "OFFICIAL_GUIDE",
+      "isSystemManaged": true,
+      "isActive": true,
+      "versions": [
+        {
+          "versionLabel": "1.1",
+          "approvalStatus": "APPROVED"
+        }
+      ],
+      "rightRag": "ALLOWED",
+      "facts": {
+        "slug": "siber-guvenlik-baskanligi-bilgi-ve-iletisim-guvenligi-rehberi",
+        "isSystemManaged": true,
+        "unitCount": 660,
+        "chunkCount": 0,
+        "embeddedChunkCount": 0,
+        "mappingCount": 0,
+        "evalScenarioSourceCount": 0,
+        "evalScenarioRefCount": 0,
+        "aiEvalSessionCount": 0,
+        "aiEvalMessageCount": 0,
+        "hasHistoricalSnapshots": false,
+        "replacementSourceExistsOrPlanned": true,
+        "usageDataIncomplete": false
+      },
+      "usage": {
+        "sessionsSelected": 0,
+        "sessionsUsed": 0,
+        "sessionsSuggested": 0,
+        "sessionsSnapshot": 0,
+        "messagesSent": 0,
+        "messagesCited": 0,
+        "messagesRunSnapshot": 0
+      },
+      "recommendation": "KORU",
+      "reason": "Sistem tarafından yönetilen kaynak; elle değiştirilmez."
+    }
+  ]
+}

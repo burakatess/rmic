@@ -50,6 +50,9 @@ model User {
 
   updatedAnnualPlanDrafts AnnualPlanDraft[] @relation("AnnualPlanDraftUpdatedBy")
   appliedAnnualPlanDrafts AnnualPlanDraft[] @relation("AnnualPlanDraftAppliedBy")
+  submittedAnnualPlanDrafts AnnualPlanDraft[] @relation("AnnualPlanDraftSubmittedBy")
+  approvedAnnualPlanDrafts  AnnualPlanDraft[] @relation("AnnualPlanDraftApprovedBy")
+  decidedAnnualPlanDrafts   AnnualPlanDraft[] @relation("AnnualPlanDraftDecidedBy")
 }
 
 model Role {
@@ -412,6 +415,12 @@ model Control {
   yearScopes           ControlYearScope[] // Yıllık kapsam kayıtları (ayrı yaşam döngüsü)
   annualPlanDraftItems AnnualPlanDraftItem[]
 
+  // Kontrol tanımı sürümü — description/testSteps/mehaz/name değişince
+  // controls.service.ts::update() içinde artırılır. Dönem Kontrolü'nün
+  // (ControlYearScope) kendi controlVersion'ı ile karşılaştırılarak "kaynak
+  // kontrolde yeni sürüm var" göstergesi hesaplanır (bkz. plan D4).
+  version Int @default(1)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -426,6 +435,12 @@ model Control {
 // Kontrol–yıl ilişkisi: Control kalıcı ana envanterdir, bu model o kontrolün
 // hangi yıl(lar)ın kapsamına alındığını, o yıla özel periyodiklik/planlama
 // ayarlarını ve kapsamdan çıkarma geçmişini (satır silinmeden) tutar.
+//
+// KULLANICI TERİMİ: "Dönem Kontrolü" — teknik model adı bilinçli olarak
+// değiştirilmedi (bkz. plan D3), yalnızca yeni alanlar eklendi: bir ana
+// kontrol + bir yıl = bir Dönem Kontrolü, kendi kalıcı kodunu
+// (`2027.BTK.0042` — computePeriodCode, period-code.util.ts) ve o an
+// uygulanan kontrol tanımının donmuş kopyasını (snapshot) taşır.
 model ControlYearScope {
   id        String  @id @default(cuid())
   control   Control @relation(fields: [controlId], references: [id])
@@ -433,6 +448,21 @@ model ControlYearScope {
   year      Int
 
   status ControlYearScopeStatus @default(ACTIVE)
+
+  // Dönem Kontrolü kodu — "{yıl}.{ana kontrol kodu}" (örn. 2027.BTK.0042).
+  // Sayaç GEREKMEZ: @@unique([controlId,year]) zaten çakışmayı engelliyor,
+  // bu alan yalnızca o ilişkinin görünür/aranabilir kodu (bkz. period-code.util.ts).
+  code String? @unique
+
+  // Plan uygulandığında (addScope/copyScope) kullanılan Control.version ve
+  // tanımın donmuş kopyası — ana kontrol sonradan değişse bile bu dönemin
+  // gösterdiği tanım sessizce değişmez (madde 17). "Yeni sürüm var" göstergesi:
+  // control.version > controlVersion.
+  controlVersion      Int?
+  snapshotName        String?
+  snapshotDescription String? @db.Text
+  snapshotTestSteps   String? @db.Text
+  snapshotMehaz       String?
 
   // Bu yıla özel planlama ayarları — Control.frequency'den bağımsız değişebilir,
   // envanterdeki varsayılan periyodiklik değişikliği geçmiş yılları etkilemez.
@@ -494,6 +524,18 @@ model AnnualPlanDraft {
   lastAppliedBy   User?     @relation("AnnualPlanDraftAppliedBy", fields: [lastAppliedById], references: [id])
   lastAppliedById String?
 
+  submittedAt   DateTime?
+  submittedBy   User?     @relation("AnnualPlanDraftSubmittedBy", fields: [submittedById], references: [id])
+  submittedById String?
+  approvedAt    DateTime?
+  approvedBy    User?     @relation("AnnualPlanDraftApprovedBy", fields: [approvedById], references: [id])
+  approvedById  String?
+  approvedRevision Int?
+  assignmentDecisions Json?
+  decisionNote  String?   @db.Text
+  decidedBy     User?     @relation("AnnualPlanDraftDecidedBy", fields: [decidedById], references: [id])
+  decidedById   String?
+
   items AnnualPlanDraftItem[]
 
   createdAt DateTime @default(now())
@@ -502,6 +544,9 @@ model AnnualPlanDraft {
 
 enum AnnualPlanDraftStatus {
   OPEN
+  PENDING_APPROVAL
+  CHANGES_REQUESTED
+  APPROVED
   APPLIED
 }
 
@@ -1045,6 +1090,9 @@ model FindingFollowUp {
   // Yeni aksiyon
   newActionRequired Boolean @default(false)
   newActionId       String?
+  // Değerlendirme ile ikinci kontrolcü onayı arasındaki yeni aksiyon taslağı.
+  // Kullanıcı/iletişim verisi içerdiğinden yalnız iş akışı servisi üzerinden yazılır.
+  newActionDraft    Json?
 
   // Attachments
   attachments          FollowUpAttachment[]
@@ -1065,6 +1113,7 @@ enum FollowUpStatus {
   DEVAM_EDIYOR
   TAMAMLANDI
   ONAYLANDI
+  IPTAL
 }
 
 enum FollowUpResult {
@@ -1215,6 +1264,7 @@ enum ActionStatus {
   TAMAMLANDI
   YETERSIZ
   KAPATILDI
+  IPTAL
   // Legacy (backward compat)
   OPEN
   IN_PROGRESS
@@ -1231,6 +1281,8 @@ model Attachment {
   id           String               @id @default(cuid())
   fileName     String // storage dosya adı
   originalName String // kullanıcının yüklediği orijinal isim
+  displayName  String?
+  description  String?              @db.Text
   mimeType     String // "application/pdf", "image/png" vb.
   sizeBytes    Int // byte cinsinden boyut
   filePath     String? // storage path (sonraki sprint)
@@ -1242,6 +1294,20 @@ model Attachment {
 
   @@index([entityType, entityId])
   @@index([uploadedById])
+}
+
+model UploadTicket {
+  id           String    @id @default(cuid())
+  fileName     String    @unique
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  uploadedById String
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime
+  claimedAt    DateTime?
+
+  @@index([uploadedById, claimedAt])
 }
 
 enum AttachmentEntityType {
@@ -1262,6 +1328,8 @@ model FindingAttachment {
   findingId    String
   fileName     String // storage dosya adı (uuid.pdf)
   originalName String // kullanıcının yüklediği orijinal isim
+  displayName  String?
+  description  String?  @db.Text
   mimeType     String // "application/pdf", "image/png" vb.
   sizeBytes    Int // dosya boyutu (byte)
   url          String? // gelecekte storage URL; şimdilik null
@@ -1277,6 +1345,8 @@ model ActionAttachment {
   actionId     String
   fileName     String
   originalName String
+  displayName  String?
+  description  String?  @db.Text
   mimeType     String
   sizeBytes    Int
   url          String?
@@ -1292,6 +1362,8 @@ model FollowUpAttachment {
   followUpId   String
   fileName     String
   originalName String
+  displayName  String?
+  description  String?  @db.Text
   mimeType     String
   sizeBytes    Int
   url          String?
@@ -1307,6 +1379,8 @@ model ControlTestAttachment {
   controlTestId String
   fileName      String
   originalName  String
+  displayName   String?
+  description   String?     @db.Text
   mimeType      String
   sizeBytes     Int
   url           String?
@@ -2001,7 +2075,12 @@ model AiEvalMessage {
   reviewedAt       DateTime?
 
   modelName     String?
+  // Model sağlayıcının bildirdiği/yapılandırılan sürüm etiketi (aynı modelName farklı sürüm olabilir).
+  modelVersion  String?
   promptVersion String?
+  // Girdi özeti: kontrol sürümü + kanıt ID/checksum + kullanıcı açıklaması + ek soru +
+  // kaynak birimleri/sürümleri + prompt/model sürümü. Herhangi biri değişirse değişir.
+  inputHash     String?
   // Bu çalışmanın dayandığı girdi sürümü (session.contentVersion) ve kullanılan kanıtlar.
   inputVersion  Int?
   evidenceRefs  Json? // { attachmentIds: string[], evidenceTextHash: string, knowledgeDocIds, regulationArticleIds }
@@ -2138,6 +2217,8 @@ enum SourceKind {
   PRECEDENT_FINDING // Emsal bulgu
   TRAINING_EXAMPLE // Eğitim örneği
   EVAL_SCENARIO // Değerlendirme/test senaryosu
+  OFFICIAL_GUIDE // Resmî kurum rehberi (ör. Bilgi ve İletişim Güvenliği Rehberi)
+  INTERNAL_METHODOLOGY // Kurumsal denetim / yazım metodolojisi
 }
 
 enum SourceConfidentiality {
@@ -2192,6 +2273,14 @@ model Source {
   // İzole test verisi işareti — fixture'lar üretimde görünmesin diye ayrılır.
   isTestFixture Boolean @default(false)
 
+  // Sistem tarafından yönetilen (import script'iyle gelen, doğrulanmış) kaynak.
+  // Otomatik retrieval yalnız APPROVED + rightRag=ALLOWED + isActive kaynaklardan yapılır.
+  isSystemManaged Boolean @default(false)
+  // Katalogdan kaldırılmış (ARŞİV) kaynak — fiziksel silinmez, geçmiş atıflar korunur.
+  isActive        Boolean @default(true)
+  // Kaynağa özgü serbest üst veri (tebliğ no, resmî gazete sayısı, kapsam, vb.).
+  metadata        Json?
+
   createdById  String
   reviewedById String?
   createdAt    DateTime @default(now())
@@ -2202,6 +2291,7 @@ model Source {
   @@index([kind])
   @@index([confidentiality])
   @@index([isTestFixture])
+  @@index([isSystemManaged, isActive])
 }
 
 model SourceVersion {
@@ -2217,6 +2307,8 @@ model SourceVersion {
   contentRetrieved Boolean              @default(false) // tam metin gerçekten alındı mı
   fullText         String?              @db.Text // ÖZGÜN tam metin (hak varsa)
   storageNote      String?              @db.Text // neden alınmadı / kısıt açıklaması
+  // Sürüme özgü üst veri: { resmiGazeteTarihi, resmiGazeteSayisi, tebligNo, yururluk, importedAt, sourceChecksum, ... }
+  metadata         Json?
   approvalStatus   SourceApprovalStatus @default(DRAFT)
 
   // İÇERİK İNCELEMESİ — kullanım hakkından AYRI. Metin/birimlerin doğru,
@@ -2295,6 +2387,10 @@ model SourceUnit {
   scope         String?
   riskAreas     String[]
   parentKey     String? // fıkra/bent hiyerarşisi
+  // Birime özgü üst veri: { bolumNo, bolumAdi, altBolumNo, tedbirSeviyesi, denetimSorusu,
+  // caprazReferanslar[], fikra, bent, madde, yururluk, sayfa }. Sorgulanabilir alanlar locator'da.
+  metadata      Json?
+  contentHash   String? // birim içerik özeti (SHA-256, ilk 32) — idempotent içe aktarma için
 
   mappings         SourceMapping[]
   chunks           SourceChunk[]

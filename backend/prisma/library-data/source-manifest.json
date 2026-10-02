@@ -10,126 +10,17 @@
       "docCode": null,
       "language": "tr",
       "confidentiality": "PUBLIC",
-      "tags": ["mevzuat", "borsa", "sermaye piyasası"],
+      "tags": [
+        "mevzuat",
+        "borsa",
+        "sermaye piyasası"
+      ],
       "rightsNote": "SPK mevzuat portalı dinamik; tebliğ metni ilgili değişiklik ve ilke kararlarından BAĞIMSIZ, tam ve güncel mevzuatmış gibi kullanılmamalı. Her tebliğ + değişiklikleri ayrı SourceVersion olarak girilmeli. Tam metin saklama/RAG hakkı: hukuk teyidi bekliyor.",
-      "version": { "versionLabel": "portal", "storageNote": "Portal girişi — spesifik tebliğler ayrı sürüm olarak eklenecek. İçerik indirilmedi.", "contentRetrieved": false }
-    },
-    {
-      "slug": "nist-sp-800-53-r5",
-      "kind": "STANDARD_FRAMEWORK",
-      "title": "NIST SP 800-53 — Security and Privacy Controls for Information Systems and Organizations",
-      "publisher": "NIST (U.S. National Institute of Standards and Technology)",
-      "officialUrl": "https://csrc.nist.gov/projects/risk-management/sp800-53-controls",
-      "docCode": "SP 800-53",
-      "language": "en",
-      "confidentiality": "PUBLIC",
-      "tags": ["nist", "controls", "kontrol katalogu"],
-      "rightsNote": "NIST yayınları ABD Hükümeti eseri olduğu için genelde kamu malı kabul edilir; ancak kurum hukuk teyidi olmadan rightFullText/rightRag ALLOWED yapılmadı. Revizyon güncellemesi: https://csrc.nist.gov/News/2025/nist-releases-revision-to-sp-800-53-controls",
-      "version": { "versionLabel": "Rev.5", "storageNote": "Kontrol ailesi metinleri (AC, AU, CM, CP, IA, SC, SI, PL, RA, SR ...) birim (SourceUnit) olarak elle/araçla girilecek. İçerik seed'de indirilmedi.", "contentRetrieved": false }
-    },
-    {
-      "slug": "nist-sp-800-53a-r5",
-      "kind": "AUDIT_METHODOLOGY",
-      "title": "NIST SP 800-53A — Assessing Security and Privacy Controls",
-      "publisher": "NIST",
-      "officialUrl": "https://csrc.nist.gov/pubs/sp/800/53/a/r5/final",
-      "docCode": "SP 800-53A",
-      "language": "en",
-      "confidentiality": "PUBLIC",
-      "tags": ["nist", "assessment", "test prosedürü", "kanıt"],
-      "rightsNote": "Assessment objectives / determination statements test kartlarına referans olacak. Hukuk teyidi olmadan tam metin/RAG hakkı ALLOWED yapılmadı.",
-      "version": { "versionLabel": "Rev.5", "storageNote": "Assessment prosedürleri birim olarak girilecek. İçerik indirilmedi.", "contentRetrieved": false }
-    },
-    {
-      "slug": "nist-csf-2-0",
-      "kind": "STANDARD_FRAMEWORK",
-      "title": "NIST Cybersecurity Framework (CSF) 2.0",
-      "publisher": "NIST",
-      "officialUrl": "https://nvlpubs.nist.gov/nistpubs/CSWP/NIST.CSWP.29.pdf",
-      "docCode": "NIST CSWP 29",
-      "language": "en",
-      "confidentiality": "PUBLIC",
-      "tags": ["nist", "csf", "govern", "identify", "protect", "detect", "respond", "recover"],
-      "rightsNote": "CSF 2.0 Core (Functions/Categories/Subcategories) birim olarak girilecek. Hukuk teyidi bekliyor.",
-      "version": { "versionLabel": "2.0", "storageNote": "İçerik indirilmedi.", "contentRetrieved": false }
-    },
-    {
-      "slug": "cpmi-iosco-cyber-fmi",
-      "kind": "STANDARD_FRAMEWORK",
-      "title": "CPMI-IOSCO — Guidance on cyber resilience for financial market infrastructures",
-      "publisher": "BIS — CPMI & IOSCO",
-      "officialUrl": "https://www.bis.org/publications/guidance-cyber-resilience-financial-market-infrastructures.pdf",
-      "docCode": null,
-      "language": "en",
-      "confidentiality": "PUBLIC",
-      "tags": ["fmi", "borsa", "siber dayanıklılık", "cpmi", "iosco"],
-      "rightsNote": "BIS/IOSCO telif hakkı saklıdır — rightFullText/rightExport muhtemelen DENIED, hukuk teyidi bekliyor. ÖNEMLİ: CPMI-IOSCO gereksinimleri TÜM borsa süreçlerine otomatik hukuki yükümlülük olarak atanamaz; uygulanabilirlik ayrıca değerlendirilmeli.",
-      "version": { "versionLabel": "2016", "storageNote": "İçerik indirilmedi.", "contentRetrieved": false }
-    },
-    {
-      "slug": "owasp-asvs",
-      "kind": "STANDARD_FRAMEWORK",
-      "title": "OWASP Application Security Verification Standard (ASVS)",
-      "publisher": "OWASP Foundation",
-      "officialUrl": "https://owasp.org/www-project-application-security-verification-standard/",
-      "docCode": "ASVS",
-      "language": "en",
-      "confidentiality": "PUBLIC",
-      "tags": ["owasp", "asvs", "güvenli geliştirme", "api"],
-      "rightsNote": "ASVS CC-BY-SA lisanslı — atıf ve aynı-lisansla-paylaşım yükümlülüğü var; RAG/dışa aktarım için hukuk teyidi gerek.",
-      "version": { "versionLabel": "4.0.3", "storageNote": "İçerik indirilmedi.", "contentRetrieved": false }
-    },
-    {
-      "slug": "owasp-llm-prompt-injection",
-      "kind": "STANDARD_FRAMEWORK",
-      "title": "OWASP — LLM Prompt Injection Prevention Cheat Sheet",
-      "publisher": "OWASP Foundation",
-      "officialUrl": "https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html",
-      "docCode": null,
-      "language": "en",
-      "confidentiality": "PUBLIC",
-      "tags": ["owasp", "prompt injection", "llm güvenliği", "rag"],
-      "rightsNote": "CC-BY-SA. Bu kaynağın kendisi RAG bağlamına girdiğinde bile içindeki talimatlar UYGULAMA TALİMATI olarak yürütülmez.",
-      "version": { "versionLabel": "current", "storageNote": "İçerik indirilmedi.", "contentRetrieved": false }
-    },
-    {
-      "slug": "nist-oscal",
-      "kind": "STANDARD_FRAMEWORK",
-      "title": "NIST OSCAL — Open Security Controls Assessment Language",
-      "publisher": "NIST",
-      "officialUrl": "https://pages.nist.gov/OSCAL/",
-      "docCode": "OSCAL",
-      "language": "en",
-      "confidentiality": "PUBLIC",
-      "tags": ["oscal", "makine-okunur", "kontrol", "assessment", "sürümleme"],
-      "rightsNote": "OSCAL modelleri (catalog, profile, component-definition, assessment-plan/results, POA&M) kaynak-sürüm-birim modelimizle hizalama için referans.",
-      "version": { "versionLabel": "1.1", "storageNote": "İçerik indirilmedi.", "contentRetrieved": false }
-    },
-    {
-      "slug": "iia-global-internal-audit-standards-2024",
-      "kind": "AUDIT_METHODOLOGY",
-      "title": "IIA — Global Internal Audit Standards (2024)",
-      "publisher": "The Institute of Internal Auditors (IIA)",
-      "officialUrl": "https://www.theiia.org/en/standards/2024-standards/global-internal-audit-standards/",
-      "docCode": null,
-      "language": "en",
-      "confidentiality": "PUBLIC",
-      "tags": ["iia", "iç denetim standartları", "metodoloji"],
-      "rightsNote": "IIA Standartları telif korumalı, erişim üyelik/lisans gerektirebilir — rightFullText muhtemelen DENIED. Yalnız resmî bağlantı + kurum içi yorum saklanır.",
-      "version": { "versionLabel": "2024", "storageNote": "İçerik indirilmedi — lisans kısıtı.", "contentRetrieved": false }
-    },
-    {
-      "slug": "cisa-kev",
-      "kind": "STANDARD_FRAMEWORK",
-      "title": "CISA — Known Exploited Vulnerabilities (KEV) Catalog",
-      "publisher": "CISA (U.S. Cybersecurity and Infrastructure Security Agency)",
-      "officialUrl": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
-      "docCode": "KEV",
-      "language": "en",
-      "confidentiality": "PUBLIC",
-      "tags": ["kev", "zafiyet", "yama", "cisa"],
-      "rightsNote": "Veri deposu: https://github.com/cisagov/kev-data . ABD Hükümeti verisi; yama/zafiyet test kartında referans. Otomatik güncelleme için ayrı bir job planlanabilir (bu turda yok).",
-      "version": { "versionLabel": "live", "storageNote": "İçerik indirilmedi — canlı katalog, periyodik senkron ayrı iş.", "contentRetrieved": false }
+      "version": {
+        "versionLabel": "portal",
+        "storageNote": "Portal girişi — spesifik tebliğler ayrı sürüm olarak eklenecek. İçerik indirilmedi.",
+        "contentRetrieved": false
+      }
     }
   ]
 }

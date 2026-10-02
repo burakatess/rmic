@@ -3,6 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ControlsService } from './controls.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
+import { CreateAttachmentDto, UpdateAttachmentDto } from '../../common/dto/attachment.dto';
 import { CreateControlDto, UpdateControlDto, SaveTestDraftDto } from './dto';
 
 @ApiTags('Controls')
@@ -21,8 +22,8 @@ export class ControlsController {
 
     // ─── ControlTests (literal path — :id'den ÖNCE olmalı, NestJS route order) ─
     @Get('tests')
-    async getAllTests(@Query() query: any) {
-        return this.controlsService.getAllTests(query);
+    async getAllTests(@Query() query: any, @CurrentUser('id') userId: string) {
+        return this.controlsService.getAllTests(query, userId);
     }
 
     // Kontrol Testi çalışma sayfası — tekil, tam detaylı kayıt (deep link/yenileme için)
@@ -87,10 +88,16 @@ export class ControlsController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async addTestAttachment(
         @Param('testId') testId: string,
-        @Body() meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number },
+        @Body() meta: CreateAttachmentDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.controlsService.addControlTestAttachment(testId, meta, userId);
+    }
+
+    @Patch('tests/:testId/attachments/:attachmentId')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    updateTestAttachment(@Param('testId') testId: string, @Param('attachmentId') attachmentId: string, @Body() dto: UpdateAttachmentDto, @CurrentUser('id') userId: string) {
+        return this.controlsService.updateControlTestAttachment(testId, attachmentId, dto, userId);
     }
 
     @Delete('tests/:testId/attachments/:attachmentId')

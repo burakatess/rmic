@@ -66,3 +66,15 @@ export class ChangePeriodicityDto {
     assignmentDecisions?: AssignmentDecisionDto[];
     @IsOptional() @IsBoolean() dryRun?: boolean;
 }
+
+export class VersionImpactDecisionDto {
+    @IsInt() @Min(2000) @Max(2100) year: number;
+    @IsIn(['KEEP_CURRENT', 'APPLY_TO_NOT_STARTED', 'APPLY_WITH_CONFIRMATION'])
+    action: 'KEEP_CURRENT' | 'APPLY_TO_NOT_STARTED' | 'APPLY_WITH_CONFIRMATION';
+}
+
+export class ApplyVersionImpactDto {
+    @IsInt() @Min(1) expectedControlVersion: number;
+    @IsArray() @ValidateNested({ each: true }) @Type(() => VersionImpactDecisionDto)
+    decisions: VersionImpactDecisionDto[];
+}

@@ -1,7 +1,7 @@
 import { nextCounterValue } from '../../common/util/sequential-id';
 
 /**
- * Yeni test kodu — YYYY-BTK-XXXX-TN. Sayaç `RecordCounter`'da
+ * Yeni test kodu — YYYY.BTK.XXXX.TN (nokta ayıracı, tire YOK). Sayaç `RecordCounter`'da
  * `test-code:{controlId}:{year}` scope'uyla tutulur: her (kontrol, yıl)
  * çifti için bağımsız, her yeni yılda doğal olarak T1'den başlar (yeni
  * scope satırı), iptal edilen numara asla tekrar kullanılmaz (sayaç yalnızca
@@ -20,5 +20,5 @@ export async function nextTestCode(
     year: number,
 ): Promise<string> {
     const n = await nextCounterValue(db, `test-code:${controlId}:${year}`);
-    return `${year}-${controlCode}-T${n}`;
+    return `${year}.${controlCode}.T${n}`;
 }

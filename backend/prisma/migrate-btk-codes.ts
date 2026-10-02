@@ -1,5 +1,5 @@
 /**
- * Mevcut kontrol kodlarını (K-YYYY-NNNN) kalıcı BTK-XXXX formatına geçirir —
+ * Mevcut kontrol kodlarını (K-YYYY-NNNN) kalıcı BTK.XXXX (nokta ayıracı) formatına geçirir —
  * plan "BTK Kod Reformu".
  *
  * Her Control için `control-code` RecordCounter sayacından (aynı atomik
@@ -15,6 +15,14 @@
  * Teknik ID'ler (Control.id / CUID) ve tüm ilişkiler DEĞİŞMEZ — yalnızca
  * görünür `controlId` alanı güncellenir.
  *
+ * Dönem Kontrolü kod tutarlılığı (madde 22 — "dönem kontrol haritası"):
+ * kontrolün `controlId`'si değiştiğinde, o kontrole bağlı ve ZATEN kod
+ * atanmış (backfill'den veya normal akıştan gelen) `ControlYearScope.code`
+ * değerleri de AYNI transaction içinde `{yıl}.{yeni kod}` olarak yeniden
+ * hesaplanır — aksi halde dönem kodu kalıcı olarak eski, artık var olmayan
+ * ana kontrol koduna işaret ederdi.
+ *
+
  * Kullanım:
  *   npx ts-node prisma/migrate-btk-codes.ts            # dry-run (varsayılan)
  *   npx ts-node prisma/migrate-btk-codes.ts --apply     # gerçekten uygula
@@ -29,11 +37,13 @@ import pg from 'pg';
 import * as fs from 'fs';
 import * as path from 'path';
 import { nextCounterValue } from '../src/common/util/sequential-id';
+import { computePeriodCode } from '../src/modules/controls/period-code.util';
 
 interface MappingEntry {
     controlId: string; // teknik ID (CUID) — değişmez
     oldCode: string;
     newCode: string;
+    periodCodesUpdated: { scopeId: string; year: number; oldPeriodCode: string | null; newPeriodCode: string }[];
 }
 
 interface ConflictEntry {
@@ -62,14 +72,14 @@ async function main() {
     const nextCode = async (): Promise<string> => {
         if (APPLY) {
             const value = await nextCounterValue(prisma, 'control-code');
-            return `BTK-${value.toString().padStart(4, '0')}`;
+            return `BTK.${value.toString().padStart(4, '0')}`;
         }
         if (dryRunCounter === null) {
             const row = await prisma.recordCounter.findUnique({ where: { scope: 'control-code' } });
             dryRunCounter = row?.value ?? 0;
         }
         dryRunCounter += 1;
-        return `BTK-${dryRunCounter.toString().padStart(4, '0')}`;
+        return `BTK.${dryRunCounter.toString().padStart(4, '0')}`;
     };
 
     try {
@@ -86,10 +96,10 @@ async function main() {
             });
             if (existingAlias) {
                 alreadyMigrated++;
-                mapping.push({ controlId: control.id, oldCode: control.controlId, newCode: existingAlias.newCode });
+                mapping.push({ controlId: control.id, oldCode: control.controlId, newCode: existingAlias.newCode, periodCodesUpdated: [] });
                 continue;
             }
-            if (control.controlId.startsWith('BTK-')) {
+            if (control.controlId.startsWith('BTK.')) {
                 // Zaten yeni formatta (örn. bu script öncesinde manuel oluşturulmuş) — atla.
                 alreadyMigrated++;
                 continue;
@@ -105,7 +115,17 @@ async function main() {
                 continue;
             }
 
-            mapping.push({ controlId: control.id, oldCode: control.controlId, newCode });
+            // Bu kontrole bağlı, ZATEN kod atanmış dönem kayıtları — yeni ana
+            // kontrol koduyla tutarlı kalması için birlikte yeniden hesaplanır.
+            const linkedScopes = await prisma.controlYearScope.findMany({
+                where: { controlId: control.id, code: { not: null } },
+                select: { id: true, year: true, code: true },
+            });
+            const periodCodesUpdated = linkedScopes.map(s => ({
+                scopeId: s.id, year: s.year, oldPeriodCode: s.code, newPeriodCode: computePeriodCode(newCode, s.year),
+            }));
+
+            mapping.push({ controlId: control.id, oldCode: control.controlId, newCode, periodCodesUpdated });
             newlyMapped++;
 
             if (APPLY) {
@@ -114,19 +134,24 @@ async function main() {
                         data: { entityType: 'CONTROL', entityId: control.id, oldCode: control.controlId, newCode, source: 'MIGRATION' },
                     }),
                     prisma.control.update({ where: { id: control.id }, data: { controlId: newCode } }),
+                    ...periodCodesUpdated.map(p =>
+                        prisma.controlYearScope.update({ where: { id: p.scopeId }, data: { code: p.newPeriodCode } })),
                 ]);
             }
         }
+
+        const periodCodesUpdatedTotal = mapping.reduce((sum, m) => sum + m.periodCodesUpdated.length, 0);
 
         console.log(`Kontrol sayısı: ${controls.length}`);
         console.log(`Zaten migrate edilmiş: ${alreadyMigrated}`);
         console.log(`Yeni eşlenen: ${newlyMapped}`);
         console.log(`Çakışma (atlanan): ${conflicts.length}`);
+        console.log(`Birlikte güncellenen dönem kontrolü kodu: ${periodCodesUpdatedTotal}`);
 
         const reportPath = path.join(__dirname, 'btk-code-migration-report.json');
         fs.writeFileSync(reportPath, JSON.stringify({
             generatedAt: new Date().toISOString(), mode: APPLY ? 'APPLY' : 'DRY-RUN',
-            summary: { totalControls: controls.length, alreadyMigrated, newlyMapped, conflicts: conflicts.length },
+            summary: { totalControls: controls.length, alreadyMigrated, newlyMapped, conflicts: conflicts.length, periodCodesUpdated: periodCodesUpdatedTotal },
             mapping, conflicts,
         }, null, 2));
         console.log(`Rapor yazıldı: ${reportPath}`);

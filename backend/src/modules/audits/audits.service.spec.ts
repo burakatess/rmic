@@ -13,8 +13,14 @@ describe('AuditsService — kritik iş kuralları', () => {
             findingStatusHistory: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
             findingStatusLog: { create: jest.fn() },
             auditLog: { create: jest.fn() },
-            action: { findMany: jest.fn(), update: jest.fn() },
+            action: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn(), updateMany: jest.fn() },
+            findingFollowUp: {
+                findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]),
+                create: jest.fn(), updateMany: jest.fn(),
+            },
             user: { findUnique: jest.fn() },
+            $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
+            $queryRawUnsafe: jest.fn().mockResolvedValue([{ value: 1 }]),
         };
         // $transaction — callback'i aynı mock istemcisiyle çalıştır (tx === prisma).
         prisma.$transaction = jest.fn((arg: any) =>
@@ -32,6 +38,42 @@ describe('AuditsService — kritik iş kuralları', () => {
     });
 
     afterEach(() => jest.clearAllMocks());
+
+    describe('generateDueFollowUps', () => {
+        it('kapalı veya iptal bulguları atlar; tamamlanmış aksiyonu açık takip yoksa doğrulamaya alır', async () => {
+            prisma.action.findMany.mockResolvedValue([]);
+
+            await service.generateDueFollowUps('manual');
+
+            expect(prisma.action.findMany).toHaveBeenCalledWith({
+                where: {
+                    dueDate: { lte: expect.any(Date) },
+                    status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR', 'YETERSIZ', 'TAMAMLANDI', 'COMPLETED'] },
+                    finding: {
+                        status: { not: 'CLOSED' },
+                        workflowStatus: { not: 'IPTAL' },
+                    },
+                    followUps: { none: { status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] } } },
+                },
+                select: { id: true, findingId: true, dueDate: true, status: true },
+            });
+        });
+
+        it('TAMAMLANDI aksiyon için doğrulama takibi üretirken aksiyon durumunu geri almaz', async () => {
+            const dueDate = new Date('2026-01-01');
+            prisma.action.findMany.mockResolvedValue([{ id: 'a-1', findingId: 'f-1', dueDate, status: 'TAMAMLANDI' }]);
+            prisma.findingFollowUp.findFirst.mockResolvedValue(null);
+            prisma.findingFollowUp.create.mockResolvedValue({ id: 'fu-1' });
+
+            const result = await service.generateDueFollowUps('manual');
+
+            expect(result.generatedCount).toBe(1);
+            expect(prisma.findingFollowUp.create).toHaveBeenCalledWith({
+                data: expect.objectContaining({ findingId: 'f-1', actionId: 'a-1', status: 'BEKLIYOR' }),
+            });
+            expect(prisma.action.update).not.toHaveBeenCalled();
+        });
+    });
 
     // ─── Mutabakat Workflow Geçişleri ──────────────────────────────────────
 
@@ -195,12 +237,15 @@ describe('AuditsService — kritik iş kuralları', () => {
             });
         });
 
-        it('hiç aksiyon yoksa finding.update çağrılmaz', async () => {
+        it('hiç aksiyon yoksa eski hedef tarihi temizler', async () => {
             prisma.action.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 
             await service.recalculateFindingTargetDate('f-1');
 
-            expect(prisma.finding.update).not.toHaveBeenCalled();
+            expect(prisma.finding.update).toHaveBeenCalledWith({
+                where: { id: 'f-1' },
+                data: { targetResolutionDate: null },
+            });
         });
     });
 
@@ -218,14 +263,24 @@ describe('AuditsService — kritik iş kuralları', () => {
             expect(prisma.finding.update).toHaveBeenCalledWith(
                 expect.objectContaining({ data: expect.objectContaining({ status: 'CLOSED' }) }),
             );
+            expect(prisma.findingFollowUp.updateMany).toHaveBeenCalledWith({
+                where: { findingId: 'f-1', status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR', 'TAMAMLANDI'] } },
+                data: { status: 'IPTAL' },
+            });
         });
 
-        it('bir aksiyon bile açık ise bulguyu kapatmaz', async () => {
+        it('en az bir aksiyon kapalı ve biri açık ise bulguyu kısmen kapatır', async () => {
             prisma.action.findMany.mockResolvedValue([{ status: 'KAPATILDI' }, { status: 'DEVAM_EDIYOR' }]);
+            prisma.finding.findUnique.mockResolvedValue({ id: 'f-1' });
+            prisma.finding.update.mockResolvedValue({});
+            prisma.findingStatusHistory.create.mockResolvedValue({});
 
             await service.checkAndCloseFindinIfAllActionsClosed('f-1', 'user-1');
 
-            expect(prisma.finding.update).not.toHaveBeenCalled();
+            expect(prisma.finding.update).toHaveBeenCalledWith({
+                where: { id: 'f-1' },
+                data: { status: 'PARTIALLY_CLOSED', resolutionStatus: 'KISMEN_KAPATILDI', closedDate: null },
+            });
         });
 
         it('hiç aksiyon yoksa bulguyu kapatmaz (boş liste = "tüm aksiyonlar kapalı" sayılmaz)', async () => {
@@ -382,6 +437,7 @@ describe('AuditsService — kritik iş kuralları', () => {
                 findUnique: jest.fn().mockResolvedValue({ id: 'fu-1', status: 'ONAYLANDI' }),
                 update: jest.fn().mockResolvedValue({ id: 'fu-1', actionId: null, result: 'YETERLI' }),
                 updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+                create: jest.fn(),
             };
         });
 
@@ -491,5 +547,94 @@ describe('AuditsService — kritik iş kuralları', () => {
             expect(data.evaluatorId).toBe('user-9');
             expect(data.evaluatedAt).toBeInstanceOf(Date);
         });
+
+        it('onaylanmamış YETERLI değerlendirmesi bulgunun çözüm durumunu değiştirmez', async () => {
+            prisma.findingFollowUp.findFirst.mockResolvedValue(
+                readyFollowUp({ evaluatorId: null, result: null, status: 'DEVAM_EDIYOR' }),
+            );
+            prisma.findingFollowUp.update.mockResolvedValue({ id: 'fu-1', actionId: null, result: 'YETERLI' });
+
+            await service.updateFollowUp(
+                'f-1', 'fu-1',
+                { status: 'TAMAMLANDI', currentStatusDetail: 'Kanıt yeterli.', result: 'YETERLI' },
+                'evaluator-1', 'AUDITOR',
+            );
+
+            expect(prisma.finding.update).not.toHaveBeenCalled();
+        });
+
+        it('onaylanmamış YETERSIZ değerlendirmesi aksiyon veya bulguyu değiştirmez', async () => {
+            prisma.findingFollowUp.findFirst.mockResolvedValue(readyFollowUp({ actionId: 'a-1', evaluatorId: null, result: null, status: 'DEVAM_EDIYOR' }));
+            prisma.findingFollowUp.update.mockResolvedValue({ id: 'fu-1', actionId: 'a-1', result: 'YETERSIZ', resolutionOutcome: 'DEVAM_EDIYOR' });
+            await service.updateFollowUp('f-1', 'fu-1', { status: 'TAMAMLANDI', result: 'YETERSIZ', resolutionOutcome: 'DEVAM_EDIYOR' }, 'evaluator-1', 'AUDITOR');
+            expect(prisma.action.update).not.toHaveBeenCalled();
+            expect(prisma.finding.update).not.toHaveBeenCalled();
+        });
+
+        it('yeni aksiyon taslağını değerlendirme kaydında onaya kadar saklar', async () => {
+            const draft = {
+                description: 'Kalıcı düzeltici aksiyon', ownerId: 'owner-1',
+                dueDate: '2099-12-31', responsibleDepartment: 'Operasyon',
+            };
+            prisma.findingFollowUp.findFirst.mockResolvedValue(
+                readyFollowUp({ evaluatorId: null, result: null, status: 'DEVAM_EDIYOR' }),
+            );
+            prisma.user.findUnique.mockResolvedValue({ id: 'owner-1' });
+            prisma.findingFollowUp.update.mockResolvedValue({
+                id: 'fu-1', actionId: null, result: 'YENI_AKSIYON_GEREKLI',
+                resolutionOutcome: 'YENI_AKSIYON_GEREKLI', newActionDraft: draft,
+            });
+
+            await service.updateFollowUp('f-1', 'fu-1', {
+                status: 'TAMAMLANDI', result: 'YENI_AKSIYON_GEREKLI',
+                resolutionOutcome: 'YENI_AKSIYON_GEREKLI', newAction: draft,
+            }, 'evaluator-1', 'AUDITOR');
+
+            expect(prisma.findingFollowUp.update).toHaveBeenCalledWith(expect.objectContaining({
+                data: expect.objectContaining({ newActionDraft: draft, newActionRequired: true }),
+            }));
+            expect(prisma.action.update).not.toHaveBeenCalled();
+            expect(prisma.finding.update).not.toHaveBeenCalled();
+        });
+
+        it('ikinci kontrolcü onayında YETERSIZ aksiyon açık/yetersiz kalır, kapanmaz', async () => {
+            prisma.findingFollowUp.findFirst.mockResolvedValue(readyFollowUp({ actionId: 'a-1', result: 'YETERSIZ', resolutionOutcome: 'DEVAM_EDIYOR' }));
+            prisma.findingFollowUp.update.mockResolvedValue({ id: 'fu-1', actionId: 'a-1', result: 'YETERSIZ', resolutionOutcome: 'DEVAM_EDIYOR' });
+            prisma.action.update.mockResolvedValue({});
+            prisma.finding.update.mockResolvedValue({});
+            await service.updateFollowUp('f-1', 'fu-1', { status: 'ONAYLANDI' }, 'second-ctrl', 'SYSTEM_ADMIN');
+            expect(prisma.action.update).toHaveBeenCalledWith({ where: { id: 'a-1' }, data: { status: 'YETERSIZ' } });
+        });
+
+        it('onaylı erteleme yeni takip üretir, aksiyon terminini değiştirmez', async () => {
+            const next = new Date('2099-12-31T00:00:00.000Z');
+            prisma.findingFollowUp.findFirst
+                .mockResolvedValueOnce(readyFollowUp({ actionId: 'a-1', result: 'YETERSIZ', resolutionOutcome: 'ERTELENDI', newFollowUpDate: next }))
+                .mockResolvedValueOnce(null);
+            prisma.findingFollowUp.update.mockResolvedValue({ id: 'fu-1', actionId: 'a-1', result: 'YETERSIZ', resolutionOutcome: 'ERTELENDI', newFollowUpDate: next });
+            prisma.findingFollowUp.create.mockResolvedValue({ id: 'fu-next' });
+            prisma.action.update.mockResolvedValue({});
+            prisma.finding.update.mockResolvedValue({});
+            await service.updateFollowUp('f-1', 'fu-1', { status: 'ONAYLANDI' }, 'second-ctrl', 'SYSTEM_ADMIN');
+            expect(prisma.findingFollowUp.create).toHaveBeenCalledWith({ data: expect.objectContaining({ actionId: 'a-1', plannedDate: next, status: 'BEKLIYOR' }) });
+            expect(prisma.action.update).toHaveBeenCalledWith({ where: { id: 'a-1' }, data: { status: 'YETERSIZ' } });
+            expect(prisma.action.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ dueDate: expect.anything() }) }));
+        });
+    });
+
+    describe('createFollowUpForAction', () => {
+        it.each(['TAMAMLANDI', 'COMPLETED'])(
+            '%s aksiyona manuel takip eklenince aksiyon durumunu geriye almaz',
+            async (status) => {
+                prisma.action.findFirst = jest.fn().mockResolvedValue({
+                    id: 'a-1', findingId: 'f-1', status, dueDate: new Date('2026-12-01'), finding: {},
+                });
+                prisma.findingFollowUp.create.mockResolvedValue({ id: 'fu-1' });
+
+                await service.createFollowUpForAction('f-1', 'a-1', {}, 'user-1');
+
+                expect(prisma.action.update).not.toHaveBeenCalled();
+            },
+        );
     });
 });

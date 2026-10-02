@@ -38,6 +38,20 @@ export class AdminController {
         });
     }
 
+    @Get('users/options')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    async findUserOptions(
+        @Query('search') search?: string,
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+    ) {
+        return this.adminService.findUserOptions({
+            search: search?.slice(0, 200),
+            page: Math.max(1, Number(page) || 1),
+            limit: Math.min(500, Math.max(1, Number(limit) || 100)),
+        });
+    }
+
     @Get('users/:id')
     async findUserById(@Param('id') id: string) {
         return this.adminService.findUserById(id);

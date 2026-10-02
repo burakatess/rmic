@@ -45,8 +45,8 @@ export class LibraryController {
     // ─── Kaynak / sürüm / birim ────────────────────────────────────────────
     @Get('sources')
     @Roles(...AI_EVAL_ROLES)
-    listSources(@Query('q') q?: string, @Query('kind') kind?: string, @Query('confidentiality') confidentiality?: string) {
-        return this.sources.list({ q, kind, confidentiality });
+    listSources(@Query('q') q?: string, @Query('kind') kind?: string, @Query('confidentiality') confidentiality?: string, @Query('includeArchived') includeArchived?: string) {
+        return this.sources.list({ q, kind, confidentiality, includeArchived: includeArchived === 'true' });
     }
 
     @Get('sources/:id')

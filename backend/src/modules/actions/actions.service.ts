@@ -2,6 +2,8 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { PrismaService } from '../../prisma';
 import { nextCounterValue, formatRecordId } from '../../common/util/sequential-id';
 import { AuditsService } from '../audits/audits.service';
+import { projectActionStatus } from '../../common/workflow/workflow-projection';
+import { parseMultiValue, personFieldWhere } from '../../common/util/person-filter';
 
 const normalizeRole = (r?: string): string =>
     ({ ADMIN: 'SYSTEM_ADMIN', RISK_MANAGER: 'RISK_CONTROL_MANAGER', CONTROL_OWNER: 'AUDITEE' }[r ?? ''] ?? r ?? '');
@@ -33,8 +35,8 @@ export class ActionsService {
         return formatRecordId('A', await nextCounterValue(this.prisma, 'action'));
     }
 
-    async findAll(query: any) {
-        const { search, ownerId, status, source, riskId, findingId, sortBy, sortOrder } = query;
+    async findAll(query: any, currentUserId?: string) {
+        const { search, ownerId, ownerIds, status, source, riskId, findingId, sortBy, sortOrder, overdue, dueMonth } = query;
         const page = parseInt(query.page, 10) || 1;
         const limit = parseInt(query.limit, 10) || 20;
         const skip = (page - 1) * limit;
@@ -45,8 +47,19 @@ export class ActionsService {
                 { actionId: { contains: search, mode: 'insensitive' } },
             ];
         }
-        if (ownerId) where.ownerId = ownerId;
-        if (status) where.status = status;
+        const ownerFilter = personFieldWhere('ownerId', ownerIds || ownerId, currentUserId);
+        if (ownerFilter) where.AND = [...(where.AND || []), ownerFilter];
+        if (status) {
+            const statuses = parseMultiValue(status);
+            where.status = statuses.length > 1 ? { in: statuses } : statuses[0];
+        }
+        if (overdue === 'true') {
+            where.dueDate = { lt: new Date() };
+            where.status = { notIn: ['KAPATILDI', 'CLOSED', 'IPTAL'] };
+        } else if (/^\d{4}-\d{2}$/.test(dueMonth || '')) {
+            const [year, month] = dueMonth.split('-').map(Number);
+            where.dueDate = { gte: new Date(year, month - 1, 1), lt: new Date(year, month, 1) };
+        }
         if (source) where.source = source;
         if (riskId) where.riskId = riskId;
         if (findingId) where.findingId = findingId;
@@ -71,7 +84,8 @@ export class ActionsService {
         const now = new Date();
         const actionsWithOverdue = actions.map((action) => ({
             ...action,
-            isOverdue: action.status !== 'CLOSED' && action.status !== 'COMPLETED' && action.dueDate < now,
+            ...projectActionStatus(action.status, action.dueDate, now),
+            isOverdue: projectActionStatus(action.status, action.dueDate, now).timingStatus === 'GECIKMIS',
         }));
 
         return { data: actionsWithOverdue, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
@@ -88,7 +102,7 @@ export class ActionsService {
             },
         });
         if (!action) throw new NotFoundException(`Action with ID ${id} not found`);
-        return action;
+        return { ...action, ...projectActionStatus(action.status, action.dueDate) };
     }
 
     async getRelations(id: string) {
@@ -192,19 +206,24 @@ export class ActionsService {
         return this.audits.deleteAction(action.findingId, id, userId);
     }
 
-    async complete(id: string, userId: string, role?: string) {
+    async complete(id: string, data: { evidenceIds?: string[] }, userId: string, role?: string) {
         const action = await this.loadActionForMutation(id, userId, role);
         if (action.status === 'KAPATILDI' || action.status === 'CLOSED') {
             throw new BadRequestException('Onaylı biçimde kapatılmış aksiyon yeniden tamamlanamaz.');
         }
+        const evidenceIds = data.evidenceIds ?? [];
         // "Tamamlandı" — ONAYLI KAPANIŞ DEĞİL. Bulgu kapanışı yalnızca takip
         // onayından geçer (checkAndCloseFindinIfAllActionsClosed KAPATILDI arar).
         return this.prisma.$transaction(async (tx) => {
+            if (evidenceIds.length) {
+                const linked = await tx.actionAttachment.count({ where: { actionId: id, id: { in: evidenceIds } } });
+                if (linked !== evidenceIds.length) throw new BadRequestException('Kanıtlardan biri bu aksiyona bağlı değil veya erişilebilir değil.');
+            }
             const updated = await tx.action.update({
                 where: { id }, data: { status: 'COMPLETED', completedAt: new Date() },
             });
             await tx.auditLog.create({
-                data: { userId, action: 'COMPLETE', entityType: 'Action', entityId: id, oldValue: action, newValue: updated },
+                data: { userId, action: 'COMPLETE', entityType: 'Action', entityId: id, oldValue: action, newValue: { ...updated, evidenceIds } },
             });
             return updated;
         });

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
 
 @Injectable()
@@ -120,13 +120,27 @@ export class RiskActionsService {
         return updated;
     }
 
-    async delete(id: string) {
-        await this.findOne(id);
-        await this.prisma.riskAction.update({
+    // Bağımlılığı olmayan kayıt fiziksel olarak silinir; bağımlılık varsa 409
+    // ile açık gerekçe döner (Risk Yönetimi kayıt silme politikası — madde 2).
+    async delete(id: string, userId: string) {
+        const ra = await this.prisma.riskAction.findUnique({
             where: { id },
-            data: { status: 'IPTAL' },
+            include: { risks: { include: { risk: { select: { riskId: true } } } } },
         });
-        return { message: 'Aksiyon iptal edildi' };
+        if (!ra) throw new NotFoundException('Aksiyon bulunamadı');
+        if (ra.risks.length > 0) {
+            throw new ConflictException(
+                `Bu aksiyon ${ra.risks.length} riske bağlı (${ra.risks.map(r => r.risk.riskId).join(', ')}). Önce risk bağlantılarını kaldırın.`,
+            );
+        }
+
+        await this.prisma.$transaction(async (tx) => {
+            await tx.auditLog.create({
+                data: { userId, action: 'DELETE', entityType: 'RiskAction', entityId: ra.id, oldValue: ra as any },
+            });
+            await tx.riskAction.delete({ where: { id } });
+        });
+        return { message: 'Aksiyon silindi' };
     }
 
     async linkRisk(aksiyonId: string, riskId: string) {

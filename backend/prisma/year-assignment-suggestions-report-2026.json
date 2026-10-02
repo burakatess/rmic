@@ -1,0 +1,223 @@
+{
+  "generatedAt": "2026-09-17T08:34:40.285Z",
+  "mode": "DRY-RUN",
+  "year": 2026,
+  "summary": {
+    "scopesConsidered": 25,
+    "alreadyHasDraftAssignment": 0,
+    "noLegacyDataToSuggest": 0,
+    "suggested": 25
+  },
+  "suggestions": [
+    {
+      "controlId": "cmtla830c000zd3vws2fj8q3k",
+      "controlCode": "K-2026-0002",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000gd3vw0u25ui5z",
+      "suggestedSecondControllerId": "cmtla82za000cd3vwh94pxbfj",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla830d0010d3vwenvyorrz",
+      "controlCode": "K-2026-0003",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000fd3vw03id2erv",
+      "suggestedSecondControllerId": "cmtla82za000cd3vwh94pxbfj",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla830f0011d3vwkv6b7zfh",
+      "controlCode": "K-2026-0004",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000fd3vw03id2erv",
+      "suggestedSecondControllerId": "cmtla82za000cd3vwh94pxbfj",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla830h0012d3vwdic3n062",
+      "controlCode": "K-2026-0005",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000ed3vwa9152e7m",
+      "suggestedSecondControllerId": "cmtla82za000cd3vwh94pxbfj",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla830k0014d3vwnz0v27pf",
+      "controlCode": "K-2026-0007",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000ed3vwa9152e7m",
+      "suggestedSecondControllerId": "cmtla82za000cd3vwh94pxbfj",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla830m0015d3vwpixu06aw",
+      "controlCode": "K-2026-0008",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000cd3vwh94pxbfj",
+      "suggestedSecondControllerId": "cmtla82za000dd3vwshnv5f2h",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla830o0016d3vwlkja1ubp",
+      "controlCode": "K-2026-0009",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000dd3vwshnv5f2h",
+      "suggestedSecondControllerId": null,
+      "skippedFields": [
+        "secondController (assignee ile aynı kişi)"
+      ]
+    },
+    {
+      "controlId": "cmtla830p0017d3vwap8e12lf",
+      "controlCode": "K-2026-0010",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000ed3vwa9152e7m",
+      "suggestedSecondControllerId": "cmtla82za000dd3vwshnv5f2h",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla830r0018d3vwt2raym2f",
+      "controlCode": "K-2026-0011",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000fd3vw03id2erv",
+      "suggestedSecondControllerId": "cmtla82za000cd3vwh94pxbfj",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla830t0019d3vwg3x82aic",
+      "controlCode": "K-2026-0012",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000cd3vwh94pxbfj",
+      "suggestedSecondControllerId": null,
+      "skippedFields": [
+        "secondController (assignee ile aynı kişi)"
+      ]
+    },
+    {
+      "controlId": "cmtla830u001ad3vwvsigvstn",
+      "controlCode": "K-2026-0013",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000fd3vw03id2erv",
+      "suggestedSecondControllerId": "cmtla82za000cd3vwh94pxbfj",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla830v001bd3vwma8b4wne",
+      "controlCode": "K-2026-0014",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000gd3vw0u25ui5z",
+      "suggestedSecondControllerId": "cmtla82za000cd3vwh94pxbfj",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla830x001cd3vwmqoh1wk4",
+      "controlCode": "K-2026-0015",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000gd3vw0u25ui5z",
+      "suggestedSecondControllerId": "cmtla82za000dd3vwshnv5f2h",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla830y001dd3vwkhcfsco4",
+      "controlCode": "K-2026-0016",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000gd3vw0u25ui5z",
+      "suggestedSecondControllerId": "cmtla82za000dd3vwshnv5f2h",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla8308000yd3vwtxrluvce",
+      "controlCode": "K-2026-0001",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000ed3vwa9152e7m",
+      "suggestedSecondControllerId": "cmtla82za000dd3vwshnv5f2h",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla830i0013d3vw6jam1lq9",
+      "controlCode": "K-2026-0006",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000dd3vwshnv5f2h",
+      "suggestedSecondControllerId": null,
+      "skippedFields": [
+        "secondController (assignee ile aynı kişi)"
+      ]
+    },
+    {
+      "controlId": "cmtla8312001fd3vwshofr0au",
+      "controlCode": "K-2026-0018",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000ed3vwa9152e7m",
+      "suggestedSecondControllerId": "cmtla82za000dd3vwshnv5f2h",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla8314001gd3vw1rs9as0z",
+      "controlCode": "K-2026-0019",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000fd3vw03id2erv",
+      "suggestedSecondControllerId": "cmtla82za000cd3vwh94pxbfj",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla8315001hd3vw448qcn72",
+      "controlCode": "K-2026-0020",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000dd3vwshnv5f2h",
+      "suggestedSecondControllerId": null,
+      "skippedFields": [
+        "secondController (assignee ile aynı kişi)"
+      ]
+    },
+    {
+      "controlId": "cmtla8317001id3vwbbb626nw",
+      "controlCode": "K-2026-0021",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000ed3vwa9152e7m",
+      "suggestedSecondControllerId": "cmtla82za000dd3vwshnv5f2h",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla8318001jd3vwsrvk86n7",
+      "controlCode": "K-2026-0022",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000fd3vw03id2erv",
+      "suggestedSecondControllerId": "cmtla82za000dd3vwshnv5f2h",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla8319001kd3vw1ttuxlih",
+      "controlCode": "K-2026-0023",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000dd3vwshnv5f2h",
+      "suggestedSecondControllerId": "cmtla82za000cd3vwh94pxbfj",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla831g001od3vwxm9lwae5",
+      "controlCode": "K-2026-0027",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000ed3vwa9152e7m",
+      "suggestedSecondControllerId": "cmtla82za000dd3vwshnv5f2h",
+      "skippedFields": []
+    },
+    {
+      "controlId": "cmtla8310001ed3vwqrmd2grq",
+      "controlCode": "K-2026-0017",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000dd3vwshnv5f2h",
+      "suggestedSecondControllerId": null,
+      "skippedFields": [
+        "secondController (assignee ile aynı kişi)"
+      ]
+    },
+    {
+      "controlId": "cmtla831e001nd3vwlc2cvp5c",
+      "controlCode": "K-2026-0026",
+      "year": 2026,
+      "suggestedAssigneeId": "cmtla82za000ed3vwa9152e7m",
+      "suggestedSecondControllerId": "cmtla82za000cd3vwh94pxbfj",
+      "skippedFields": []
+    }
+  ]
+}

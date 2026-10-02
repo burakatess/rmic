@@ -1,7 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
     IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString,
-    Max, MaxLength, Min, ValidateNested,
+    ArrayMaxSize, IsNotEmpty, Max, MaxLength, Min, ValidateNested,
 } from 'class-validator';
 import { ControlFrequency } from '@prisma/client';
 
@@ -62,6 +62,36 @@ export class EligibleControllersQueryDto {
     @IsIn(['assignee', 'secondController']) role: 'assignee' | 'secondController';
 }
 
+export class AnnualPlanAssignmentDecisionDto {
+    @IsString() @IsNotEmpty() @MaxLength(100) controlId: string;
+    @IsString() @IsNotEmpty() @MaxLength(100) taskId: string;
+    @IsIn(['REASSIGN', 'KEEP']) action: 'REASSIGN' | 'KEEP';
+}
+
 export class ApplyPlanDto {
     @IsInt() expectedRevision: number;
+    @IsOptional() @IsArray() @ArrayMaxSize(10000)
+    @ValidateNested({ each: true }) @Type(() => AnnualPlanAssignmentDecisionDto)
+    assignmentDecisions?: AnnualPlanAssignmentDecisionDto[];
+}
+
+export class AnnualPlanTransitionDto {
+    @IsInt() expectedRevision: number;
+    @IsOptional() @IsString() @MaxLength(2000) note?: string;
+    @IsOptional() @IsArray() @ArrayMaxSize(10000)
+    @ValidateNested({ each: true }) @Type(() => AnnualPlanAssignmentDecisionDto)
+    assignmentDecisions?: AnnualPlanAssignmentDecisionDto[];
+}
+
+export class AnnualPlanDecisionDto {
+    @IsInt() expectedRevision: number;
+    @IsOptional() @IsString() @MaxLength(2000) note?: string;
+}
+
+// Madde 18: "Önceki Yıldan Kopyala" ekranında üç BAĞIMSIZ seçenek — atamaları
+// kopyalama varsayılan KAPALI.
+export class CopyFromYearDto {
+    @IsOptional() @IsBoolean() copyScope?: boolean;
+    @IsOptional() @IsBoolean() copyCalendar?: boolean;
+    @IsOptional() @IsBoolean() copyAssignments?: boolean;
 }

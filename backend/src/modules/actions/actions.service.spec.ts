@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ActionsService } from './actions.service';
 import { AuditsService } from '../audits/audits.service';
 import { PrismaService } from '../../prisma';
@@ -11,7 +11,8 @@ describe('ActionsService — nesne bazlı yetkilendirme + ortak domain delegasyo
 
     beforeEach(async () => {
         prisma = {
-            action: { findUnique: jest.fn(), update: jest.fn(), findFirst: jest.fn() },
+            action: { findUnique: jest.fn(), update: jest.fn(), findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
+            actionAttachment: { count: jest.fn() },
             finding: { findUnique: jest.fn() },
             auditLog: { create: jest.fn().mockResolvedValue({}) },
             user: { findUnique: jest.fn() },
@@ -44,7 +45,7 @@ describe('ActionsService — nesne bazlı yetkilendirme + ortak domain delegasyo
 
     it('AUDITEE başka kullanıcının aksiyonunu tamamlayamaz', async () => {
         prisma.action.findUnique.mockResolvedValue({ id: 'a-1', findingId: 'f-1', ownerId: 'other-user' });
-        await expect(service.complete('a-1', 'auditee-1', 'AUDITEE')).rejects.toThrow(ForbiddenException);
+        await expect(service.complete('a-1', {}, 'auditee-1', 'AUDITEE')).rejects.toThrow(ForbiddenException);
     });
 
     it('AUDITEE başka kullanıcının aksiyonunu uzatamaz', async () => {
@@ -57,8 +58,24 @@ describe('ActionsService — nesne bazlı yetkilendirme + ortak domain delegasyo
     it('AUDITEE kendi aksiyonunu tamamlayabilir', async () => {
         prisma.action.findUnique.mockResolvedValue({ id: 'a-1', findingId: 'f-1', ownerId: 'auditee-1', status: 'BEKLIYOR' });
         prisma.action.update.mockResolvedValue({ id: 'a-1', status: 'COMPLETED' });
-        await expect(service.complete('a-1', 'auditee-1', 'AUDITEE')).resolves.toBeDefined();
+        await expect(service.complete('a-1', {}, 'auditee-1', 'AUDITEE')).resolves.toBeDefined();
         expect(prisma.action.update).toHaveBeenCalled();
+    });
+
+    it('kanıtlı tamamlama yalnız aksiyona bağlı kanıt kimlikleriyle başarılıdır', async () => {
+        prisma.action.findUnique.mockResolvedValue({ id: 'a-1', findingId: 'f-1', ownerId: 'auditee-1', status: 'DEVAM_EDIYOR' });
+        prisma.actionAttachment.count.mockResolvedValue(2);
+        prisma.action.update.mockResolvedValue({ id: 'a-1', status: 'COMPLETED' });
+        await service.complete('a-1', { evidenceIds: ['ev-1', 'ev-2'] }, 'auditee-1', 'AUDITEE');
+        expect(prisma.actionAttachment.count).toHaveBeenCalledWith({ where: { actionId: 'a-1', id: { in: ['ev-1', 'ev-2'] } } });
+        expect(prisma.action.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'COMPLETED' }) }));
+    });
+
+    it('başka kayda ait veya erişilemeyen kanıt bağlanamaz', async () => {
+        prisma.action.findUnique.mockResolvedValue({ id: 'a-1', findingId: 'f-1', ownerId: 'auditee-1', status: 'DEVAM_EDIYOR' });
+        prisma.actionAttachment.count.mockResolvedValue(1);
+        await expect(service.complete('a-1', { evidenceIds: ['ev-1', 'other-action-evidence'] }, 'auditee-1', 'AUDITEE')).rejects.toThrow(BadRequestException);
+        expect(prisma.action.update).not.toHaveBeenCalled();
     });
 
     it('yönetici rolü başkasının aksiyonunu güncelleyebilir — ortak domain servisine delege', async () => {
@@ -87,6 +104,17 @@ describe('ActionsService — nesne bazlı yetkilendirme + ortak domain delegasyo
 
     it('aksiyon yoksa NotFoundException (Prisma 500 değil)', async () => {
         prisma.action.findUnique.mockResolvedValue(null);
-        await expect(service.complete('yok', 'u-1', 'AUDITOR')).rejects.toThrow(NotFoundException);
+        await expect(service.complete('yok', {}, 'u-1', 'AUDITOR')).rejects.toThrow(NotFoundException);
+    });
+
+    it('kişi çoklu filtresi ve pagination aynı backend where koşulunu count sorgusunda kullanır', async () => {
+        await service.findAll({ ownerIds: 'u-1,u-2,__UNASSIGNED__', status: 'BEKLIYOR,DEVAM_EDIYOR', page: '2', limit: '25' }, 'actor-1');
+        const listArgs = prisma.action.findMany.mock.calls[0][0];
+        const countArgs = prisma.action.count.mock.calls[0][0];
+        expect(listArgs.skip).toBe(25);
+        expect(listArgs.take).toBe(25);
+        expect(listArgs.where).toEqual(countArgs.where);
+        expect(listArgs.where.AND).toContainEqual({ OR: [{ ownerId: { in: ['u-1', 'u-2'] } }, { ownerId: null }] });
+        expect(listArgs.where.status).toEqual({ in: ['BEKLIYOR', 'DEVAM_EDIYOR'] });
     });
 });

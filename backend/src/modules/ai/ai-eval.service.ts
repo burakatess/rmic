@@ -1,5 +1,5 @@
 import {
-    BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException,
+    BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { Prisma } from '@prisma/client';
@@ -8,10 +8,17 @@ import { AiProviderService } from './ai-provider.service';
 import { AiEmbeddingService } from './ai-embedding.service';
 import { TextExtractService } from './text-extract.service';
 import { EVAL_VISION } from './prompts';
-import { EVAL_V2, EVAL_ASK, makeNonce } from './prompts/eval-v2';
-import { EVAL_OUTPUT_SCHEMA_VERSION, EVAL_PROMPT_VERSION } from './ai.constants';
-import { validateEvalOutput, SchemaIssue } from './eval-output.validator';
+import { EVAL_ASK, makeNonce } from './prompts/eval-v2';
+import { EVAL_V3 } from './prompts/eval-v3';
+import { EVAL_PROMPT_VERSION, EVAL_V3_SCHEMA_VERSION, EVAL_V3_PROMPT_VERSION } from './ai.constants';
 import type { EvalRunDto, EvalAskDto } from './dto';
+import { EvalSourceRetrievalService, formatUnitsForPrompt } from './eval-v3/eval-source-retrieval.service';
+import { buildRetrievalQuery } from './eval-v3/eval-retrieval.util';
+import { buildEvidenceDigest, EvidenceItem } from './eval-v3/eval-evidence.util';
+import { computeEvalInputHash, textChecksum } from './eval-v3/eval-input-hash';
+import { summarizePreviousEvaluation } from './eval-v3/eval-previous-summary';
+import { processEvalV3Response, EvidenceCtx } from './eval-v3/eval-v3.pipeline';
+import { RetrievedUnit, V3Issue } from './eval-v3/eval-v3.types';
 
 type EvalKind = 'DOCUMENT' | 'IMAGE' | 'EMAIL' | 'TEXT';
 
@@ -51,6 +58,7 @@ export class AiEvalService {
         private provider: AiProviderService,
         private embeddings: AiEmbeddingService,
         private extractor: TextExtractService,
+        private retrieval: EvalSourceRetrievalService,
     ) {}
 
     // ─── Liste (görünüm / arama / filtre / sıralama / sayfalama) ─────────────
@@ -268,6 +276,9 @@ export class AiEvalService {
             : (before.titleEditedByUser
                 ? before.title
                 : this.deriveTitle(controlSnapshot, dto.controlText ?? null, period ?? undefined));
+        // Değişmeyen girdide contentVersion ARTMAZ: her "Değerlendir" tıklaması (veya boş autosave)
+        // sürümü artırıp uçuştaki sonucu "stale" yapıyor ve eski sonucu görünür bırakıyordu.
+        const somethingChanged = inputsChanged || nextTitle !== before.title || (period ?? null) !== (before.period ?? null);
 
         await this.prisma.aiEvalSession.update({
             where: { id },
@@ -286,7 +297,7 @@ export class AiEvalService {
                 knowledgeSnapshot: (knowledgeSnapshot ?? Prisma.JsonNull) as Prisma.InputJsonValue,
                 sourceUnitIds: dto.sourceUnitIds ?? [],
                 sourceSnapshot: (sourceSnapshot ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-                contentVersion: { increment: 1 },
+                ...(somethingChanged ? { contentVersion: { increment: 1 } } : {}),
                 inputsDirty: inputsChanged && hasEval > 0 ? true : before.inputsDirty,
             },
         });
@@ -535,10 +546,19 @@ export class AiEvalService {
         }
 
         const base = JSON.parse(JSON.stringify(latest.edited ?? latest.original)) as Record<string, unknown>;
-        const arr = base[body.group];
-        if (!Array.isArray(arr) || !arr[body.index]) throw new BadRequestException('Geçersiz tespit referansı.');
-
-        const item = arr[body.index] as Record<string, unknown>;
+        let item: Record<string, unknown>;
+        if (body.group === 'finding') {
+            // v3: tek bir bulgu nesnesi (exists=true iken incelenir).
+            const f = base.finding as Record<string, unknown> | undefined;
+            if (!f || typeof f !== 'object' || f.exists !== true || body.index !== 0) {
+                throw new BadRequestException('Geçersiz tespit referansı.');
+            }
+            item = f;
+        } else {
+            const arr = base[body.group];
+            if (!Array.isArray(arr) || !arr[body.index]) throw new BadRequestException('Geçersiz tespit referansı.');
+            item = arr[body.index] as Record<string, unknown>;
+        }
         // AI'nin özgün çıktısı EZİLMEZ — düzenleme editedEvaluation'da yaşar.
         if (body.status === 'EDITED' && body.edited && typeof body.edited === 'object') {
             Object.assign(item, body.edited as Record<string, unknown>);
@@ -717,16 +737,19 @@ export class AiEvalService {
     }
 
     /**
-     * "Değerlendir / Yeniden Değerlendir" — EKRANDAKİ güncel girdiyle tam 6
-     * başlıklı yapılandırılmış rapor üretir.
+     * "Değerlendir / Yeniden Değerlendir" — EKRANDAKİ güncel girdiyle yedi bölümlü,
+     * doğrulanmış (v3) değerlendirme üretir.
      *
-     * Sıra (task §1):
-     *   1) Ekran girdisini KAYDET (contentVersion çakışırsa 409). Kayıt
-     *      başarısızsa çalıştırma YAPILMAZ — eski girdiyle değerlendirme olmaz.
-     *   2) Seçili kaynakları CANLI yetki/onayla çöz (geri alınmışsa dur).
-     *   3) Değişmez girdi snapshot'ı → model → runtime şema doğrulaması (1 retry)
-     *      → atıf doğrulaması.
-     *   4) Geç gelen / iptal edilen / stale sonuç güncel sonucu EZMEZ.
+     * Sıra:
+     *   1) Ekran girdisini KAYDET (contentVersion çakışırsa 409); başarısızsa koşu yok.
+     *   2) Kanıtları oku (dosya başına kimlik E1..; okunamayanlar yeniden denenir).
+     *   3) OTOMATİK kaynak taraması: kontrol + kanıt + açıklamadan sorgu → onaylı sistem
+     *      kaynaklarında hybrid arama → eşik → top-K (+ kullanıcının elle seçtikleri).
+     *   4) Girdi özeti (inputHash) → prompt (yeniden değerlendirmede kullanıcının son girdisi
+     *      <yeniden_degerlendirme_talimati> bloğunda) → model.
+     *   5) Şema + atıf doğrulaması; başarısızsa TEK onarım denemesi; yine başarısızsa
+     *      SONUÇ KAYDEDİLMEZ (önceki değerlendirme yeni sonuç sanılmaz).
+     *   6) Geç gelen / iptal edilen / stale sonuç güncel sonucu EZMEZ.
      */
     async runEvaluation(
         sessionId: string,
@@ -736,8 +759,8 @@ export class AiEvalService {
     ) {
         // 1) Ekran girdisini önce kaydet — hata olursa buradan fırlar, koşu yok.
         if (screen) {
-            const { additionalNote: _drop, ...sessionPatch } = screen;
-            void _drop;
+            const { additionalNote: _drop, followUpQuestion: _dropQ, ...sessionPatch } = screen;
+            void _drop; void _dropQ;
             await this.updateSession(sessionId, sessionPatch, userId);
         }
         const session = await this.getSession(sessionId, userId);
@@ -762,9 +785,10 @@ export class AiEvalService {
                 'Değerlendirme için en az bir kanıt gerekli: dosya ekleyin, Yanıt/Kanıt metni yazın ya da açıklama girin.',
             );
         }
+        const isReEvaluation = priorEvalRuns > 0;
 
-        // 2) Kaynakları çalışma öncesi çöz — onay/hak geri alınmışsa burada durur.
-        const sourceResolved = await this.resolveSourceUnitsForRun(session.sourceUnitIds ?? []);
+        // Kullanıcının elle seçtiği kaynaklar — canlı onay/hak doğrulaması (geri alınmışsa burada durur).
+        const userSelected = await this.retrieval.loadUserSelected(session.sourceUnitIds ?? []);
 
         const inputVersion = session.contentVersion;
         const filesTotal = activeAttachments.filter((a) => !a.extractedText).length;
@@ -783,102 +807,110 @@ export class AiEvalService {
             },
         });
 
-        const { evidenceParts, sections, filesRead } = await this.readEvidence(
-            sessionId, activeAttachments, filesTotal,
-        );
-        await this.prisma.aiEvalSession.update({
-            where: { id: sessionId },
-            data: { runProgress: { phase: 'evaluating', filesRead, filesTotal } as Prisma.InputJsonValue },
-        });
-
-        const controlText = this.controlAsText(session);
-        const regulationText = this.regulationAsText(session);
-        const knowledgeText = this.knowledgeAsText(session);
-        const sourceUnitsText = sourceResolved.promptText;
-        const evidenceDigest = evidenceParts.join('\n\n').slice(0, MAX_DIGEST);
-        const digestTruncated = evidenceParts.join('\n\n').length > MAX_DIGEST;
-
-        const precedents = await this.loadPrecedentFindings(
-            session.controlRefId, `${controlText}\n${evidenceDigest}`.slice(0, 4000),
-        );
-        const precedentText = precedents.length ? JSON.stringify(precedents, null, 2) : '';
-        // Önceki AI ÇIKTISI yalnız "değişenler" bölümü için — KANIT bloğuna girmez.
-        const prevEval = this.pickPreviousEvaluation(session.messages);
-        const previousEvaluationJson = prevEval ? JSON.stringify(prevEval) : null;
-
         const cfg = this.provider.config;
-        const runInputSnapshot = {
-            schemaVersion: EVAL_OUTPUT_SCHEMA_VERSION,
-            promptVersion: EVAL_PROMPT_VERSION,
-            model: cfg.evalModel || cfg.models.heavy,
-            temperature: 0.2,
-            contentVersion: session.contentVersion,
-            period: session.period ?? null,
-            controlText,
-            controlTextHash: createHash('sha256').update(controlText).digest('hex').slice(0, 16),
-            additionalNote,
-            evidenceDigestChars: evidenceDigest.length,
-            evidenceDigestHash: createHash('sha256').update(evidenceDigest).digest('hex').slice(0, 16),
-            evidenceDigestTruncated: digestTruncated,
-            evidenceSections: sections,
-            regulationArticleIds: session.regulationArticleIds,
-            knowledgeDocIds: session.knowledgeDocIds,
-            sourceUnits: sourceResolved.snapshot,
-            sourceLimitNotes: sourceResolved.blocked,
-        };
-        const evidenceRefs = {
-            attachmentIds: activeAttachments.map((a) => a.id),
-            evidenceTextHash: session.evidenceText?.trim()
-                ? createHash('sha256').update(session.evidenceText.trim()).digest('hex').slice(0, 16)
-                : null,
-            knowledgeDocIds: session.knowledgeDocIds,
-            regulationArticleIds: session.regulationArticleIds,
-            sourceUnitIds: session.sourceUnitIds,
-            sourceVersions: Array.isArray(session.sourceSnapshot)
-                ? (session.sourceSnapshot as { slug?: string; surum?: string }[]).map((s) => `${s.slug}@${s.surum}`)
-                : [],
-        };
-        const retrievalNote = {
-            selectedUnitIds: session.sourceUnitIds,
-            sentUnitIds: sourceResolved.sentUnitIds,
-            limitNotes: sourceResolved.blocked,
-            digestTruncated,
-        };
-
         const nonce = makeNonce();
         let modelName = '';
         try {
-            let resp = await this.provider.chat({
-                tier: 'heavy', modelOverride: cfg.evalModel, reasoning: true, json: true, maxTokens: Math.max(cfg.maxTokens, 12000),
-                system: EVAL_V2.system,
-                user: EVAL_V2.user({
-                    nonce, controlText, additionalNote, regulationText, knowledgeText,
-                    sourceUnitsText, precedentText, evidenceDigest, previousEvaluationJson,
-                    period: session.period,
-                }),
+            const read = await this.readEvidence(sessionId, activeAttachments, filesTotal);
+            await this.prisma.aiEvalSession.update({
+                where: { id: sessionId },
+                data: { runProgress: { phase: 'retrieving', filesRead: read.filesRead, filesTotal } as Prisma.InputJsonValue },
             });
-            modelName = resp.model;
-            let validation = validateEvalOutput(resp.parsed);
 
-            // Runtime şema doğrulaması başarısızsa 1 kontrollü düzeltme denemesi.
-            if (!validation.valid) {
-                const errs = validation.issues
-                    .filter((i) => i.severity === 'ERROR')
-                    .map((i) => `- ${i.path}: ${i.message}`)
-                    .join('\n');
-                resp = await this.provider.chat({
-                    tier: 'heavy', modelOverride: cfg.evalModel, reasoning: true, json: true, maxTokens: Math.max(cfg.maxTokens, 12000),
-                    system: EVAL_V2.system,
-                    user:
-                        EVAL_V2.user({
-                            nonce, controlText, additionalNote, regulationText, knowledgeText,
-                            sourceUnitsText, precedentText, evidenceDigest, previousEvaluationJson,
-                            period: session.period,
-                        }) +
-                        `\n\nÖNCEKİ DENEMEN ŞU ŞEMA HATALARINI İÇERİYORDU — YALNIZCA BUNLARI DÜZELTEREK TAM JSON'U TEKRAR ÜRET:\n${errs}`,
-                });
+            const digest = buildEvidenceDigest(read.items, MAX_DIGEST);
+            const controlInfo = this.controlAsText(session);
+            const followUpQuestion = this.collectPendingQuestions(session.messages, screen?.followUpQuestion ?? null);
+            const riskNames = this.controlRiskNames(session.controlSnapshot);
+            const controlName = (session.controlSnapshot as { name?: string } | null)?.name ?? null;
+
+            // 3) OTOMATİK kaynak taraması
+            const query = buildRetrievalQuery({
+                controlName, controlText: controlInfo, riskNames,
+                evidenceText: digest.text, userNote: additionalNote, followUp: followUpQuestion,
+            });
+            const retrieved = await this.retrieval.retrieve(query);
+            const legacy = await this.retrieval.resolveLegacyRegulationSelections(session.regulationSnapshot);
+            const merged = new Map<string, RetrievedUnit>();
+            for (const u of userSelected) merged.set(u.unitId, u);
+            for (const u of legacy.units) if (!merged.has(u.unitId)) merged.set(u.unitId, u);
+            for (const u of retrieved.units) if (!merged.has(u.unitId)) merged.set(u.unitId, u);
+            const units = [...merged.values()].map((u, i) => ({ ...u, alias: `U${i + 1}` }));
+            const note = { ...retrieved.note, selectedByUser: [...userSelected, ...legacy.units].map((u) => u.unitId), sentUnitIds: units.map((u) => u.unitId) };
+
+            const methodology = await this.retrieval.loadMethodology();
+            const sourcesText = formatUnitsForPrompt(units);
+
+            const prevEval = this.pickPreviousEvaluation(session.messages);
+            const previousSummary = isReEvaluation ? summarizePreviousEvaluation(prevEval) : null;
+            const priorUserHistory = isReEvaluation ? this.collectPriorUserHistory(session.messages) : null;
+
+            const precedents = await this.loadPrecedentFindings(
+                session.controlRefId, `${controlInfo}\n${digest.text}`.slice(0, 4000),
+            );
+            const precedentText = precedents.length ? JSON.stringify(precedents, null, 2) : '';
+            const legacyContext = legacy.contextOnly.length
+                ? 'Kullanıcının seçtiği, kaynak kütüphanesinde karşılığı BULUNAMAYAN mevzuat maddeleri (yalnız bağlam; sourceUnitId yoktur, atıf yapılamaz):\n' +
+                  legacy.contextOnly.map((c) => `• ${c.madde} — ${c.baslik}\n${c.metin}`).join('\n\n')
+                : '';
+            const knowledgeText = [this.knowledgeAsText(session), legacyContext].filter((t) => t?.trim()).join('\n\n');
+
+            const modelVersion = process.env.AI_EVAL_MODEL_VERSION?.trim() || cfg.evalModel || cfg.models.heavy;
+            const inputHash = computeEvalInputHash({
+                controlVersion: (session.controlSnapshot as { version?: number } | null)?.version ?? null,
+                controlTextHash: textChecksum(controlInfo),
+                evidence: read.items.filter((i) => i.attachmentId).map((i) => ({ id: i.attachmentId as string, checksum: textChecksum(i.text) })),
+                evidenceTextHash: session.evidenceText?.trim() ? textChecksum(session.evidenceText.trim()) : null,
+                additionalNote, followUpQuestion,
+                sourceUnits: units.map((u) => ({ unitId: u.unitId, versionId: u.versionId, textHash: u.textHash })),
+                regulationArticleIds: session.regulationArticleIds ?? [],
+                knowledgeDocIds: session.knowledgeDocIds ?? [],
+                promptVersion: EVAL_V3_PROMPT_VERSION, modelVersion, methodologyHash: methodology.hash,
+            });
+            const lastHash = [...session.messages].reverse().find(
+                (m) => m.role === 'ASSISTANT' && (m.kind ?? 'EVALUATION') === 'EVALUATION' && !m.cancelled && !m.stale && m.inputHash,
+            )?.inputHash;
+            const unchangedInput = !!lastHash && lastHash === inputHash;
+
+            await this.prisma.aiEvalSession.update({
+                where: { id: sessionId },
+                data: { runProgress: { phase: 'evaluating', filesRead: read.filesRead, filesTotal } as Prisma.InputJsonValue },
+            });
+
+            const system = EVAL_V3.system(methodology.text);
+            const evidenceLimitNote = digest.truncated
+                ? '(NOT: bazı kanıtlar uzunluk sınırı nedeniyle kısaltıldı; ilgili kanıtın limitations alanında belirt.)'
+                : null;
+            const userPrompt = EVAL_V3.user({
+                nonce, period: session.period, controlInfo, userNote: additionalNote, followUpQuestion,
+                sourcesText, knowledgeText, precedentText, evidenceDigest: digest.text, evidenceLimitNote,
+                previousSummary, priorUserHistory, isReEvaluation,
+            });
+            const evidenceCtx: EvidenceCtx[] = read.items.map((i) => ({
+                evidenceId: i.evidenceId, name: i.name, kind: i.kind, readStatus: i.readStatus,
+                note: i.note ?? null, attachmentId: i.attachmentId ?? null,
+            }));
+
+            const callModel = (extra = '') => this.provider.chat({
+                tier: 'heavy', modelOverride: cfg.evalModel, reasoning: true, json: true,
+                maxTokens: Math.max(cfg.maxTokens, 12000), system, user: userPrompt + extra,
+            });
+
+            let resp = await callModel();
+            modelName = resp.model;
+            let result = processEvalV3Response(resp.parsed, { units, evidence: evidenceCtx });
+            let repaired = false;
+
+            // 5) Şema/atıf doğrulaması başarısızsa TEK kontrollü onarım denemesi.
+            if (!result.valid) {
+                const errs = result.issues.filter((i) => i.severity === 'ERROR').map((i) => `- ${i.path}: ${i.message}`).join('\n');
+                const raw = resp.parsed ? '' : `\n\nÖNCEKİ YANITIN (JSON olarak ayrıştırılamadı):\n${(resp.text || '').slice(0, 4000)}`;
+                resp = await callModel(
+                    `\n\nÖNCEKİ DENEMEN ŞU HATALARI İÇERİYORDU — YALNIZCA BUNLARI DÜZELTEREK TAM JSON'U TEKRAR ÜRET ` +
+                        `(kaynak atfı yoksa bulgu üretme, kanıt yetersizse INSUFFICIENT_EVIDENCE kullan):\n${errs}${raw}`,
+                );
                 modelName = resp.model;
-                validation = validateEvalOutput(resp.parsed);
+                result = processEvalV3Response(resp.parsed, { units, evidence: evidenceCtx });
+                repaired = true;
             }
 
             const now = await this.prisma.aiEvalSession.findUnique({
@@ -888,22 +920,67 @@ export class AiEvalService {
             const cancelled = !!now?.cancelRequested;
             const stale = (now?.contentVersion ?? inputVersion) !== inputVersion;
 
-            const output = (validation.normalized ?? resp.parsed ?? null) as Record<string, unknown> | null;
-            // Atıf doğrulaması — YAPISAL doğrulamadan AYRI (anlam desteği insan incelemesinde).
-            const citation =
-                cancelled || stale
-                    ? { refs: [] as unknown[], unsupported: 0 }
-                    : await this.verifyOutputCitationsV2(output, sourceResolved.sentUnitIds);
+            if (!result.valid && !cancelled && !stale) {
+                // Sonuç KAYDEDİLMEZ; önceki değerlendirme yeni sonuç gibi görünmez.
+                const summaryErr = result.issues.filter((i) => i.severity === 'ERROR').map((i) => i.message).slice(0, 3).join(' ');
+                await this.prisma.aiEvalMessage.create({
+                    data: {
+                        sessionId, role: 'ASSISTANT', kind: 'EVALUATION',
+                        content: 'Değerlendirme çıktısı doğrulamadan geçemedi; sonuç kaydedilmedi. Kanıt/açıklama ekleyip yeniden deneyebilirsiniz.',
+                        schemaVersion: EVAL_V3_SCHEMA_VERSION, schemaValid: false,
+                        schemaIssues: result.issues as unknown as Prisma.InputJsonValue,
+                        modelName: resp.model, modelVersion, promptVersion: EVAL_V3_PROMPT_VERSION, inputVersion, inputHash,
+                        additionalNote, retrievalNote: { ...note, unchangedInput } as unknown as Prisma.InputJsonValue,
+                        errorText: `Şema/atıf doğrulaması başarısız (onarım denendi: ${repaired}): ${summaryErr}`,
+                        tokensIn: resp.tokensIn ?? null, tokensOut: resp.tokensOut ?? null, latencyMs: resp.latencyMs,
+                    },
+                });
+                await this.prisma.aiEvalSession.update({
+                    where: { id: sessionId },
+                    data: {
+                        runStatus: priorEvalRuns > 0 ? 'AWAITING_REVIEW' : 'DRAFT', runProgress: Prisma.DbNull,
+                        runStartedAt: null, cancelRequested: false,
+                    },
+                });
+                throw new BadRequestException(
+                    'Değerlendirme sonucu doğrulanamadı ve kaydedilmedi. Lütfen kanıtları/açıklamayı gözden geçirip yeniden deneyin.',
+                );
+            }
 
-            const schemaIssues: SchemaIssue[] = validation.issues;
-            const needsReview = !cancelled && !stale && (!validation.valid || citation.unsupported > 0);
-            const reviewReasons: string[] = [];
-            if (!validation.valid) reviewReasons.push('Yapılandırılmış çıktı şema doğrulamasından geçmedi (kontrollü düzeltme sonrası).');
-            if (citation.unsupported > 0) reviewReasons.push(`${citation.unsupported} kaynak atıfı doğrulanamadı (uydurma / bu koşuda iletilmemiş).`);
+            const output = result.output;
+            const needsReview = !cancelled && !stale && (result.reviewReasons.length > 0 || repaired);
+            const reviewReasons = [...result.reviewReasons];
+            if (repaired) reviewReasons.push('Çıktı ilk denemede doğrulanamadı, kontrollü düzeltme ile alındı.');
+            if (note.semanticUnavailableReason) reviewReasons.push(`Otomatik kaynak taramasında anlamsal arama kullanılamadı (${note.semanticUnavailableReason}).`);
 
-            const summary =
-                (output && typeof output.summary === 'string' && output.summary.trim()) ||
-                'Değerlendirme tamamlandı.';
+            const summary = output?.controlResult.text || 'Değerlendirme tamamlandı.';
+            const runInputSnapshot = {
+                schemaVersion: EVAL_V3_SCHEMA_VERSION, promptVersion: EVAL_V3_PROMPT_VERSION,
+                model: cfg.evalModel || cfg.models.heavy, modelVersion, inputHash, unchangedInput,
+                contentVersion: session.contentVersion, period: session.period ?? null,
+                controlTextHash: textChecksum(controlInfo), additionalNote, followUpQuestion,
+                isReEvaluation, hadPreviousSummary: !!previousSummary,
+                methodology: { version: methodology.version, hash: methodology.hash, origin: methodology.origin },
+                evidence: digest.items.map((i) => ({
+                    evidenceId: i.evidenceId, name: i.name, kind: i.kind, readStatus: i.readStatus,
+                    attachmentId: i.attachmentId ?? null, chars: i.chars, sentChars: i.sentChars, truncated: i.truncated,
+                    checksum: textChecksum(i.text),
+                })),
+                evidenceDigestTruncated: digest.truncated,
+                regulationArticleIds: session.regulationArticleIds, knowledgeDocIds: session.knowledgeDocIds,
+                sourceUnits: units.map((u) => ({
+                    unitId: u.unitId, versionId: u.versionId, sourceSlug: u.sourceSlug, versionLabel: u.versionLabel,
+                    unitCode: u.unitCode, textHash: u.textHash, truncated: u.truncated, origin: u.origin,
+                    score: u.score, rank: u.rank,
+                })),
+            };
+            const evidenceRefs = {
+                attachmentIds: activeAttachments.map((a) => a.id),
+                evidenceTextHash: session.evidenceText?.trim() ? textChecksum(session.evidenceText.trim()) : null,
+                knowledgeDocIds: session.knowledgeDocIds, regulationArticleIds: session.regulationArticleIds,
+                sourceUnitIds: units.map((u) => u.unitId),
+                sourceVersions: units.map((u) => `${u.sourceSlug}@${u.versionLabel}`),
+            };
 
             await this.prisma.aiEvalMessage.create({
                 data: {
@@ -914,17 +991,17 @@ export class AiEvalService {
                             ? 'Girdiler bu koşu sürerken değişti — bu sonuç s' + inputVersion +
                               ' sürümüne ait. Güncel girdiler için yeniden değerlendirin.'
                             : summary,
-                    evaluation: (resp.parsed ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-                    schemaVersion: EVAL_OUTPUT_SCHEMA_VERSION,
-                    schemaValid: cancelled || stale ? null : validation.valid,
-                    schemaIssues: (schemaIssues as unknown as Prisma.InputJsonValue) ?? Prisma.JsonNull,
-                    modelName: resp.model, promptVersion: EVAL_PROMPT_VERSION, inputVersion,
+                    evaluation: (output ?? Prisma.JsonNull) as unknown as Prisma.InputJsonValue,
+                    schemaVersion: EVAL_V3_SCHEMA_VERSION,
+                    schemaValid: cancelled || stale ? null : true,
+                    schemaIssues: result.issues as unknown as Prisma.InputJsonValue,
+                    modelName: resp.model, modelVersion, promptVersion: EVAL_V3_PROMPT_VERSION, inputVersion, inputHash,
                     additionalNote,
                     evidenceRefs: evidenceRefs as Prisma.InputJsonValue,
-                    runInputSnapshot: runInputSnapshot as Prisma.InputJsonValue,
-                    retrievalNote: retrievalNote as Prisma.InputJsonValue,
-                    sentSourceUnitIds: sourceResolved.sentUnitIds,
-                    citedSourceRefs: (citation.refs as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+                    runInputSnapshot: runInputSnapshot as unknown as Prisma.InputJsonValue,
+                    retrievalNote: { ...note, unchangedInput } as unknown as Prisma.InputJsonValue,
+                    sentSourceUnitIds: units.map((u) => u.unitId),
+                    citedSourceRefs: ((output?.references ?? []) as unknown) as Prisma.InputJsonValue,
                     tokensIn: resp.tokensIn ?? null, tokensOut: resp.tokensOut ?? null, latencyMs: resp.latencyMs,
                     cancelled, stale,
                 },
@@ -942,15 +1019,17 @@ export class AiEvalService {
                     inputsDirty: stale,
                     needsReview: cancelled || stale ? undefined : needsReview,
                     needsReviewReason: cancelled || stale ? undefined : (needsReview ? reviewReasons.join(' ') : null),
-                    usedSourceUnitIds: cancelled || stale ? undefined : sourceResolved.sentUnitIds,
+                    usedSourceUnitIds: cancelled || stale ? undefined : (output?.usedSourceUnitIds ?? []),
                 },
             });
         } catch (e) {
+            if (e instanceof BadRequestException) throw e;
+            const providerBusy = e instanceof ServiceUnavailableException; // sağlayıcı mesajı önceden Türkçe ve teknik detay içermez
             await this.prisma.aiEvalMessage.create({
                 data: {
                     sessionId, role: 'ASSISTANT', kind: 'EVALUATION', content: 'Değerlendirme yapılamadı.',
                     modelName: modelName || cfg.evalModel || cfg.models.heavy,
-                    promptVersion: EVAL_PROMPT_VERSION, inputVersion,
+                    promptVersion: EVAL_V3_PROMPT_VERSION, inputVersion,
                     errorText: (e as Error).message,
                 },
             });
@@ -958,13 +1037,51 @@ export class AiEvalService {
                 where: { id: sessionId },
                 data: { runStatus: 'ERROR', runProgress: Prisma.DbNull, runStartedAt: null, cancelRequested: false },
             });
+            if (providerBusy) throw e;
             throw new BadRequestException('Değerlendirme yapılamadı. Lütfen tekrar deneyin.');
         }
 
         await this.audit(userId, 'AI_EVAL', sessionId, {
-            model: modelName, promptVersion: EVAL_PROMPT_VERSION, schemaVersion: EVAL_OUTPUT_SCHEMA_VERSION,
+            model: modelName, promptVersion: EVAL_V3_PROMPT_VERSION, schemaVersion: EVAL_V3_SCHEMA_VERSION,
         });
         return this.getSession(sessionId, userId);
+    }
+
+    /** Son değerlendirmeden SONRA sorulan (Ek soru) soruların soru+yanıt özeti — yeniden değerlendirmeye girer. */
+    private collectPendingQuestions(
+        messages: { role: string; kind?: string | null; content: string; answerText?: string | null; createdAt?: Date | string }[],
+        explicit: string | null,
+    ): string | null {
+        const lastEvalIdx = (() => {
+            for (let i = messages.length - 1; i >= 0; i--) {
+                const m = messages[i];
+                if (m.role === 'ASSISTANT' && (m.kind ?? 'EVALUATION') === 'EVALUATION') return i;
+            }
+            return -1;
+        })();
+        const after = messages.slice(lastEvalIdx + 1);
+        const lines: string[] = [];
+        const q = after.filter((m) => m.role === 'USER' && m.kind === 'QUESTION');
+        for (const m of q) lines.push(`Soru: ${m.content.trim()}`);
+        if (explicit?.trim()) lines.push(`Soru: ${explicit.trim()}`);
+        return lines.length ? lines.join('\n') : null;
+    }
+
+    /** Önceki koşularda kullanıcının yazdığı açıklamalar (en fazla 5) — girdi, kanıt değil. */
+    private collectPriorUserHistory(
+        messages: { role: string; kind?: string | null; additionalNote?: string | null }[],
+    ): string | null {
+        const notes = messages
+            .filter((m) => m.role === 'USER' && (m.kind ?? 'EVALUATION') === 'EVALUATION' && m.additionalNote?.trim())
+            .map((m) => (m.additionalNote as string).trim().slice(0, 1000));
+        // Bu koşunun notu henüz mesaj olarak eklenmedi (oturum daha önce okundu) → hepsi "geçmiş".
+        const prior = notes.slice(-5);
+        return prior.length ? prior.map((n, i) => `${i + 1}) ${n}`).join('\n') : null;
+    }
+
+    private controlRiskNames(snapshot: unknown): string[] {
+        const c = (snapshot ?? {}) as { risks?: { riskId?: string; name?: string }[] };
+        return (c.risks ?? []).map((r) => `${r.riskId ?? ''} ${r.name ?? ''}`.trim()).filter(Boolean);
     }
 
     /**
@@ -993,9 +1110,14 @@ export class AiEvalService {
         for (const att of activeAttachments) {
             if (att.extractedText) evidenceParts.push(`### ${att.originalName}\n${att.extractedText}`);
         }
-        const sourceResolved = await this.resolveSourceUnitsForRun(session.sourceUnitIds ?? []).catch(() => ({
-            promptText: '', sentUnitIds: [] as string[], snapshot: [] as unknown[], blocked: [] as string[],
-        }));
+        // Soru, SON değerlendirmede modele giden kaynak birimleriyle (retrieval + seçili) yanıtlanır.
+        const lastEvalMsg = [...session.messages].reverse().find(
+            (m) => m.role === 'ASSISTANT' && (m.kind ?? 'EVALUATION') === 'EVALUATION' && !m.cancelled && !m.stale,
+        );
+        const askUnits = await this.retrieval
+            .loadUserSelected([...new Set([...(session.sourceUnitIds ?? []), ...(lastEvalMsg?.sentSourceUnitIds ?? [])])])
+            .catch(() => [] as RetrievedUnit[]);
+        const sourceResolved = { promptText: formatUnitsForPrompt(askUnits) };
 
         await this.prisma.aiEvalMessage.create({
             data: { sessionId, role: 'USER', kind: 'QUESTION', content: question },
@@ -1057,25 +1179,40 @@ export class AiEvalService {
         return this.runEvaluation(sessionId, null, text ?? '', userId);
     }
 
-    /** Kanıt dosyalarını okur; ilerleme fazını günceller; işlenen bölüm envanteri döner. */
+    /**
+     * Kanıt dosyalarını okur; ilerleme fazını günceller; kanıt başına KİMLİKLİ envanter döner
+     * (E0 = kullanıcı kanıt metni, E1.. = dosyalar). Okunamayan dosyanın "okunamadı" yer
+     * tutucusu ARTIK kalıcı önbelleğe yazılmaz — bir sonraki koşuda yeniden denenir.
+     */
     private async readEvidence(
         sessionId: string,
-        activeAttachments: { id: string; fileName: string; originalName: string; mimeType: string; sizeBytes: number; extractedText: string | null }[],
+        activeAttachments: {
+            id: string; fileName: string; originalName: string; mimeType: string; sizeBytes: number;
+            extractedText: string | null; docDate?: string | null; relatedSystem?: string | null;
+            relatedSample?: string | null; relatedTestStep?: string | null; note?: string | null;
+        }[],
         filesTotal: number,
     ) {
-        const evidenceParts: string[] = [];
-        const sections: { ref: string; chars: number; readStatus: string; note?: string | null }[] = [];
+        const items: EvidenceItem[] = [];
         const session = await this.prisma.aiEvalSession.findUnique({ where: { id: sessionId }, select: { evidenceText: true } });
         if (session?.evidenceText?.trim()) {
-            const t = session.evidenceText.trim();
-            evidenceParts.push(`### Manuel kanıt / yanıt metni\n${t}`);
-            sections.push({ ref: 'Manuel kanıt / yanıt metni', chars: t.length, readStatus: 'READ' });
+            items.push({
+                evidenceId: 'E0', name: 'Manuel kanıt / yanıt metni', kind: 'TEXT', readStatus: 'READ',
+                text: session.evidenceText.trim(), attachmentId: null,
+            });
         }
         let filesRead = 0;
+        let n = 0;
         for (const att of activeAttachments) {
+            n++;
+            const meta = {
+                docDate: att.docDate ?? null, relatedSystem: att.relatedSystem ?? null,
+                relatedSample: att.relatedSample ?? null, relatedTestStep: att.relatedTestStep ?? null, note: att.note ?? null,
+            };
+            const kind = this.kindFor(att.mimeType, att.originalName);
+            const evidenceId = `E${n}`;
             if (att.extractedText) {
-                evidenceParts.push(`### ${att.originalName}\n${att.extractedText}`);
-                sections.push({ ref: att.originalName, chars: att.extractedText.length, readStatus: 'READ' });
+                items.push({ evidenceId, name: att.originalName, kind, readStatus: 'READ', attachmentId: att.id, text: att.extractedText, meta });
                 continue;
             }
             await this.prisma.aiEvalSession.update({
@@ -1103,23 +1240,26 @@ export class AiEvalService {
                     });
                     extracted = `[görsel — VISION okuması]\n${JSON.stringify(vres.parsed ?? { rawText: vres.text }, null, 2)}`;
                 } else {
-                    extracted = `(otomatik okunamadı${doc.note ? ': ' + doc.note : ''})`;
                     readStatus = 'FAILED';
                     readNote = doc.note ?? 'Desteklenmeyen dosya türü.';
                 }
             } catch (e) {
-                extracted = '(okuma sırasında hata)';
                 readStatus = 'FAILED';
                 readNote = (e as Error).message;
             }
+            // Başarısız okuma yer tutucusu kalıcı önbelleğe YAZILMAZ (extractedText null kalır → yeniden denenir).
             await this.prisma.aiEvalAttachment.update({
-                where: { id: att.id }, data: { extractedText: extracted, readStatus, readNote },
+                where: { id: att.id },
+                data: { ...(readStatus === 'FAILED' ? {} : { extractedText: extracted }), readStatus, readNote },
             });
-            evidenceParts.push(`### ${att.originalName}\n${extracted}`);
-            sections.push({ ref: att.originalName, chars: extracted.length, readStatus, note: readNote });
+            items.push({
+                evidenceId, name: att.originalName, kind, readStatus, note: readNote, attachmentId: att.id,
+                text: readStatus === 'FAILED' ? `(otomatik okunamadı${readNote ? ': ' + readNote : ''})` : extracted,
+                meta,
+            });
             filesRead++;
         }
-        return { evidenceParts, sections, filesRead };
+        return { items, filesRead };
     }
 
     /** Bağlam için önceki EVALUATION çıktısı (iptal/stale olmayan en yenisi). Kanıt DEĞİL. */
@@ -1129,74 +1269,6 @@ export class AiEvalService {
                 !x.cancelled && !x.stale && (x.evaluation || x.editedEvaluation),
         );
         return m ? (m.editedEvaluation ?? m.evaluation) : null;
-    }
-
-    /**
-     * v2 çıktıdaki TÜM kaynak atıflarını (sourceReferences + requirementAssessments.sourceRefs +
-     * expectedState.sourceRef + findingAssessment.sourceBasis) gerçek birime + bu koşuda
-     * MODELE İLETİLEN kümeye + (alıntı varsa) özgün metne karşı doğrular.
-     * Geçerli ID + alıntı eşleşmesi, tespitin o kaynaktan çıktığını KANITLAMAZ —
-     * ilişki (relationReviewed) insan incelemesine bırakılır (task §6).
-     */
-    private async verifyOutputCitationsV2(output: Record<string, unknown> | null, sentUnitIds: string[]) {
-        if (!output) return { refs: [] as unknown[], unsupported: 0 };
-        type Ref = { path: string; sourceUnitId: string; quote: string | null; label: string | null };
-        const found: Ref[] = [];
-        const pushRef = (path: string, r: unknown) => {
-            if (!r || typeof r !== 'object') return;
-            const o = r as Record<string, unknown>;
-            const id = typeof o.sourceUnitId === 'string' ? o.sourceUnitId.trim() : '';
-            if (!id) return;
-            found.push({ path, sourceUnitId: id, quote: typeof o.quote === 'string' ? o.quote : null, label: typeof o.label === 'string' ? o.label : null });
-        };
-        const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
-        arr(output.sourceReferences).forEach((r, i) => pushRef(`sourceReferences[${i}]`, r));
-        arr(output.expectedState).forEach((e, i) => pushRef(`expectedState[${i}].sourceRef`, (e as Record<string, unknown>)?.sourceRef));
-        arr(output.requirementAssessments).forEach((ra, i) => {
-            arr((ra as Record<string, unknown>)?.sourceRefs).forEach((r, j) =>
-                pushRef(`requirementAssessments[${i}].sourceRefs[${j}]`, r));
-        });
-        arr(output.findingAssessment).forEach((f, i) => {
-            arr((f as Record<string, unknown>)?.sourceBasis).forEach((r, j) =>
-                pushRef(`findingAssessment[${i}].sourceBasis[${j}]`, r));
-        });
-        if (found.length === 0) return { refs: [], unsupported: 0 };
-
-        const units = await this.prisma.sourceUnit.findMany({
-            where: { id: { in: [...new Set(found.map((f) => f.sourceUnitId))] } },
-            select: { id: true, versionId: true, unitCode: true, originalText: true },
-        });
-        const byId = new Map(units.map((u) => [u.id, u]));
-        const norm = (t: string) => t.toLowerCase().replace(/\s+/g, ' ').trim();
-        let unsupported = 0;
-        const refs = found.map((r) => {
-            const u = byId.get(r.sourceUnitId);
-            if (!u) {
-                unsupported++;
-                return {
-                    path: r.path, sourceUnitId: r.sourceUnitId, label: r.label, exists: false,
-                    inSentSet: false, quoteVerified: false, relationReviewed: false,
-                    reason: 'Atıf yapılan birim yok — UYDURMA ATIF, reddedildi.',
-                };
-            }
-            const inSentSet = sentUnitIds.includes(u.id);
-            let quoteVerified = true;
-            if (r.quote && r.quote.trim().length > 12) {
-                quoteVerified = norm(u.originalText).includes(norm(r.quote).slice(0, 120));
-            }
-            if (!inSentSet || !quoteVerified) unsupported++;
-            return {
-                path: r.path, sourceUnitId: u.id, sourceVersionId: u.versionId, unitCode: u.unitCode,
-                label: r.label, quote: r.quote, exists: true, inSentSet, quoteVerified,
-                relationReviewed: false,
-                reason: !inSentSet
-                    ? 'Birim var ama bu koşuda modele iletilmemişti — atıf geçersiz.'
-                    : !quoteVerified
-                        ? 'Birim iletildi ama alıntı özgün metinle eşleşmiyor.'
-                        : 'Birim iletildi; alıntı doğrulandı. İlişki (tespitin gerçekten bu kaynaktan çıkması) insan incelemesi bekliyor.',
-            };
-        });
-        return { refs, unsupported };
     }
 
     // ─── Çıktı işlemleri (güncel, incelenmiş sonuçtan) ─────────────────────
@@ -1213,7 +1285,37 @@ export class AiEvalService {
                       return r?.status && r.status !== 'REJECTED';
                   })
                 : [];
+        const isV3 = s.latestEvaluation?.schemaVersion === EVAL_V3_SCHEMA_VERSION ||
+            (typeof eff.expectedState === 'string' && typeof eff.finding === 'object' && !Array.isArray(eff.finding));
         const isV2 = Array.isArray(eff.findingAssessment) || Array.isArray(eff.requirementAssessments);
+
+        if (isV3) {
+            const cr = (eff.controlResult ?? {}) as { status?: string; text?: string };
+            const f = (eff.finding ?? {}) as { exists?: boolean; title?: string; explanation?: string; _review?: { status?: string } };
+            const refs = Array.isArray(eff.references) ? (eff.references as Record<string, unknown>[]) : [];
+            const more = Array.isArray(eff.additionalEvidenceRequired) ? (eff.additionalEvidenceRequired as string[]) : [];
+            const controlResult = [
+                `Kontrol sonucu: ${(cr.status ?? '').replace(/_/g, ' ')}`,
+                cr.text || null,
+                refs.length ? '\nİlişkili mevzuat ve rehber maddeleri:' : null,
+                ...refs.map((r) => `• ${r.sourceName ?? ''} ${r.version ? `(${r.version}) ` : ''}${r.articleNumber ?? ''} — ${r.articleTitle ?? ''}`),
+            ].filter(Boolean).join('\n');
+            const findingRejected = f._review?.status === 'REJECTED';
+            return {
+                schemaVersion: s.latestEvaluation?.schemaVersion ?? null,
+                outcome: s.outcome,
+                runStatus: s.runStatus,
+                needsReview: (s as { needsReview?: boolean }).needsReview ?? false,
+                needsReviewReason: (s as { needsReviewReason?: string | null }).needsReviewReason ?? null,
+                evaluationVersion: s.latestEvaluation?.messageId ?? null,
+                reviewed: this.countUnreviewed(eff) === 0,
+                controlResult,
+                missingEvidenceRequest: more.length
+                    ? `Aşağıdaki kanıt/belgeler istenmelidir:\n${more.map((m) => `• ${m}`).join('\n')}`
+                    : 'Ek kanıt talebi belirtilmedi.',
+                findingCandidates: f.exists === true && !findingRejected ? [f] : [],
+            };
+        }
 
         if (isV2) {
             const findings = notRejected(eff.findingAssessment) as Record<string, unknown>[];
@@ -1309,6 +1411,11 @@ export class AiEvalService {
     }
 
     private countUnreviewed(evaluation: Record<string, unknown>): number {
+        // v3: yalnız var olan (exists=true) tek bulgu insan incelemesi gerektirir.
+        const f3 = evaluation.finding as Record<string, unknown> | undefined;
+        if (f3 && typeof f3 === 'object' && !Array.isArray(f3) && typeof evaluation.expectedState === 'string') {
+            return f3.exists === true && !f3._review ? 1 : 0;
+        }
         // v2: yalnız findingAssessment girişleri insan incelemesi gerektirir.
         const groups: readonly string[] = Array.isArray(evaluation.findingAssessment)
             ? ['findingAssessment']
@@ -1331,6 +1438,13 @@ export class AiEvalService {
         _schemaVersion: string | null,
     ): { findings: number | null; missingEvidence: number | null } {
         if (!evalObj) return { findings: null, missingEvidence: null };
+        const f3 = evalObj.finding as Record<string, unknown> | undefined;
+        if (f3 && typeof f3 === 'object' && !Array.isArray(f3) && typeof evalObj.expectedState === 'string') {
+            return {
+                findings: f3.exists === true ? 1 : 0,
+                missingEvidence: Array.isArray(evalObj.additionalEvidenceRequired) ? evalObj.additionalEvidenceRequired.length : 0,
+            };
+        }
         if (Array.isArray(evalObj.findingAssessment) || Array.isArray(evalObj.requirementAssessments)) {
             const findings = Array.isArray(evalObj.findingAssessment)
                 ? (evalObj.findingAssessment as Record<string, unknown>[]).filter((f) => f?.supported !== false).length
@@ -1377,10 +1491,22 @@ export class AiEvalService {
         if (controlRefId) {
             const c = await this.prisma.control.findUnique({
                 where: { id: controlRefId },
-                select: { controlId: true, name: true, description: true, testSteps: true, type: true, frequency: true },
+                select: {
+                    controlId: true, name: true, description: true, testSteps: true, type: true, frequency: true,
+                    mehaz: true, version: true,
+                    owner: { select: { firstName: true, lastName: true, department: true } },
+                    directorateRel: { select: { name: true } },
+                    risks: { select: { risk: { select: { riskId: true, name: true } } } },
+                },
             });
             if (!c) throw new BadRequestException('Seçilen kontrol bulunamadı');
-            controlSnapshot = { ...c };
+            const { owner, directorateRel, risks, ...rest } = c;
+            controlSnapshot = {
+                ...rest,
+                owner: owner ? { name: `${owner.firstName} ${owner.lastName}`.trim(), department: owner.department ?? null } : null,
+                directorate: directorateRel?.name ?? null,
+                risks: risks.map((r) => ({ riskId: r.risk.riskId, name: r.risk.name })),
+            };
         }
         void controlText;
 
@@ -1446,13 +1572,23 @@ export class AiEvalService {
     }
 
     private controlAsText(session: {
-        controlText: string | null; controlManualNote: string | null; controlSnapshot: unknown;
+        controlText: string | null; controlManualNote: string | null; controlSnapshot: unknown; period?: string | null;
     }): string {
         const parts: string[] = [];
         if (session.controlSnapshot && typeof session.controlSnapshot === 'object') {
-            const c = session.controlSnapshot as Record<string, unknown>;
-            parts.push(`Kontrol: ${c.name ?? ''} (${c.controlId ?? ''})`, `Tanım: ${c.description ?? ''}`);
+            const c = session.controlSnapshot as Record<string, unknown> & {
+                owner?: { name?: string; department?: string } | null;
+                directorate?: string | null;
+                risks?: { riskId?: string; name?: string }[];
+            };
+            parts.push(`Kontrol: ${c.name ?? ''} (${c.controlId ?? ''})`, `Tanım / amaç: ${c.description ?? ''}`);
             if (c.testSteps) parts.push(`Test adımları: ${c.testSteps}`);
+            if (c.mehaz) parts.push(`Mehaz: ${c.mehaz}`);
+            if (c.frequency) parts.push(`Kontrol periyodu: ${c.frequency}`);
+            if (c.type) parts.push(`Kontrol türü: ${c.type}`);
+            if (c.owner?.name) parts.push(`Kontrol sahibi: ${c.owner.name}${c.owner.department ? ` (${c.owner.department})` : ''}`);
+            if (c.directorate) parts.push(`Sorumlu birim: ${c.directorate}`);
+            if (c.risks?.length) parts.push(`Bağlı riskler: ${c.risks.map((r) => `${r.riskId ?? ''} ${r.name ?? ''}`.trim()).join('; ')}`);
         } else if (session.controlText?.trim()) {
             parts.push(session.controlText.trim());
         }
@@ -1464,156 +1600,6 @@ export class AiEvalService {
         if (!Array.isArray(session.regulationSnapshot)) return '';
         return (session.regulationSnapshot as Record<string, unknown>[])
             .map((r) => `• ${r.madde} — ${r.baslik}\n${r.metin}`).join('\n\n');
-    }
-
-    /** Kaynak Kataloğu birimlerinin metni — özgün metin + sürüm referansı ile. */
-    private sourceUnitsAsText(session: { sourceSnapshot: unknown }): string {
-        if (!Array.isArray(session.sourceSnapshot) || session.sourceSnapshot.length === 0) return '';
-        return (session.sourceSnapshot as Record<string, unknown>[])
-            .map((r) => {
-                const ref = `${r.kaynak} ${r.surum} · ${r.kod}`;
-                const tr = r.trAciklama ? `\n(TR açıklama: ${String(r.trAciklama)})` : '';
-                return `• [${ref}]\n${String(r.ozgunMetin)}${tr}`;
-            })
-            .join('\n\n');
-    }
-
-    private static readonly UNIT_TEXT_LIMIT = 8000;
-    private static readonly SOURCE_TOTAL_LIMIT = 30_000;
-
-    /**
-     * Çalışma anında seçili kaynak birimlerini CANLI yetki/onay ile doğrular.
-     * - Onaylı DEĞİL / RAG hakkı geri alınmış birim → çalışma BLOKLANIR (item 7).
-     * - Uzun içerikte sınır AÇIK: kesilen birim işaretlenir (sessiz kesme yok).
-     * Döner: { promptText, sentUnits[], snapshot[], blockedReasons[] }
-     */
-    private async resolveSourceUnitsForRun(sourceUnitIds: string[]) {
-        if (!sourceUnitIds || sourceUnitIds.length === 0) {
-            return { promptText: '', sentUnitIds: [] as string[], snapshot: [] as unknown[], blocked: [] as string[] };
-        }
-        const units = await this.prisma.sourceUnit.findMany({
-            where: { id: { in: sourceUnitIds } },
-            include: { version: { include: { source: true } } },
-        });
-        const byId = new Map(units.map((u) => [u.id, u]));
-        const blocked: string[] = [];
-        const usable: typeof units = [];
-        for (const id of sourceUnitIds) {
-            const u = byId.get(id);
-            if (!u) {
-                blocked.push(`Seçili kaynak birimi bulunamadı (${id.slice(0, 8)}…).`);
-                continue;
-            }
-            const s = u.version.source;
-            if (u.version.approvalStatus !== 'APPROVED') {
-                blocked.push(`"${s.title} ${u.version.versionLabel} · ${u.unitCode}" sürümü artık onaylı değil (${u.version.approvalStatus}).`);
-                continue;
-            }
-            if (s.rightRag !== 'ALLOWED' || !s.rightsVerifiedAt) {
-                blocked.push(`"${s.title} · ${u.unitCode}" kaynağının RAG kullanım hakkı geri alınmış / doğrulanmamış.`);
-                continue;
-            }
-            usable.push(u);
-        }
-        if (blocked.length > 0) {
-            // Seçili kaynağın hakkı/onayı geri alınmışsa YENİ ÇALIŞMA BAŞLATILMAZ.
-            throw new BadRequestException(
-                'Seçili kaynaklarla değerlendirme başlatılamaz:\n' + blocked.map((b) => '• ' + b).join('\n') +
-                    '\nKaynak seçimini güncelleyin (Kaynak Kataloğu birimleri).',
-            );
-        }
-
-        const parts: string[] = [];
-        const snapshot: unknown[] = [];
-        const sentUnitIds: string[] = [];
-        let total = 0;
-        for (const u of usable) {
-            const s = u.version.source;
-            let body = u.originalText;
-            let truncated = false;
-            if (body.length > AiEvalService.UNIT_TEXT_LIMIT) {
-                body = body.slice(0, AiEvalService.UNIT_TEXT_LIMIT);
-                truncated = true;
-            }
-            if (total + body.length > AiEvalService.SOURCE_TOTAL_LIMIT) {
-                blocked.push(`"${s.title} · ${u.unitCode}" toplam kaynak metni sınırını (${AiEvalService.SOURCE_TOTAL_LIMIT}) aştığı için bu çalışmaya iletilmedi.`);
-                continue;
-            }
-            total += body.length;
-            const ref = `${s.title} ${u.version.versionLabel} · ${u.unitCode} (id:${u.id})`;
-            const tr = u.translationTr ? `\n(TR açıklama: ${u.translationTr})` : '';
-            const trunc = truncated ? '\n[NOT: metin sınır nedeniyle kısaltıldı — tam metin kaynakta]' : '';
-            parts.push(`• [${ref}]\n${body}${tr}${trunc}`);
-            sentUnitIds.push(u.id);
-            snapshot.push({
-                unitId: u.id,
-                versionId: u.version.id,
-                sourceSlug: s.slug,
-                versionLabel: u.version.versionLabel,
-                unitCode: u.unitCode,
-                textHash: createHash('sha256').update(u.originalText).digest('hex').slice(0, 16),
-                truncated,
-            });
-        }
-        return {
-            promptText: parts.join('\n\n'),
-            sentUnitIds,
-            snapshot,
-            blocked, // yalnız "sınır aşımı" gibi bilgilendirici notlar (bloklama zaten yukarıda)
-        };
-    }
-
-    /** Çıktıdaki dayanakKaynakBirimId atıflarını gerçek birimlere + gönderilen kümeye + alıntıya karşı doğrular. */
-    private async verifyOutputCitations(
-        evaluation: unknown,
-        sentUnitIds: string[],
-    ): Promise<unknown[]> {
-        if (!evaluation || typeof evaluation !== 'object') return [];
-        const ev = evaluation as Record<string, unknown>;
-        const groups = ['uyumsuzAlanlar', 'uyumluAlanlar', 'bulguAdaylari'];
-        const refs: {
-            group: string; index: number; sourceUnitId: string; dayanakAlinti: string | null;
-        }[] = [];
-        for (const g of groups) {
-            const arr = ev[g];
-            if (!Array.isArray(arr)) continue;
-            arr.forEach((item, index) => {
-                const it = item as Record<string, unknown>;
-                const uid = it.dayanakKaynakBirimId;
-                if (typeof uid === 'string' && uid.trim()) {
-                    refs.push({ group: g, index, sourceUnitId: uid.trim(), dayanakAlinti: (it.dayanakAlinti as string) ?? null });
-                }
-            });
-        }
-        if (refs.length === 0) return [];
-        const units = await this.prisma.sourceUnit.findMany({
-            where: { id: { in: [...new Set(refs.map((r) => r.sourceUnitId))] } },
-            select: { id: true, versionId: true, unitCode: true, originalText: true },
-        });
-        const byId = new Map(units.map((u) => [u.id, u]));
-        const norm = (t: string) => t.toLowerCase().replace(/\s+/g, ' ').trim();
-        return refs.map((r) => {
-            const u = byId.get(r.sourceUnitId);
-            if (!u) {
-                return { ...r, exists: false, inSentSet: false, textVerified: false, relationReviewed: false,
-                    reason: 'Atıf yapılan birim yok — UYDURMA ATIF, reddedildi.' };
-            }
-            const inSentSet = sentUnitIds.includes(u.id);
-            let textVerified = true;
-            if (r.dayanakAlinti && r.dayanakAlinti.trim().length > 12) {
-                textVerified = norm(u.originalText).includes(norm(r.dayanakAlinti).slice(0, 120));
-            }
-            return {
-                group: r.group, index: r.index, sourceUnitId: u.id, sourceVersionId: u.versionId, unitCode: u.unitCode,
-                quote: r.dayanakAlinti, exists: true, inSentSet, textVerified,
-                relationReviewed: false, // ilişki insan incelemesine bırakılır
-                reason: !inSentSet
-                    ? 'Birim var ama bu çalışmada modele iletilmemişti — atıf geçersiz.'
-                    : !textVerified
-                        ? 'Birim iletildi ama alıntı özgün metinle eşleşmiyor.'
-                        : 'Birim iletildi; alıntı doğrulandı. İlişki (tespitin gerçekten bu kaynaktan çıkması) insan incelemesi bekliyor.',
-            };
-        });
     }
 
     private knowledgeAsText(session: { knowledgeSnapshot: unknown }): string {
