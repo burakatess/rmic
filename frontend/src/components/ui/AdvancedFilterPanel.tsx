@@ -61,12 +61,13 @@ interface AdvancedFilterPanelProps {
   className?: string;
 }
 
-function MultiSelectField({
+export function MultiSelectField({
   field,
 }: {
   field: Extract<AdvancedFilterField, { type: 'multiselect' }>;
 }) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
   const ref = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -83,6 +84,7 @@ function MultiSelectField({
       field.value.includes(value) ? field.value.filter((v) => v !== value) : [...field.value, value]
     );
   };
+  const visibleOptions = field.options.filter(o => o.label.toLocaleLowerCase('tr-TR').includes(search.toLocaleLowerCase('tr-TR')));
 
   return (
     <div className="relative" ref={ref}>
@@ -104,7 +106,8 @@ function MultiSelectField({
       </button>
       {open && (
         <div className="absolute left-0 top-full mt-1 z-30 w-full min-w-[200px] bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-60 overflow-y-auto">
-          {field.options.map((opt) => (
+          <div className="px-2 pb-1.5 sticky top-0 bg-white"><input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Kişi ara…" className="w-full border rounded px-2 py-1 text-xs"/><div className="flex gap-2 mt-1 text-[10px]"><button type="button" className="text-blue-600" onClick={() => field.onChange(Array.from(new Set([...field.value, ...visibleOptions.map(o => o.value)])))}>Tümünü seç</button><button type="button" className="text-slate-500" onClick={() => field.onChange([])}>Temizle</button></div></div>
+          {visibleOptions.map((opt) => (
             <label
               key={opt.value}
               className="flex items-center gap-2 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer"

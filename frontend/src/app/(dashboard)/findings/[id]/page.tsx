@@ -8,7 +8,7 @@ import {
     DetailShell, DetailHeader, DetailSection, Tabs, Timeline,
     StatusBadge, Button, LoadingState, EmptyState, FileUpload,
 } from '@/components/ui';
-import type { TimelineItem, TimelineVariant, AttachmentMeta } from '@/components/ui';
+import type { TimelineItem, TimelineVariant, AttachmentMeta, UploadedAttachmentMeta } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { PermissionGate, useAuth } from '@/components/auth';
 import AddActionModal from '@/components/modals/AddActionModal';
@@ -16,7 +16,7 @@ import { FindingFollowUpModal } from '@/components/modals/FindingFollowUpModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Attachment { id: string; fileName?: string; originalName: string; mimeType: string; sizeBytes: number; createdAt: string }
+interface Attachment { id: string; fileName?: string; originalName: string; displayName?: string | null; description?: string | null; mimeType: string; sizeBytes: number; createdAt: string }
 interface LinkedRisk { id: string; riskId: string; name: string; status: string; residualRiskScore?: number; inherentRiskScore?: number; owner?: { firstName: string; lastName: string } }
 interface LinkedControl { id: string; controlId: string; name: string; directorate?: string; frequency?: string; status?: string; effectivenessStatus?: string }
 interface Action {
@@ -146,6 +146,8 @@ const toAttachmentMeta = (a: Attachment): AttachmentMeta => ({
     id: a.id,
     fileName: a.fileName || '',
     originalName: a.originalName,
+    displayName: a.displayName,
+    description: a.description,
     mimeType: a.mimeType,
     sizeBytes: a.sizeBytes,
 });
@@ -171,6 +173,9 @@ export default function FindingDetailPage() {
     const router = useRouter();
     const { success, error: showError } = useToast();
     const { user } = useAuth();
+    const userRole = user?.role?.name;
+    const canAdvanceFinding = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR'].includes(userRole || '');
+    const canApproveFinding = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER'].includes(userRole || '');
 
     const [finding, setFinding] = useState<Finding | null>(null);
     const [auditTrail, setAuditTrail] = useState<AuditEntry[]>([]);
@@ -235,7 +240,7 @@ export default function FindingDetailPage() {
             const res = await api.updateFollowUp(finding.id, fuId, { status: 'ONAYLANDI' }) as { createdAction?: { actionId: string } | null };
             success('Onaylandı', res?.createdAction
                 ? `Takip onaylandı. Yeni aksiyon: ${res.createdAction.actionId}`
-                : 'Takip değerlendirmesi onaylandı.');
+                : 'Takip değerlendirmesi onaylandı. Yeterli sonuçta bağlı aksiyon kapatıldı.');
             load();
         } catch (err) {
             showError('Onaylanamadı', err instanceof Error ? err.message : 'İşlem başarısız');
@@ -254,7 +259,7 @@ export default function FindingDetailPage() {
     };
 
     // Attachment upload/remove — finding / action / followup (aynı API çağrıları)
-    const uploadFindingAttachment = async (meta: AttachmentMeta) => {
+    const uploadFindingAttachment = async (meta: UploadedAttachmentMeta) => {
         if (!finding) return;
         try {
             await api.addFindingAttachment(finding.id, meta);
@@ -263,7 +268,7 @@ export default function FindingDetailPage() {
         } catch { showError('Hata', `${meta.originalName} eklenemedi.`); }
     };
 
-    const uploadActionAttachment = async (actionId: string, meta: AttachmentMeta) => {
+    const uploadActionAttachment = async (actionId: string, meta: UploadedAttachmentMeta) => {
         if (!finding) return;
         try {
             await api.addActionAttachment(finding.id, actionId, meta);
@@ -272,7 +277,7 @@ export default function FindingDetailPage() {
         } catch { showError('Hata', `${meta.originalName} eklenemedi.`); }
     };
 
-    const uploadFollowUpAttachment = async (fuId: string, meta: AttachmentMeta) => {
+    const uploadFollowUpAttachment = async (fuId: string, meta: UploadedAttachmentMeta) => {
         if (!finding) return;
         try {
             await api.addFollowUpAttachment(finding.id, fuId, meta);
@@ -298,6 +303,9 @@ export default function FindingDetailPage() {
         try { await api.removeFollowUpAttachment(finding.id, fuId, attId); success('Silindi', ''); load(); }
         catch { showError('Hata', 'Dosya silinemedi.'); }
     };
+    const updateFindingAttachment = async (attId: string, patch: { displayName?: string; description?: string }) => { if (!finding) return; await api.updateFindingAttachment(finding.id, attId, patch); await load(); };
+    const updateActionAttachment = async (actionId: string, attId: string, patch: { displayName?: string; description?: string }) => { if (!finding) return; await api.updateActionAttachment(finding.id, actionId, attId, patch); await load(); };
+    const updateFollowUpAttachment = async (fuId: string, attId: string, patch: { displayName?: string; description?: string }) => { if (!finding) return; await api.updateFollowUpAttachment(finding.id, fuId, attId, patch); await load(); };
 
     if (loading) {
         return (
@@ -420,21 +428,21 @@ export default function FindingDetailPage() {
                 }
                 actions={
                     <>
-                        {finding.workflowStatus === 'TASLAK' && (
+                        {canAdvanceFinding && finding.workflowStatus === 'TASLAK' && (
                             <Button variant="primary" size="sm" onClick={() => setWorkflowAction('mutabakata-gonder')}
                                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>}
                             >
                                 Mutabakata Gönder
                             </Button>
                         )}
-                        {finding.workflowStatus === 'MUTABAKATA_GONDERILDI' && (
+                        {canAdvanceFinding && finding.workflowStatus === 'MUTABAKATA_GONDERILDI' && (
                             <Button variant="primary" size="sm" onClick={() => setWorkflowAction('ic-kontrol-onayina-gonder')}
                                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
                             >
                                 İKS Onayına Gönder
                             </Button>
                         )}
-                        {finding.workflowStatus === 'IC_KONTROL_ONAYINA_GONDERILDI' && (
+                        {canApproveFinding && finding.workflowStatus === 'IC_KONTROL_ONAYINA_GONDERILDI' && (
                             <>
                                 <Button variant="success" size="sm" onClick={() => setWorkflowAction('mutabakat-onayla')}
                                     icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
@@ -448,26 +456,24 @@ export default function FindingDetailPage() {
                                 </Button>
                             </>
                         )}
-                        {finding.workflowStatus !== 'IPTAL' && finding.workflowStatus !== 'MUTABAKAT_YAPILDI' && (
+                        {canApproveFinding && finding.workflowStatus !== 'IPTAL' && finding.workflowStatus !== 'MUTABAKAT_YAPILDI' && (
                             <Button variant="ghost" size="sm" onClick={() => setWorkflowAction('iptal-et')} className="text-red-500 hover:bg-red-50">
                                 İptal Et
                             </Button>
                         )}
-                        {finding.workflowStatus === 'MUTABAKAT_YAPILDI' && (
+                        {canApproveFinding && finding.workflowStatus === 'MUTABAKAT_YAPILDI' && (
                             <Button variant="ghost" size="sm" onClick={() => setWorkflowAction('iptal-et')} className="text-red-500 hover:bg-red-50">
                                 İptal Et
                             </Button>
                         )}
-                        {finding.status !== 'CLOSED' && (
-                            <PermissionGate permission="finding:update">
-                                <Button variant="success" size="sm" onClick={() => setWorkflowAction('kapat')}
+                        {canApproveFinding && finding.status !== 'CLOSED' && (
+                            <Button variant="success" size="sm" onClick={() => setWorkflowAction('kapat')}
                                     icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
-                                >
-                                    Bulguyu Kapat
-                                </Button>
-                            </PermissionGate>
+                            >
+                                Bulguyu Kapat
+                            </Button>
                         )}
-                        {finding.status === 'CLOSED' && (
+                        {canApproveFinding && finding.status === 'CLOSED' && (
                             <PermissionGate permission="finding:update">
                                 <Button variant="outline" size="sm" onClick={() => setWorkflowAction('yeniden-ac')}>
                                     Yeniden Aç
@@ -685,8 +691,10 @@ export default function FindingDetailPage() {
                                             <div className="px-5 pb-4 border-t border-slate-100 pt-3">
                                                 <FileUpload
                                                     compact
+                                                    attachmentKind="action"
                                                     attachments={(action.attachments || []).map(toAttachmentMeta)}
                                                     onUpload={(meta) => uploadActionAttachment(action.id, meta)}
+                                                    onUpdate={(att, patch) => { if (att.id) return updateActionAttachment(action.id, att.id, patch); }}
                                                     onRemove={(att) => { if (att.id) removeActionAttachment(action.id, att.id); }}
                                                 />
                                             </div>
@@ -751,7 +759,11 @@ export default function FindingDetailPage() {
                                             <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50 border-b border-slate-100">
                                                 <div>
                                                     <div className="flex items-center gap-2 flex-wrap">
-                                                        <Link href={`/follow-ups/${fu.id}`} className="font-mono text-sm font-bold text-blue-700 hover:underline">{fu.followUpId}</Link>
+                                                        <button type="button"
+                                                            onClick={() => { setSelectedFollowUp(fu); setFollowUpOpen(true); }}
+                                                            className="font-mono text-sm font-bold text-blue-700 hover:underline">
+                                                            {fu.followUpId}
+                                                        </button>
                                                         <StatusBadge variant={fuCfg.variant}>{fuCfg.label}</StatusBadge>
                                                         {resOutCfg && <StatusBadge variant={resOutCfg.variant} dot>{resOutCfg.label}</StatusBadge>}
                                                         {fu.newActionRequired && <StatusBadge variant="high">Yeni Aksiyon Gerekli</StatusBadge>}
@@ -801,10 +813,12 @@ export default function FindingDetailPage() {
                                                 )}
                                                 {/* FollowUp attachments */}
                                                 {(fu.attachments || []).length > 0 && (
-                                                    <FileUpload
-                                                        compact
+                                                        <FileUpload
+                                                            attachmentKind="follow-up"
+                                                            compact
                                                         attachments={(fu.attachments || []).map(toAttachmentMeta)}
-                                                        onUpload={(meta) => uploadFollowUpAttachment(fu.id, meta)}
+                                                            onUpload={(meta) => uploadFollowUpAttachment(fu.id, meta)}
+                                                            onUpdate={(att, patch) => { if (att.id) return updateFollowUpAttachment(fu.id, att.id, patch); }}
                                                         onRemove={(att) => { if (att.id) removeFollowUpAttachment(fu.id, att.id); }}
                                                     />
                                                 )}
@@ -853,9 +867,11 @@ export default function FindingDetailPage() {
                 {/* ═══════ EKLER TAB ═══════ */}
                 {activeTab === 'ekler' && (
                     <DetailSection title="Bulgu Ekleri">
-                        <FileUpload
-                            attachments={finding.attachments.map(toAttachmentMeta)}
-                            onUpload={uploadFindingAttachment}
+                            <FileUpload
+                                attachmentKind="finding"
+                                attachments={finding.attachments.map(toAttachmentMeta)}
+                                onUpload={uploadFindingAttachment}
+                                onUpdate={(att, patch) => { if (att.id) return updateFindingAttachment(att.id, patch); }}
                             onRemove={(att) => { if (att.id) removeFindingAttachment(att.id); }}
                             label=""
                         />
@@ -942,7 +958,12 @@ export default function FindingDetailPage() {
                     }}
                     onSubmit={async (data) => {
                         if (editAction) {
-                            await api.updateFindingAction(finding.id, editAction.id, data);
+                            const completing = data.status === 'TAMAMLANDI' && !['TAMAMLANDI', 'COMPLETED'].includes(editAction.status);
+                            const { status, ...details } = data;
+                            await api.updateFindingAction(finding.id, editAction.id, completing ? details : data);
+                            if (completing) {
+                                await api.completeAction(editAction.id, (editAction.attachments || []).map((a: Attachment) => a.id));
+                            }
                         } else {
                             await api.createFindingAction(finding.id, data);
                         }

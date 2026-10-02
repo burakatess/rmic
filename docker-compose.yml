@@ -23,14 +23,17 @@ services:
     restart: unless-stopped
     ports:
       - "3001:3001"
+    volumes:
+      # Kanıt dosyaları container yeniden oluşturulduğunda kaybolmamalı.
+      - ./backend/uploads:/app/uploads
     # backend/.env — AI_* (AI_ENABLED, AI_API_KEY, AI_*_MODEL) ve varsa diğer
     # gizli değerler buradan gelir. environment: altındaki anahtarlar bunu ezer.
     env_file:
       - ./backend/.env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/grc_db?schema=public
-      JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-this-refresh-in-production}
+      # JWT secret'ları backend/.env'den gelir. Burada placeholder ile override
+      # etmek production güvenlik kontrolünü bozar ve servisin başlamasını engeller.
       JWT_EXPIRES_IN: 15m
       JWT_REFRESH_EXPIRES_IN: 7d
       PORT: 3001
@@ -50,6 +53,10 @@ services:
         # NEXT_PUBLIC_* derleme anında gömülür; tarayıcı "backend" host'unu
         # çözemez, bu yüzden host üzerinden erişilebilen adresi veriyoruz.
         NEXT_PUBLIC_API_URL: http://localhost:3001/api
+        # Bu local docker-compose kurulumuna özgü kolaylık — login sayfasında
+        # demo hesap butonlarını gösterir. Gerçek bir prod dağıtımında "false"
+        # yapın (veya bu satırı silin).
+        NEXT_PUBLIC_SHOW_DEMO_LOGIN: "true"
     restart: unless-stopped
     ports:
       - "3000:3000"

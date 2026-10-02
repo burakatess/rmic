@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "next lint",
     "test": "jest",
-    "test:watch": "jest --watchAll"
+    "test:watch": "jest --watchAll",
+    "test:e2e": "playwright test",
+    "test:e2e:chrome": "PW_BROWSER=chrome playwright test",
+    "test:e2e:edge": "PW_BROWSER=edge playwright test"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.68.0",
@@ -21,6 +24,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

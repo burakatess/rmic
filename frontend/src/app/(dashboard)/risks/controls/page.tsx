@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import api from '@/lib/api';
+import api, { ApiError } from '@/lib/api';
 import { PageHeader, DataTable, FilterBar, StatusBadge, Button, Modal } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
@@ -288,6 +288,57 @@ function KontrolFormModal({ open, onClose, onSaved, editing, risks }: {
     );
 }
 
+// ─── Silme onay modalı — tekil veya toplu ────────────────────────────────────
+function DeleteConfirmModal({ targets, onClose, onDone }: {
+    targets: RiskControl[]; onClose: () => void; onDone: () => void;
+}) {
+    const { success, error: showError } = useToast();
+    const [busy, setBusy] = useState(false);
+
+    const submit = async () => {
+        setBusy(true);
+        const failures: { code: string; message: string }[] = [];
+        let deleted = 0;
+        for (const t of targets) {
+            try {
+                await api.deleteRiskControl(t.id);
+                deleted++;
+            } catch (err) {
+                failures.push({ code: t.kontrolId, message: err instanceof ApiError ? err.message : 'Silme başarısız oldu.' });
+            }
+        }
+        setBusy(false);
+        if (deleted > 0) success('Silindi', `${deleted} kontrol silindi.`);
+        if (failures.length > 0) {
+            showError('Bazı kayıtlar silinemedi', failures.map(f => `${f.code}: ${f.message}`).join(' · '));
+        }
+        onDone();
+        if (failures.length === 0) onClose();
+    };
+
+    return (
+        <Modal open onClose={onClose} title={targets.length === 1 ? 'Kontrolü Sil' : `${targets.length} Kontrolü Sil`} size="md">
+            <div className="space-y-4">
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    Bu işlem geri alınamayabilir.
+                </div>
+                <div className="max-h-64 overflow-y-auto space-y-1.5">
+                    {targets.map(t => (
+                        <div key={t.id} className="flex items-center gap-2 text-sm border border-slate-100 rounded-lg px-3 py-2">
+                            <span className="font-mono font-bold text-blue-700">{t.kontrolId}</span>
+                            <span className="text-slate-600 truncate">{t.kontrolTanimi}</span>
+                        </div>
+                    ))}
+                </div>
+                <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
+                    <Button variant="secondary" onClick={onClose} disabled={busy}>Vazgeç</Button>
+                    <Button variant="danger" onClick={submit} loading={busy}>Sil</Button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function KontrolAlaniPage() {
     const { hasPermission } = useAuth();
@@ -306,6 +357,8 @@ export default function KontrolAlaniPage() {
 
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<RiskControl | null>(null);
+    const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+    const [deleteTargets, setDeleteTargets] = useState<RiskControl[] | null>(null);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -426,15 +479,23 @@ export default function KontrolAlaniPage() {
             ),
         },
         {
-            key: 'ops', header: '', defaultWidth: 60,
+            key: 'ops', header: '', defaultWidth: 90,
             render: (c) => (
-                <button onClick={() => { setEditing(c); setModalOpen(true); }}
-                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                </button>
+                <div className="flex items-center gap-1">
+                    <button onClick={() => { setEditing(c); setModalOpen(true); }}
+                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Düzenle">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    </button>
+                    {hasPermission('risk:delete') && (
+                        <button onClick={() => setDeleteTargets([c])}
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Sil">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                    )}
+                </div>
             ),
         },
-    ], []);
+    ], [hasPermission]);
 
     const filtered = useMemo(() => {
         if (!Object.values(colFilters).some(v => v)) return baseFiltered;
@@ -510,6 +571,22 @@ export default function KontrolAlaniPage() {
                         onClearAll={() => { setSearch(''); setFilters({}); setPage(1); }}
                     />
                 </div>
+
+                {selectedRows.size > 0 && (
+                    <div className="mb-4 flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5">
+                        <span className="text-xs font-semibold text-blue-700">{selectedRows.size} seçili</span>
+                        {selectedRows.size > paginated.length && (
+                            <span className="text-[11px] text-blue-500">(bazıları farklı sayfada — filtre sonucu görünmeyen seçimler korunur)</span>
+                        )}
+                        {hasPermission('risk:delete') && (
+                            <Button size="sm" variant="danger" className="ml-auto"
+                                onClick={() => setDeleteTargets(controls.filter(c => selectedRows.has(c.id)))}>
+                                Seçileni Sil
+                            </Button>
+                        )}
+                        <Button size="sm" variant="ghost" onClick={() => setSelectedRows(new Set())}>Temizle</Button>
+                    </div>
+                )}
             </div>
 
             <div className="px-8 pb-8 flex-1 overflow-auto">
@@ -527,6 +604,10 @@ export default function KontrolAlaniPage() {
                     emptyDescription="Henüz risk kontrolü eklenmemiş. Yeni Kontrol butonunu kullanın."
                     columnFilters={colFilters}
                     onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
+                    showCheckbox
+                    selectedRows={selectedRows}
+                    onRowSelect={(id) => setSelectedRows(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; })}
+                    onSelectAll={() => setSelectedRows(prev => prev.size === paginated.length ? new Set() : new Set(paginated.map(c => c.id)))}
                 />
             </div>
 
@@ -537,6 +618,14 @@ export default function KontrolAlaniPage() {
                 editing={editing}
                 risks={allRisks}
             />
+
+            {deleteTargets && (
+                <DeleteConfirmModal
+                    targets={deleteTargets}
+                    onClose={() => setDeleteTargets(null)}
+                    onDone={() => { setDeleteTargets(null); setSelectedRows(new Set()); load(); }}
+                />
+            )}
         </div>
     );
 }

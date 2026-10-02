@@ -312,6 +312,21 @@ export default function ControlTestDetailPage() {
         } finally { setSubmitting(false); }
     };
 
+    const handleOpenFinding = async () => {
+        if (submitting) return;
+        setSubmitting(true);
+        try {
+            const ok = await flushSave();
+            if (!ok) {
+                showError('Kayıt Başarısız', 'Bulgu oluşturmadan önce test gözlemleri kaydedilemedi. Lütfen tekrar deneyin.');
+                return;
+            }
+            setFindingModalOpen(true);
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
     const handleApprove = async () => {
         if (submitting) return;
         setSubmitting(true);
@@ -352,6 +367,10 @@ export default function ControlTestDetailPage() {
     const handleRemoved = (id: string) => {
         setTest((prev: any) => prev ? { ...prev, attachments: prev.attachments.filter((a: EvidenceItem) => a.id !== id) } : prev);
         setSelectedAttachment(prev => prev?.id === id ? null : prev);
+    };
+    const handleEvidenceUpdated = (updated: EvidenceItem) => {
+        setTest((prev: any) => prev ? { ...prev, attachments: prev.attachments.map((a: EvidenceItem) => a.id === updated.id ? updated : a) } : prev);
+        setSelectedAttachment(prev => prev?.id === updated.id ? updated : prev);
     };
 
     // ── Timeline ─────────────────────────────────────────────────────────────
@@ -467,6 +486,7 @@ export default function ControlTestDetailPage() {
                     selectedId={selectedAttachment?.id ?? null}
                     onSelect={setSelectedAttachment}
                     onUploaded={handleUploaded}
+                    onUpdated={handleEvidenceUpdated}
                     onRemoved={handleRemoved}
                     disabled={isDone}
                     disabledReason="Onaylanmış testin kanıtları değiştirilemez. Önce SYSTEM_ADMIN final onayı iptal etmeli."
@@ -547,7 +567,7 @@ export default function ControlTestDetailPage() {
 
                     {form.findingStatus === 'BULGUSU_VAR' && !isDone && !canApprove && (
                         <Button variant={needsFindingFirst ? 'primary' : 'secondary'} size="sm" className={`w-full ${needsFindingFirst ? 'bg-rose-600 hover:bg-rose-700 ring-rose-600' : ''}`}
-                            onClick={() => setFindingModalOpen(true)} icon={<IconPlus />}>
+                            onClick={handleOpenFinding} disabled={submitting} icon={<IconPlus />}>
                             Bulgu Kaydı Oluştur {hasFindings ? `(${test.findings.length})` : ''}
                         </Button>
                     )}
@@ -665,6 +685,16 @@ export default function ControlTestDetailPage() {
                 <p className="text-lg font-bold text-slate-800 leading-snug">
                     {control.controlId} — {control.name}
                 </p>
+                <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                    <Link href={`/controls/${control.id}`} target="_blank" className="text-[11px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded px-2 py-0.5 hover:underline">
+                        Ana Kontrol: {control.controlId}
+                    </Link>
+                    {test.scope?.code && (
+                        <Link href={`/controls/agenda/${test.scope.id}`} target="_blank" className="text-[11px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5 hover:underline">
+                            Dönem Kontrolü: {test.scope.code}
+                        </Link>
+                    )}
+                </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 mt-1.5">
                     <span className="inline-flex items-center gap-1"><IconCalendar />{test.periodLabel || (test.year ? `${test.year}` : '—')}</span>
                     {test.directorate?.name && <span className="inline-flex items-center gap-1"><IconPin />{test.directorate.name}</span>}

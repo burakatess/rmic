@@ -9,9 +9,11 @@ import {
     LoadingState, EmptyState, ErrorState, Modal,
 } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
+import { AnnualPlanAssignmentDecisions, hasUnresolvedPlanConflicts } from '@/components/controls/AnnualPlanAssignmentDecisions';
+import { PermissionGate } from '@/components/auth';
 import { useToast } from '@/components/ui/Toast';
 import type {
-    AnnualPlanRow, AnnualPlanWorkspace, AnnualPlanPreview, AnnualPlanScope, EligibleController,
+    AnnualPlanAssignmentDecision, AnnualPlanRow, AnnualPlanWorkspace, AnnualPlanPreview, AnnualPlanScope, EligibleController, WorkloadByAssignee,
 } from '@/types/annual-plan';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
@@ -84,7 +86,7 @@ export default function AnnualPlanPage() {
 function AnnualPlanPageContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const { success: toastSuccess, error: toastError } = useToast();
+    const { success: toastSuccess, error: toastError, info: toastInfo } = useToast();
 
     const [year, setYear] = useState<number>(Number(searchParams.get('year')) || CURRENT_YEAR);
     const [scope, setScope] = useState<AnnualPlanScope>((searchParams.get('scope') as AnnualPlanScope) || 'ORG');
@@ -104,14 +106,53 @@ function AnnualPlanPageContent() {
     const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
     const [saving, setSaving] = useState(false);
     const [editingRow, setEditingRow] = useState<AnnualPlanRow | null>(null);
+    const [assignmentDecisions, setAssignmentDecisions] = useState<AnnualPlanAssignmentDecision[]>([]);
     const [previewData, setPreviewData] = useState<AnnualPlanPreview | null>(null);
+    const previewRequestId = useRef(0);
+    const [previewContext, setPreviewContext] = useState<{ year: number; revision: number } | null>(null);
     const [previewOpen, setPreviewOpen] = useState(false);
     const [applying, setApplying] = useState(false);
+    const [transitioning, setTransitioning] = useState(false);
     // İki çalışma görünümü — AYNI taslak/state üzerinde (madde 4): sekme değişince
     // pendingEdits/workspace kaybolmaz.
     const [view, setView] = useState<'schedule' | 'assignments'>('schedule');
     const [bulkAssignRole, setBulkAssignRole] = useState<'assigneeId' | 'secondControllerId' | null>(null);
+    const [copyModalOpen, setCopyModalOpen] = useState(false);
+    const [workloadOpen, setWorkloadOpen] = useState(false);
+    const [workloadData, setWorkloadData] = useState<WorkloadByAssignee | null>(null);
+    const [workloadLoading, setWorkloadLoading] = useState(false);
+    const workloadReqId = useRef(0);
     const reqId = useRef(0);
+
+    // Kontrolcü seçenekleri — TEK sefer sekme/yıl bazında çekilir ve tüm satır
+    // seçicileri arasında paylaşılır. Önceden her satırın kendi UserPicker'ı
+    // bağımsız fetch atıyordu (N satır × 2 alan = 2N eşzamanlı istek) ve hata
+    // sessizce yutuluyordu (.catch(() => setLoaded(true))) — bu da "seçim
+    // boş geliyor" şikayetinin kök nedeniydi: tek bir isteğin başarısız
+    // olması, hiçbir hata göstermeden o satırı kalıcı olarak boş bırakıyordu.
+    const [controllerOptions, setControllerOptions] = useState<{ assignee: EligibleController[]; secondController: EligibleController[] }>({ assignee: [], secondController: [] });
+    const [controllerOptionsLoading, setControllerOptionsLoading] = useState(false);
+    const [controllerOptionsError, setControllerOptionsError] = useState(false);
+
+    const loadControllerOptions = useCallback(async () => {
+        setControllerOptionsLoading(true);
+        setControllerOptionsError(false);
+        try {
+            const [assignee, secondController] = await Promise.all([
+                api.getEligibleControllers(year, 'assignee'),
+                api.getEligibleControllers(year, 'secondController'),
+            ]);
+            setControllerOptions({ assignee: assignee.data, secondController: secondController.data });
+        } catch {
+            setControllerOptionsError(true);
+        } finally {
+            setControllerOptionsLoading(false);
+        }
+    }, [year]);
+
+    useEffect(() => {
+        if (view === 'assignments') loadControllerOptions();
+    }, [view, year, loadControllerOptions]);
 
     const scopeParams = useMemo(() => ({ scope, directorateId: scope === 'UNIT' ? directorateIds : undefined }), [scope, directorateIds]);
 
@@ -155,6 +196,19 @@ function AnnualPlanPageContent() {
     }, [year, scopeParams, search, frequencyFilter, scopeFilter, missingOnly, changedOnly, page]);
 
     useEffect(() => { loadWorkspace(); }, [loadWorkspace]);
+
+    // Kontrolcü İş Yükü — yalnızca panel açıkken yüklenir/tazelenir (Madde 12).
+    useEffect(() => {
+        if (!workloadOpen) return;
+        const id = ++workloadReqId.current;
+        setWorkloadLoading(true);
+        api.getWorkloadByAssignee(year, scopeParams).then(data => {
+            if (id !== workloadReqId.current) return;
+            setWorkloadData(data);
+        }).catch(() => { }).finally(() => {
+            if (id === workloadReqId.current) setWorkloadLoading(false);
+        });
+    }, [workloadOpen, year, scopeParams]);
     useEffect(() => { setPage(1); }, [year, scope, directorateIds, search, frequencyFilter, scopeFilter, missingOnly, changedOnly]);
 
     // Sayfadan ayrılmada kaydedilmemiş değişiklik koruması (Madde 22).
@@ -226,6 +280,18 @@ function AnnualPlanPageContent() {
             if (!ok) return;
             setPendingEdits(new Map());
         }
+        ++reqId.current;
+        ++previewRequestId.current;
+        setWorkspace(null);
+        setLoading(true);
+        setSelectedRows(new Set());
+        setPreviewOpen(false);
+        setPreviewData(null);
+        setPreviewContext(null);
+        setAssignmentDecisions([]);
+        setBulkAssignRole(null);
+        setEditingRow(null);
+        setPage(1);
         setYear(targetYear);
     };
 
@@ -271,11 +337,16 @@ function AnnualPlanPageContent() {
         }
     };
 
-    const copyFromPreviousYear = async () => {
+    const copyFromPreviousYear = async (options: { copyScope: boolean; copyCalendar: boolean; copyAssignments: boolean }) => {
         if (pendingEdits.size > 0) { toastError('Önce kaydedin', 'Kopyalamadan önce kaydedilmemiş değişikliklerinizi kaydedin veya geri alın.'); return; }
         try {
-            const result = await api.copyAnnualPlanFromYear(year, year - 1, scopeParams) as any;
-            toastSuccess('Kopyalandı', `${result.seeded} kontrol ${year - 1} yılından taslağa eklendi (${result.skippedAlreadyInDraft} zaten taslaktaydı, atlandı).`);
+            const result = await api.copyAnnualPlanFromYear(year, year - 1, options, scopeParams) as any;
+            const parts = [`${result.seeded} kontrol ${year - 1} yılından taslağa eklendi`, `${result.skippedAlreadyInDraft} zaten taslaktaydı (atlandı)`];
+            if (options.copyAssignments && result.assignmentsDroppedInactive > 0) {
+                parts.push(`${result.assignmentsDroppedInactive} atama pasif/geçersiz kullanıcı nedeniyle düşürüldü`);
+            }
+            toastSuccess('Kopyalandı', parts.join(' · '));
+            setCopyModalOpen(false);
             loadWorkspace();
         } catch (err) {
             toastError('Hata', err instanceof Error ? err.message : 'Kopyalama başarısız.');
@@ -283,9 +354,15 @@ function AnnualPlanPageContent() {
     };
 
     const openPreview = async () => {
+        if (!workspace || workspace.year !== year || loading) return;
+        const requestId = ++previewRequestId.current;
+        const context = { year, revision: workspace.draftRevision };
         if (pendingEdits.size > 0) { toastError('Önce kaydedin', 'Önizleme, kaydedilmiş taslağı kullanır. Lütfen önce "Taslağı Kaydet" yapın.'); return; }
         try {
             const preview = await api.previewAnnualPlanApply(year);
+            if (requestId !== previewRequestId.current) return;
+            setAssignmentDecisions([]);
+            setPreviewContext(context);
             setPreviewData(preview);
             setPreviewOpen(true);
         } catch (err) {
@@ -294,11 +371,12 @@ function AnnualPlanPageContent() {
     };
 
     const applyPlan = async () => {
-        if (!workspace) return;
+        if (!workspace || !previewContext || previewContext.year !== year || workspace.year !== year) return;
         setApplying(true);
         try {
-            const result = await api.applyAnnualPlan(year, workspace.draftRevision);
+            const result = await api.applyAnnualPlan(previewContext.year, previewContext.revision, assignmentDecisions);
             if (!result.applied) {
+                await openPreview();
                 toastError('Uygulanamadı', 'Çözülmemiş çatışmalar/eksik takvimler var. Önizlemeyi tekrar kontrol edin.');
             } else {
                 toastSuccess('Plan uygulandı', `${result.added} eklendi, ${result.removed} çıkarıldı, ${result.modified} güncellendi, ${result.tasksCreated} task oluşturuldu.`);
@@ -306,10 +384,57 @@ function AnnualPlanPageContent() {
                 loadWorkspace();
             }
         } catch (err) {
+            if (err instanceof ApiError && (err.status === 400 || err.status === 409)) {
+                setPreviewOpen(false);
+                setAssignmentDecisions([]);
+                loadWorkspace();
+            }
             toastError('Hata', err instanceof Error ? err.message : 'Plan uygulanamadı.');
         } finally {
             setApplying(false);
         }
+    };
+
+    const submitForApproval = async () => {
+        if (!workspace || pendingEdits.size > 0) {
+            toastError('Önce kaydedin', 'Planı onaya göndermeden önce taslak değişikliklerini kaydedin.');
+            return;
+        }
+        setTransitioning(true);
+        try {
+            await api.submitAnnualPlan(year, workspace.draftRevision, undefined, assignmentDecisions);
+            toastSuccess('Onaya gönderildi', `${year} Yıllık Planı yönetici onayına gönderildi.`);
+            setPreviewOpen(false);
+            loadWorkspace();
+        } catch (err) {
+            toastError('Gönderilemedi', err instanceof Error ? err.message : 'Plan onaya gönderilemedi.');
+        } finally { setTransitioning(false); }
+    };
+
+    const approvePlan = async () => {
+        if (!workspace) return;
+        setTransitioning(true);
+        try {
+            await api.approveAnnualPlan(year, workspace.draftRevision);
+            toastSuccess('Plan onaylandı', 'Onaylanan revision artık uygulanabilir.');
+            loadWorkspace();
+        } catch (err) {
+            toastError('Onaylanamadı', err instanceof Error ? err.message : 'Plan onaylanamadı.');
+        } finally { setTransitioning(false); }
+    };
+
+    const requestChanges = async () => {
+        if (!workspace) return;
+        const note = window.prompt('Değişiklik talebi gerekçesini yazın:')?.trim();
+        if (!note) return;
+        setTransitioning(true);
+        try {
+            await api.requestAnnualPlanChanges(year, workspace.draftRevision, note);
+            toastSuccess('Değişiklik istendi', 'Plan yeniden düzenlemeye açıldı.');
+            loadWorkspace();
+        } catch (err) {
+            toastError('İşlem başarısız', err instanceof Error ? err.message : 'Değişiklik talebi kaydedilemedi.');
+        } finally { setTransitioning(false); }
     };
 
     const bulkAction = async (action: 'ADD' | 'REMOVE') => {
@@ -343,12 +468,24 @@ function AnnualPlanPageContent() {
                 controlIds: Array.from(selectedRows), action: 'ASSIGN',
                 [role]: userId, onlyMissing, expectedRevision: workspace.draftRevision,
             } as any, scopeParams);
-            toastSuccess('Atandı', `${result.items?.length ?? selectedRows.size} kontrole atama uygulandı.`);
-            setSelectedRows(new Set());
+            // Backend TÜM taslağı döner (result.items = taslağın tamamı) — bu
+            // işlemden gerçekten etkilenen kontrol sayısı ayrıca `affectedCount`
+            // olarak gelir (onlyMissing nedeniyle bazı seçili kontroller
+            // atlanmış olabilir, bu yüzden selectedRows.size de tam doğru değil).
+            const affectedCount = result.affectedCount ?? selectedRows.size;
+            if (affectedCount === 0) {
+                toastInfo('Atama yapılmadı', 'Seçili kontrollerde hedef kontrolcü alanı zaten dolu. Değiştirmek için “Yalnızca eksikler” seçimini kaldırın.');
+            } else {
+                toastSuccess('Atandı', `${affectedCount} kontrole atama uygulandı.`);
+            }
+            // Seçim BİLEREK korunur — aynı seçili gruba art arda 1. ve 2.
+            // kontrolcü ataması yapılabilsin (önceden burada sıfırlanıyordu,
+            // bu da "başarılı ama seçimler sıfırlanıyor" şikayetinin nedeniydi).
             loadWorkspace();
         } catch (err) {
             if (err instanceof ApiError && err.status === 409) {
                 toastError('Çakışma', 'Taslak başka bir kullanıcı tarafından güncellendi. Sayfa yenileniyor.');
+                setSelectedRows(new Set());
                 loadWorkspace();
             } else {
                 toastError('Hata', err instanceof Error ? err.message : 'Toplu atama başarısız.');
@@ -446,7 +583,7 @@ function AnnualPlanPageContent() {
             key: 'assignee', header: 'Atanan Kontrolcü', defaultWidth: 200,
             render: (row) => (
                 <UserPicker
-                    year={year} role="assignee" controlId={row.controlId}
+                    role="assignee" options={controllerOptions.assignee} loading={controllerOptionsLoading}
                     value={row.assigneeId} otherValue={row.secondControllerId}
                     onChange={(v) => setAssignment(row, { assigneeId: v })}
                 />
@@ -456,7 +593,7 @@ function AnnualPlanPageContent() {
             key: 'secondController', header: 'İkinci Kontrolcü', defaultWidth: 200,
             render: (row) => (
                 <UserPicker
-                    year={year} role="secondController" controlId={row.controlId}
+                    role="secondController" options={controllerOptions.secondController} loading={controllerOptionsLoading}
                     value={row.secondControllerId} otherValue={row.assigneeId}
                     onChange={(v) => setAssignment(row, { secondControllerId: v })}
                 />
@@ -468,7 +605,7 @@ function AnnualPlanPageContent() {
                 ? <StatusBadge variant="success" size="sm">Tamamlandı</StatusBadge>
                 : <StatusBadge variant="warning" size="sm">Eksik</StatusBadge>,
         },
-    ], [year]);
+    ], [year, controllerOptions, controllerOptionsLoading]);
 
     return (
         <PageShell>
@@ -478,12 +615,12 @@ function AnnualPlanPageContent() {
                 breadcrumbs={[{ label: 'Kontrol Yönetimi', href: '/controls' }, { label: 'Yıllık Plan' }]}
                 actions={
                     <div className="flex items-center gap-2">
-                        <Button size="sm" variant="outline" onClick={copyFromPreviousYear}>Önceki Yıldan Kopyala</Button>
+                        <Button size="sm" variant="outline" onClick={() => setCopyModalOpen(true)}>Önceki Yıldan Kopyala</Button>
                         <Button size="sm" variant="outline" onClick={discardChanges} disabled={!workspace || (workspace.draftRevision === 0 && pendingEdits.size === 0)}>Değişiklikleri Geri Al</Button>
                         <Button size="sm" variant="outline" onClick={saveDraft} disabled={pendingEdits.size === 0 || saving}>
                             {saving ? 'Kaydediliyor...' : `Taslağı Kaydet${pendingEdits.size > 0 ? ` (${pendingEdits.size})` : ''}`}
                         </Button>
-                        <Button size="sm" variant="primary" onClick={openPreview} disabled={!workspace}>Planı Uygula</Button>
+                        <Button size="sm" variant="primary" onClick={openPreview} disabled={loading || !workspace || workspace.year !== year}>Önizle</Button>
                     </div>
                 }
             />
@@ -496,13 +633,27 @@ function AnnualPlanPageContent() {
                 {workspace && (
                     <>
                         <StatusBadge variant={workspace.draftStatus === 'APPLIED' && workspace.changedCount === 0 ? 'success' : workspace.changedCount > 0 || pendingEdits.size > 0 ? 'warning' : 'neutral'}>
-                            {workspace.changedCount > 0 || pendingEdits.size > 0 ? 'Değişiklik Var' : workspace.draftStatus === 'APPLIED' ? 'Uygulandı' : 'Taslak'}
+                            {workspace.changedCount > 0 || pendingEdits.size > 0 ? 'Değişiklik Var' : ({ OPEN: 'Taslak', PENDING_APPROVAL: 'Onay Bekliyor', CHANGES_REQUESTED: 'Değişiklik İstendi', APPROVED: 'Onaylandı', APPLIED: 'Uygulandı' } as Record<string, string>)[workspace.draftStatus]}
                         </StatusBadge>
                         <span className="text-xs text-slate-400">
                             Son güncelleme: {new Date(workspace.draftUpdatedAt).toLocaleString('tr-TR')}
                             {workspace.draftLastAppliedAt && ` · Son uygulama: ${new Date(workspace.draftLastAppliedAt).toLocaleString('tr-TR')}`}
                         </span>
                     </>
+                )}
+
+                {workspace && (
+                    <div className="ml-auto flex items-center gap-2">
+                        {workspace.draftStatus === 'PENDING_APPROVAL' && (
+                            <>
+                                <Button size="sm" variant="outline" onClick={requestChanges} disabled={transitioning}>Değişiklik İste</Button>
+                                <Button size="sm" variant="primary" onClick={approvePlan} disabled={transitioning}>Onayla</Button>
+                            </>
+                        )}
+                        {workspace.draftStatus === 'APPROVED' && (
+                            <Button size="sm" variant="outline" onClick={requestChanges} disabled={transitioning}>Onayı Geri Aç</Button>
+                        )}
+                    </div>
                 )}
 
                 <div className="h-5 w-px bg-slate-200 mx-1" />
@@ -632,12 +783,21 @@ function AnnualPlanPageContent() {
                     ) : (
                         <>
                             {/* Kontrolcü Atamaları — aynı taslak, yalnızca kapsamdaki satırlar */}
+                            {controllerOptionsError && (
+                                <div className="flex items-center justify-between gap-3 mb-3 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                                    <span className="text-sm text-red-700">Kontrolcü listesi yüklenemedi — seçim alanları bu nedenle boş görünüyor.</span>
+                                    <Button size="sm" variant="outline" onClick={loadControllerOptions}>Tekrar Dene</Button>
+                                </div>
+                            )}
                             <div className="flex flex-wrap items-center gap-2 mb-3">
                                 <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Kod veya tanım ara..." className={`${inputCls} w-56`} />
                                 <select value={frequencyFilter} onChange={(e) => setFrequencyFilter(e.target.value)} className={inputCls}>
                                     <option value="">Tüm sıklıklar</option>
                                     {Object.entries(FREQUENCY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                                 </select>
+                                <Button size="sm" variant="outline" onClick={() => setWorkloadOpen(o => !o)}>
+                                    {workloadOpen ? 'İş Yükünü Gizle' : 'Kontrolcü İş Yükü'}
+                                </Button>
                                 {selectedRows.size > 0 && (
                                     <div className="flex items-center gap-2 ml-auto bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">
                                         <span className="text-xs font-semibold text-blue-700">{selectedRows.size} seçili</span>
@@ -647,6 +807,10 @@ function AnnualPlanPageContent() {
                                     </div>
                                 )}
                             </div>
+
+                            {workloadOpen && (
+                                <WorkloadPanel data={workloadData} loading={workloadLoading} />
+                            )}
 
                             {assignmentRows.length === 0 ? (
                                 <EmptyState title="Kapsamda kontrol yok" description="Önce Kapsam ve Takvim sekmesinden kontrolleri bu yılın kapsamına alın." />
@@ -696,12 +860,21 @@ function AnnualPlanPageContent() {
                 />
             )}
 
+            {/* Önceki yıldan kopyalama — üç bağımsız seçenek (madde 18) */}
+            {copyModalOpen && (
+                <CopyFromYearModal
+                    fromYear={year - 1}
+                    onClose={() => setCopyModalOpen(false)}
+                    onConfirm={copyFromPreviousYear}
+                />
+            )}
+
             {/* Toplu kontrolcü/ikinci kontrolcü atama */}
             {bulkAssignRole && (
                 <BulkAssignModal
                     role={bulkAssignRole}
                     count={selectedRows.size}
-                    year={year}
+                    options={bulkAssignRole === 'assigneeId' ? controllerOptions.assignee : controllerOptions.secondController}
                     onClose={() => setBulkAssignRole(null)}
                     onConfirm={(userId, onlyMissing) => {
                         bulkAssign(bulkAssignRole, userId, onlyMissing);
@@ -711,11 +884,11 @@ function AnnualPlanPageContent() {
             )}
 
             {/* Planı Uygula önizleme */}
-            <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title={`Planı Uygula — ${year} Önizleme`} description="Onaylamadan hiçbir gerçek kayıt değişmez.">
+            <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title={`Yıllık Plan — ${year} Önizleme`} description="Önizleme hiçbir gerçek kayıt değiştirmez.">
                 {previewData && (
                     <div className="space-y-4">
                         <p className="text-sm text-slate-700 bg-slate-50 rounded-lg p-3">
-                            {previewData.toAdd.length} kontrol kapsama alınacak, {previewData.toRemove.length} kontrol kapsamdan çıkarılacak, {previewData.toModify.length} kontrolün periyodikliği değişecek —{' '}
+                            {previewData.toAdd.length} kontrol kapsama alınacak, {previewData.toRemove.length} kontrol kapsamdan çıkarılacak, {previewData.toModify.length} kontrolün takvimi veya ataması değişecek —{' '}
                             <b>{previewData.taskSummary.toCreate} task oluşturulacak</b>, {previewData.taskSummary.toCancel} task iptal edilecek, {previewData.taskSummary.protectedCount} devam eden/tamamlanmış task korunacak.
                         </p>
 
@@ -725,12 +898,15 @@ function AnnualPlanPageContent() {
                                 {previewData.missingSchedule.map(c => <p key={c.controlId} className="text-xs text-amber-700">{c.controlCode} — {c.name}</p>)}
                             </div>
                         )}
-                        {previewData.conflicts.length > 0 && (
+                        {previewData.conflicts.some(c => c.type !== 'ASSIGNMENT') && (
                             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                                <p className="text-xs font-bold text-red-700 mb-1">Çatışma — devam eden task kararı gerekli (ilgili kontrolün detay sayfasından çözün):</p>
-                                {previewData.conflicts.map(c => <p key={c.controlId} className="text-xs text-red-700">{c.controlCode} — {c.name}: {c.reason}</p>)}
+                                <p className="text-xs font-bold text-red-700 mb-1">Kapsamdan çıkarma engellendi — devam eden görevler var:</p>
+                                {previewData.conflicts.filter(c => c.type !== 'ASSIGNMENT').map(c => <p key={c.controlId} className="text-xs text-red-700">{c.controlCode} — {c.name}: {c.reason}</p>)}
                             </div>
                         )}
+                        <PermissionGate permission="control:*">
+                            <AnnualPlanAssignmentDecisions preview={previewData} decisions={assignmentDecisions} onChange={setAssignmentDecisions} disabled={applying} />
+                        </PermissionGate>
                         {previewData.assignmentBlocked.length > 0 && (
                             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                                 <p className="text-xs font-bold text-amber-700 mb-1">Atama eksik — periyodik kontroller için Atanan Kontrolcü + İkinci Kontrolcü tamamlanmadan plan uygulanamaz:</p>
@@ -775,9 +951,17 @@ function AnnualPlanPageContent() {
 
                         <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
                             <Button variant="outline" onClick={() => setPreviewOpen(false)}>Vazgeç</Button>
-                            <Button variant="primary" onClick={applyPlan} disabled={applying || previewData.blocked}>
-                                {applying ? 'Uygulanıyor...' : previewData.blocked ? 'Çatışmalar çözülmeden uygulanamaz' : 'Onayla ve Uygula'}
-                            </Button>
+                            <PermissionGate permission="control:*">
+                                {workspace?.draftStatus === 'APPROVED' ? (
+                                    <Button variant="primary" onClick={applyPlan} disabled={applying || hasUnresolvedPlanConflicts(previewData, assignmentDecisions)}>
+                                        {applying ? 'Uygulanıyor...' : hasUnresolvedPlanConflicts(previewData, assignmentDecisions) ? 'Eksikleri ve görev kararlarını tamamlayın' : 'Onaylanmış Planı Uygula'}
+                                    </Button>
+                                ) : (
+                                    <Button variant="primary" onClick={submitForApproval} disabled={transitioning || hasUnresolvedPlanConflicts(previewData, assignmentDecisions)}>
+                                        {transitioning ? 'Gönderiliyor...' : hasUnresolvedPlanConflicts(previewData, assignmentDecisions) ? 'Eksikleri tamamlayın' : 'Onaya Gönder'}
+                                    </Button>
+                                )}
+                            </PermissionGate>
                         </div>
                     </div>
                 )}
@@ -786,30 +970,83 @@ function AnnualPlanPageContent() {
     );
 }
 
+// ─── Kontrolcü İş Yükü — madde 12: kontrol sayısı ≠ task sayısı, birinci+
+// ikinci kontrolcü nedeniyle toplam task sayısı ikiye katlanmaz (ayrı sütun). ──
+function WorkloadPanel({ data, loading }: { data: WorkloadByAssignee | null; loading: boolean }) {
+    if (loading && !data) {
+        return <div className="bg-white rounded-xl border border-slate-200 p-5 mb-4 text-sm text-slate-400">Yükleniyor...</div>;
+    }
+    if (!data) return null;
+
+    return (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 mb-4 space-y-4">
+            <div className="flex items-center gap-4">
+                <StatusBadge variant={data.unassignedControlCount > 0 ? 'warning' : 'success'} size="sm">
+                    {data.unassignedControlCount} atanmamış kontrol
+                </StatusBadge>
+                <StatusBadge variant={data.unassignedTaskCount > 0 ? 'warning' : 'success'} size="sm">
+                    {data.unassignedTaskCount} atanmamış task
+                </StatusBadge>
+                <span className="text-xs text-slate-400">Task sayısı gerçek iş yükü saati değildir — yalnızca planlanan kayıt sayısıdır.</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Atanan Kontrolcü Başına</h4>
+                    {data.byAssignee.length === 0 ? (
+                        <p className="text-xs text-slate-400">Henüz atama yok.</p>
+                    ) : (
+                        <table className="w-full text-sm">
+                            <thead><tr className="text-left text-xs text-slate-400"><th className="font-medium pb-1">Kontrolcü</th><th className="font-medium pb-1 text-right">Kontrol</th><th className="font-medium pb-1 text-right">Task</th></tr></thead>
+                            <tbody>
+                                {data.byAssignee.sort((a, b) => b.taskCount - a.taskCount).map(a => (
+                                    <tr key={a.userId} className="border-t border-slate-50">
+                                        <td className="py-1 text-slate-700">{a.name}</td>
+                                        <td className="py-1 text-right text-slate-600">{a.controlCount}</td>
+                                        <td className="py-1 text-right font-semibold text-slate-700">{a.taskCount}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+                <div>
+                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">İkinci Kontrolcü Başına (İnceleme)</h4>
+                    {data.bySecondController.length === 0 ? (
+                        <p className="text-xs text-slate-400">Henüz atama yok.</p>
+                    ) : (
+                        <table className="w-full text-sm">
+                            <thead><tr className="text-left text-xs text-slate-400"><th className="font-medium pb-1">Kontrolcü</th><th className="font-medium pb-1 text-right">İnceleme</th></tr></thead>
+                            <tbody>
+                                {data.bySecondController.sort((a, b) => b.reviewCount - a.reviewCount).map(a => (
+                                    <tr key={a.userId} className="border-t border-slate-50">
+                                        <td className="py-1 text-slate-700">{a.name}</td>
+                                        <td className="py-1 text-right font-semibold text-slate-700">{a.reviewCount}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ─── Kontrolcü seçici — yalnızca aktif/uygun kullanıcılar, aynı kişi iki alana ──
-function UserPicker({ year, role, controlId, value, otherValue, onChange }: {
-    year: number; role: 'assignee' | 'secondController'; controlId: string;
+// Seçenekler artık üst bileşenden (bir kez, sekme/yıl bazında) prop olarak
+// gelir — her satırın kendi bağımsız fetch'i atması ve hatayı sessizce
+// yutması KALDIRILDI (bkz. üstteki loadControllerOptions yorumu).
+function UserPicker({ role, options, loading, value, otherValue, onChange }: {
+    role: 'assignee' | 'secondController'; options: EligibleController[]; loading: boolean;
     value: string | null; otherValue: string | null;
     onChange: (userId: string | null) => void;
 }) {
-    const [options, setOptions] = useState<EligibleController[]>([]);
-    const [loaded, setLoaded] = useState(false);
-
-    useEffect(() => {
-        let cancelled = false;
-        api.getEligibleControllers(year, role, controlId).then(res => {
-            if (!cancelled) { setOptions(res.data); setLoaded(true); }
-        }).catch(() => { if (!cancelled) setLoaded(true); });
-        return () => { cancelled = true; };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [year, role, controlId]);
-
     return (
         <select
             value={value ?? ''}
             onChange={(e) => onChange(e.target.value || null)}
-            className={`${inputCls} w-full max-w-[190px] ${!loaded ? 'opacity-60' : ''}`}
-            disabled={!loaded}
+            className={`${inputCls} w-full max-w-[190px] ${loading ? 'opacity-60' : ''}`}
+            disabled={loading}
         >
             <option value="">{role === 'assignee' ? 'Atanan Kontrolcü Seçin' : 'İkinci Kontrolcü Seçin'}</option>
             {options.filter(u => u.id !== otherValue).map(u => (
@@ -820,19 +1057,56 @@ function UserPicker({ year, role, controlId, value, otherValue, onChange }: {
 }
 
 // ─── Toplu atama diyaloğu ────────────────────────────────────────────────────
-function BulkAssignModal({ role, count, year, onClose, onConfirm }: {
-    role: 'assigneeId' | 'secondControllerId'; count: number; year: number;
+// ─── Önceki yıldan kopyalama — üç bağımsız anahtar (madde 18) ────────────────
+function CopyFromYearModal({ fromYear, onClose, onConfirm }: {
+    fromYear: number;
+    onClose: () => void;
+    onConfirm: (options: { copyScope: boolean; copyCalendar: boolean; copyAssignments: boolean }) => void;
+}) {
+    const [copyScope, setCopyScope] = useState(true);
+    const [copyCalendar, setCopyCalendar] = useState(true);
+    const [copyAssignments, setCopyAssignments] = useState(false);
+
+    return (
+        <Modal open onClose={onClose} title="Önceki Yıldan Kopyala" description={`${fromYear} yılının kapsamı bu yılın taslağına eklenecek.`}>
+            <div className="space-y-3">
+                <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+                    <input type="checkbox" checked={copyScope} onChange={(e) => setCopyScope(e.target.checked)} className="mt-0.5 rounded border-slate-300" />
+                    <span>
+                        <span className="font-semibold">Kapsamı kopyala</span>
+                        <span className="block text-xs text-slate-400">{fromYear} yılında kapsamda olan kontroller bu yılın taslağına eklenir. Kapalıysa hiçbir şey kopyalanmaz.</span>
+                    </span>
+                </label>
+                <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+                    <input type="checkbox" checked={copyCalendar} onChange={(e) => setCopyCalendar(e.target.checked)} disabled={!copyScope} className="mt-0.5 rounded border-slate-300" />
+                    <span>
+                        <span className="font-semibold">Takvimi kopyala</span>
+                        <span className="block text-xs text-slate-400">Sıklık ve referans ay {fromYear}&apos;den aynen kopyalanır. Kapalıysa kontrolün kendi varsayılan sıklığı kullanılır.</span>
+                    </span>
+                </label>
+                <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+                    <input type="checkbox" checked={copyAssignments} onChange={(e) => setCopyAssignments(e.target.checked)} disabled={!copyScope} className="mt-0.5 rounded border-slate-300" />
+                    <span>
+                        <span className="font-semibold">Kontrolcü atamalarını kopyala</span>
+                        <span className="block text-xs text-slate-400">Varsayılan kapalı. Açılırsa kopyalanan kullanıcıların aktiflik durumu yeniden doğrulanır — pasif kullanıcı sessizce düşürülür.</span>
+                    </span>
+                </label>
+
+                <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
+                    <Button variant="outline" onClick={onClose}>Vazgeç</Button>
+                    <Button variant="primary" onClick={() => onConfirm({ copyScope, copyCalendar, copyAssignments })}>Kopyala</Button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+function BulkAssignModal({ role, count, options, onClose, onConfirm }: {
+    role: 'assigneeId' | 'secondControllerId'; count: number; options: EligibleController[];
     onClose: () => void; onConfirm: (userId: string, onlyMissing: boolean) => void;
 }) {
-    const [options, setOptions] = useState<EligibleController[]>([]);
     const [userId, setUserId] = useState('');
     const [onlyMissing, setOnlyMissing] = useState(true);
-    const apiRole = role === 'assigneeId' ? 'assignee' : 'secondController';
-
-    useEffect(() => {
-        api.getEligibleControllers(year, apiRole).then(res => setOptions(res.data)).catch(() => { });
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [year, apiRole]);
 
     return (
         <Modal open onClose={onClose} title={role === 'assigneeId' ? 'Toplu Atanan Kontrolcü Ata' : 'Toplu İkinci Kontrolcü Ata'} description={`${count} kontrol seçili.`}>

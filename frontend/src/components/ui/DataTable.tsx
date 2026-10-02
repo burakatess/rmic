@@ -426,6 +426,11 @@ export function DataTable<T>({
                 >
                   <div className="flex items-center gap-1.5">
                     <span className="truncate">{col.header}</span>
+                    {col.filter && (
+                      <svg aria-label={`${col.header} filtresi`} className={`w-3.5 h-3.5 flex-shrink-0 ${columnFilters[col.key] ? 'text-blue-600 fill-blue-100' : 'text-slate-300'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h18l-7 8v6l-4 2v-8L3 4z" />
+                      </svg>
+                    )}
                     {col.sortable && sortKey === col.key && sortDirection && (
                       <svg className={`w-3.5 h-3.5 text-blue-600 flex-shrink-0 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />

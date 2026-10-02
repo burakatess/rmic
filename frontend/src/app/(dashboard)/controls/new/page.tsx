@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import api from '@/lib/api';
@@ -36,6 +36,7 @@ export default function NewControlPage() {
     const router = useRouter();
     const { success: toastSuccess, error: toastError } = useToast();
     const [loading, setLoading] = useState(false);
+    const submissionLock = useRef(false);
     const [users, setUsers] = useState<User[]>([]);
     const [directorates, setDirectorates] = useState<Directorate[]>([]);
 
@@ -56,8 +57,6 @@ export default function NewControlPage() {
         directorateId: '',
         contactPersonId: '',
         frequency: 'MONTHLY',
-        dueDate: '',
-        status: 'ACTIVE',
         notes: '',
         attachment: null as File | null,
     });
@@ -80,13 +79,16 @@ export default function NewControlPage() {
         }
     };
 
-    // Gerçek kontrol kodu formatı backend'in generateControlId()'sinin ürettiği
-    // "K-YYYY-NNNN" — frekanstan bağımsız (controls.service.ts'e bakınız).
+    // Gerçek kontrol kodu formatı backend'in generateControlCode()'unun ürettiği
+    // "BTK.XXXX" (nokta ayıracı, tire yok — control-code.util.ts). Eski
+    // "K-YYYY-NNNN" kayıtları da hâlâ geçerli kabul edilir (geçiş tamamlanana
+    // kadar iki format bir arada var olabilir — bkz. migrate-btk-codes.ts).
     const validateNaming = (summary: string) => {
         if (!summary) return 'Kontrol Kodu zorunludur.';
-        const regex = /^K-20\d{2}-\d+$/;
-        if (!regex.test(summary)) {
-            return 'Kontrol kodu "K-YYYY-NNNN" formatında olmalıdır. Örn: K-2026-0001';
+        const btkRegex = /^BTK\.\d{4,}$/;
+        const legacyRegex = /^K-20\d{2}-\d+$/;
+        if (!btkRegex.test(summary) && !legacyRegex.test(summary)) {
+            return 'Kontrol kodu "BTK.XXXX" formatında olmalıdır. Örn: BTK.0001';
         }
         return '';
     };
@@ -101,6 +103,7 @@ export default function NewControlPage() {
     };
 
     const handleSave = async (isDraft: boolean) => {
+        if (submissionLock.current) return;
         const err = validateNaming(formData.summary);
         if (err) {
             setSummaryError(err);
@@ -113,6 +116,7 @@ export default function NewControlPage() {
             return;
         }
 
+        submissionLock.current = true;
         setLoading(true);
 
         try {
@@ -125,15 +129,12 @@ export default function NewControlPage() {
                 gmy: formData.gmy,
                 directorateId: formData.directorateId,
                 frequency: formData.frequency,
-                // Not: "dueDate" (pasife alınacağı tarih) alanının backend karşılığı yok — göndermiyoruz.
                 // Uygulama ayı/yıllık kapsam artık burada seçilmiyor — Kontrol
                 // Yönetimi → Yıllık Plan'dan yönetiliyor (Madde 10).
                 notes: formData.notes,
-                isActive: formData.status === 'ACTIVE',
                 // ownerId artık kaydı oluşturan kişiyle backend'de sabitlenir, buradan
                 // gönderilmez. Atanan Kontrolcü/İkinci Kontrolcü Yıllık Plan'da seçilir.
                 contactPersonId: formData.contactPersonId || null,
-                status: isDraft ? 'DRAFT' : 'ACTIVE'
             });
 
             toastSuccess('Başarılı', isDraft ? 'Taslak başarıyla kaydedildi.' : 'Kontrol başarıyla oluşturuldu. Yıllık kapsama almak için Yıllık Plan sayfasını kullanın.');
@@ -142,6 +143,7 @@ export default function NewControlPage() {
             console.error('Failed to create control:', error);
             toastError('Hata', error instanceof Error ? error.message : 'Kontrol kaydedilirken bir hata oluştu.');
         } finally {
+            submissionLock.current = false;
             setLoading(false);
         }
     };
@@ -192,10 +194,10 @@ export default function NewControlPage() {
                                         value={formData.summary}
                                         onChange={(e) => handleSummaryChange(e.target.value)}
                                         className={`w-full px-4 py-2.5 border rounded-xl outline-none focus:ring-2 transition-all text-sm font-semibold ${summaryError ? 'border-rose-300 focus:ring-rose-500/10 focus:border-rose-500' : 'border-slate-200 focus:ring-blue-500/10 focus:border-blue-500'}`}
-                                        placeholder="K-2026-0001"
+                                        placeholder="BTK.0001"
                                     />
                                     {summaryError && <p className="text-xs font-semibold text-rose-600 mt-1.5 flex items-center gap-1">❌ {summaryError}</p>}
-                                    <p className="text-[10px] text-slate-400 mt-1">Format: K-YYYY-NNNN</p>
+                                    <p className="text-[10px] text-slate-400 mt-1">Format: BTK.XXXX</p>
                                 </div>
 
                                 <div className="col-span-1">
@@ -339,7 +341,7 @@ export default function NewControlPage() {
                             <span className="text-xl">📅</span>
                             <div>
                                 <h3 className="font-extrabold text-sm text-slate-800 uppercase tracking-wider">BÖLÜM 3: KONTROL PLANLAMA</h3>
-                                <p className="text-xs text-slate-400 mt-0.5">Sıklık takvimi, aktif/pasif durumu ve bitiş vade tarihi</p>
+                                <p className="text-xs text-slate-400 mt-0.5">Yıllık plan kapsamına göre hesaplanan kontrol durumu</p>
                             </div>
                         </div>
                         <span className="text-slate-400 font-bold">{collapsed.planning ? '➕' : '➖'}</span>
@@ -348,26 +350,12 @@ export default function NewControlPage() {
                     {!collapsed.planning && (
                         <div className="p-6 space-y-5">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="col-span-1">
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Durum <span className="text-red-500">*</span></label>
-                                    <select
-                                        value={formData.status}
-                                        onChange={(e) => setFormData(prev => ({ ...prev, status: e.target.value }))}
-                                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm font-semibold"
-                                    >
-                                        <option value="ACTIVE">Aktif (Test Görevi Üretir)</option>
-                                        <option value="INACTIVE">Pasif (Test Görevi Durdurulur)</option>
-                                    </select>
-                                </div>
-
-                                <div className="col-span-1">
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Due Date (Pasife Alınacağı Tarih)</label>
-                                    <input
-                                        type="date"
-                                        value={formData.dueDate}
-                                        onChange={(e) => setFormData(prev => ({ ...prev, dueDate: e.target.value }))}
-                                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm font-semibold"
-                                    />
+                                <div className="col-span-2">
+                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Durum</label>
+                                    <div className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-500" aria-label="Kontrol durumu">
+                                        Pasif
+                                    </div>
+                                    <p className="mt-1.5 text-[11px] text-slate-400">Kontrol, mevcut yılın Yıllık Plan kapsamına alındığında otomatik olarak Aktif görünür.</p>
                                 </div>
 
 

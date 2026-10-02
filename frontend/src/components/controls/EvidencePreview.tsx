@@ -9,6 +9,8 @@ interface Attachment {
     originalName: string;
     mimeType: string;
     sizeBytes: number;
+    displayName?: string | null;
+    description?: string | null;
 }
 
 const formatSize = (bytes: number) => {
@@ -19,7 +21,7 @@ const formatSize = (bytes: number) => {
 
 const isPreviewable = (mimeType: string) => mimeType === 'application/pdf' || mimeType.startsWith('image/');
 
-export function EvidencePreview({ attachment }: { attachment: Attachment | null }) {
+export function EvidencePreview({ attachment, kind = 'control-test' }: { attachment: Attachment | null; kind?: 'control-test' | 'finding' | 'action' | 'follow-up' }) {
     const [blobUrl, setBlobUrl] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -33,7 +35,7 @@ export function EvidencePreview({ attachment }: { attachment: Attachment | null 
 
         let cancelled = false;
         setLoading(true);
-        api.getAttachmentBlobUrl(attachment.fileName, attachment.originalName)
+        api.getAttachmentBlobUrl(kind, attachment.id)
             .then((url) => { if (!cancelled) setBlobUrl(url); })
             .catch(() => { if (!cancelled) setError('Kanıt yüklenirken bir hata oluştu.'); })
             .finally(() => { if (!cancelled) setLoading(false); });
@@ -45,7 +47,7 @@ export function EvidencePreview({ attachment }: { attachment: Attachment | null 
     }, [attachment?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
-        return () => { if (blobUrl) URL.revokeObjectURL(blobUrl); };
+        return () => { if (blobUrl && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(blobUrl); };
     }, [blobUrl]);
 
     if (!attachment) {
@@ -56,13 +58,15 @@ export function EvidencePreview({ attachment }: { attachment: Attachment | null 
         );
     }
 
-    const handleDownload = () => api.downloadAttachment(attachment.fileName, attachment.originalName);
+    const handleDownload = () => api.downloadAttachment(kind, attachment.id, attachment.displayName || attachment.originalName);
 
     if (!isPreviewable(attachment.mimeType)) {
         return (
             <div className="h-full flex flex-col items-center justify-center gap-3 p-8 text-center">
                 <svg className="w-10 h-10 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-6 4h6m2 5H7a2 2 0 01-2-2V4a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V20a2 2 0 01-2 2z" /></svg>
-                <p className="text-sm font-semibold text-slate-600">{attachment.originalName}</p>
+                <p className="text-sm font-semibold text-slate-600">{attachment.displayName || attachment.originalName}</p>
+                <p className="text-xs text-slate-400">Özgün dosya: {attachment.originalName}</p>
+                {attachment.description && <p className="text-xs text-slate-500 max-w-md">{attachment.description}</p>}
                 <p className="text-xs text-slate-400">{attachment.mimeType} · {formatSize(attachment.sizeBytes)}</p>
                 <p className="text-xs text-slate-400 max-w-xs">Bu dosya türü sayfada önizlenemiyor.</p>
                 <button onClick={handleDownload} className="text-xs font-bold text-emerald-700 hover:underline">İndir →</button>
@@ -89,11 +93,12 @@ export function EvidencePreview({ attachment }: { attachment: Attachment | null 
         return (
             <div className="h-full flex flex-col">
                 <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 bg-slate-50">
-                    <p className="text-xs font-semibold text-slate-600 truncate">{attachment.originalName}</p>
-                    <button onClick={handleDownload} className="text-xs font-bold text-emerald-700 hover:underline shrink-0 ml-2">İndir</button>
+                    <div className="min-w-0"><p className="text-xs font-semibold text-slate-600 truncate">{attachment.displayName || attachment.originalName}</p><p className="text-[10px] text-slate-400 truncate">{attachment.originalName}</p></div>
+                    <div className="flex gap-3"><button onClick={() => setLightbox(true)} className="text-xs font-bold text-slate-600 hover:underline">Büyük ekran</button><button onClick={handleDownload} className="text-xs font-bold text-emerald-700 hover:underline">İndir</button></div>
                 </div>
                 {/* Tarayıcının yerleşik PDF görüntüleyicisi — sayfalama ve yakınlaştırma hazır gelir */}
-                <iframe src={blobUrl} title={attachment.originalName} className="flex-1 w-full border-0" />
+                <iframe src={`${blobUrl}#page=1&zoom=page-width`} title={attachment.displayName || attachment.originalName} className="flex-1 w-full border-0" />
+                {lightbox && <div className="fixed inset-0 z-[70] bg-slate-950/90 p-4 flex flex-col"><div className="flex justify-between text-white pb-2"><span>{attachment.displayName || attachment.originalName}</span><button onClick={() => setLightbox(false)} aria-label="Kapat">Kapat ✕</button></div><iframe src={`${blobUrl}#page=1&zoom=page-width`} title={`${attachment.originalName} büyük ekran`} className="flex-1 w-full border-0 bg-white rounded" /></div>}
             </div>
         );
     }

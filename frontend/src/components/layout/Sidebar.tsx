@@ -39,6 +39,16 @@ const navigation: NavItem[] = [
         ),
     },
     {
+        label: 'Akış Sağlığı',
+        href: '/workflow-health',
+        permission: 'control:view',
+        icon: (
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4l2-6 4 12 2-6h6" />
+            </svg>
+        ),
+    },
+    {
         label: 'Risk Yönetimi',
         permission: 'risk:view',
         icon: (
@@ -68,7 +78,7 @@ const navigation: NavItem[] = [
         children: [
             { label: 'Kontrol Envanteri', href: '/controls' },
             { label: 'Yıllık Plan', href: '/controls/annual-plan', permission: 'control:*' },
-            { label: 'Kontrol Takip Panosu', href: '/controls/agenda' },
+            { label: 'Dönem Kontrolleri', href: '/controls/agenda' },
             { label: 'Kontrol-Risk Eşleştirme', href: '/controls/mapping' },
             { label: 'Kontrol Testi', href: '/controls/testing', permission: 'control:test' },
         ],

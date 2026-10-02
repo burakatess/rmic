@@ -25,8 +25,7 @@ interface ActionFormData {
     ownerId: string;
     responsibleDepartment: string;
     dueDate: string;
-    status: 'BEKLIYOR' | 'DEVAM_EDIYOR' | 'TAMAMLANDI' | 'YETERSIZ' | 'KAPATILDI';
-    evidence: string;
+    status: 'BEKLIYOR' | 'DEVAM_EDIYOR' | 'TAMAMLANDI' | 'YETERSIZ';
     notes: string;
 }
 
@@ -35,7 +34,6 @@ const STATUS_OPTIONS = [
     { value: 'DEVAM_EDIYOR', label: 'Devam Ediyor' },
     { value: 'TAMAMLANDI', label: 'Tamamlandı' },
     { value: 'YETERSIZ', label: 'Yetersiz' },
-    { value: 'KAPATILDI', label: 'Kapatıldı' },
 ];
 
 export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, findingData, action }: AddActionModalProps) {
@@ -45,7 +43,6 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
         responsibleDepartment: '',
         dueDate: '',
         status: 'BEKLIYOR',
-        evidence: '',
         notes: '',
     });
     const [users, setUsers] = useState<User[]>([]);
@@ -83,7 +80,6 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
                 responsibleDepartment: action.responsibleDepartment || '',
                 dueDate: formatD(action.dueDate),
                 status: action.status || 'BEKLIYOR',
-                evidence: action.evidence || '',
                 notes: action.notes || '',
             });
         } else {
@@ -93,7 +89,6 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
                 responsibleDepartment: findingData?.relatedDepartment || '',
                 dueDate: '',
                 status: 'BEKLIYOR',
-                evidence: '',
                 notes: '',
             });
         }
@@ -140,12 +135,12 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
                 responsibleDepartment: '',
                 dueDate: '',
                 status: 'BEKLIYOR',
-                evidence: '',
                 notes: '',
             });
             onClose();
         } catch (err) {
             console.error('Failed to save corrective action:', err);
+            setErrors({ submit: err instanceof Error ? err.message : 'Aksiyon kaydedilemedi.' });
         } finally {
             setSubmitting(false);
         }
@@ -294,21 +289,7 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
                             </div>
                         </div>
 
-                        {/* 6. Evidence Link */}
-                        <div>
-                            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">
-                                Kanıt / Dökümantasyon Bağlantısı
-                            </label>
-                            <input
-                                type="text"
-                                value={formData.evidence}
-                                onChange={(e) => setFormData(prev => ({ ...prev, evidence: e.target.value }))}
-                                placeholder="örn. JIRA linki veya Sharepoint belge URL'si..."
-                                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/20 focus:border-slate-600 bg-white"
-                            />
-                        </div>
-
-                        {/* 7. Notlar */}
+                        {/* Kanıtlar aksiyon kartındaki güvenli yükleme alanından yönetilir. */}
                         <div>
                             <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">
                                 Aksiyon Notları / Açıklamalar
@@ -321,6 +302,7 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
                                 className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/20 focus:border-slate-600 resize-none bg-white transition-all"
                             />
                         </div>
+                        {errors.submit && <p role="alert" className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">{errors.submit}</p>}
 
                     </form>
 

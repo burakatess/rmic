@@ -88,7 +88,9 @@ function ActionsContent() {
     const searchParams = useSearchParams();
 
     const [actions, setActions] = useState<Action[]>([]);
+    const [totalCount, setTotalCount] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [users, setUsers] = useState<Array<{ id: string; firstName: string; lastName: string; isActive?: boolean }>>([]);
     const [editAction, setEditAction] = useState<Action | null>(null);
 
     const [searchQuery, setSearchQuery] = useState('');
@@ -96,6 +98,7 @@ function ActionsContent() {
     const [colFilters, setColFilters] = useState<Record<string, string>>({});
     const [quickFilter, setQuickFilter] = useState<string | null>(null);
     const [page, setPage] = useState(1);
+    const [urlReady, setUrlReady] = useState(false);
     const pageSize = 15;
 
     // Toplu seçim
@@ -111,25 +114,54 @@ function ActionsContent() {
         } else if (status && statusLabels[status]) {
             setActiveFilters(p => ({ ...p, status }));
         }
+        const ownerIds = searchParams.get('ownerIds');
+        const source = searchParams.get('source');
+        const search = searchParams.get('search');
+        const quick = searchParams.get('quick');
+        const urlPage = Number(searchParams.get('page'));
+        setActiveFilters(p => ({ ...p, ...(ownerIds ? { ownerIds } : {}), ...(source ? { source } : {}) }));
+        if (search) setSearchQuery(search);
+        if (quick) setQuickFilter(quick);
+        if (Number.isInteger(urlPage) && urlPage > 0) setPage(urlPage);
+        setUrlReady(true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    useEffect(() => {
+        if (!urlReady) return;
+        const params = new URLSearchParams();
+        if (searchQuery) params.set('search', searchQuery);
+        Object.entries(activeFilters).forEach(([key, value]) => { if (value && value !== 'all') params.set(key, value); });
+        if (quickFilter) params.set('quick', quickFilter);
+        if (page > 1) params.set('page', String(page));
+        const query = params.toString();
+        window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+    }, [urlReady, searchQuery, activeFilters, quickFilter, page]);
 
     const loadActions = useCallback(async () => {
         setLoading(true);
         try {
-            const result = await api.getActions({}) as { data: Action[] };
+            const quickParams: Record<string, string> = {};
+            if (quickFilter === 'benim') quickParams.ownerIds = '__MINE__';
+            if (quickFilter === 'geciken') quickParams.overdue = 'true';
+            if (quickFilter === 'buay') quickParams.dueMonth = new Date().toISOString().slice(0, 7);
+            if (quickFilter === 'devam') quickParams.status = 'BEKLIYOR,DEVAM_EDIYOR,OPEN,IN_PROGRESS,YETERSIZ';
+            if (quickFilter === 'tamamlanan') quickParams.status = 'TAMAMLANDI,COMPLETED,KAPATILDI,CLOSED';
+            const result = await api.getActions({ page, limit: pageSize, ...(searchQuery ? { search: searchQuery } : {}), ...(activeFilters.status ? { status: activeFilters.status } : {}), ...(activeFilters.source ? { source: activeFilters.source } : {}), ...(activeFilters.ownerIds ? { ownerIds: activeFilters.ownerIds } : {}), ...quickParams }) as { data: Action[]; pagination?: { total: number } };
             setActions(result.data || []);
+            setTotalCount(result.pagination?.total || 0);
         } catch (error) {
             console.error('Failed to load actions:', error);
             showError('Hata', 'Aksiyonlar yüklenemedi.');
-            setActions([]);
+            setActions([]); setTotalCount(0);
         } finally {
             setLoading(false);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [activeFilters.ownerIds, activeFilters.status, activeFilters.source, searchQuery, quickFilter, page]);
 
     useEffect(() => { loadActions(); }, [loadActions]);
+    useEffect(() => { api.getUserOptions({ limit: 500 }).then(r => setUsers(r.data)).catch(() => setUsers([])); }, []);
 
     // ── Quick filter predicate'leri ──
     const quickFilterFns: Record<string, (a: Action) => boolean> = useMemo(() => ({
@@ -260,7 +292,7 @@ function ActionsContent() {
         );
     }, [baseFilteredActions, colFilters, columns]);
 
-    const paginatedActions = useMemo(() => filteredActions.slice((page - 1) * pageSize, page * pageSize), [filteredActions, page]);
+    const paginatedActions = filteredActions;
 
     // ── Toplu Seçim ───────────────────────────────────────────────────────────
 
@@ -322,7 +354,8 @@ function ActionsContent() {
             onChange: (v) => { setActiveFilters(p => ({ ...p, source: v })); setPage(1); },
             options: Object.entries(sourceLabels).map(([k, v]) => ({ value: k, label: v })),
         },
-    ], [activeFilters]);
+        { type: 'multiselect', key: 'ownerIds', label: 'Aksiyon Sorumlusu', value: (activeFilters.ownerIds || '').split(',').filter(Boolean), onChange: (v: string[]) => { setActiveFilters(p => ({ ...p, ownerIds: v.join(',') })); setPage(1); }, options: [{ value: '__MINE__', label: 'Bana atananlar' }, { value: '__UNASSIGNED__', label: 'Atanmamış' }, ...users.map(u => ({ value: u.id, label: `${u.firstName} ${u.lastName}${u.isActive === false ? ' (pasif)' : ''}` }))] },
+    ], [activeFilters, users]);
 
     // ── Aktif filtre chip'leri ──
     const filterLabels: Record<string, string> = { status: 'Durum', source: 'Kaynak' };
@@ -422,7 +455,7 @@ function ActionsContent() {
                 selectedRows={selectedRows}
                 onRowSelect={handleRowSelect}
                 onSelectAll={handleSelectAll}
-                totalCount={filteredActions.length}
+                totalCount={Object.values(colFilters).some(Boolean) ? filteredActions.length : totalCount}
                 page={page}
                 pageSize={pageSize}
                 onPageChange={setPage}

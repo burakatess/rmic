@@ -11,7 +11,10 @@ import type {
     AiEvalSession, AiEvalMessage, AiEvalAttachment, AiEvalRunStatus, AiEvalOutcome,
     EvalOutput, EvalFindingCandidate, EvalCompliancePoint, KnowledgeDoc,
     EvalOutputV2, EvalRequirementAssessment, EvalFindingAssessment, EvalSourceRefV2, ReqResult,
+    EvalOutputV3, EvalRetrievalNoteV3,
 } from '@/types/ai';
+import { isV3Eval } from '@/types/ai';
+import { EvalReportV3 } from '@/components/ai/EvalReportV3';
 import { KNOWLEDGE_KIND_LABEL, OUTCOME_LABEL, READ_STATUS_LABEL, RUN_STATUS_LABEL } from '@/types/ai';
 
 interface ControlOpt {
@@ -75,6 +78,9 @@ export default function AiEvalSessionPage() {
     const [msg, setMsg] = useState('');
     const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
     const [running, setRunning] = useState(false);
+    // Son "Değerlendir" çağrısı doğrulama/AI hatasıyla başarısız olduysa mesaj burada tutulur;
+    // ekrandaki rapor bu durumda ÖNCEKİ (kaydedilmiş) değerlendirmedir.
+    const [evalError, setEvalError] = useState<string | null>(null);
 
     const threadEnd = useRef<HTMLDivElement>(null);
     const creatingRef = useRef(false);
@@ -375,6 +381,7 @@ export default function AiEvalSessionPage() {
         }
         setRunning(true);
         setTab('current');
+        setEvalError(null);
         try {
             const s = await api.evaluateAiEvalSession(sid, {
                 ...controlBody(),
@@ -402,7 +409,9 @@ export default function AiEvalSessionPage() {
                     await load();
                 }
             } else {
-                showError('Değerlendirme hatası', e instanceof Error ? e.message : 'AI çağrısı başarısız');
+                const m = e instanceof Error ? e.message : 'AI çağrısı başarısız';
+                setEvalError(m);
+                showError('Değerlendirme hatası', m);
                 await load();
             }
         } finally {
@@ -414,7 +423,7 @@ export default function AiEvalSessionPage() {
         }
     };
 
-    // "Ek soru sor" — 6 başlıklı raporu YENİDEN ÜRETMEZ; soruya yanıt verir.
+    // "Ek soru sor" — raporu YENİDEN ÜRETMEZ; soruya yanıt verir.
     const askQuestion = async () => {
         const sid = liveId ?? session?.id;
         if (!sid || !msg.trim()) return;
@@ -471,7 +480,7 @@ export default function AiEvalSessionPage() {
     };
 
     const reviewFinding = async (
-        group: 'uyumsuzAlanlar' | 'bulguAdaylari' | 'findingAssessment' | 'requirementAssessments',
+        group: 'uyumsuzAlanlar' | 'bulguAdaylari' | 'findingAssessment' | 'requirementAssessments' | 'finding',
         index: number,
         status: 'ACCEPTED' | 'EDITED' | 'REJECTED',
         reason?: string,
@@ -607,8 +616,15 @@ export default function AiEvalSessionPage() {
                         />
                     )}
 
+                    <div className="mt-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-2.5" data-testid="optional-sources-note">
+                        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Kaynaklar (isteğe bağlı)</h3>
+                        <p className="mt-0.5 text-[11px] text-slate-500">
+                            Kaynaklar değerlendirme sırasında otomatik taranır; buradan isteğe bağlı ek kaynak seçebilirsiniz.
+                        </p>
+                    </div>
+
                     <ChipPicker
-                        label="Mevzuat maddeleri"
+                        label="Ek mevzuat maddeleri (isteğe bağlı)"
                         tone="blue"
                         chips={regChips.map((r) => ({ id: r.id, label: `${r.regulation.code} md.${r.articleCode}` }))}
                         query={regQuery}
@@ -627,7 +643,7 @@ export default function AiEvalSessionPage() {
                     />
 
                     <ChipPicker
-                        label="Kurumsal kaynaklar (politika / prosedür / metodoloji / rehber)"
+                        label="Ek kurumsal kaynaklar — politika / prosedür / metodoloji / rehber (isteğe bağlı)"
                         tone="violet"
                         chips={knChips.map((k) => ({ id: k.id, label: `[${KNOWLEDGE_KIND_LABEL[k.kind]}] ${k.code}` }))}
                         query={knQuery}
@@ -646,7 +662,7 @@ export default function AiEvalSessionPage() {
                     />
 
                     <ChipPicker
-                        label="Kaynak Kataloğu birimleri (sürümlü mevzuat / standart maddesi)"
+                        label="Ek Kaynak Kataloğu birimleri — sürümlü mevzuat / standart maddesi (isteğe bağlı)"
                         tone="blue"
                         chips={srcChips.map((s) => ({ id: s.id, label: s.label }))}
                         query={srcQuery}
@@ -731,7 +747,7 @@ export default function AiEvalSessionPage() {
                                 </ul>
                             )}
                             <p className="text-[10px] text-slate-400">
-                                Kaynaklar önerilir; değerlendirmeye eklenmesi için siz seçersiniz (gizli enjeksiyon yok).
+                                Otomatik taramaya ek olarak yalnız sizin seçtikleriniz modele iletilir; öneriler siz seçmeden eklenmez.
                             </p>
                         </div>
                     )}
@@ -821,6 +837,7 @@ export default function AiEvalSessionPage() {
                                 session={session!}
                                 running={running}
                                 latestEval={latestEval}
+                                evalError={evalError}
                                 msg={msg}
                                 setMsg={setMsg}
                                 hasControl={hasControl}
@@ -933,13 +950,22 @@ function isV2Eval(e: (EvalOutput & EvalOutputV2) | null): boolean {
     return !!e && (Array.isArray(e.requirementAssessments) || !!e.controlResult || Array.isArray(e.expectedState));
 }
 
+function LegacyFormatLabel() {
+    return (
+        <p className="mb-1.5 text-[11px] font-medium text-slate-400" data-testid="legacy-format-label">
+            Eski format (salt-okunur)
+        </p>
+    );
+}
+
 function CurrentTab({
-    session, running, latestEval, msg, setMsg, hasControl, hasEvidence,
+    session, running, latestEval, evalError, msg, setMsg, hasControl, hasEvidence,
     onEvaluate, onAsk, onCancel, onReview, onComplete, onReopen, threadEndRef,
 }: {
     session: AiEvalSession;
     running: boolean;
     latestEval: (EvalOutput & EvalOutputV2) | null;
+    evalError: string | null;
     msg: string;
     setMsg: (v: string) => void;
     hasControl: boolean;
@@ -947,7 +973,7 @@ function CurrentTab({
     onEvaluate: () => void;
     onAsk: () => void;
     onCancel: () => void;
-    onReview: (g: 'uyumsuzAlanlar' | 'bulguAdaylari' | 'findingAssessment' | 'requirementAssessments', i: number, s: 'ACCEPTED' | 'EDITED' | 'REJECTED', reason?: string, edited?: unknown) => void;
+    onReview: (g: 'uyumsuzAlanlar' | 'bulguAdaylari' | 'findingAssessment' | 'requirementAssessments' | 'finding', i: number, s: 'ACCEPTED' | 'EDITED' | 'REJECTED', reason?: string, edited?: unknown) => void;
     onComplete: (o: AiEvalOutcome) => void;
     onReopen: () => void;
     threadEndRef: React.RefObject<HTMLDivElement | null>;
@@ -958,7 +984,9 @@ function CurrentTab({
         (m) => m.role === 'ASSISTANT' && (m.kind ?? 'EVALUATION') === 'EVALUATION' && (m.evaluation || m.errorText),
     );
     const cited = lastRun?.citedSourceRefs ?? [];
-    const v2 = isV2Eval(latestEval);
+    // v3 ÖNCE denetlenir: v3 çıktısı da `controlResult` taşıdığı için isV2Eval onu da yakalardı.
+    const v3 = isV3Eval(latestEval, session.latestEvaluation?.schemaVersion);
+    const v2 = !v3 && isV2Eval(latestEval);
     const citOk = (c: { exists: boolean; inSentSet: boolean; textVerified?: boolean; quoteVerified?: boolean }) =>
         c.exists && c.inSentSet && (c.quoteVerified ?? c.textVerified ?? true);
     const hasEval = !!latestEval;
@@ -986,6 +1014,18 @@ function CurrentTab({
                 </div>
             )}
 
+            {evalError && rs !== 'RUNNING' && !running && (
+                <div role="alert" className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-800" data-testid="eval-error-banner">
+                    <p className="font-semibold">Yeni değerlendirme kaydedilmedi.</p>
+                    <p className="mt-0.5">{evalError}</p>
+                    {hasEval && (
+                        <p className="mt-1 text-red-700">
+                            Aşağıda görünen rapor <b>önceki değerlendirmenin</b> sonucudur; yeni bir sonuç olarak değerlendirmeyin.
+                        </p>
+                    )}
+                </div>
+            )}
+
             {session.needsReview && rs !== 'RUNNING' && (
                 <div className="rounded-lg border border-orange-300 bg-orange-50 p-3 text-xs text-orange-800">
                     <p className="font-semibold">Bu değerlendirme insan incelemesi gerektiriyor.</p>
@@ -1007,7 +1047,7 @@ function CurrentTab({
 
             {hasEval && (
                 <>
-                    {(lastRun?.sentSourceUnitIds?.length || cited.length > 0) && (
+                    {!v3 && (lastRun?.sentSourceUnitIds?.length || cited.length > 0) && (
                         <div className="rounded-lg border border-slate-200 bg-white p-2.5 text-[11px]">
                             <p className="mb-1 font-semibold text-slate-600">
                                 Kaynak atıfları — modele iletilen: {lastRun?.sentSourceUnitIds?.length ?? 0} · çıktıda atıf: {cited.length}
@@ -1033,18 +1073,30 @@ function CurrentTab({
                             </p>
                         </div>
                     )}
-                    {v2 ? (
-                        <EvalReportV2
-                            e={latestEval as EvalOutputV2}
+                    {v3 ? (
+                        <EvalReportV3
+                            e={latestEval as unknown as EvalOutputV3}
+                            retrievalNote={(session.latestEvaluation?.retrievalNote ?? null) as EvalRetrievalNoteV3 | null}
                             reviewable={rs === 'AWAITING_REVIEW'}
-                            onReview={onReview}
+                            onReview={(s, reason) => onReview('finding', 0, s, reason)}
                         />
                     ) : (
-                        <EvalCard
-                            e={latestEval as EvalOutput}
-                            reviewable={rs === 'AWAITING_REVIEW'}
-                            onReview={onReview}
-                        />
+                        <>
+                            <LegacyFormatLabel />
+                            {v2 ? (
+                                <EvalReportV2
+                                    e={latestEval as EvalOutputV2}
+                                    reviewable={rs === 'AWAITING_REVIEW'}
+                                    onReview={onReview}
+                                />
+                            ) : (
+                                <EvalCard
+                                    e={latestEval as EvalOutput}
+                                    reviewable={rs === 'AWAITING_REVIEW'}
+                                    onReview={onReview}
+                                />
+                            )}
+                        </>
                     )}
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                         {rs === 'COMPLETED' ? (
@@ -1094,7 +1146,7 @@ function CurrentTab({
                         rows={2}
                         placeholder={
                             hasEval
-                                ? 'Ek açıklama (yeniden değerlendirmeye girer) ya da ek soru (rapora dokunmaz)…'
+                                ? 'Yeni açıklama (yeniden değerlendirmede kullanılır) ya da ek soru (rapora dokunmaz)…'
                                 : 'Değerlendirilecek ek açıklama / not (opsiyonel)…'
                         }
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
@@ -1108,7 +1160,7 @@ function CurrentTab({
                                 variant="outline"
                                 onClick={onAsk}
                                 disabled={!msg.trim() || rs === 'RUNNING' || running}
-                                title="6 başlıklı raporu yeniden üretmez; sorunuza yanıt verir."
+                                title="Raporu değiştirmez; yalnızca sorunuza yanıt verir."
                             >
                                 Ek soru sor
                             </Button>
@@ -1119,9 +1171,10 @@ function CurrentTab({
                         )}
                     </div>
                     <p className="mt-1.5 text-[10px] text-slate-400">
-                        <b>Yeniden değerlendir</b>: ekrandaki güncel kontrol + kanıt + ek açıklama ile tam raporu
-                        yeniden üretir (önceki rapor geçmişte kalır). <b>Ek soru sor</b>: yalnız sorunuzu yanıtlar,
-                        raporu değiştirmez.
+                        <b>Yeniden değerlendir</b>: yazdığınız metin YENİ açıklama olarak gönderilir ve önceki
+                        sorularınızla birlikte yeniden değerlendirmede kullanılır; ekrandaki güncel kontrol + kanıtla
+                        rapor yeniden üretilir (önceki rapor geçmişte kalır). <b>Ek soru sor</b>: yalnız sorunuzu
+                        yanıtlar, raporu değiştirmez.
                     </p>
                 </div>
             </div>
@@ -1288,10 +1341,20 @@ function HistoryTab({ runs }: { runs: AiEvalMessage[] }) {
                                     {m.schemaValid === false ? ' · şema doğrulanamadı' : ''}
                                 </summary>
                                 <div className="mt-2">
-                                    {isV2Eval((m.editedEvaluation || m.evaluation) as EvalOutput & EvalOutputV2) ? (
-                                        <EvalReportV2 e={(m.editedEvaluation || m.evaluation) as EvalOutputV2} />
+                                    {isV3Eval(m.editedEvaluation || m.evaluation, m.schemaVersion) ? (
+                                        <EvalReportV3
+                                            e={(m.editedEvaluation || m.evaluation) as unknown as EvalOutputV3}
+                                            retrievalNote={(m.retrievalNote ?? null) as EvalRetrievalNoteV3 | null}
+                                        />
                                     ) : (
-                                        <EvalCard e={(m.editedEvaluation || m.evaluation) as EvalOutput} />
+                                        <>
+                                            <LegacyFormatLabel />
+                                            {isV2Eval((m.editedEvaluation || m.evaluation) as EvalOutput & EvalOutputV2) ? (
+                                                <EvalReportV2 e={(m.editedEvaluation || m.evaluation) as EvalOutputV2} />
+                                            ) : (
+                                                <EvalCard e={(m.editedEvaluation || m.evaluation) as EvalOutput} />
+                                            )}
+                                        </>
                                     )}
                                 </div>
                             </details>

@@ -1,5 +1,7 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import Login from '@/app/login/page';
+import { AuthProvider } from '@/components/auth/AuthProvider';
+import { ToastProvider } from '@/components/ui/Toast';
 import '@testing-library/jest-dom';
 
 // Mock the Next.js router
@@ -11,14 +13,28 @@ jest.mock('next/navigation', () => ({
             prefetch: jest.fn(),
         };
     },
+    usePathname() {
+        return '/login';
+    },
 }));
 
-describe('Login Page', () => {
-    it('renders the login form', () => {
-        render(<Login />);
+function renderLogin() {
+    return render(
+        <AuthProvider>
+            <ToastProvider>
+                <Login />
+            </ToastProvider>
+        </AuthProvider>,
+    );
+}
 
-        // Check if the title is rendered
-        expect(screen.getByText('Risk Yönetimi ve İç Kontrol Platformu')).toBeInTheDocument();
+describe('Login Page', () => {
+    beforeEach(() => localStorage.clear());
+
+    it('renders the login form', async () => {
+        renderLogin();
+
+        expect(await screen.findByText('RMIC')).toBeInTheDocument();
 
         // Check for email and password inputs
         expect(screen.getByPlaceholderText('ornek@sirket.com')).toBeInTheDocument();
@@ -28,10 +44,10 @@ describe('Login Page', () => {
         expect(screen.getByRole('button', { name: /Giriş Yap/i })).toBeInTheDocument();
     });
 
-    it('allows user to type credentials', () => {
-        render(<Login />);
+    it('allows user to type credentials', async () => {
+        renderLogin();
 
-        const emailInput = screen.getByPlaceholderText('ornek@sirket.com');
+        const emailInput = await screen.findByPlaceholderText('ornek@sirket.com');
         const passwordInput = screen.getByPlaceholderText('••••••••');
 
         fireEvent.change(emailInput, { target: { value: 'admin@grc.com' } });
