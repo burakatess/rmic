@@ -678,12 +678,13 @@ export class ReportsService {
                     plannedDate: { gte: start, lte: end },
                     status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] as any },
                     OR: [
+                        { assigneeId: userId },
                         { finding: { assigneeId: userId } },
                         { action: { ownerId: userId } },
                     ],
                 },
                 select: {
-                    id: true, followUpId: true, status: true, plannedDate: true,
+                    id: true, followUpId: true, status: true, plannedDate: true, assigneeId: true,
                     finding: { select: { findingId: true, summary: true, assigneeId: true } },
                     action: { select: { actionId: true, ownerId: true } },
                 },

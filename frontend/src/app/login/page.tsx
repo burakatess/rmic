@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useAuth } from '@/components/auth';
 import { useToast } from '@/components/ui/Toast';
 import { Button, Input } from '@/components/ui';
+import { shouldShowDemoLogin } from '@/lib/demo-login';
 
 export default function LoginPage() {
     const { login } = useAuth();
@@ -12,6 +13,16 @@ export default function LoginPage() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const hostname = useSyncExternalStore(
+        () => () => undefined,
+        () => window.location.hostname,
+        () => undefined,
+    );
+    const showDemoLogin = shouldShowDemoLogin({
+        nodeEnv: process.env.NODE_ENV,
+        configuredValue: process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN,
+        hostname,
+    });
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -113,7 +124,7 @@ export default function LoginPage() {
                         yalnızca derleme anında açıkça NEXT_PUBLIC_SHOW_DEMO_LOGIN=true verilmişse
                         görünür (örn. kendi local docker-compose kurulumunuz). Gerçek bir prod
                         dağıtımında bu bayrak set EDİLMEMELİDİR. */}
-                    {(process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN === 'true') && (
+                    {showDemoLogin && (
                         <>
                             <div className="flex items-center gap-4 my-8">
                                 <div className="flex-1 h-px bg-slate-700" />
@@ -125,7 +136,7 @@ export default function LoginPage() {
                                 {[
                                     { email: 'burak@rmic.com',  label: 'Sistem Yöneticisi', desc: 'Tüm yetkiler' },
                                     { email: 'mgr1@rmic.com',   label: 'İKS Yöneticisi',    desc: 'Bulgu & aksiyon yönetimi' },
-                                    { email: 'aud1@rmic.com',   label: 'İKS Çalışanı',      desc: 'Denetim ve bulgular' },
+                                    { email: 'aud2@rmic.com',   label: 'İKS Çalışanı',      desc: 'Denetim ve bulgular' },
                                 ].map(({ email: dEmail, label, desc }) => (
                                     <button
                                         key={dEmail}

@@ -172,6 +172,22 @@ export function DataTable<T>({
 
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(getInitialWidths);
 
+  // Yeni kolonlar eklendiğinde eski localStorage genişlik ayarı tabloyu eksik
+  // bırakmasın; mevcut kullanıcı genişliklerini koruyup yalnız eksikleri tamamla.
+  useEffect(() => {
+    setColumnWidths(previous => {
+      const next = { ...previous };
+      let changed = false;
+      for (const column of columns) {
+        if (next[column.key] === undefined) {
+          next[column.key] = column.defaultWidth || 150;
+          changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+  }, [columns]);
+
   // ── Kolon görünürlüğü (kişiselleştirilebilir) ──
   const hasHideable = columns.some(c => c.hideable || c.defaultHidden);
   const getInitialVisible = useCallback((): string[] => {

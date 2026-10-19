@@ -1,5 +1,7 @@
 node_modules
 .next
+.next-playwright
+coverage
 .git
 .gitignore
 README.md

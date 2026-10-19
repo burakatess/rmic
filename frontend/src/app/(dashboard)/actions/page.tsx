@@ -192,8 +192,8 @@ function ActionsContent() {
 
     const columns: ColumnDef<Action>[] = useMemo(() => [
         {
-            key: 'actionId', header: 'Aksiyon ID', sortable: true, defaultWidth: 120,
-            filter: { type: 'text', placeholder: 'ID ara...', fn: (a: Action, v) => a.actionId.toLowerCase().includes(v.toLowerCase()) },
+            key: 'actionId', header: 'Aksiyon No', sortable: true, defaultWidth: 160,
+            filter: { type: 'text', placeholder: 'Aksiyon No ara...', fn: (a: Action, v) => a.actionId.toLowerCase().includes(v.toLowerCase()) },
             render: (a) => (
                 <Link href={`/actions/${a.id}`} className="font-mono text-xs font-bold text-blue-700 hover:underline">
                     {a.actionId}
@@ -437,7 +437,7 @@ function ActionsContent() {
             <AdvancedFilterPanel
                 searchValue={searchQuery}
                 onSearchChange={(v) => { setSearchQuery(v); setPage(1); }}
-                searchPlaceholder="Aksiyon ID veya açıklama ara..."
+                searchPlaceholder="Aksiyon No veya açıklama ara..."
                 fields={advancedFields}
                 activeCount={Object.values(activeFilters).filter(v => v && v !== 'all').length}
                 onClearAll={clearAll}

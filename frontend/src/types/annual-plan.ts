@@ -16,8 +16,10 @@ export interface AnnualPlanRow {
     controlId: string;
     controlCode: string;
     name: string;
+    description: string;
     frequency: string;
     directorateId: string | null;
+    directorateName: string | null;
     ownerId: string;
     inScope: boolean;
     effectiveFrequency: string;

@@ -22,7 +22,7 @@ describe('ControlScopeService — yıllık kapsam + periyodik task üretimi', ()
             auditLog: { create: jest.fn().mockResolvedValue({}), findMany: jest.fn().mockResolvedValue([]) },
             user: { findUnique: jest.fn().mockResolvedValue({ isActive: true, role: { permissions: ['control:*'] } }) },
             // nextTestCode/nextCounterValue'nun kullandığı atomik sayaç RPC'sinin mock'u.
-            $queryRawUnsafe: jest.fn().mockImplementation(() => Promise.resolve([{ value: ++counter }])),
+            $queryRaw: jest.fn().mockImplementation(() => Promise.resolve([{ value: ++counter }])),
             $transaction: jest.fn((cb: any) => cb(prisma)),
         };
         const module: TestingModule = await Test.createTestingModule({

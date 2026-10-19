@@ -4,7 +4,7 @@ import { ControlsService } from './controls.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
 import { CreateAttachmentDto, UpdateAttachmentDto } from '../../common/dto/attachment.dto';
-import { CreateControlDto, UpdateControlDto, SaveTestDraftDto } from './dto';
+import { CompleteControlTestDto, CreateControlDto, UpdateControlDto, SaveTestDraftDto } from './dto';
 
 @ApiTags('Controls')
 @ApiBearerAuth('JWT-Auth')
@@ -46,8 +46,13 @@ export class ControlsController {
 
     @Patch('tests/:testId/complete')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async completeTest(@Param('testId') testId: string, @Body() data: any, @CurrentUser('id') userId: string) {
+    async completeTest(@Param('testId') testId: string, @Body() data: CompleteControlTestDto, @CurrentUser('id') userId: string) {
         return this.controlsService.completeTest(testId, data, userId);
+    }
+
+    @Get('tests/:testId/open-finding-references')
+    async getOpenFindingReferences(@Param('testId') testId: string) {
+        return this.controlsService.getOpenFindingReferences(testId);
     }
 
     @Patch('tests/:testId/approve')
@@ -70,7 +75,7 @@ export class ControlsController {
     // eşdeğer (test tamamlanınca zaten onaya düşüyor) — endpoint tekilliği için alias.
     @Patch('tests/:testId/submit-approval')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async submitApproval(@Param('testId') testId: string, @Body() data: any, @CurrentUser('id') userId: string) {
+    async submitApproval(@Param('testId') testId: string, @Body() data: CompleteControlTestDto, @CurrentUser('id') userId: string) {
         return this.controlsService.completeTest(testId, data, userId);
     }
 

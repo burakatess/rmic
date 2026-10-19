@@ -19,8 +19,8 @@ describe('AuditsService — kritik iş kuralları', () => {
                 create: jest.fn(), updateMany: jest.fn(),
             },
             user: { findUnique: jest.fn() },
-            $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
-            $queryRawUnsafe: jest.fn().mockResolvedValue([{ value: 1 }]),
+            directorate: { findUnique: jest.fn() },
+            $queryRaw: jest.fn().mockResolvedValue([{ locked: true, value: 1 }]),
         };
         // $transaction — callback'i aynı mock istemcisiyle çalıştır (tx === prisma).
         prisma.$transaction = jest.fn((arg: any) =>
@@ -55,13 +55,13 @@ describe('AuditsService — kritik iş kuralları', () => {
                     },
                     followUps: { none: { status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] } } },
                 },
-                select: { id: true, findingId: true, dueDate: true, status: true },
+                select: { id: true, actionId: true, findingId: true, dueDate: true, status: true },
             });
         });
 
         it('TAMAMLANDI aksiyon için doğrulama takibi üretirken aksiyon durumunu geri almaz', async () => {
             const dueDate = new Date('2026-01-01');
-            prisma.action.findMany.mockResolvedValue([{ id: 'a-1', findingId: 'f-1', dueDate, status: 'TAMAMLANDI' }]);
+            prisma.action.findMany.mockResolvedValue([{ id: 'a-1', actionId: 'A-2026-0002-01', findingId: 'f-1', dueDate, status: 'TAMAMLANDI' }]);
             prisma.findingFollowUp.findFirst.mockResolvedValue(null);
             prisma.findingFollowUp.create.mockResolvedValue({ id: 'fu-1' });
 
@@ -297,25 +297,58 @@ describe('AuditsService — kritik iş kuralları', () => {
     describe('updateFollowUp — iş kuralı doğrulamaları', () => {
         const baseFollowUp = { id: 'fu-1', findingId: 'f-1' };
 
-        it('YENI_AKSIYON_GEREKLI seçilip newAction eksikse reddeder', async () => {
+        const validNewAction = {
+            description: 'Kalıcı düzeltici aksiyon', directorateId: 'dir-1',
+            ownerId: 'owner-1', dueDate: '2099-12-01',
+        };
+
+        it('YENI_AKSIYON_GEREKLI seçilip yeni aksiyon bilgisi eksikse reddeder', async () => {
             prisma.findingFollowUp = { findFirst: jest.fn().mockResolvedValue(baseFollowUp), update: jest.fn() };
 
             await expect(
-                service.updateFollowUp('f-1', 'fu-1', { result: 'YENI_AKSIYON_GEREKLI' }, 'user-1'),
-            ).rejects.toThrow(BadRequestException);
+                service.updateFollowUp('f-1', 'fu-1', { result: 'YENI_AKSIYON_GEREKLI', resolutionOutcome: 'YENI_AKSIYON_GEREKLI' }, 'user-1'),
+            ).rejects.toThrow('Yeni aksiyon planı');
             expect(prisma.findingFollowUp.update).not.toHaveBeenCalled();
         });
 
-        it('YENI_AKSIYON_GEREKLI seçilip newAction.ownerId geçersiz bir kullanıcıysa reddeder', async () => {
+        it('YENI_AKSIYON_GEREKLI için sorumlu birim seçilmemişse reddeder', async () => {
             prisma.findingFollowUp = { findFirst: jest.fn().mockResolvedValue(baseFollowUp), update: jest.fn() };
-            prisma.user.findUnique.mockResolvedValue(null);
-
             await expect(
                 service.updateFollowUp('f-1', 'fu-1', {
-                    result: 'YENI_AKSIYON_GEREKLI',
-                    newAction: { description: 'Yeni aksiyon', ownerId: 'no-such-user', dueDate: '2026-12-01' },
+                    result: 'YENI_AKSIYON_GEREKLI', resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
+                    newAction: { description: 'Plan', dueDate: '2099-12-01' },
                 }, 'user-1'),
-            ).rejects.toThrow(BadRequestException);
+            ).rejects.toThrow('sorumlu birim');
+        });
+
+        it('YENI_AKSIYON_GEREKLI için hedef tarih geçmişteyse reddeder', async () => {
+            prisma.findingFollowUp = { findFirst: jest.fn().mockResolvedValue(baseFollowUp), update: jest.fn() };
+            await expect(
+                service.updateFollowUp('f-1', 'fu-1', {
+                    result: 'YENI_AKSIYON_GEREKLI', resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
+                    newAction: { ...validNewAction, dueDate: '2000-01-01' },
+                }, 'user-1'),
+            ).rejects.toThrow('hedef tarihi');
+        });
+
+        it('YENI_AKSIYON_GEREKLI için geçersiz birim reddedilir', async () => {
+            prisma.findingFollowUp = { findFirst: jest.fn().mockResolvedValue(baseFollowUp), update: jest.fn() };
+            prisma.directorate.findUnique.mockResolvedValue(null);
+            await expect(
+                service.updateFollowUp('f-1', 'fu-1', { result: 'YENI_AKSIYON_GEREKLI', resolutionOutcome: 'YENI_AKSIYON_GEREKLI', newAction: validNewAction }, 'user-1'),
+            ).rejects.toThrow('Geçersiz birim');
+        });
+
+        it('YENI_AKSIYON_GEREKLI için geçersiz sorumlu kullanıcı reddedilir', async () => {
+            prisma.findingFollowUp = { findFirst: jest.fn().mockResolvedValue(baseFollowUp), update: jest.fn() };
+            prisma.directorate.findUnique.mockResolvedValue({ id: 'dir-1' });
+            prisma.user.findUnique.mockResolvedValue(null);
+            await expect(
+                service.updateFollowUp('f-1', 'fu-1', {
+                    result: 'YENI_AKSIYON_GEREKLI', resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
+                    newAction: { ...validNewAction, ownerId: 'no-such-user' },
+                }, 'user-1'),
+            ).rejects.toThrow('Geçersiz kullanıcı');
         });
 
         it('ERTELENDI seçilip newFollowUpDate verilmezse reddeder', async () => {
@@ -431,7 +464,7 @@ describe('AuditsService — kritik iş kuralları', () => {
         });
 
         beforeEach(() => {
-            prisma.action = { ...prisma.action, findUnique: jest.fn(), update: jest.fn() };
+            prisma.action = { ...prisma.action, findUnique: jest.fn(), update: jest.fn(), create: jest.fn() };
             prisma.findingFollowUp = {
                 findFirst: jest.fn(),
                 findUnique: jest.fn().mockResolvedValue({ id: 'fu-1', status: 'ONAYLANDI' }),
@@ -488,6 +521,45 @@ describe('AuditsService — kritik iş kuralları', () => {
             ).rejects.toThrow(BadRequestException);
         });
 
+        it('onay bekleyen kayıt maker tarafından API üzerinden değiştirilemez', async () => {
+            prisma.findingFollowUp.findFirst.mockResolvedValue(readyFollowUp({ assigneeId: 'maker-1' }));
+            await expect(service.updateFollowUp(
+                'f-1', 'fu-1', { currentStatusDetail: 'değiştirildi' }, 'maker-1', 'AUDITOR',
+            )).rejects.toThrow(ForbiddenException);
+            expect(prisma.findingFollowUp.update).not.toHaveBeenCalled();
+        });
+
+        it('checker reddederse açıklamayı ezmeden revizyona döner ve yeni takip oluşturmaz', async () => {
+            prisma.findingFollowUp.findFirst.mockResolvedValue(readyFollowUp({ explanation: 'Maker açıklaması' }));
+            prisma.findingFollowUp.update.mockResolvedValue({ id: 'fu-1', status: 'DEVAM_EDIYOR', approvalStatus: 'REDDEDILDI' });
+
+            await service.updateFollowUp(
+                'f-1', 'fu-1', { approvalStatus: 'REDDEDILDI', explanation: 'Kanıt eksik' },
+                'second-ctrl', 'SYSTEM_ADMIN',
+            );
+
+            expect(prisma.findingFollowUp.update).toHaveBeenCalledWith(expect.objectContaining({
+                data: expect.objectContaining({ rejectionReason: 'Kanıt eksik', status: 'DEVAM_EDIYOR', approvalStatus: 'REDDEDILDI' }),
+            }));
+            expect(prisma.findingFollowUp.create).not.toHaveBeenCalled();
+        });
+
+        it('reddedilen kayıt maker tarafından düzenlenip tekrar onaya gönderilebilir', async () => {
+            prisma.findingFollowUp.findFirst.mockResolvedValue(readyFollowUp({
+                status: 'DEVAM_EDIYOR', approvalStatus: 'REDDEDILDI', assigneeId: 'maker-1', evaluatorId: 'maker-1',
+            }));
+            prisma.findingFollowUp.update.mockResolvedValue({ id: 'fu-1', status: 'TAMAMLANDI', approvalStatus: 'BEKLIYOR' });
+
+            await service.updateFollowUp(
+                'f-1', 'fu-1', { status: 'TAMAMLANDI', currentStatusDetail: 'Revize edildi', result: 'YETERSIZ', resolutionOutcome: 'DEVAM_EDIYOR' },
+                'maker-1', 'AUDITOR',
+            );
+
+            expect(prisma.findingFollowUp.update).toHaveBeenCalledWith(expect.objectContaining({
+                data: expect.objectContaining({ status: 'TAMAMLANDI', approvalStatus: 'BEKLIYOR', rejectionReason: null }),
+            }));
+        });
+
         it('geçerli onay: onaylayan/zaman SUNUCU tarafından atomik claim ile yazılır', async () => {
             prisma.findingFollowUp.findFirst.mockResolvedValue(readyFollowUp({ evaluatorId: 'evaluator-x' }));
             await service.updateFollowUp(
@@ -496,9 +568,9 @@ describe('AuditsService — kritik iş kuralları', () => {
                 'second-ctrl', 'RISK_CONTROL_MANAGER',
             );
             const claim = prisma.findingFollowUp.updateMany.mock.calls[0][0];
-            expect(claim.where).toEqual(
-                expect.objectContaining({ NOT: { OR: [{ status: 'ONAYLANDI' }, { approvalStatus: 'ONAYLANDI' }] } }),
-            );
+            expect(claim.where).toEqual(expect.objectContaining({
+                status: 'TAMAMLANDI', approvalStatus: 'BEKLIYOR', secondControllerId: 'second-ctrl',
+            }));
             expect(claim.data.approvedBy).toBe('second-ctrl');
             expect(claim.data.approvedAt).toBeInstanceOf(Date);
         });
@@ -537,6 +609,52 @@ describe('AuditsService — kritik iş kuralları', () => {
             expect(prisma.action.update).not.toHaveBeenCalled();
         });
 
+        it('Yeni Aksiyon Gerekli onayında taslaktan yeni aksiyon (plan + birim + sorumlu + tarih) oluşturur', async () => {
+            const draft = {
+                description: 'Kalıcı düzeltici aksiyon', directorateId: 'dir-1',
+                ownerId: 'owner-1', dueDate: '2099-12-31',
+            };
+            prisma.findingFollowUp.findFirst.mockResolvedValue(readyFollowUp({
+                actionId: 'a-1', result: 'YENI_AKSIYON_GEREKLI',
+                resolutionOutcome: 'YENI_AKSIYON_GEREKLI', newActionDraft: draft,
+                action: { id: 'a-1', actionId: 'A-1', ownerId: 'owner-0' },
+            }));
+            prisma.directorate.findUnique.mockResolvedValue({ id: 'dir-1' });
+            prisma.user.findUnique.mockResolvedValue({ id: 'owner-1' });
+            prisma.findingFollowUp.update.mockResolvedValue({
+                id: 'fu-1', followUpId: 'T-1', actionId: 'a-1', result: 'YENI_AKSIYON_GEREKLI',
+            });
+            const createSpy = jest.spyOn(service, 'createAction')
+                .mockResolvedValue({ id: 'a-2', actionId: 'A-2026-0034-02' } as never);
+
+            const result = await service.updateFollowUp('f-1', 'fu-1', { status: 'ONAYLANDI' }, 'second-ctrl', 'SYSTEM_ADMIN');
+
+            expect(createSpy).toHaveBeenCalledWith('f-1', expect.objectContaining({
+                description: 'Kalıcı düzeltici aksiyon', directorateId: 'dir-1',
+                ownerId: 'owner-1', dueDate: '2099-12-31', status: 'BEKLIYOR',
+            }), 'second-ctrl', prisma);
+            expect(prisma.findingFollowUp.create).not.toHaveBeenCalled();
+            expect((result as { createdAction?: unknown }).createdAction).toEqual({ id: 'a-2', actionId: 'A-2026-0034-02' });
+        });
+
+        it('yeni aksiyon oluşturma başarısızsa onay işlemi hata verir', async () => {
+            const draft = { description: 'Plan', directorateId: 'dir-1', ownerId: 'owner-1', dueDate: '2099-12-31' };
+            prisma.findingFollowUp.findFirst.mockResolvedValue(readyFollowUp({
+                actionId: 'a-1', result: 'YENI_AKSIYON_GEREKLI', newActionDraft: draft,
+            }));
+            prisma.directorate.findUnique.mockResolvedValue({ id: 'dir-1' });
+            prisma.user.findUnique.mockResolvedValue({ id: 'owner-1' });
+            prisma.findingFollowUp.update.mockResolvedValue({
+                id: 'fu-1', followUpId: 'T-1', actionId: 'a-1', result: 'YENI_AKSIYON_GEREKLI',
+            });
+            jest.spyOn(service, 'createAction').mockRejectedValue(new Error('simulated create failure'));
+
+            await expect(service.updateFollowUp(
+                'f-1', 'fu-1', { status: 'ONAYLANDI' }, 'second-ctrl', 'SYSTEM_ADMIN',
+            )).rejects.toThrow('simulated create failure');
+            expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        });
+
         it('evaluatorId istemci alanı yok sayılır; değerlendiren = oturum sahibi', async () => {
             prisma.findingFollowUp.findFirst.mockResolvedValue(
                 readyFollowUp({ evaluatorId: null, result: null, status: 'DEVAM_EDIYOR' }),
@@ -571,19 +689,20 @@ describe('AuditsService — kritik iş kuralları', () => {
             expect(prisma.finding.update).not.toHaveBeenCalled();
         });
 
-        it('yeni aksiyon taslağını değerlendirme kaydında onaya kadar saklar', async () => {
+        it('Yeni Aksiyon Gerekli değerlendirmesinde yeni aksiyon taslağını saklar, aksiyon oluşturmaz', async () => {
             const draft = {
-                description: 'Kalıcı düzeltici aksiyon', ownerId: 'owner-1',
-                dueDate: '2099-12-31', responsibleDepartment: 'Operasyon',
+                description: 'Kalıcı düzeltici aksiyon', directorateId: 'dir-1',
+                ownerId: 'owner-1', dueDate: '2099-12-31',
             };
             prisma.findingFollowUp.findFirst.mockResolvedValue(
                 readyFollowUp({ evaluatorId: null, result: null, status: 'DEVAM_EDIYOR' }),
             );
+            prisma.directorate.findUnique.mockResolvedValue({ id: 'dir-1' });
             prisma.user.findUnique.mockResolvedValue({ id: 'owner-1' });
             prisma.findingFollowUp.update.mockResolvedValue({
-                id: 'fu-1', actionId: null, result: 'YENI_AKSIYON_GEREKLI',
-                resolutionOutcome: 'YENI_AKSIYON_GEREKLI', newActionDraft: draft,
+                id: 'fu-1', actionId: null, result: 'YENI_AKSIYON_GEREKLI', newActionDraft: draft,
             });
+            const createSpy = jest.spyOn(service, 'createAction');
 
             await service.updateFollowUp('f-1', 'fu-1', {
                 status: 'TAMAMLANDI', result: 'YENI_AKSIYON_GEREKLI',
@@ -591,8 +710,12 @@ describe('AuditsService — kritik iş kuralları', () => {
             }, 'evaluator-1', 'AUDITOR');
 
             expect(prisma.findingFollowUp.update).toHaveBeenCalledWith(expect.objectContaining({
-                data: expect.objectContaining({ newActionDraft: draft, newActionRequired: true }),
+                data: expect.objectContaining({
+                    newActionRequired: true,
+                    newActionDraft: expect.objectContaining({ description: 'Kalıcı düzeltici aksiyon', directorateId: 'dir-1' }),
+                }),
             }));
+            expect(createSpy).not.toHaveBeenCalled();
             expect(prisma.action.update).not.toHaveBeenCalled();
             expect(prisma.finding.update).not.toHaveBeenCalled();
         });
@@ -614,6 +737,7 @@ describe('AuditsService — kritik iş kuralları', () => {
             prisma.findingFollowUp.update.mockResolvedValue({ id: 'fu-1', actionId: 'a-1', result: 'YETERSIZ', resolutionOutcome: 'ERTELENDI', newFollowUpDate: next });
             prisma.findingFollowUp.create.mockResolvedValue({ id: 'fu-next' });
             prisma.action.update.mockResolvedValue({});
+            prisma.action.findUnique.mockResolvedValue({ id: 'a-1', actionId: 'A-2026-0002-01' });
             prisma.finding.update.mockResolvedValue({});
             await service.updateFollowUp('f-1', 'fu-1', { status: 'ONAYLANDI' }, 'second-ctrl', 'SYSTEM_ADMIN');
             expect(prisma.findingFollowUp.create).toHaveBeenCalledWith({ data: expect.objectContaining({ actionId: 'a-1', plannedDate: next, status: 'BEKLIYOR' }) });
@@ -627,7 +751,7 @@ describe('AuditsService — kritik iş kuralları', () => {
             '%s aksiyona manuel takip eklenince aksiyon durumunu geriye almaz',
             async (status) => {
                 prisma.action.findFirst = jest.fn().mockResolvedValue({
-                    id: 'a-1', findingId: 'f-1', status, dueDate: new Date('2026-12-01'), finding: {},
+                    id: 'a-1', actionId: 'A-2026-0002-01', findingId: 'f-1', status, dueDate: new Date('2026-12-01'), finding: {},
                 });
                 prisma.findingFollowUp.create.mockResolvedValue({ id: 'fu-1' });
 
