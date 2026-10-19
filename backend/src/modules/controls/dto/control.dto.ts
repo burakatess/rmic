@@ -1,10 +1,28 @@
-import { IsString, IsNotEmpty, IsOptional, IsEnum, IsArray, IsIn, IsDateString, IsInt, MaxLength } from 'class-validator';
+import { Equals, IsBoolean, IsString, IsNotEmpty, IsOptional, IsEnum, IsArray, IsIn, IsDateString, IsInt, MaxLength, MinLength, ValidateIf } from 'class-validator';
 import { EmptyToUndefined } from '../../../common/decorators';
 
 export enum ControlType { IT_GENERAL = 'IT_GENERAL', IT_APPLICATION = 'IT_APPLICATION', OPERATIONAL = 'OPERATIONAL', FINANCIAL = 'FINANCIAL', COMPLIANCE = 'COMPLIANCE', BT = 'BT', BT_DISI = 'BT_DISI' }
 export enum ControlNature { PREVENTIVE = 'PREVENTIVE', DETECTIVE = 'DETECTIVE' }
 export enum ControlAutomation { MANUAL = 'MANUAL', AUTOMATED = 'AUTOMATED', SEMI_AUTOMATED = 'SEMI_AUTOMATED' }
 export enum ControlFrequency { DAILY = 'DAILY', WEEKLY = 'WEEKLY', MONTHLY = 'MONTHLY', QUARTERLY = 'QUARTERLY', SEMI_ANNUAL = 'SEMI_ANNUAL', ANNUAL = 'ANNUAL', AD_HOC = 'AD_HOC' }
+
+export enum FindingTestStatusDto { BULGUSU_YOK = 'BULGUSU_YOK', BULGUSU_VAR = 'BULGUSU_VAR' }
+
+export class CompleteControlTestDto {
+    @IsOptional() @IsEnum(FindingTestStatusDto) findingStatus?: FindingTestStatusDto;
+    @IsOptional() @IsString() @MaxLength(10000) resultText?: string;
+    @IsOptional() @IsString() @MaxLength(10000) evidenceSummary?: string;
+    @IsOptional() @IsArray() @IsString({ each: true }) evidenceUrls?: string[];
+    @IsOptional() @IsString() referencedFindingId?: string;
+
+    @ValidateIf(o => !!o.referencedFindingId)
+    @IsString() @MinLength(10) @MaxLength(5000)
+    referenceReason?: string;
+
+    @ValidateIf(o => !!o.referencedFindingId)
+    @IsBoolean() @Equals(true)
+    continuationConfirmed?: boolean;
+}
 
 export class CreateControlDto {
     @IsOptional() @IsString() @MaxLength(100) controlId?: string;

@@ -122,9 +122,16 @@ export default function ControlTestDetailPage() {
     const [reasonModal, setReasonModal] = useState<null | 'return' | 'cancel'>(null);
     const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
     const [submitting, setSubmitting] = useState(false);
-    const [openFindings, setOpenFindings] = useState<{ id: string; findingId: string; summary?: string | null }[]>([]);
+    const [openFindings, setOpenFindings] = useState<Array<{
+        id: string; findingId: string; summary?: string | null; createdAt: string; status: string;
+        resolutionStatus: string; recommended?: boolean;
+        control?: { controlId: string; name: string } | null;
+        controlTest?: { id: string; testNo: string; periodLabel?: string | null } | null;
+    }>>([]);
     const [referencedFindingId, setReferencedFindingId] = useState('');
     const [referenceReason, setReferenceReason] = useState('');
+    const [referenceMode, setReferenceMode] = useState<'new' | 'existing' | null>(null);
+    const [continuationConfirmed, setContinuationConfirmed] = useState(false);
 
     // ── Veri yükleme ─────────────────────────────────────────────────────────
     const load = useCallback(async (silent = false) => {
@@ -160,13 +167,8 @@ export default function ControlTestDetailPage() {
     // Açık bulgu referansı için aday listesi
     useEffect(() => {
         if (!test || (test.findings?.length ?? 0) > 0) return;
-        api.getFindings({ controlId: test.control.id, limit: 100 })
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .then((res: any) => {
-                const list = Array.isArray(res) ? res : (res?.data || []);
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                setOpenFindings(list.filter((f: any) => f.status !== 'CLOSED'));
-            })
+        api.getOpenFindingReferences(test.id)
+            .then(setOpenFindings)
             .catch(() => setOpenFindings([]));
     }, [test]);
 
@@ -299,12 +301,12 @@ export default function ControlTestDetailPage() {
     };
 
     const handleReference = async () => {
-        if (!referencedFindingId || submitting) return;
+        if (!referencedFindingId || !continuationConfirmed || referenceReason.trim().length < 10 || submitting) return;
         setSubmitting(true);
         try {
             const ok = await flushSave();
             if (!ok) { showError('Kayıt Başarısız', 'Değerlendirmeniz kaydedilemedi.'); return; }
-            await api.completeControlTest(test.id, { referencedFindingId, referenceReason });
+            await api.completeControlTest(test.id, { referencedFindingId, referenceReason: referenceReason.trim(), continuationConfirmed: true });
             success('İlerletildi', 'Test, referans verilen açık bulgu ile 2. kontrolcü onayına gönderildi.');
             await load(true);
         } catch (e) {
@@ -566,25 +568,52 @@ export default function ControlTestDetailPage() {
                     {!form.findingStatus && <p className="text-xs text-slate-400 mb-2">Değerlendirilmedi — devam etmeden önce bir sonuç seçin.</p>}
 
                     {form.findingStatus === 'BULGUSU_VAR' && !isDone && !canApprove && (
-                        <Button variant={needsFindingFirst ? 'primary' : 'secondary'} size="sm" className={`w-full ${needsFindingFirst ? 'bg-rose-600 hover:bg-rose-700 ring-rose-600' : ''}`}
+                        <div className="grid grid-cols-2 gap-2">
+                            <Button variant={referenceMode === 'new' ? 'primary' : 'secondary'} size="sm"
+                                onClick={() => setReferenceMode('new')} disabled={submitting} icon={<IconPlus />}>
+                                Yeni Bulgu Oluştur
+                            </Button>
+                            <Button variant={referenceMode === 'existing' ? 'primary' : 'secondary'} size="sm"
+                                onClick={() => setReferenceMode('existing')} disabled={submitting || openFindings.length === 0} icon={<IconLink />}>
+                                Açık Bulguya Referans Ver
+                            </Button>
+                        </div>
+                    )}
+
+                    {referenceMode === 'new' && form.findingStatus === 'BULGUSU_VAR' && !isDone && !canApprove && (
+                        <Button variant="primary" size="sm" className="w-full mt-2 bg-rose-600 hover:bg-rose-700 ring-rose-600"
                             onClick={handleOpenFinding} disabled={submitting} icon={<IconPlus />}>
                             Bulgu Kaydı Oluştur {hasFindings ? `(${test.findings.length})` : ''}
                         </Button>
                     )}
 
-                    {needsFindingFirst && openFindings.length > 0 && (
+                    {needsFindingFirst && referenceMode === 'existing' && openFindings.length > 0 && (
                         <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
                             <p className="text-xs font-semibold text-amber-700">Ya da mevcut açık bir bulguyu referans alarak ilerletin</p>
                             <select value={referencedFindingId} onChange={e => setReferencedFindingId(e.target.value)}
                                 className="w-full px-2.5 py-2 text-xs border border-amber-300 rounded-lg bg-white">
                                 <option value="">Açık bulgu seçiniz...</option>
-                                {openFindings.map(f => <option key={f.id} value={f.id}>{f.findingId} — {f.summary || ''}</option>)}
+                                {openFindings.map(f => <option key={f.id} value={f.id}>{f.recommended ? '★ ' : ''}{f.findingId} — {f.summary || ''}</option>)}
                             </select>
                             {referencedFindingId && (
                                 <>
-                                    <textarea value={referenceReason} onChange={e => setReferenceReason(e.target.value)} rows={2}
-                                        placeholder="Referans gerekçesi (opsiyonel)..." className="w-full px-2.5 py-2 text-xs border border-amber-300 rounded-lg resize-none" />
-                                    <Button variant="primary" size="sm" className="w-full" onClick={handleReference} disabled={submitting} icon={<IconLink />}>
+                                    {(() => {
+                                        const selected = openFindings.find(f => f.id === referencedFindingId);
+                                        return selected ? <div className="text-xs text-amber-900 bg-white rounded-lg border border-amber-200 p-2 space-y-1">
+                                            <p><strong>İlk tespit:</strong> {new Date(selected.createdAt).toLocaleDateString('tr-TR')}</p>
+                                            <p><strong>İlk test:</strong> {selected.controlTest?.testNo || 'Belirtilmemiş'} {selected.controlTest?.periodLabel ? `(${selected.controlTest.periodLabel})` : ''}</p>
+                                            <p><strong>Durum:</strong> {selected.resolutionStatus}</p>
+                                            <p><strong>Kaynak kontrol:</strong> {selected.control?.controlId} — {selected.control?.name}</p>
+                                        </div> : null;
+                                    })()}
+                                    <textarea value={referenceReason} onChange={e => setReferenceReason(e.target.value)} rows={3}
+                                        placeholder="Bu dönemde yapılan incelemeyi ve sorunun neden devam ettiğini açıklayın..." className="w-full px-2.5 py-2 text-xs border border-amber-300 rounded-lg resize-none" />
+                                    <label className="flex items-start gap-2 text-xs text-amber-900">
+                                        <input type="checkbox" checked={continuationConfirmed} onChange={e => setContinuationConfirmed(e.target.checked)} className="mt-0.5" />
+                                        <span>Mevcut sorun bu dönemde de devam etmektedir.</span>
+                                    </label>
+                                    <Button variant="primary" size="sm" className="w-full" onClick={handleReference}
+                                        disabled={submitting || !continuationConfirmed || referenceReason.trim().length < 10} icon={<IconLink />}>
                                         Referans ile Onaya Gönder
                                     </Button>
                                 </>

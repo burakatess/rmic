@@ -184,6 +184,10 @@ class ApiClient {
         this.clearTokens();
     }
 
+    async globalSearch(params: { q: string; category?: string; limit?: number }) {
+        return this.request<{ data: Array<{ id: string; type: string; code: string; title: string; context: string; url: string }> }>(`/search${buildQuery(params)}`);
+    }
+
     async getProfile() {
         return this.request<{
             id: string;
@@ -347,6 +351,10 @@ class ApiClient {
 
     async getControlTestById(testId: string) {
         return this.request<any>(`/controls/tests/${testId}`);
+    }
+
+    async getOpenFindingReferences(testId: string) {
+        return this.request<any[]>(`/controls/tests/${testId}/open-finding-references`);
     }
 
     async saveTestDraft(testId: string, data: {

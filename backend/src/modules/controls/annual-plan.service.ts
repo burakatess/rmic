@@ -500,7 +500,11 @@ export class AnnualPlanService {
 
         const allControls = await this.prisma.control.findMany({
             where: rbacWhere,
-            select: { id: true, controlId: true, name: true, frequency: true, selectedMonths: true, controlDate: true, directorateId: true, ownerId: true },
+            select: {
+                id: true, controlId: true, name: true, description: true, frequency: true,
+                selectedMonths: true, controlDate: true, directorateId: true, ownerId: true,
+                directorateRel: { select: { id: true, name: true } },
+            },
         });
 
         const realScopesThisYear = await this.prisma.controlYearScope.findMany({
@@ -514,7 +518,7 @@ export class AnnualPlanService {
     /** Kontrol × yıl için TEK etkin-satır hesabı — Kapsam-Takvim tablosu,
      * Kontrolcü-Atamaları tablosu ve iş yükü KPI'ları hepsi bundan türer. */
     private buildEffectiveRows(
-        allControls: { id: string; controlId: string; name: string; frequency: ControlFrequency; selectedMonths: string[]; controlDate: Date | null; directorateId: string | null; ownerId: string }[],
+        allControls: { id: string; controlId: string; name: string; description: string; frequency: ControlFrequency; selectedMonths: string[]; controlDate: Date | null; directorateId: string | null; ownerId: string; directorateRel: { id: string; name: string } | null }[],
         draftByControl: Map<string, any>, realScopeByControl: Map<string, any>, year: number,
     ) {
         return allControls.map(c => {
@@ -544,7 +548,8 @@ export class AnnualPlanService {
                 ? computeScopePeriods(effFrequency, year, { selectedMonths: effMonths, controlDate: effControlDate, referenceMonth: effReferenceMonth }).length
                 : (inScope && isAdHoc ? 1 : 0);
             return {
-                controlId: c.id, controlCode: c.controlId, name: c.name, frequency: c.frequency,
+                controlId: c.id, controlCode: c.controlId, name: c.name, description: c.description,
+                directorateName: c.directorateRel?.name ?? null, frequency: c.frequency,
                 directorateId: c.directorateId, ownerId: c.ownerId,
                 inScope, effectiveFrequency: effFrequency, effectiveReferenceMonth: effReferenceMonth,
                 effectiveSelectedMonths: effMonths, effectiveControlDate: effControlDate,
@@ -574,8 +579,11 @@ export class AnnualPlanService {
         // KPI/workload zaten yukarıda tüm yetkili kümeden hesaplandı. ─────────
         let rows = effectiveRows;
         if (query.search) {
-            const q = query.search.toLowerCase();
-            rows = rows.filter(r => r.controlCode.toLowerCase().includes(q) || r.name.toLowerCase().includes(q));
+            const q = query.search.trim().toLocaleLowerCase('tr-TR');
+            rows = rows.filter(r => r.controlCode.toLocaleLowerCase('tr-TR').includes(q)
+                || r.name.toLocaleLowerCase('tr-TR').includes(q)
+                || r.description.toLocaleLowerCase('tr-TR').includes(q)
+                || r.directorateName?.toLocaleLowerCase('tr-TR').includes(q));
         }
         if (query.ownerId) rows = rows.filter(r => r.ownerId === query.ownerId);
         if (query.frequency) rows = rows.filter(r => r.frequency === query.frequency);

@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
 import { AuditsService } from '../audits/audits.service';
-import { nextCounterValue, formatRecordId } from '../../common/util/sequential-id';
+import { nextCounterValue, formatRecordId, nextFindingNo } from '../../common/util/sequential-id';
 import { RiskSimulationService } from './risk-simulation.service';
 import type { TransferDto } from './dto';
 
@@ -357,24 +357,6 @@ export class TransferService {
                 }
 
                 // ── Aksiyonlar ──
-                // Finding.findingId (B-YYYY-NNNN) hâlâ audits.service.ts::createFinding'in
-                // LEGACY findFirst-tabanlı sırasıyla üretiliyor (RecordCounter'a henüz
-                // taşınmadı) — burada nextCounterValue('finding') kullanmak, mevcut
-                // seed/legacy kayıtlarla ÇAKIŞIR (aynı B-2026-0001 tekrar üretilir).
-                // Bu yüzden AYNI legacy şema (prefix + findFirst) tx içinde, tek seferde
-                // okunup bellekte artırılarak kullanılıyor (control-scope.service.ts'teki
-                // testNo deseniyle aynı gerekçe: tx içi ardışık findFirst aynı değeri döner).
-                const findingYear = new Date().getFullYear();
-                const findingPrefix = `B-${findingYear}-`;
-                const lastFinding = await tx.finding.findFirst({
-                    where: { findingId: { startsWith: findingPrefix } }, orderBy: { findingId: 'desc' }, select: { findingId: true },
-                });
-                let nextFindingSeq = 1;
-                if (lastFinding) {
-                    const n = parseInt(lastFinding.findingId.split('-')[2], 10);
-                    if (!isNaN(n)) nextFindingSeq = n + 1;
-                }
-
                 const assignmentByActionId = new Map((dto.actionAssignments ?? []).map(a => [a.scenarioActionId, a]));
                 for (const row of preview.rows.filter(r => r.kind === 'ACTION' && r.classification === 'CREATE')) {
                     const simAction = scenario.actions.find(a => a.id === row.refId)!;
@@ -384,7 +366,7 @@ export class TransferService {
                     if (!owner) throw new BadRequestException('Geçersiz kullanıcı: aksiyon sorumlusu bulunamadı');
                     const targetControl = scenario.controls.find(c => c.id === simAction.targetControlSimId)!;
 
-                    const findingId = `${findingPrefix}${(nextFindingSeq++).toString().padStart(4, '0')}`;
+                    const findingId = await nextFindingNo(tx as any, new Date());
                     const finding = await tx.finding.create({
                         data: {
                             findingId,

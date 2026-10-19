@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
 import {
     DetailShell, DetailHeader, DetailSection, Tabs, Timeline,
@@ -27,9 +27,9 @@ interface Action {
 }
 interface FollowUp {
     id: string; followUpId: string; status: string; actionId?: string | null;
-    secondControllerId?: string | null; approvalStatus?: string | null; evaluatorId?: string | null;
+    assigneeId?: string | null; secondControllerId?: string | null; approvalStatus?: string | null; evaluatorId?: string | null;
     result?: string | null; resolutionOutcome?: string | null; newFollowUpDate?: string | null;
-    explanation?: string | null; birimCevabi?: string | null; currentStatusDetail?: string | null;
+    explanation?: string | null; rejectionReason?: string | null; birimCevabi?: string | null; currentStatusDetail?: string | null;
     internalControlAssessment?: string | null; targetResolutionDate?: string | null;
     testDate?: string | null; plannedDate?: string | null; notes?: string | null;
     newActionRequired?: boolean; attachments?: Attachment[];
@@ -53,6 +53,15 @@ interface Finding {
     risk: LinkedRisk | null; control: LinkedControl | null; linkedRisks: LinkedRisk[];
     actions: Action[]; followUps: FollowUp[]; attachments: Attachment[]; statusLogs: StatusLog[];
     _count: { actions: number; followUps: number; linkedRisks: number; attachments: number };
+    controlTest?: { id: string; testNo: string; periodLabel?: string | null; plannedDate?: string | null } | null;
+    referencingTests?: Array<{ id: string; testNo: string; periodLabel?: string | null; plannedDate?: string | null; status: string; referenceReason?: string | null }>;
+    currentStatusSummary: {
+        status: string; workflowStatus: string; resolutionStatus: string; systemSummary: string;
+        latestApproved: null | { id: string; followUpId: string; result?: string | null; evaluatedAt?: string | null; approvedAt?: string | null; explanation?: string | null; evaluatorName?: string | null; approverName?: string | null };
+        pending: null | { id: string; followUpId: string; evaluatedAt?: string | null };
+        actionCounts: { open: number; closed: number; total: number };
+        nextFollowUpDate?: string | null;
+    };
     createdAt: string; updatedAt: string;
 }
 
@@ -171,6 +180,7 @@ const TAB_KEYS: Tab[] = ['detay', 'aksiyonlar', 'takip', 'riskler', 'ekler', 'ta
 export default function FindingDetailPage() {
     const { id } = useParams<{ id: string }>();
     const router = useRouter();
+    const searchParams = useSearchParams();
     const { success, error: showError } = useToast();
     const { user } = useAuth();
     const userRole = user?.role?.name;
@@ -186,6 +196,7 @@ export default function FindingDetailPage() {
     const [editAction, setEditAction] = useState<any | null>(null);
     const [followUpOpen, setFollowUpOpen] = useState(false);
     const [selectedFollowUp, setSelectedFollowUp] = useState<FollowUp | null>(null);
+    const handledFollowUpLink = useRef<string | null>(null);
 
     // Workflow dialog
     const [workflowAction, setWorkflowAction] = useState<string | null>(null);
@@ -198,9 +209,9 @@ export default function FindingDetailPage() {
 
     // ?tab= deep-link (örn. /findings/:id?tab=takip)
     useEffect(() => {
-        const t = new URLSearchParams(window.location.search).get('tab');
+        const t = searchParams.get('tab');
         if (t && TAB_KEYS.includes(t as Tab)) setActiveTab(t as Tab);
-    }, []);
+    }, [searchParams]);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -216,6 +227,20 @@ export default function FindingDetailPage() {
     }, [id]);
 
     useEffect(() => { load(); }, [load]);
+
+    useEffect(() => {
+        const followUpId = searchParams.get('followUpId');
+        if (!finding || !followUpId || activeTab !== 'takip' || handledFollowUpLink.current === followUpId) return;
+        handledFollowUpLink.current = followUpId;
+        const followUp = finding.followUps.find(item => item.id === followUpId);
+        if (!followUp) {
+            showError('Takip bulunamadı', 'Bağlantıdaki takip kaydı bu bulguya ait değil, silinmiş veya erişiminiz dışında.');
+            return;
+        }
+        setSelectedFollowUp(followUp);
+        setFollowUpOpen(true);
+        document.getElementById(`follow-up-${followUp.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, [activeTab, finding, searchParams, showError]);
 
     const submitWorkflow = async () => {
         if (!finding || !workflowAction) return;
@@ -237,13 +262,26 @@ export default function FindingDetailPage() {
     const approveFollowUp = async (fuId: string) => {
         if (!finding) return;
         try {
-            const res = await api.updateFollowUp(finding.id, fuId, { status: 'ONAYLANDI' }) as { createdAction?: { actionId: string } | null };
-            success('Onaylandı', res?.createdAction
-                ? `Takip onaylandı. Yeni aksiyon: ${res.createdAction.actionId}`
+            const res = await api.updateFollowUp(finding.id, fuId, { status: 'ONAYLANDI' }) as { createdFollowUp?: { followUpId: string } | null };
+            success('Onaylandı', res?.createdFollowUp
+                ? `Takip ertelendi. Yeni takip oluşturuldu: ${res.createdFollowUp.followUpId}`
                 : 'Takip değerlendirmesi onaylandı. Yeterli sonuçta bağlı aksiyon kapatıldı.');
             load();
         } catch (err) {
             showError('Onaylanamadı', err instanceof Error ? err.message : 'İşlem başarısız');
+        }
+    };
+
+    const rejectFollowUp = async (fuId: string) => {
+        if (!finding) return;
+        const reason = window.prompt('Ret gerekçesini yazın:')?.trim();
+        if (!reason) return;
+        try {
+            await api.updateFollowUp(finding.id, fuId, { approvalStatus: 'REDDEDILDI', explanation: reason });
+            success('Revizyona Gönderildi', 'Takip birinci kontrolcüye revizyon için gönderildi.');
+            load();
+        } catch (err) {
+            showError('Reddedilemedi', err instanceof Error ? err.message : 'İşlem başarısız');
         }
     };
 
@@ -579,6 +617,30 @@ export default function FindingDetailPage() {
                                 {/* Güncel Durum Log */}
                                 <DetailSection title="Bulgunun Güncel Durumu">
                                     <div className="space-y-3">
+                                        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-2">
+                                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                <p className="text-sm font-semibold text-blue-950">{finding.currentStatusSummary.systemSummary}</p>
+                                                <StatusBadge variant={resolutionConfig[finding.currentStatusSummary.resolutionStatus]?.variant || 'neutral'}>
+                                                    {resolutionConfig[finding.currentStatusSummary.resolutionStatus]?.label || finding.currentStatusSummary.resolutionStatus}
+                                                </StatusBadge>
+                                            </div>
+                                            <p className="text-xs text-blue-800">Aksiyonlar: {finding.currentStatusSummary.actionCounts.open} açık · {finding.currentStatusSummary.actionCounts.closed} kapalı</p>
+                                            {finding.currentStatusSummary.latestApproved && (
+                                                <div className="text-xs text-slate-700 bg-white/80 rounded-lg p-3 space-y-1">
+                                                    <p><strong>Son onaylı takip:</strong> {finding.currentStatusSummary.latestApproved.followUpId} · değerlendirme {fmt(finding.currentStatusSummary.latestApproved.evaluatedAt)} · onay {fmt(finding.currentStatusSummary.latestApproved.approvedAt)}</p>
+                                                    <p><strong>Değerlendiren:</strong> {finding.currentStatusSummary.latestApproved.evaluatorName || '—'} · <strong>Onaylayan:</strong> {finding.currentStatusSummary.latestApproved.approverName || '—'}</p>
+                                                    {finding.currentStatusSummary.latestApproved.explanation && <p className="whitespace-pre-wrap"><strong>Sonuç açıklaması:</strong> {finding.currentStatusSummary.latestApproved.explanation}</p>}
+                                                    <button type="button" className="text-blue-700 font-semibold hover:underline" onClick={() => {
+                                                        setActiveTab('takip');
+                                                        const followUp = finding.followUps.find(item => item.id === finding.currentStatusSummary.latestApproved?.id);
+                                                        if (followUp) { setSelectedFollowUp(followUp); setFollowUpOpen(true); }
+                                                    }}>Takip çalışmasına git</button>
+                                                </div>
+                                            )}
+                                            {finding.currentStatusSummary.pending && <p className="text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">Yeni takip değerlendirmesi tamamlandı; ikinci kontrolcü onayı bekleniyor ({finding.currentStatusSummary.pending.followUpId}).</p>}
+                                            {finding.currentStatusSummary.nextFollowUpDate && <p className="text-xs text-blue-800"><strong>Sonraki takip:</strong> {fmt(finding.currentStatusSummary.nextFollowUpDate)}</p>}
+                                        </div>
+                                        {finding.currentStatusDetail && <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-[10px] font-bold text-slate-500 uppercase">Manuel / geçmiş açıklama</p><p className="text-xs text-slate-700 whitespace-pre-wrap mt-1">{finding.currentStatusDetail}</p></div>}
                                         {finding.statusLogs.length === 0 && <p className="text-xs text-slate-400 italic">Henüz güncelleme yok</p>}
                                         <div className="space-y-2 max-h-48 overflow-y-auto">
                                             {finding.statusLogs.map(log => (
@@ -602,6 +664,15 @@ export default function FindingDetailPage() {
                                         </div>
                                     </div>
                                 </DetailSection>
+
+                                {(finding.controlTest || (finding.referencingTests?.length ?? 0) > 0) && (
+                                    <DetailSection title="İlişkili Kontrol Testleri">
+                                        <div className="space-y-2 text-xs">
+                                            {finding.controlTest && <Link href={`/controls/testing/${finding.controlTest.id}`} className="block rounded-lg border border-blue-200 bg-blue-50 p-2 hover:border-blue-400"><strong>İlk tespit testi:</strong> {finding.controlTest.testNo} {finding.controlTest.periodLabel ? `· ${finding.controlTest.periodLabel}` : ''}</Link>}
+                                            {(finding.referencingTests ?? []).map(test => <Link key={test.id} href={`/controls/testing/${test.id}`} className="block rounded-lg border border-amber-200 bg-amber-50 p-2 hover:border-amber-400"><strong>Devam eden sorun referansı:</strong> {test.testNo} {test.periodLabel ? `· ${test.periodLabel}` : ''}{test.referenceReason ? <span className="block mt-1 text-slate-600">{test.referenceReason}</span> : null}</Link>)}
+                                        </div>
+                                    </DetailSection>
+                                )}
 
                                 {/* Birim Cevabı & İKS Değerlendirmesi */}
                                 {finding.birimCevabi && (
@@ -751,11 +822,22 @@ export default function FindingDetailPage() {
                         ) : (
                             <div className="space-y-4">
                                 {finding.followUps.map(fu => {
-                                    const fuCfg = followUpStatusConfig[fu.status] || { label: fu.status, variant: 'neutral' as BV };
+                                    const isPendingApproval = fu.status === 'TAMAMLANDI' && fu.approvalStatus === 'BEKLIYOR' && !!fu.result;
+                                    const isApproved = fu.status === 'ONAYLANDI' || fu.approvalStatus === 'ONAYLANDI';
+                                    const isRevisionRequired = fu.approvalStatus === 'REDDEDILDI';
+                                    const canEditFollowUp = !isPendingApproval && !isApproved
+                                        && (!fu.assigneeId || fu.assigneeId === user?.id);
+                                    const fuCfg = isPendingApproval
+                                        ? { label: 'Onay Bekliyor', variant: 'warning' as BV }
+                                        : isRevisionRequired
+                                            ? { label: 'Revizyon Gerekli', variant: 'high' as BV }
+                                            : isApproved && fu.resolutionOutcome === 'ERTELENDI'
+                                                ? { label: 'Ertelendi', variant: 'neutral' as BV }
+                                                : (followUpStatusConfig[fu.status] || { label: fu.status, variant: 'neutral' as BV });
                                     const resOutCfg = fu.resolutionOutcome ? resolutionConfig[fu.resolutionOutcome] : null;
                                     const linkedAction = finding.actions.find(a => a.id === fu.actionId);
                                     return (
-                                        <div key={fu.id} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                                        <div id={`follow-up-${fu.id}`} key={fu.id} className={`bg-white border rounded-xl shadow-sm overflow-hidden scroll-mt-24 ${searchParams.get('followUpId') === fu.id ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'}`}>
                                             <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50 border-b border-slate-100">
                                                 <div>
                                                     <div className="flex items-center gap-2 flex-wrap">
@@ -776,10 +858,15 @@ export default function FindingDetailPage() {
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-2">
-                                                    {fu.status !== 'ONAYLANDI' && fu.result && fu.secondControllerId === user?.id && (
+                                                    {isPendingApproval && fu.secondControllerId === user?.id && (
                                                         <Button variant="success" size="sm" onClick={() => approveFollowUp(fu.id)}>Onayla</Button>
                                                     )}
-                                                    <Button variant="secondary" size="sm" onClick={() => { setSelectedFollowUp(fu); setFollowUpOpen(true); }}>Düzenle</Button>
+                                                    {isPendingApproval && fu.secondControllerId === user?.id && (
+                                                        <Button variant="danger" size="sm" onClick={() => rejectFollowUp(fu.id)}>Reddet</Button>
+                                                    )}
+                                                    <Button variant="secondary" size="sm" onClick={() => { setSelectedFollowUp(fu); setFollowUpOpen(true); }}>
+                                                        {canEditFollowUp ? 'Düzenle' : 'Görüntüle'}
+                                                    </Button>
                                                 </div>
                                             </div>
                                             <div className="p-5 space-y-3">
@@ -809,6 +896,12 @@ export default function FindingDetailPage() {
                                                         <StatusBadge variant={fu.result === 'YETERLI' ? 'success' : fu.result === 'YENI_AKSIYON_GEREKLI' ? 'high' : 'critical'} dot>
                                                             {fu.result === 'YETERLI' ? 'Yeterli' : fu.result === 'YENI_AKSIYON_GEREKLI' ? 'Yeni Aksiyon Gerekli' : 'Yetersiz'}
                                                         </StatusBadge>
+                                                    </div>
+                                                )}
+                                                {fu.rejectionReason && (
+                                                    <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                                                        <p className="text-[10px] font-bold uppercase tracking-widest text-red-600">Ret Gerekçesi</p>
+                                                        <p className="mt-1 text-sm text-red-800">{fu.rejectionReason}</p>
                                                     </div>
                                                 )}
                                                 {/* FollowUp attachments */}
@@ -977,6 +1070,12 @@ export default function FindingDetailPage() {
                     findingId={finding.id}
                     followUp={selectedFollowUp}
                     actions={finding.actions}
+                    readOnly={!!selectedFollowUp && (
+                        selectedFollowUp.status === 'ONAYLANDI'
+                        || selectedFollowUp.approvalStatus === 'ONAYLANDI'
+                        || (selectedFollowUp.status === 'TAMAMLANDI' && selectedFollowUp.approvalStatus === 'BEKLIYOR' && !!selectedFollowUp.result)
+                        || (!!selectedFollowUp.assigneeId && selectedFollowUp.assigneeId !== user?.id)
+                    )}
                     isOpen={followUpOpen}
                     onClose={() => { setFollowUpOpen(false); setSelectedFollowUp(null); }}
                     onSuccess={() => load()}

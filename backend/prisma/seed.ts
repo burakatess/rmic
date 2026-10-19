@@ -516,8 +516,12 @@ async function main() {
     console.log(`✅ ${findings.length} bulgu`);
 
     // ── 9. Aksiyonlar ────────────────────────────────────────────────────────
-    let aNum = 1;
-    const genAId = () => `A-2026-${(aNum++).toString().padStart(4, '0')}`;
+    const actionSeqByFinding = new Map<string, number>();
+    const genAId = (finding: { id: string; findingId: string }) => {
+        const next = (actionSeqByFinding.get(finding.id) ?? 0) + 1;
+        actionSeqByFinding.set(finding.id, next);
+        return `A-${finding.findingId.slice(2)}-${next.toString().padStart(2, '0')}`;
+    };
     const aDescs = [
         'Erişim hakları gözden geçirilecek, gereksiz yetkiler kaldırılacaktır.',
         'Güvenlik duvarı kuralları denetlenecek ve revize edilecektir.',
@@ -539,7 +543,7 @@ async function main() {
         const dueDate = aStat === 'KAPATILDI' ? pastDate(randInt(1, 30)) : futureDate(randInt(30, 120));
 
         const a1 = await prisma.action.create({ data: {
-            actionId: genAId(), findingId: f.id,
+            actionId: genAId(f), findingId: f.id,
             description: aDescs[i % aDescs.length],
             ownerId: randOf([uMgr1, uMgr2, ...auditors]).id,
             directorateId: f.directorateId, responsibleDepartment: f.relatedDepartment,
@@ -551,7 +555,7 @@ async function main() {
 
         if (i % 3 === 0) {
             const a2 = await prisma.action.create({ data: {
-                actionId: genAId(), findingId: f.id,
+                actionId: genAId(f), findingId: f.id,
                 description: `Ek düzeltici aksiyon: ${f.summary} için süreç iyileştirme çalışması.`,
                 ownerId: randOf(managers).id,
                 directorateId: f.directorateId,
@@ -570,8 +574,12 @@ async function main() {
     console.log(`✅ ${actions.length} aksiyon`);
 
     // ── 10. Bulgu Takip Çalışmaları ──────────────────────────────────────────
-    let fuNum = 1;
-    const genFuId = () => `T-2026-${(fuNum++).toString().padStart(4, '0')}`;
+    const followUpSeqByAction = new Map<string, number>();
+    const genFuId = (action: { id: string; actionId: string }) => {
+        const next = (followUpSeqByAction.get(action.id) ?? 0) + 1;
+        followUpSeqByAction.set(action.id, next);
+        return `T-${action.actionId.slice(2)}-${next.toString().padStart(2, '0')}`;
+    };
     const followUps: any[] = [];
 
     for (const action of actions.slice(0, 30)) {
@@ -583,7 +591,7 @@ async function main() {
         const resOut = result === 'YETERLI' ? 'KAPATILDI' : result === 'YETERSIZ' ? 'YENI_AKSIYON_GEREKLI' : 'DEVAM_EDIYOR';
 
         const fu = await prisma.findingFollowUp.create({ data: {
-            followUpId: genFuId(), findingId: f.id, actionId: action.id,
+            followUpId: genFuId(action), findingId: f.id, actionId: action.id,
             status: fuStat as any, plannedDate: action.dueDate, directorateId: f.directorateId,
             birimCevabi: fuStat !== 'BEKLIYOR' ? 'Birim aksiyonları değerlendirdi ve ilerleme bildirdi.' : null,
             currentStatusDetail: fuStat !== 'BEKLIYOR' ? `${f.summary} konusunda alınan aksiyonlar devam etmektedir.` : null,
@@ -599,15 +607,16 @@ async function main() {
     }
     console.log(`✅ ${followUps.length} takip çalışması`);
 
-    // RecordCounter senkronizasyonu — bu seed script actionId/followUpId'yi kendi
-    // bellek-içi sayacıyla üretiyor (RecordCounter'ı hiç çağırmıyor). audits.service.ts
-    // içindeki nextCounterValue-tabanlı generateActionId/generateFollowUpId (tercih
-    // edilen, atomik üretim yolu — bkz. sequential-id.ts) bu senkronizasyon olmadan
-    // her taze seed sonrası A-2026-0001'den başlar ve yukarıdaki seed kayıtlarıyla
-    // ÇAKIŞIR. Var olan en yüksek sıra numarasına eşitleniyor.
-    await prisma.recordCounter.upsert({ where: { scope: 'action' }, update: { value: aNum - 1 }, create: { scope: 'action', value: aNum - 1 } });
-    await prisma.recordCounter.upsert({ where: { scope: 'followup' }, update: { value: fuNum - 1 }, create: { scope: 'followup', value: fuNum - 1 } });
-    console.log('✅ RecordCounter (action/followup) mevcut seed verisiyle senkronize edildi');
+    await prisma.recordCounter.upsert({ where: { scope: 'finding:2026' }, update: { value: fNum - 1 }, create: { scope: 'finding:2026', value: fNum - 1 } });
+    for (const [findingId, value] of actionSeqByFinding) {
+        const scope = `action:${findingId}`;
+        await prisma.recordCounter.upsert({ where: { scope }, update: { value }, create: { scope, value } });
+    }
+    for (const [actionId, value] of followUpSeqByAction) {
+        const scope = `followup:${actionId}`;
+        await prisma.recordCounter.upsert({ where: { scope }, update: { value }, create: { scope, value } });
+    }
+    console.log('✅ Hiyerarşik RecordCounter kapsamları seed verisiyle senkronize edildi');
 
     // ── 11. Audit Trail & StatusLog ──────────────────────────────────────────
     for (const f of findings.slice(0, 10)) {

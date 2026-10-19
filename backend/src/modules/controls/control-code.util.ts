@@ -7,7 +7,7 @@ import { nextCounterValue } from '../../common/util/sequential-id';
  * common/util/sequential-id.ts). padStart(4,'0') 9999 sonrası kesmez,
  * doğal olarak 5+ haneye genişler.
  */
-export async function generateControlCode(db: { $queryRawUnsafe<T = unknown>(query: string, ...values: unknown[]): Promise<T> }): Promise<string> {
+export async function generateControlCode(db: Parameters<typeof nextCounterValue>[0]): Promise<string> {
     const value = await nextCounterValue(db, 'control-code');
     return `BTK.${value.toString().padStart(4, '0')}`;
 }

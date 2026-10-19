@@ -5,6 +5,7 @@ import { generateControlCode } from './control-code.util';
 import { nextTestCode } from './test-code.util';
 import { projectControlStatus } from '../../common/workflow/workflow-projection';
 import { personFieldWhere } from '../../common/util/person-filter';
+import { CompleteControlTestDto } from './dto';
 
 @Injectable()
 export class ControlsService {
@@ -600,7 +601,32 @@ export class ControlsService {
         return updated;
     }
 
-    async completeTest(testId: string, data: any, userId: string) {
+    async getOpenFindingReferences(testId: string) {
+        const test = await this.prisma.controlTest.findUnique({ where: { id: testId }, select: { id: true, controlId: true, plannedDate: true } });
+        if (!test) throw new NotFoundException(`Test ${testId} bulunamadı`);
+        const findings = await this.prisma.finding.findMany({
+            where: {
+                AND: [
+                    { OR: [{ controlId: test.controlId }, { controlTest: { controlId: test.controlId } }] },
+                    { status: { not: 'CLOSED' }, workflowStatus: { not: 'IPTAL' }, resolutionStatus: { not: 'KAPATILDI' } },
+                ],
+            },
+            select: {
+                id: true, findingId: true, summary: true, status: true, workflowStatus: true,
+                resolutionStatus: true, createdAt: true,
+                control: { select: { id: true, controlId: true, name: true } },
+                controlTest: { select: { id: true, testNo: true, plannedDate: true, periodLabel: true, control: { select: { id: true, controlId: true, name: true } } } },
+            },
+            orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+        });
+        return findings.map(finding => ({
+            ...finding,
+            control: finding.control ?? finding.controlTest?.control ?? null,
+            recommended: !!finding.controlTest?.plannedDate && finding.controlTest.plannedDate < test.plannedDate,
+        })).sort((a, b) => Number(b.recommended) - Number(a.recommended));
+    }
+
+    async completeTest(testId: string, data: CompleteControlTestDto, userId: string) {
         const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
         if (!test) throw new NotFoundException(`Test ${testId} not found`);
         // İş kuralı: test yeniden başlatılmadan (DEVAM_EDIYOR) veya geri gönderilmiş
@@ -622,8 +648,8 @@ export class ControlsService {
             if (!relatedViaControl && !relatedViaTest) {
                 throw new BadRequestException('Referans verilen bulgu bu kontrolle ilişkili değil.');
             }
-            if (ref.status === 'CLOSED') {
-                throw new BadRequestException('Kapalı bir bulguya referans verilemez.');
+            if (ref.status === 'CLOSED' || ref.workflowStatus === 'IPTAL' || ref.resolutionStatus === 'KAPATILDI') {
+                throw new BadRequestException('Kapalı, sonuçlandırılmış veya iptal edilmiş bir bulguya referans verilemez.');
             }
 
             const updated = await this.prisma.controlTest.update({
@@ -633,13 +659,13 @@ export class ControlsService {
                     completedAt: new Date(),
                     findingStatus: 'BULGUSU_VAR',
                     referencedFindingId: ref.id,
-                    referenceReason: data.referenceReason || null,
+                    referenceReason: data.referenceReason!.trim(),
                     resultText: data.resultText || `Devam eden açık bulgu (${ref.findingId}) referans alınarak ilerletildi.`,
                 },
             });
 
             await this.prisma.auditLog.create({
-                data: { userId, action: 'REFERENCE_FINDING', entityType: 'ControlTest', entityId: testId, newValue: { referencedFindingId: ref.id, findingId: ref.findingId } },
+                data: { userId, action: 'REFERENCE_FINDING', entityType: 'ControlTest', entityId: testId, newValue: { referencedFindingId: ref.id, findingId: ref.findingId, referenceReason: data.referenceReason!.trim() } },
             });
 
             return updated;

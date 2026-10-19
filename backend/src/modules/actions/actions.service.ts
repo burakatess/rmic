@@ -1,6 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
-import { nextCounterValue, formatRecordId } from '../../common/util/sequential-id';
 import { AuditsService } from '../audits/audits.service';
 import { projectActionStatus } from '../../common/workflow/workflow-projection';
 import { parseMultiValue, personFieldWhere } from '../../common/util/person-filter';
@@ -28,11 +27,6 @@ export class ActionsService {
             throw new ForbiddenException('Yalnızca kendi sorumluluğunuzdaki aksiyonu değiştirebilirsiniz');
         }
         return action;
-    }
-
-    /** Atomik sayaçtan A-2026-NNNN (bkz. audits.service.ts ile aynı). */
-    private async nextActionId(): Promise<string> {
-        return formatRecordId('A', await nextCounterValue(this.prisma, 'action'));
     }
 
     async findAll(query: any, currentUserId?: string) {

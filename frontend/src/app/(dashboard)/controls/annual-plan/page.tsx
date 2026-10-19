@@ -510,6 +510,22 @@ function AnnualPlanPageContent() {
                 </Link>
             ),
         },
+        {
+            key: 'description', header: 'Kontrol Tanımı', defaultWidth: 340,
+            render: (row) => (
+                <details className="group text-xs text-slate-600">
+                    <summary className="list-none cursor-pointer">
+                        <span className="line-clamp-3 leading-relaxed">{row.description || '—'}</span>
+                        {row.description?.length > 180 && <span className="mt-1 inline-block font-semibold text-blue-700 group-open:hidden">Tam metni gör</span>}
+                    </summary>
+                    <p className="mt-2 whitespace-pre-wrap leading-relaxed max-h-64 overflow-auto">{row.description}</p>
+                </details>
+            ),
+        },
+        {
+            key: 'directorate', header: 'İlgili Direktörlük', defaultWidth: 190,
+            render: (row) => <span className="text-xs text-slate-600" title="Kaynak kontrolün ilgili direktörlüğü">{row.directorateName || 'Atanmamış'}</span>,
+        },
         { key: 'freq', header: 'Sıklık', defaultWidth: 90, render: (row) => <span className="text-xs text-slate-500">{FREQUENCY_LABELS[row.frequency] || row.frequency}</span> },
         {
             key: 'prev', header: `${year - 1}`, defaultWidth: 80,

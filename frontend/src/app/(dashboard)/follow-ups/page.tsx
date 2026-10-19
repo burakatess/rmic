@@ -293,7 +293,10 @@ export default function FollowUpsPage() {
             defaultWidth: 160,
             filter: { type: 'text', placeholder: 'Takip No...', fn: (f: FollowUp, v) => f.followUpId.toLowerCase().includes(v.toLowerCase()) },
             render: (f) => (
-                <span className="font-mono text-xs font-bold text-violet-700">{f.followUpId}</span>
+                <Link href={`/findings/${f.finding.id}?tab=takip&followUpId=${f.id}`}
+                    className="font-mono text-xs font-bold text-violet-700 hover:text-violet-900 hover:underline">
+                    {f.followUpId}
+                </Link>
             ),
         },
         {
@@ -399,7 +402,7 @@ export default function FollowUpsPage() {
             header: 'İşlemler',
             defaultWidth: 80,
             render: (f) => (
-                <Link href={`/findings/${f.finding.id}?tab=takip`}
+                <Link href={`/findings/${f.finding.id}?tab=takip&followUpId=${f.id}`}
                     className="p-1.5 rounded text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors inline-block"
                     title="Bulguya Git">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

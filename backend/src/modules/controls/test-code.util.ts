@@ -14,7 +14,7 @@ import { nextCounterValue } from '../../common/util/sequential-id';
  * commit-edilmemiş satırları görememe) yarattığı çakışma riski burada yok.
  */
 export async function nextTestCode(
-    db: { $queryRawUnsafe<T = unknown>(query: string, ...values: unknown[]): Promise<T> },
+    db: Parameters<typeof nextCounterValue>[0],
     controlId: string,
     controlCode: string,
     year: number,

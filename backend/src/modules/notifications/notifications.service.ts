@@ -41,6 +41,7 @@ export class NotificationsService {
                     status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] as any },
                     plannedDate: { gte: now, lte: in3Days },
                     OR: [
+                        { assigneeId: userId },
                         { finding: { assigneeId: userId } },
                         { action: { ownerId: userId } },
                     ],

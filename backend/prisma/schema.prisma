@@ -858,7 +858,7 @@ model AuditExecution {
 
 model Finding {
   id          String          @id @default(cuid())
-  findingId   String          @unique // 2026.BT.01
+  findingId   String          @unique // Immutable business identifier: B-2026-0001
   description String          @db.Text
   impact      String          @db.Text
   severity    FindingSeverity
@@ -1046,7 +1046,7 @@ enum FindingType {
 
 model FindingFollowUp {
   id         String  @id @default(cuid())
-  followUpId String  @unique // 2026.03.BT.01
+  followUpId String  @unique // Immutable business identifier: T-2026-0001-01-01
   finding    Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
   findingId  String
 
@@ -1074,6 +1074,16 @@ model FindingFollowUp {
   approvalStatus FollowUpApprovalStatus? @default(BEKLIYOR)
   approvedBy     String?
   approvedAt     DateTime?
+  rejectionReason String? @db.Text
+
+  // Takip işi ataması: ControlTest ataması varsa ondan snapshot alınır; legacy
+  // kayıtlarda Finding assignee / Action owner fallback'i kullanılır.
+  assigneeId String?
+
+  // Bir erteleme/onay yalnız bir ardıl takip üretebilir (idempotency).
+  previousFollowUp   FindingFollowUp? @relation("FollowUpSuccession", fields: [previousFollowUpId], references: [id], onDelete: SetNull)
+  previousFollowUpId String?          @unique
+  nextFollowUp       FindingFollowUp? @relation("FollowUpSuccession")
 
   // Direktörlük (FK)
   directorate   Directorate? @relation("FollowUpDirectorate", fields: [directorateId], references: [id])
@@ -1104,6 +1114,7 @@ model FindingFollowUp {
   @@index([findingId])
   @@index([actionId])
   @@index([directorateId])
+  @@index([assigneeId])
   @@index([status])
   @@index([result])
 }
@@ -1185,7 +1196,7 @@ model FindingStatusHistory {
 
 model Action {
   id          String @id @default(cuid())
-  actionId    String @unique // A-2026-001
+  actionId    String @unique // Immutable business identifier: A-2026-0001-01
   description String @db.Text
 
   // Action always belongs to a Finding (iş kuralı)
@@ -1528,7 +1539,7 @@ enum KnowledgeDocKind {
 // ==========================================
 
 model RecordCounter {
-  scope     String   @id // "action" | "followup"
+  scope     String   @id // finding:{year} | action:{findingCuid} | followup:{actionCuid} (+ diğer domain sayaçları)
   value     Int      @default(0)
   updatedAt DateTime @updatedAt
 }

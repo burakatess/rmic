@@ -34,21 +34,21 @@ function timeAgo(dateStr: string): string {
 
 interface SearchResult {
     id: string;
-    type: 'risk' | 'control' | 'finding' | 'action';
+    type: 'risk' | 'control' | 'period-control' | 'control-test' | 'finding' | 'action' | 'follow-up';
+    code: string;
     title: string;
-    subtitle: string;
+    context: string;
     url: string;
 }
-
-// Not: Genel arama için henüz bir backend endpoint'i yok. Sahte/demo sonuç
-// göstermek yerine arama kutusu her zaman "Sonuç bulunamadı" boş state'ine düşer
-// (bkz. aşağıdaki arama efekti) — gerçek bir /search API'si eklenince buraya bağlanacak.
 
 const TYPE_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
     risk: { label: 'Risk', color: 'text-red-700', bg: 'bg-red-100' },
     control: { label: 'Kontrol', color: 'text-blue-700', bg: 'bg-blue-100' },
+    'period-control': { label: 'Dönem Kontrolü', color: 'text-cyan-700', bg: 'bg-cyan-100' },
+    'control-test': { label: 'Kontrol Testi', color: 'text-indigo-700', bg: 'bg-indigo-100' },
     finding: { label: 'Bulgu', color: 'text-purple-700', bg: 'bg-purple-100' },
     action: { label: 'Aksiyon', color: 'text-green-700', bg: 'bg-green-100' },
+    'follow-up': { label: 'Takip', color: 'text-amber-700', bg: 'bg-amber-100' },
 };
 
 export default function Header() {
@@ -76,9 +76,13 @@ export default function Header() {
 
     // Search state
     const [searchQuery, setSearchQuery] = useState('');
-    const [searchCategory, setSearchCategory] = useState<'all' | 'risk' | 'control' | 'finding' | 'action'>('all');
+    const [searchCategory, setSearchCategory] = useState<'all' | SearchResult['type']>('all');
     const [showSearchResults, setShowSearchResults] = useState(false);
     const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+    const [searchLoading, setSearchLoading] = useState(false);
+    const [searchError, setSearchError] = useState<string | null>(null);
+    const [activeResult, setActiveResult] = useState(-1);
+    const searchSequence = useRef(0);
     const searchRef = useRef<HTMLDivElement>(null);
 
     // Close search results when clicking outside
@@ -92,10 +96,39 @@ export default function Header() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Genel arama backend'i henüz yok — sonuç listesi her zaman boş kalır (bkz. yukarıdaki not).
     useEffect(() => {
-        setSearchResults([]);
+        const query = searchQuery.trim();
+        const sequence = ++searchSequence.current;
+        setActiveResult(-1);
+        if (query.length < 2) {
+            setSearchResults([]);
+            setSearchError(null);
+            setSearchLoading(false);
+            return;
+        }
+        setSearchLoading(true);
+        setSearchError(null);
+        const timer = window.setTimeout(async () => {
+            try {
+                const response = await api.globalSearch({ q: query, category: searchCategory, limit: 12 });
+                if (sequence !== searchSequence.current) return;
+                setSearchResults(response.data as SearchResult[]);
+            } catch (error) {
+                if (sequence !== searchSequence.current) return;
+                setSearchResults([]);
+                setSearchError(error instanceof Error ? error.message : 'Arama yapılamadı.');
+            } finally {
+                if (sequence === searchSequence.current) setSearchLoading(false);
+            }
+        }, 300);
+        return () => window.clearTimeout(timer);
     }, [searchQuery, searchCategory]);
+
+    const chooseResult = (result: SearchResult) => {
+        setShowSearchResults(false);
+        setSearchQuery('');
+        router.push(result.url);
+    };
 
     const handleLogout = () => {
         localStorage.removeItem('accessToken');
@@ -169,8 +202,11 @@ export default function Header() {
                                 <option value="all">Tümü</option>
                                 <option value="risk">Risk</option>
                                 <option value="control">Kontrol</option>
+                                <option value="period-control">Dönem Kontrolü</option>
+                                <option value="control-test">Kontrol Testi</option>
                                 <option value="finding">Bulgu</option>
                                 <option value="action">Aksiyon</option>
+                                <option value="follow-up">Bulgu Takip</option>
                             </select>
                             <div className="w-px h-5 bg-gray-300" />
                             {/* Search Input */}
@@ -186,6 +222,20 @@ export default function Header() {
                                         setShowSearchResults(true);
                                     }}
                                     onFocus={() => setShowSearchResults(true)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'ArrowDown') {
+                                            event.preventDefault();
+                                            setActiveResult(current => Math.min(current + 1, searchResults.length - 1));
+                                        } else if (event.key === 'ArrowUp') {
+                                            event.preventDefault();
+                                            setActiveResult(current => Math.max(current - 1, 0));
+                                        } else if (event.key === 'Enter' && searchResults.length > 0) {
+                                            event.preventDefault();
+                                            chooseResult(searchResults[Math.max(activeResult, 0)]);
+                                        } else if (event.key === 'Escape') {
+                                            setShowSearchResults(false);
+                                        }
+                                    }}
                                     placeholder="ID veya isim ara..."
                                     className="w-48 h-9 pl-8 pr-3 bg-transparent border-none text-sm focus:outline-none placeholder-gray-400"
                                 />
@@ -193,17 +243,24 @@ export default function Header() {
                         </div>
 
                         {/* Search Results Dropdown */}
-                        {showSearchResults && searchResults.length > 0 && (
+                        {showSearchResults && searchQuery.trim().length >= 2 && (searchLoading || searchError || searchResults.length > 0) && (
                             <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden z-50">
                                 <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
-                                    <p className="text-xs text-gray-500">{searchResults.length} sonuç bulundu</p>
+                                    <p className="text-xs text-gray-500">{searchLoading ? 'Aranıyor…' : searchError ? 'Arama hatası' : `${searchResults.length} sonuç bulundu`}</p>
                                 </div>
-                                <div className="max-h-72 overflow-y-auto">
-                                    {searchResults.map(result => (
+                                {searchError ? (
+                                    <p role="alert" className="p-4 text-sm text-red-600 text-center">{searchError}</p>
+                                ) : searchLoading ? (
+                                    <p className="p-4 text-sm text-gray-500 text-center">Yükleniyor…</p>
+                                ) : <div role="listbox" className="max-h-72 overflow-y-auto">
+                                    {searchResults.map((result, index) => (
                                         <Link
-                                            key={result.id}
+                                            key={`${result.type}-${result.id}`}
                                             href={result.url}
-                                            className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 border-b border-gray-50 last:border-0"
+                                            role="option"
+                                            aria-selected={index === activeResult}
+                                            className={`flex items-center gap-3 px-3 py-2.5 border-b border-gray-50 last:border-0 ${index === activeResult ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                                            onMouseEnter={() => setActiveResult(index)}
                                             onClick={() => {
                                                 setShowSearchResults(false);
                                                 setSearchQuery('');
@@ -214,15 +271,16 @@ export default function Header() {
                                             </span>
                                             <div className="flex-1 min-w-0">
                                                 <p className="text-sm font-medium text-gray-900 truncate">{result.title}</p>
-                                                <p className="text-xs text-gray-500 truncate">{result.subtitle}</p>
+                                                <p className="text-xs font-mono text-gray-600 truncate">{result.code}</p>
+                                                {result.context && <p className="text-xs text-gray-500 truncate">{result.context}</p>}
                                             </div>
                                         </Link>
                                     ))}
-                                </div>
+                                </div>}
                             </div>
                         )}
 
-                        {showSearchResults && searchQuery.length >= 2 && searchResults.length === 0 && (
+                        {showSearchResults && searchQuery.trim().length >= 2 && !searchLoading && !searchError && searchResults.length === 0 && (
                             <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-lg border border-gray-200 p-4 z-50">
                                 <p className="text-sm text-gray-500 text-center">Sonuç bulunamadı</p>
                             </div>

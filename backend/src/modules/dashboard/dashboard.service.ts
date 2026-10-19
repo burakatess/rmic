@@ -46,7 +46,7 @@ function actionScopeWhere(scope: ResolvedDirectorateScope) {
 }
 function followUpScopeWhere(scope: ResolvedDirectorateScope) {
     if (scope.appliedScope === 'MINE') {
-        return { OR: [{ finding: { assigneeId: scope.userId } }, { action: { ownerId: scope.userId } }, { secondControllerId: scope.userId }] };
+        return { OR: [{ assigneeId: scope.userId }, { finding: { assigneeId: scope.userId } }, { action: { ownerId: scope.userId } }, { secondControllerId: scope.userId }] };
     }
     if (scope.appliedScope === 'UNIT') return { directorateId: { in: scope.directorateIds! } };
     return {};
@@ -347,7 +347,7 @@ export class DashboardService {
                 ...(includeCarryover ? {} : { plannedDate: { gte: periodStart } }),
             },
             select: {
-                id: true, followUpId: true, status: true, plannedDate: true,
+                id: true, followUpId: true, status: true, plannedDate: true, assigneeId: true,
                 finding: { select: { summary: true, severity: true, assigneeId: true } },
                 action: { select: { ownerId: true } },
             },
@@ -366,7 +366,7 @@ export class DashboardService {
                 carriedOver: !!r.plannedDate && r.plannedDate < periodStart,
                 expectedAction: { label: 'Takibi değerlendir', href: '/follow-ups' },
                 sortScore: this.score({ overdue, revision: false, severity: r.finding?.severity ?? null, dueDate: due }),
-                assigneeId: r.finding?.assigneeId ?? r.action?.ownerId ?? null,
+                assigneeId: r.assigneeId ?? r.finding?.assigneeId ?? r.action?.ownerId ?? null,
             };
         });
     }

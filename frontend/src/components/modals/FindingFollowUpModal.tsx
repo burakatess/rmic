@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
-import { Button, StatusBadge } from '../ui';
+import { Button } from '../ui';
 import { useToast } from '../ui/Toast';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -29,6 +29,7 @@ interface FindingFollowUpModalProps {
     findingId: string;
     followUp?: FollowUp | null;
     actions?: Action[];
+    readOnly?: boolean;
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -44,7 +45,7 @@ const FOLLOW_UP_STATUSES = [
 const RESULT_OPTIONS = [
     { value: 'YETERLI', label: 'Yeterli', desc: 'Kanıt ve uygulama aksiyonun yeterli olduğunu gösteriyor.' },
     { value: 'YETERSIZ', label: 'Yetersiz', desc: 'Düzeltme sürmeli veya yeni bir tarihe ertelenmeli.' },
-    { value: 'YENI_AKSIYON_GEREKLI', label: 'Yeni Aksiyon Gerekli', desc: 'Ek bir düzeltici aksiyon tanımlanmalı.' },
+    { value: 'YENI_AKSIYON_GEREKLI', label: 'Yeni Aksiyon Gerekli', desc: 'Yeni bir düzeltici aksiyon (plan, sorumlu birim, hedef tarih) tanımlanmalı.' },
 ];
 
 // Yalnız YETERSIZ değerlendirmesinde kullanıcı devam/erteleme kararını verir.
@@ -71,7 +72,7 @@ const fmt = (d?: string | null) => {
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
-export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, followUp, actions = [] }: FindingFollowUpModalProps) {
+export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, followUp, actions = [], readOnly = false }: FindingFollowUpModalProps) {
     const { success, error: showError } = useToast();
     const isEdit = !!followUp;
     const [saving, setSaving] = useState(false);
@@ -94,14 +95,11 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
         notes:                     '',
     });
 
-    // "Yeni Aksiyon Gerekli" seçilince inline aksiyon formu
-    const [newActionForm, setNewActionForm] = useState({
-        description:          '',
-        ownerId:              '',
-        responsibleDepartment:'',
-        dueDate:              '',
-        notes:                '',
-    });
+    // YENI_AKSIYON_GEREKLI: onayda oluşturulacak yeni aksiyonun tanımı.
+    const EMPTY_NEW_ACTION = { description: '', directorateId: '', ownerId: '', dueDate: '', notes: '' };
+    const [newAction, setNewAction] = useState(EMPTY_NEW_ACTION);
+    const [directorates, setDirectorates] = useState<{ id: string; name: string }[]>([]);
+
     const [users, setUsers] = useState<{ id: string; firstName: string; lastName: string; department?: string }[]>([]);
 
     useEffect(() => {
@@ -123,21 +121,31 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                 explanation:               followUp.explanation || '',
                 notes:                     followUp.notes || '',
             });
+            const draft = (followUp as { newActionDraft?: Record<string, unknown> | null }).newActionDraft;
+            setNewAction(draft && typeof draft === 'object' ? {
+                description:   String(draft.description ?? ''),
+                directorateId: String(draft.directorateId ?? ''),
+                ownerId:       String(draft.ownerId ?? ''),
+                dueDate:       fmt(typeof draft.dueDate === 'string' ? draft.dueDate : null),
+                notes:         String(draft.notes ?? ''),
+            } : EMPTY_NEW_ACTION);
         } else {
+            setNewAction(EMPTY_NEW_ACTION);
             setForm({ actionId: '', status: 'BEKLIYOR', secondControllerId: '', birimCevabi: '', currentStatusDetail: '', internalControlAssessment: '', result: '', resolutionOutcome: '', newFollowUpDate: '', testDate: '', targetResolutionDate: '', explanation: '', notes: '' });
         }
-        // Load users for new action
+        // İkinci kontrolcü ataması için kullanıcılar.
         api.getUsers().then((res: any) => setUsers(Array.isArray(res) ? res : res?.data || [])).catch(() => setUsers([]));
+        api.getDirectorates({ isActive: 'true' })
+            .then((res: any) => setDirectorates(Array.isArray(res) ? res : res?.data || []))
+            .catch(() => setDirectorates([]));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen, followUp]);
 
     const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
         setForm(p => ({ ...p, [key]: e.target.value }));
 
-    const setNA = (key: keyof typeof newActionForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-        setNewActionForm(p => ({ ...p, [key]: e.target.value }));
-
-    const showNewActionForm = form.result === 'YENI_AKSIYON_GEREKLI';
     const showNewDate = form.resolutionOutcome === 'ERTELENDI';
+    const showNewAction = form.result === 'YENI_AKSIYON_GEREKLI';
 
     const chooseResult = (result: string) => {
         setForm(p => ({
@@ -154,6 +162,10 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!isEdit && !form.actionId) {
+            showError('Zorunlu Alan', 'Takip çalışması için ilgili aksiyonu seçiniz.');
+            return;
+        }
 
         // Validations
         if (!form.currentStatusDetail.trim()) {
@@ -168,49 +180,45 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
             showError('Zorunlu Alan', 'Ertelenen takip için yeni takip tarihi seçiniz.');
             return;
         }
-        if (form.result === 'YENI_AKSIYON_GEREKLI' && !newActionForm.description.trim()) {
-            showError('Zorunlu Alan', 'Yeni aksiyon açıklaması giriniz.');
-            return;
-        }
-        if (form.result === 'YENI_AKSIYON_GEREKLI' && !newActionForm.ownerId) {
-            showError('Zorunlu Alan', 'Yeni aksiyon için sorumlu kişi seçiniz.');
-            return;
-        }
-        if (form.result === 'YENI_AKSIYON_GEREKLI' && !newActionForm.dueDate) {
-            showError('Zorunlu Alan', 'Yeni aksiyon için hedef tarih giriniz.');
-            return;
+        if (form.result === 'YENI_AKSIYON_GEREKLI') {
+            if (!newAction.description.trim()) {
+                showError('Zorunlu Alan', 'Yeni Aksiyon Planı zorunludur.');
+                return;
+            }
+            if (!newAction.directorateId) {
+                showError('Zorunlu Alan', 'Yeni aksiyon için Sorumlu Birim seçiniz.');
+                return;
+            }
+            if (!newAction.dueDate) {
+                showError('Zorunlu Alan', 'Yeni aksiyon için hedef tarihi seçiniz.');
+                return;
+            }
         }
 
         setSaving(true);
         try {
-            const isNewActionCase = form.result === 'YENI_AKSIYON_GEREKLI'
-                && newActionForm.description && newActionForm.ownerId && newActionForm.dueDate;
-
             const payload: Record<string, any> = {
-                actionId:                  form.actionId || null,
+                ...(!isEdit ? { actionId: form.actionId } : {}),
                 status:                    form.status,
                 birimCevabi:               form.birimCevabi || null,
                 currentStatusDetail:       form.currentStatusDetail,
                 internalControlAssessment: form.internalControlAssessment || null,
                 result:                    form.result || null,
                 resolutionOutcome:         form.resolutionOutcome || null,
-                newFollowUpDate:           form.newFollowUpDate || null,
+                newFollowUpDate:           form.result === 'YENI_AKSIYON_GEREKLI' ? null : (form.newFollowUpDate || null),
+                ...(form.result === 'YENI_AKSIYON_GEREKLI' ? {
+                    newAction: {
+                        description:   newAction.description.trim(),
+                        directorateId: newAction.directorateId,
+                        ...(newAction.ownerId ? { ownerId: newAction.ownerId } : {}),
+                        dueDate:       newAction.dueDate,
+                        ...(newAction.notes.trim() ? { notes: newAction.notes.trim() } : {}),
+                    },
+                } : {}),
                 testDate:                  form.testDate || null,
                 targetResolutionDate:      form.targetResolutionDate || null,
                 explanation:               form.explanation || null,
                 notes:                     form.notes || null,
-                newActionRequired:         form.result === 'YENI_AKSIYON_GEREKLI',
-                // Backend, YENI_AKSIYON_GEREKLI sonucunda bu bilgiyle (veya boşsa fallback ile)
-                // aynı istekte otomatik yeni Action + FollowUp oluşturur — ayrı bir çağrı gerekmez.
-                ...(isNewActionCase ? {
-                    newAction: {
-                        description:           newActionForm.description,
-                        ownerId:               newActionForm.ownerId,
-                        responsibleDepartment: newActionForm.responsibleDepartment || undefined,
-                        dueDate:               newActionForm.dueDate,
-                        notes:                 newActionForm.notes || undefined,
-                    },
-                } : {}),
             };
 
             if (isEdit && followUp) {
@@ -222,10 +230,15 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                         reason: form.explanation?.trim() || 'Takip değerlendirmesi için ikinci kontrolcü atandı.',
                     });
                 }
-                const res = await api.updateFollowUp(findingId, followUp.id, payload) as { createdAction?: { actionId: string } | null };
+                const res = await api.updateFollowUp(findingId, followUp.id, payload) as {
+                    createdFollowUp?: { followUpId: string } | null;
+                    createdAction?: { actionId: string } | null;
+                };
                 // Mesaj, formun doluluğuna göre DEĞİL, backend'in gerçek sonucuna göre (Madde 7).
                 success('Güncellendi', res?.createdAction
-                    ? `Takip çalışması güncellendi. Yeni düzeltici aksiyon oluşturuldu: ${res.createdAction.actionId}`
+                    ? `Yeni aksiyon oluşturuldu: ${res.createdAction.actionId}`
+                    : res?.createdFollowUp
+                    ? `Takip ertelendi. Yeni takip oluşturuldu: ${res.createdFollowUp.followUpId}`
                     : form.status === 'TAMAMLANDI'
                         ? 'Takip tamamlandı, ikinci kontrolcü onayı bekleniyor.'
                         : 'Takip çalışması güncellendi.');
@@ -253,7 +266,7 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                 <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 bg-slate-50/50">
                     <div>
                         <h2 className="text-base font-bold text-slate-900">
-                            {isEdit ? 'Takip Çalışmasını Düzenle' : 'Yeni Takip Çalışması'}
+                            {isEdit ? (readOnly ? 'Takip Çalışması' : 'Takip Çalışmasını Düzenle') : 'Yeni Takip Çalışması'}
                         </h2>
                         {isEdit && followUp && <p className="text-xs text-slate-500 font-mono mt-0.5">{followUp.followUpId}</p>}
                     </div>
@@ -263,22 +276,27 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                 </div>
 
                 <form onSubmit={handleSubmit}>
+                    <fieldset disabled={readOnly}>
                     <div className="px-6 py-5 space-y-6 max-h-[75vh] overflow-y-auto">
 
                         {/* İlgili aksiyon */}
                         {actions.length > 0 && (
                             <div>
                                 <label className="field-label">İlgili Aksiyon</label>
-                                <select value={form.actionId} onChange={set('actionId')}
+                                <select value={form.actionId} onChange={set('actionId')} disabled={isEdit}
                                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-300 outline-none bg-white">
-                                    <option value="">— Aksiyon seçiniz (opsiyonel) —</option>
+                                    <option value="">— Aksiyon seçiniz —</option>
                                     {actions.map(a => (
                                         <option key={a.id} value={a.id}>
                                             {a.actionId} — {a.description.slice(0, 55)}{a.description.length > 55 ? '…' : ''}
                                         </option>
                                     ))}
                                 </select>
+                                {isEdit && <p className="mt-1 text-xs text-slate-500">İlgili aksiyon, takip numarasının immutable hiyerarşisinin parçasıdır.</p>}
                             </div>
+                        )}
+                        {!isEdit && actions.length === 0 && (
+                            <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Takip oluşturmak için önce bu bulguya bir aksiyon ekleyin.</p>
                         )}
 
                         {/* ── BİRİM TARAFI ─────────────────────────────────────────── */}
@@ -398,6 +416,48 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                                 </div>
                             )}
 
+                            {/* Yeni aksiyon tanımı: plan + sorumlu birim + (opsiyonel) sorumlu kişi + hedef tarih */}
+                            {showNewAction && (
+                                <div className="p-4 bg-orange-50 border border-orange-200 rounded-xl space-y-3">
+                                    <p className="text-xs text-orange-800">
+                                        Yeni aksiyon, ikinci kontrolcü onayından sonra bu bulgu için oluşturulur.
+                                    </p>
+                                    <div>
+                                        <label htmlFor="new-action-description" className="text-xs font-semibold text-orange-800 uppercase block mb-1.5">Yeni Aksiyon Planı *</label>
+                                        <textarea id="new-action-description" rows={3} maxLength={5000} value={newAction.description}
+                                            onChange={e => setNewAction(p => ({ ...p, description: e.target.value }))}
+                                            placeholder="Yapılacak düzeltici aksiyonu açıklayınız…"
+                                            className="w-full border border-orange-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-orange-300 bg-white resize-none" />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label htmlFor="new-action-directorate" className="text-xs font-semibold text-orange-800 uppercase block mb-1.5">Sorumlu Birim *</label>
+                                            <select id="new-action-directorate" value={newAction.directorateId}
+                                                onChange={e => setNewAction(p => ({ ...p, directorateId: e.target.value }))}
+                                                className="w-full border border-orange-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-orange-300 bg-white">
+                                                <option value="">Birim seçiniz…</option>
+                                                {directorates.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label htmlFor="new-action-due" className="text-xs font-semibold text-orange-800 uppercase block mb-1.5">Hedef Tarih *</label>
+                                            <input id="new-action-due" type="date" value={newAction.dueDate}
+                                                onChange={e => setNewAction(p => ({ ...p, dueDate: e.target.value }))}
+                                                className="w-full border border-orange-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-orange-300 bg-white" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label htmlFor="new-action-owner" className="text-xs font-semibold text-orange-800 uppercase block mb-1.5">Sorumlu Kişi (opsiyonel)</label>
+                                        <select id="new-action-owner" value={newAction.ownerId}
+                                            onChange={e => setNewAction(p => ({ ...p, ownerId: e.target.value }))}
+                                            className="w-full border border-orange-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-orange-300 bg-white">
+                                            <option value="">Mevcut aksiyonun sorumlusu</option>
+                                            {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}{u.department ? ` — ${u.department}` : ''}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Durum & açıklama */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
@@ -433,56 +493,6 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                             </div>
                         </div>
 
-                        {/* ── YENİ AKSİYON FORMU (YENI_AKSIYON_GEREKLI seçilince) ── */}
-                        {showNewActionForm && (
-                            <div className="border-2 border-orange-300 rounded-xl p-5 bg-orange-50 space-y-4">
-                                <div className="flex items-center gap-2 mb-1">
-                                    <h4 className="text-sm font-bold text-orange-800">Yeni Düzeltici Aksiyon</h4>
-                                </div>
-                                <p className="text-xs text-orange-700">Bu takip tamamlandığında sistem otomatik olarak aşağıdaki aksiyonu oluşturacak.</p>
-
-                                <div>
-                                    <label className="text-xs font-semibold text-orange-800 uppercase block mb-1.5">Aksiyon Açıklaması *</label>
-                                    <textarea value={newActionForm.description} onChange={setNA('description')} rows={2}
-                                        placeholder="Yapılacak düzeltici aksiyon…"
-                                        className="w-full border border-orange-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-300 outline-none resize-none bg-white" />
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-xs font-semibold text-orange-800 uppercase block mb-1.5">Aksiyon Sahibi *</label>
-                                        <select value={newActionForm.ownerId} onChange={setNA('ownerId')}
-                                            className="w-full border border-orange-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-300 outline-none bg-white">
-                                            <option value="">Kişi seçiniz</option>
-                                            {users.map(u => (
-                                                <option key={u.id} value={u.id}>{u.firstName} {u.lastName}{u.department ? ` — ${u.department}` : ''}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="text-xs font-semibold text-orange-800 uppercase block mb-1.5">Sorumlu Direktörlük</label>
-                                        <input type="text" value={newActionForm.responsibleDepartment} onChange={setNA('responsibleDepartment')}
-                                            placeholder="Direktörlük adı…"
-                                            className="w-full border border-orange-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-300 outline-none bg-white" />
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-xs font-semibold text-orange-800 uppercase block mb-1.5">Hedef Tamamlanma Tarihi *</label>
-                                        <input type="date" value={newActionForm.dueDate} onChange={setNA('dueDate')}
-                                            className="w-full border border-orange-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-300 outline-none bg-white" />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs font-semibold text-orange-800 uppercase block mb-1.5">Not</label>
-                                        <input type="text" value={newActionForm.notes} onChange={setNA('notes')}
-                                            placeholder="Opsiyonel not…"
-                                            className="w-full border border-orange-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-300 outline-none bg-white" />
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
                         {/* Güncelleme özeti */}
                         {form.result && (
                             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-600">
@@ -492,21 +502,22 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                                     {form.result === 'YETERLI' && <li>Bulgu sonucu açık aksiyonlara göre sistem tarafından türetilir</li>}
                                     {form.result === 'YETERSIZ' && <li>Çözüm Durumu → <strong>{RESOLUTION_OPTIONS.find(o => o.value === form.resolutionOutcome)?.label}</strong></li>}
                                     {form.currentStatusDetail && <li>Güncel Durum log'una yeni satır eklenir</li>}
-                                    {form.newFollowUpDate && <li>Yeni takip tarihi → <strong>{form.newFollowUpDate}</strong></li>}
-                                    {showNewActionForm && <li className="text-orange-700 font-semibold">Yeni aksiyon oluşturulur</li>}
+                                    {form.newFollowUpDate && form.result !== 'YENI_AKSIYON_GEREKLI' && <li>Yeni takip tarihi → <strong>{form.newFollowUpDate}</strong></li>}
+                                    {form.result === 'YENI_AKSIYON_GEREKLI' && <li className="text-orange-700 font-semibold">Yeni aksiyon oluşturulur{newAction.dueDate ? <> — hedef tarih <strong>{newAction.dueDate}</strong></> : null}</li>}
                                 </ul>
                             </div>
                         )}
                     </div>
+                    </fieldset>
 
                     {/* Footer */}
                     <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/50">
-                        <p className="text-xs text-slate-400">{isEdit ? `ID: ${followUp?.followUpId}` : 'Yeni takip çalışması'}</p>
+                        <p className="text-xs text-slate-400">{isEdit ? `Takip No: ${followUp?.followUpId}` : 'Yeni takip çalışması'}</p>
                         <div className="flex gap-3">
                             <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={saving}>İptal</Button>
-                            <Button type="submit" variant="primary" size="sm" disabled={saving || !form.currentStatusDetail.trim()}>
-                                {saving ? 'Kaydediliyor…' : isEdit ? 'Güncelle' : 'Oluştur'}
-                            </Button>
+                            {!readOnly && <Button type="submit" variant="primary" size="sm" disabled={saving || !form.currentStatusDetail.trim()}>
+                                {saving ? 'Kaydediliyor…' : isEdit && form.status === 'TAMAMLANDI' ? 'Kaydet ve Onaya Gönder' : isEdit ? 'Güncelle' : 'Oluştur'}
+                            </Button>}
                         </div>
                     </div>
                 </form>

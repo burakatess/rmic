@@ -300,7 +300,7 @@ export default function AuditPlanDetailPage() {
                             <table className="w-full text-sm">
                                 <thead className="bg-slate-50/80 border-b border-slate-200">
                                     <tr>
-                                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Bulgu ID</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Bulgu No</th>
                                         <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Açıklama</th>
                                         <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Ciddiyet</th>
                                         <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Durum</th>

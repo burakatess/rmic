@@ -32,33 +32,8 @@ async function main() {
     });
     console.log(`SimulationMethodology v${created.version} eklendi (id=${created.id}, createdBy=${admin.email}).`);
 
-    // RecordCounter senkronizasyonu — audits.service.ts::createAction (nextCounterValue
-    // tabanlı) ile bu ortamdaki mevcut en yüksek Action/FollowUp sıra numarası arasında
-    // fark varsa (RecordCounter hiç kullanılmamışsa scope=0'dan başlar), Risk Simülasyonu
-    // transferi (veya bu servisi kullanan başka bir akış) mevcut kayıtlarla ÇAKIŞABİLİR.
-    // Bu yüzden burada da (grc_verify'de yapıldığı gibi) senkronize ediliyor.
-    for (const [scope, prefix, table, idField] of [
-        ['action', 'A-', 'action', 'actionId'],
-        ['followup', 'T-', 'findingFollowUp', 'followUpId'],
-    ] as const) {
-        const rows: { id: string }[] = await (prisma as any)[table].findMany({
-            select: { [idField]: true },
-            where: { [idField]: { startsWith: prefix } },
-        }).then((r: any[]) => r.map((x) => ({ id: x[idField] })));
-        let maxSeq = 0;
-        for (const r of rows) {
-            const parts = r.id.split('-');
-            const n = parseInt(parts[parts.length - 1], 10);
-            if (!isNaN(n) && n > maxSeq) maxSeq = n;
-        }
-        const counter = await prisma.recordCounter.findUnique({ where: { scope } });
-        if (!counter || counter.value < maxSeq) {
-            await prisma.recordCounter.upsert({ where: { scope }, update: { value: maxSeq }, create: { scope, value: maxSeq } });
-            console.log(`RecordCounter[${scope}] ${counter?.value ?? '(yok)'} → ${maxSeq} olarak senkronize edildi.`);
-        } else {
-            console.log(`RecordCounter[${scope}] zaten güncel (${counter.value} >= ${maxSeq}).`);
-        }
-    }
+    // Business identifier sayaçları yalnız domain migration/servisleri tarafından
+    // yönetilir; methodology seed'i numaralandırma state'ine dokunmaz.
 }
 
 main()
