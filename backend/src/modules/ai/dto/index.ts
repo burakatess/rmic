@@ -71,7 +71,7 @@ export class RenameEvalSessionDto {
 }
 
 export class CompleteEvalSessionDto {
-    @IsEnum(EVAL_OUTCOMES as unknown as string[])
+    @IsEnum(EVAL_OUTCOMES)
     outcome!: string;
 }
 
@@ -86,16 +86,16 @@ export class BulkEvalDto {
 }
 
 export class EvalListQueryDto {
-    @IsOptional() @IsIn(EVAL_VIEWS as unknown as string[])
+    @IsOptional() @IsIn(EVAL_VIEWS)
     view?: string;
 
     @IsOptional() @IsString() @MaxLength(200)
     q?: string;
 
-    @IsOptional() @IsIn(EVAL_RUN_STATUSES as unknown as string[])
+    @IsOptional() @IsIn(EVAL_RUN_STATUSES)
     runStatus?: string;
 
-    @IsOptional() @IsIn(EVAL_OUTCOMES as unknown as string[])
+    @IsOptional() @IsIn(EVAL_OUTCOMES)
     outcome?: string;
 
     @IsOptional() @IsString()

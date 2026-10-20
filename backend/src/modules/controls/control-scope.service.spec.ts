@@ -39,7 +39,7 @@ describe('ControlScopeService — yıllık kapsam + periyodik task üretimi', ()
         prisma.controlYearScope.create.mockResolvedValue({ id: 'scope-1', year: 2030, controlId: 'ctl-1' });
         prisma.controlTest.createMany.mockResolvedValue({ count: 12 });
 
-        const result = await service.addScope('ctl-1', { years: [2030] } as any, 'user-1');
+        const result = await service.addScope('ctl-1', { years: [2030] }, 'user-1');
 
         expect(result.results[0].tasksCreated).toBe(12);
         const rows = prisma.controlTest.createMany.mock.calls[0][0].data;
@@ -53,7 +53,7 @@ describe('ControlScopeService — yıllık kapsam + periyodik task üretimi', ()
         prisma.controlYearScope.findUnique.mockResolvedValue({ id: 'scope-1', year: 2030, status: 'ACTIVE', controlId: 'ctl-1', frequency: 'MONTHLY' });
         prisma.controlTest.createMany.mockResolvedValue({ count: 0 }); // DB unique kısıtı sayesinde hepsi skip edildi
 
-        const result = await service.addScope('ctl-1', { years: [2030] } as any, 'user-1');
+        const result = await service.addScope('ctl-1', { years: [2030] }, 'user-1');
 
         expect(result.results[0].action).toBe('SCOPE_ADD_NOOP');
         expect(result.results[0].tasksCreated).toBe(0);
@@ -68,7 +68,7 @@ describe('ControlScopeService — yıllık kapsam + periyodik task üretimi', ()
 
     it('dryRun=true hiçbir yazma yapmadan periyot/önizleme döner', async () => {
         prisma.controlYearScope.findUnique.mockResolvedValue(null);
-        const result = await service.addScope('ctl-1', { years: [2030], dryRun: true } as any, 'user-1');
+        const result = await service.addScope('ctl-1', { years: [2030], dryRun: true }, 'user-1');
 
         expect(result.results[0].newTaskCount).toBe(12);
         expect(prisma.controlYearScope.create).not.toHaveBeenCalled();
@@ -80,7 +80,7 @@ describe('ControlScopeService — yıllık kapsam + periyodik task üretimi', ()
         prisma.controlYearScope.findUnique.mockResolvedValue({ id: 'scope-1', year: 2026, status: 'ACTIVE', controlId: 'ctl-1' });
         prisma.controlTest.findMany.mockResolvedValue([{ id: 'task-1', testNo: 'TST-2026-0001', periodLabel: 'Ocak 2026', assigneeId: 'u-1', plannedDate: new Date() }]);
 
-        const result = await service.removeScope('ctl-1', 2026, { reason: 'gerekçe' } as any, 'user-1');
+        const result = await service.removeScope('ctl-1', 2026, { reason: 'gerekçe' }, 'user-1');
 
         expect(result.requiresDecision).toBe(true);
         expect(result.ongoingTasks).toHaveLength(1);
@@ -92,7 +92,7 @@ describe('ControlScopeService — yıllık kapsam + periyodik task üretimi', ()
         prisma.controlTest.findMany.mockResolvedValue([]); // devam eden yok
         prisma.controlYearScope.update.mockResolvedValue({ id: 'scope-1', status: 'REMOVED' });
 
-        const result = await service.removeScope('ctl-1', 2026, { reason: 'gerekçe' } as any, 'user-1');
+        const result = await service.removeScope('ctl-1', 2026, { reason: 'gerekçe' }, 'user-1');
 
         expect(result.requiresDecision).toBe(false);
         expect(prisma.controlTest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -193,7 +193,7 @@ describe('ControlScopeService — yıllık kapsam + periyodik task üretimi', ()
         prisma.controlYearScope.create.mockResolvedValue({ id: 'scope-1', year: 2030, controlId: 'ctl-1' });
         prisma.controlTest.createMany.mockResolvedValue({ count: 0 });
 
-        await service.addScope('ctl-1', { years: [2030], assigneeId: 'user-a', secondControllerId: 'user-b' } as any, 'user-1');
+        await service.addScope('ctl-1', { years: [2030], assigneeId: 'user-a', secondControllerId: 'user-b' }, 'user-1');
 
         const createData = prisma.controlYearScope.create.mock.calls[0][0].data;
         expect(createData.assigneeId).toBe('user-a');
@@ -216,7 +216,7 @@ describe('ControlScopeService — yıllık kapsam + periyodik task üretimi', ()
 
         const result: any = await service.changePeriodicity('ctl-1', 2027, {
             reason: 'atama güncelleme', assigneeId: 'user-new',
-        } as any, 'user-1');
+        }, 'user-1');
 
         expect(result.requiresAssignmentDecision).toBeFalsy();
         const assignUpdateCall = prisma.controlTest.updateMany.mock.calls.find(
@@ -237,7 +237,7 @@ describe('ControlScopeService — yıllık kapsam + periyodik task üretimi', ()
 
         const result: any = await service.changePeriodicity('ctl-1', 2027, {
             reason: 'atama güncelleme', assigneeId: 'user-new',
-        } as any, 'user-1');
+        }, 'user-1');
 
         expect(result.requiresAssignmentDecision).toBe(true);
         expect(result.tasks[0].id).toBe('t1');
@@ -256,7 +256,7 @@ describe('ControlScopeService — yıllık kapsam + periyodik task üretimi', ()
         prisma.controlYearScope.update.mockResolvedValue({ id: 'scope-1' });
         prisma.controlTest.createMany.mockResolvedValue({ count: 0 });
 
-        await service.changePeriodicity('ctl-1', 2027, { reason: 'atama güncelleme', assigneeId: 'user-new' } as any, 'user-1');
+        await service.changePeriodicity('ctl-1', 2027, { reason: 'atama güncelleme', assigneeId: 'user-new' }, 'user-1');
 
         const anyAssignUpdate = prisma.controlTest.updateMany.mock.calls.some(
             (c: any) => c[0].where.id?.in?.includes('t1'),
@@ -270,7 +270,7 @@ describe('ControlScopeService — yıllık kapsam + periyodik task üretimi', ()
         prisma.controlYearScope.create.mockResolvedValue({ id: 'scope-1', year: 2027, controlId: 'ctl-1' });
         prisma.controlTest.createMany.mockResolvedValue({ count: 0 });
 
-        await service.addScope('ctl-1', { years: [2027] } as any, 'user-1');
+        await service.addScope('ctl-1', { years: [2027] }, 'user-1');
 
         const createData = prisma.controlYearScope.create.mock.calls[0][0].data;
         expect(createData.code).toBe('2027.BTK.0001');
@@ -288,7 +288,7 @@ describe('ControlScopeService — yıllık kapsam + periyodik task üretimi', ()
         prisma.controlYearScope.update.mockResolvedValue({ id: 'scope-1', year: 2027 });
         prisma.controlTest.createMany.mockResolvedValue({ count: 0 });
 
-        await service.addScope('ctl-1', { years: [2027] } as any, 'user-1');
+        await service.addScope('ctl-1', { years: [2027] }, 'user-1');
 
         const updateData = prisma.controlYearScope.update.mock.calls[0][0].data;
         expect(updateData.code).toBeUndefined();

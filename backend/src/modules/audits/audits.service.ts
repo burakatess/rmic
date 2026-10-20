@@ -354,7 +354,7 @@ export class AuditsService {
                 risk: { select: { id: true, riskId: true, name: true } },
                 control: { select: { id: true, controlId: true, name: true } },
                 linkedRisks: { select: { id: true, riskId: true, name: true } },
-                
+
                 _count: { select: { actions: true, followUps: true } },
             },
         });

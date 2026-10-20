@@ -185,7 +185,7 @@ describe('RisksService', () => {
                     categoryId: 'cat-1',
                     inherentProbability: 3,
                     inherentImpact: 4,
-                } as any,
+                },
                 'user-1',
             );
 

@@ -1150,7 +1150,7 @@ export class ReportsService {
                     })],
                     width: { size: widths[index], type: WidthType.DXA },
                     shading: { fill: 'B8CCE4' }, // Light blue
-                    verticalAlign: 'center' as any,
+                    verticalAlign: 'center',
                 });
             }),
         });

@@ -49,7 +49,7 @@ describe('KnowledgeService', () => {
         prisma.knowledgeDoc.findUnique.mockResolvedValue(null);
         prisma.knowledgeDoc.create.mockResolvedValue({ id: 'k-1', code: 'POL-2' });
         await service.create(
-            { kind: 'POLICY' as any, code: 'POL-2', title: 'Başlık', body: 'içerik' },
+            { kind: 'POLICY', code: 'POL-2', title: 'Başlık', body: 'içerik' },
             'user-1',
         );
         expect(prisma.auditLog.create).toHaveBeenCalledWith(

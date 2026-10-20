@@ -249,7 +249,7 @@ export class AnnualPlanService {
             const selectedMonths = !scheduleTouched
                 ? (existing?.selectedMonths ?? [])
                 : (referenceMonth != null && frequency && ['QUARTERLY', 'SEMI_ANNUAL', 'ANNUAL'].includes(frequency)
-                    ? monthNumbersToLabels(computeMonthGroup(frequency as any, referenceMonth))
+                    ? monthNumbersToLabels(computeMonthGroup(frequency, referenceMonth))
                     : (item.selectedMonths ?? []));
             const controlDate = item.controlDate !== undefined ? new Date(item.controlDate) : (scheduleTouched ? null : existing?.controlDate ?? null);
             const reason = item.reason !== undefined ? item.reason : existing?.reason ?? null;
@@ -297,7 +297,7 @@ export class AnnualPlanService {
             const items: AnnualPlanDraftItemPatchDto[] = controls.map(c => ({
                 controlId: c.id,
                 inScope: dto.action === 'ADD',
-                frequency: dto.frequency ?? (c.frequency as ControlFrequency),
+                frequency: dto.frequency ?? (c.frequency),
                 selectedMonths: dto.selectedMonths ?? c.selectedMonths,
             }));
             await this.upsertItems(tx, draft.id, items);
@@ -437,12 +437,12 @@ export class AnnualPlanService {
                     reason: `${fromYear} yılından kopyalandı`,
                 };
                 if (copyCalendar) {
-                    item.frequency = s.frequency as ControlFrequency;
+                    item.frequency = s.frequency;
                     item.referenceMonth = s.referenceMonth ?? undefined;
                     item.selectedMonths = s.selectedMonths;
                     item.controlDate = s.controlDate ? s.controlDate.toISOString() : undefined;
                 } else {
-                    item.frequency = s.control.frequency as ControlFrequency;
+                    item.frequency = s.control.frequency;
                 }
                 if (copyAssignments) {
                     let assigneeId = s.assigneeId ?? undefined;
@@ -737,10 +737,10 @@ export class AnnualPlanService {
             if (!control) continue;
             const realScope = realScopeByControl.get(item.controlId);
             const realActive = !!realScope && realScope.status === 'ACTIVE';
-            const frequency = (item.frequency ?? control.frequency) as ControlFrequency;
+            const frequency = (item.frequency ?? control.frequency);
             const referenceMonth = item.referenceMonth ?? realScope?.referenceMonth ?? null;
             const selectedMonths = referenceMonth != null && ['QUARTERLY', 'SEMI_ANNUAL', 'ANNUAL'].includes(frequency)
-                ? monthNumbersToLabels(computeMonthGroup(frequency as any, referenceMonth))
+                ? monthNumbersToLabels(computeMonthGroup(frequency, referenceMonth))
                 : (item.selectedMonths.length > 0 ? item.selectedMonths : control.selectedMonths);
             const effAssigneeId = item.assigneeId ?? realScope?.assigneeId ?? null;
             const effSecondControllerId = item.secondControllerId ?? realScope?.secondControllerId ?? null;
@@ -758,7 +758,7 @@ export class AnnualPlanService {
 
             const frequencyChanged = item.frequency && item.frequency !== realScope?.frequency;
             const referenceMonthChanged = item.referenceMonth != null && item.referenceMonth !== realScope?.referenceMonth;
-            const assignmentChanged = realActive && (effAssigneeId !== (realScope!.assigneeId ?? null) || effSecondControllerId !== (realScope!.secondControllerId ?? null));
+            const assignmentChanged = realActive && (effAssigneeId !== (realScope.assigneeId ?? null) || effSecondControllerId !== (realScope.secondControllerId ?? null));
 
             if (item.inScope && !realActive) {
                 // addScope ile AYNI geçmiş-dönem filtresi (computePeriodsForScope) —
@@ -768,18 +768,18 @@ export class AnnualPlanService {
                 toAdd.push({ controlId: control.id, controlCode: control.controlId, name: control.name, frequency, periodCount: periods.length, assigneeId: effAssigneeId, secondControllerId: effSecondControllerId });
                 taskToCreate += periods.length;
             } else if (!item.inScope && realActive) {
-                const pending = await this.controlScopeService.getOngoingTasksRequiringDecision(realScope!.id, [], this.prisma);
+                const pending = await this.controlScopeService.getOngoingTasksRequiringDecision(realScope.id, [], this.prisma);
                 if (pending.length > 0) {
                     conflicts.push({ controlId: control.id, controlCode: control.controlId, name: control.name, type: 'SCOPE_REMOVAL', reason: 'Devam eden task(lar) için karar gerekli', ongoingTasks: pending });
                     continue;
                 }
-                const pendingTaskCount = await this.prisma.controlTest.count({ where: { scopeId: realScope!.id, status: 'BEKLIYOR' } });
+                const pendingTaskCount = await this.prisma.controlTest.count({ where: { scopeId: realScope.id, status: 'BEKLIYOR' } });
                 toRemove.push({ controlId: control.id, controlCode: control.controlId, name: control.name });
                 taskToCancel += pendingTaskCount;
             } else if (item.inScope && realActive && (frequencyChanged || referenceMonthChanged || assignmentChanged)) {
                 if (assignmentChanged) {
                     const liveAuto = await this.prisma.controlTest.findMany({
-                        where: { scopeId: realScope!.id, isAutoGenerated: true, status: { in: ['DEVAM_EDIYOR', 'TAMAMLANDI', 'GERI_GONDERILDI'] } },
+                        where: { scopeId: realScope.id, isAutoGenerated: true, status: { in: ['DEVAM_EDIYOR', 'TAMAMLANDI', 'GERI_GONDERILDI'] } },
                         select: { id: true, testNo: true, periodLabel: true, status: true, assigneeId: true, secondControllerId: true },
                     });
                     const needsDecision = liveAuto.filter(t => t.assigneeId !== effAssigneeId || t.secondControllerId !== effSecondControllerId);
@@ -789,16 +789,16 @@ export class AnnualPlanService {
                 }
                 const newPeriods = computeScopePeriods(frequency, year, { selectedMonths, controlDate: item.controlDate, referenceMonth });
                 const newKeys = new Set(newPeriods.map(p => p.periodKey));
-                const existingTasks = await this.prisma.controlTest.findMany({ where: { scopeId: realScope!.id } });
+                const existingTasks = await this.prisma.controlTest.findMany({ where: { scopeId: realScope.id } });
                 const cancel = existingTasks.filter(t => t.status === 'BEKLIYOR' && t.periodKey && !newKeys.has(t.periodKey));
                 const existingKeys = new Set(existingTasks.map(t => t.periodKey));
                 const create = newPeriods.filter(p => !existingKeys.has(p.periodKey));
                 const protectedCount = existingTasks.filter(t => t.status !== 'BEKLIYOR' && t.periodKey && !newKeys.has(t.periodKey)).length;
                 toModify.push({
                     controlId: control.id, controlCode: control.controlId, name: control.name,
-                    fromFrequency: realScope!.frequency, toFrequency: frequency, toCreate: create.length, toCancel: cancel.length, protectedCount,
-                    assigneeChange: assignmentChanged ? { from: realScope!.assigneeId ?? null, to: effAssigneeId } : null,
-                    secondControllerChange: assignmentChanged ? { from: realScope!.secondControllerId ?? null, to: effSecondControllerId } : null,
+                    fromFrequency: realScope.frequency, toFrequency: frequency, toCreate: create.length, toCancel: cancel.length, protectedCount,
+                    assigneeChange: assignmentChanged ? { from: realScope.assigneeId ?? null, to: effAssigneeId } : null,
+                    secondControllerChange: assignmentChanged ? { from: realScope.secondControllerId ?? null, to: effSecondControllerId } : null,
                 });
                 taskToCreate += create.length; taskToCancel += cancel.length; taskProtected += protectedCount;
             }
@@ -980,7 +980,7 @@ export class AnnualPlanService {
                 const effSecondControllerId = item.secondControllerId ?? realScope?.secondControllerId ?? null;
                 const frequencyChanged = item.frequency && item.frequency !== realScope?.frequency;
                 const referenceMonthChanged = item.referenceMonth != null && item.referenceMonth !== realScope?.referenceMonth;
-                const assignmentChanged = realActive && (effAssigneeId !== (realScope!.assigneeId ?? null) || effSecondControllerId !== (realScope!.secondControllerId ?? null));
+                const assignmentChanged = realActive && (effAssigneeId !== (realScope.assigneeId ?? null) || effSecondControllerId !== (realScope.secondControllerId ?? null));
 
                 if (item.inScope && !realActive) {
                     const r = await this.controlScopeService.addScope(item.controlId, {
@@ -994,7 +994,7 @@ export class AnnualPlanService {
                     } as any, userId, tx);
                     added++; tasksCreated += r.results[0]?.tasksCreated ?? 0;
                 } else if (!item.inScope && realActive) {
-                    const r = await this.controlScopeService.removeScope(item.controlId, year, { reason: item.reason || 'Yıllık Plan uygulaması ile kapsam dışı bırakıldı' } as any, userId, tx);
+                    const r = await this.controlScopeService.removeScope(item.controlId, year, { reason: item.reason || 'Yıllık Plan uygulaması ile kapsam dışı bırakıldı' }, userId, tx);
                     if (!r.requiresDecision) removed++;
                 } else if (item.inScope && realActive && (frequencyChanged || referenceMonthChanged || assignmentChanged)) {
                     const r: any = await this.controlScopeService.changePeriodicity(item.controlId, year, {

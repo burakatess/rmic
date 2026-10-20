@@ -135,7 +135,7 @@ export class RiskSimulationService {
     }
 
     async createSimulation(dto: CreateRiskSimulationDto, userId: string) {
-        const simulationId = formatRecordId('SIM', await nextCounterValue(this.prisma as any, 'risk-simulation'));
+        const simulationId = formatRecordId('SIM', await nextCounterValue(this.prisma, 'risk-simulation'));
         const sim = await this.prisma.riskSimulation.create({
             data: { simulationId, name: dto.name, description: dto.description, createdById: userId },
         });
@@ -540,7 +540,7 @@ export class RiskSimulationService {
             infosecImpactInputs: {
                 confidentiality: scenario.gizlilikEtkisi, integrity: scenario.butunlukEtkisi, availability: scenario.erisilebilirlikEtkisi,
             },
-            finalImpactChoice: scenario.finalImpactChoice as 'BUSINESS' | 'INFOSEC',
+            finalImpactChoice: scenario.finalImpactChoice,
             controls, actions, residualOverride,
         });
     }

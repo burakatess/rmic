@@ -253,7 +253,7 @@ export class TransferService {
                     if (!category) throw new BadRequestException('Geçersiz kategori: seçilen risk kategorisi bulunamadı');
                     const owner = await tx.user.findUnique({ where: { id: dto.newRisk.ownerId } });
                     if (!owner) throw new BadRequestException('Geçersiz kullanıcı: seçilen risk sorumlusu bulunamadı');
-                    const riskId2 = formatRecordId('R', await nextCounterValue(tx as any, 'risk'));
+                    const riskId2 = formatRecordId('R', await nextCounterValue(tx, 'risk'));
                     const inherentImpact = calc.finalImpactTier ?? 1;
                     const created = await tx.risk.create({
                         data: {
@@ -366,7 +366,7 @@ export class TransferService {
                     if (!owner) throw new BadRequestException('Geçersiz kullanıcı: aksiyon sorumlusu bulunamadı');
                     const targetControl = scenario.controls.find(c => c.id === simAction.targetControlSimId)!;
 
-                    const findingId = await nextFindingNo(tx as any, new Date());
+                    const findingId = await nextFindingNo(tx, new Date());
                     const finding = await tx.finding.create({
                         data: {
                             findingId,
@@ -384,12 +384,12 @@ export class TransferService {
                         finding.id,
                         { description: simAction.name + (simAction.description ? ` — ${simAction.description}` : ''), ownerId: assignment.ownerId, dueDate: assignment.dueDate, status: 'BEKLIYOR' },
                         userId,
-                        tx as any,
+                        tx,
                     );
                     (resultSummary.createdActionIds as string[]).push(action.id);
                 }
 
-                const transferId = formatRecordId('TRF', await nextCounterValue(tx as any, 'risk-simulation-transfer'));
+                const transferId = formatRecordId('TRF', await nextCounterValue(tx, 'risk-simulation-transfer'));
                 const transfer = await tx.riskSimulationTransfer.create({
                     data: {
                         scenarioId, transferId, scenarioVersionAtTransfer: scenario.contentVersion,
