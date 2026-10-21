@@ -61,7 +61,7 @@ describe('AnnualPlanService — taslak eşzamanlılık (revision)', () => {
         const result = await service.saveDraftItems(2026, 'u1', ['control:*'], {
             expectedRevision: 3,
             items: [{ controlId: 'c1', inScope: true }],
-        } as any, {});
+        }, {});
 
         expect(prisma.annualPlanDraft.updateMany).toHaveBeenCalledWith({
             where: { id: 'd1', revision: 3 },
@@ -91,7 +91,7 @@ describe('AnnualPlanService — taslak eşzamanlılık (revision)', () => {
         await service.saveDraftItems(2026, 'u1', ['control:*'], {
             expectedRevision: 1,
             items: [{ controlId: 'c1', inScope: true, assigneeId: 'user-a', secondControllerId: 'user-b' }],
-        } as any, {});
+        }, {});
 
         const upsertArgs = prisma.annualPlanDraftItem.upsert.mock.calls[0][0];
         expect(upsertArgs.update.frequency).toBe('QUARTERLY');
@@ -114,8 +114,8 @@ describe('AnnualPlanService — taslak eşzamanlılık (revision)', () => {
 
         await service.saveDraftItems(2026, 'u1', ['control:*'], {
             expectedRevision: 1,
-            items: [{ controlId: 'c1', inScope: true, referenceMonth: 8, frequency: 'QUARTERLY' as any }],
-        } as any, {});
+            items: [{ controlId: 'c1', inScope: true, referenceMonth: 8, frequency: 'QUARTERLY' }],
+        }, {});
 
         const upsertArgs = prisma.annualPlanDraftItem.upsert.mock.calls[0][0];
         expect(upsertArgs.update.referenceMonth).toBe(8);

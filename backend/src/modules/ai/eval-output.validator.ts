@@ -68,7 +68,7 @@ export function validateEvalOutput(parsed: unknown): EvalValidationResult {
         err('controlResult', 'controlResult nesnesi yok.');
         o.controlResult = { overall: 'INSUFFICIENT_EVIDENCE', summary: '', samplingPeriodLimits: '' };
     } else {
-        const cr = o.controlResult as Record<string, unknown>;
+        const cr = o.controlResult;
         if (!CONTROL_OVERALL.includes(cr.overall as never)) {
             err('controlResult.overall', `overall geçersiz: ${String(cr.overall)}`);
         }
@@ -84,7 +84,7 @@ export function validateEvalOutput(parsed: unknown): EvalValidationResult {
         err('impact', 'impact nesnesi yok.');
         o.impact = { type: 'UNDETERMINED', description: '', note: '' };
     } else {
-        const im = o.impact as Record<string, unknown>;
+        const im = o.impact;
         if (!IMPACT_TYPES.includes(im.type as never)) {
             err('impact.type', `impact.type geçersiz: ${String(im.type)}`);
         }

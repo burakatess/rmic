@@ -124,7 +124,7 @@ describe('BKP = 75 örneği ve bileşenler', () => {
         [60.0001, 'Güçlü', 2], [80, 'Güçlü', 2],
         [80.0001, 'Çok Güçlü', 3], [100, 'Çok Güçlü', 3],
     ])('BKP=%s → seviye=%s, kademe azaltım=%i', (x, label, reduction) => {
-        const band = getBkpLevel(x as number, cfg);
+        const band = getBkpLevel(x, cfg);
         expect(band.label).toBe(label);
         expect(band.tierReduction).toBe(reduction);
     });

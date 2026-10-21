@@ -106,7 +106,7 @@ export class AiEvalService {
             this.prisma.aiEvalSession.count({ where }),
             this.prisma.aiEvalSession.findMany({
                 where,
-                orderBy: { [sort]: dir } as Prisma.AiEvalSessionOrderByWithRelationInput,
+                orderBy: { [sort]: dir },
                 skip: (page - 1) * pageSize,
                 take: pageSize,
                 select: {
@@ -796,7 +796,7 @@ export class AiEvalService {
             where: { id: sessionId },
             data: {
                 runStatus: 'RUNNING', runStartedAt: new Date(), cancelRequested: false,
-                runProgress: { phase: 'preparing', filesRead: 0, filesTotal } as Prisma.InputJsonValue,
+                runProgress: { phase: 'preparing', filesRead: 0, filesTotal },
             },
         });
         await this.prisma.aiEvalMessage.create({
@@ -814,7 +814,7 @@ export class AiEvalService {
             const read = await this.readEvidence(sessionId, activeAttachments, filesTotal);
             await this.prisma.aiEvalSession.update({
                 where: { id: sessionId },
-                data: { runProgress: { phase: 'retrieving', filesRead: read.filesRead, filesTotal } as Prisma.InputJsonValue },
+                data: { runProgress: { phase: 'retrieving', filesRead: read.filesRead, filesTotal } },
             });
 
             const digest = buildEvidenceDigest(read.items, MAX_DIGEST);
@@ -873,7 +873,7 @@ export class AiEvalService {
 
             await this.prisma.aiEvalSession.update({
                 where: { id: sessionId },
-                data: { runProgress: { phase: 'evaluating', filesRead: read.filesRead, filesTotal } as Prisma.InputJsonValue },
+                data: { runProgress: { phase: 'evaluating', filesRead: read.filesRead, filesTotal } },
             });
 
             const system = EVAL_V3.system(methodology.text);
@@ -930,7 +930,7 @@ export class AiEvalService {
                         schemaVersion: EVAL_V3_SCHEMA_VERSION, schemaValid: false,
                         schemaIssues: result.issues as unknown as Prisma.InputJsonValue,
                         modelName: resp.model, modelVersion, promptVersion: EVAL_V3_PROMPT_VERSION, inputVersion, inputHash,
-                        additionalNote, retrievalNote: { ...note, unchangedInput } as unknown as Prisma.InputJsonValue,
+                        additionalNote, retrievalNote: { ...note, unchangedInput },
                         errorText: `Şema/atıf doğrulaması başarısız (onarım denendi: ${repaired}): ${summaryErr}`,
                         tokensIn: resp.tokensIn ?? null, tokensOut: resp.tokensOut ?? null, latencyMs: resp.latencyMs,
                     },
@@ -997,9 +997,9 @@ export class AiEvalService {
                     schemaIssues: result.issues as unknown as Prisma.InputJsonValue,
                     modelName: resp.model, modelVersion, promptVersion: EVAL_V3_PROMPT_VERSION, inputVersion, inputHash,
                     additionalNote,
-                    evidenceRefs: evidenceRefs as Prisma.InputJsonValue,
-                    runInputSnapshot: runInputSnapshot as unknown as Prisma.InputJsonValue,
-                    retrievalNote: { ...note, unchangedInput } as unknown as Prisma.InputJsonValue,
+                    evidenceRefs: evidenceRefs,
+                    runInputSnapshot: runInputSnapshot,
+                    retrievalNote: { ...note, unchangedInput },
                     sentSourceUnitIds: units.map((u) => u.unitId),
                     citedSourceRefs: ((output?.references ?? []) as unknown) as Prisma.InputJsonValue,
                     tokensIn: resp.tokensIn ?? null, tokensOut: resp.tokensOut ?? null, latencyMs: resp.latencyMs,
@@ -1167,7 +1167,7 @@ export class AiEvalService {
                     : answer,
                 answerText: answer,
                 modelName, promptVersion: EVAL_PROMPT_VERSION, inputVersion: session.contentVersion,
-                schemaIssues: ({ reevaluationRecommended, why } as unknown as Prisma.InputJsonValue),
+                schemaIssues: ({ reevaluationRecommended, why }),
             },
         });
         await this.audit(userId, 'AI_EVAL_ASK', sessionId, { reevaluationRecommended });
@@ -1217,7 +1217,7 @@ export class AiEvalService {
             }
             await this.prisma.aiEvalSession.update({
                 where: { id: sessionId },
-                data: { runProgress: { phase: 'reading_files', filesRead, filesTotal } as Prisma.InputJsonValue },
+                data: { runProgress: { phase: 'reading_files', filesRead, filesTotal } },
             });
             await this.prisma.aiEvalAttachment.update({ where: { id: att.id }, data: { readStatus: 'READING' } });
 
@@ -1642,7 +1642,7 @@ export class AiEvalService {
             ozet: f.summary ?? null,
             aciklama: f.description.slice(0, 600),
             oneri: f.recommendation?.slice(0, 400) ?? null,
-            benzerlik: 'benzerlik' in f ? Number((f.benzerlik as number).toFixed(3)) : undefined,
+            benzerlik: 'benzerlik' in f ? Number((f.benzerlik).toFixed(3)) : undefined,
         }));
     }
 

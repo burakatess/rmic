@@ -43,7 +43,7 @@ export class PrismaExceptionFilter implements ExceptionFilter {
             switch (exception.code) {
                 case 'P2002': {
                     const target = Array.isArray(exception.meta?.target)
-                        ? (exception.meta!.target as string[]).join(', ')
+                        ? (exception.meta.target as string[]).join(', ')
                         : undefined;
                     return this.send(response, new ConflictException(
                         target ? `Bu kayıt zaten mevcut (${target})` : 'Bu kayıt zaten mevcut',

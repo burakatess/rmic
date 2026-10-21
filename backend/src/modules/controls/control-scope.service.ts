@@ -159,7 +159,7 @@ export class ControlScopeService {
             // varsa selectedMonths İSTEMCİDEN GÜVENİLMEZ — backend kendi hesaplar
             // (madde 21: istemciden gelen keyfi ay listesine güvenme).
             const selectedMonths = referenceMonth != null && ['QUARTERLY', 'SEMI_ANNUAL', 'ANNUAL'].includes(frequency)
-                ? monthNumbersToLabels(computeMonthGroup(frequency as any, referenceMonth))
+                ? monthNumbersToLabels(computeMonthGroup(frequency, referenceMonth))
                 : (dto.selectedMonths ?? control.selectedMonths);
             const controlDate = dto.controlDate ? new Date(dto.controlDate) : control.controlDate;
             const includePastPeriods = dto.includePastPeriods ?? false;
@@ -236,7 +236,7 @@ export class ControlScopeService {
     }
 
     async reactivateScope(controlId: string, year: number, userId: string, externalTx?: any) {
-        return this.addScope(controlId, { years: [year] } as AddScopeDto, userId, externalTx);
+        return this.addScope(controlId, { years: [year] }, userId, externalTx);
     }
 
     // ─── Toplu kapsama alma ────────────────────────────────────────────────────
@@ -381,9 +381,9 @@ export class ControlScopeService {
         const newFrequency = dto.frequency || scope.frequency;
         const newReferenceMonth = dto.referenceMonth !== undefined ? dto.referenceMonth : scope.referenceMonth;
         const newSelectedMonths = newReferenceMonth != null && ['QUARTERLY', 'SEMI_ANNUAL', 'ANNUAL'].includes(newFrequency)
-            ? monthNumbersToLabels(computeMonthGroup(newFrequency as any, newReferenceMonth))
+            ? monthNumbersToLabels(computeMonthGroup(newFrequency, newReferenceMonth))
             : (dto.selectedMonths ?? scope.selectedMonths);
-        const newPeriods = computeScopePeriods(newFrequency as any, year, { selectedMonths: newSelectedMonths, controlDate: scope.controlDate, referenceMonth: newReferenceMonth });
+        const newPeriods = computeScopePeriods(newFrequency, year, { selectedMonths: newSelectedMonths, controlDate: scope.controlDate, referenceMonth: newReferenceMonth });
         const newKeys = new Set(newPeriods.map(p => p.periodKey));
 
         const newAssigneeId = dto.assigneeId !== undefined ? (dto.assigneeId || null) : scope.assigneeId;
@@ -714,7 +714,7 @@ export class ControlScopeService {
         }
 
         const now = new Date();
-        let rows = scopes.map(s => {
+        const rows = scopes.map(s => {
             const scopeTasks = tasksByScope.get(s.id) ?? [];
             const active = scopeTasks.filter(t => ACTIVE_TASK_STATUSES.includes(t.status));
             const completed = scopeTasks.filter(t => t.status === 'ONAYLANDI');
