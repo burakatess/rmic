@@ -144,6 +144,29 @@ export default function RiskSimulationListPage() {
                     <Button variant="primary" onClick={() => setWsOpen(true)}>Yeni Çalışma Alanı</Button>
                 </div> : undefined}
             />
+            {!loading && (() => {
+                const latest = rows.find(r => r.mode === 'WORKSPACE' && r.status === 'ACTIVE');
+                const canCreate = hasPermission('risk:sim:create');
+                return (
+                    <div className="mb-5 flex flex-wrap items-center gap-4 rounded-2xl border border-teal-200 bg-gradient-to-r from-teal-50 to-white px-5 py-4">
+                        <div className="min-w-0 flex-1">
+                            <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-teal-700">Risk Yönetimi Simülatörü</div>
+                            <div className="mt-0.5 text-[15px] font-semibold text-slate-900">
+                                {latest ? <>Son çalışma alanı: {latest.name} <span className="font-mono text-sm text-slate-400">{latest.simulationId}</span></> : 'Risk kütüğünün tamamını tek ekranda simüle edin'}
+                            </div>
+                            <p className="mt-0.5 text-[13px] text-slate-600">
+                                Risk kütüğü, kontrol kartları, GRC Excel tabloları, simülasyon testi ve raporu, ısı haritası. Platform verisiyle veya GRC Excel&apos;inden başlatın.
+                                Aşağıdaki &quot;Senaryo&quot; türündeki eski simülasyonlar önceki ekranda açılır.
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {latest && <Link href={simHref(latest)} className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800">Simülatörü aç</Link>}
+                            {canCreate && <Button variant={latest ? 'secondary' : 'primary'} onClick={() => setWsOpen(true)}>Platform verisiyle başlat</Button>}
+                            {canCreate && <Button variant="secondary" onClick={() => setImportOpen(true)}>Excel&apos;den yükle</Button>}
+                        </div>
+                    </div>
+                );
+            })()}
             <DataTable
                 columns={columns}
                 data={rows}
