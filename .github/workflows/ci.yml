@@ -8,7 +8,7 @@ on:
 
 jobs:
   backend:
-    name: Backend (Lint + Test + Build)
+    name: Backend (Lint + Unit + E2E + Build)
     runs-on: ubuntu-latest
 
     services:
@@ -31,10 +31,16 @@ jobs:
         working-directory: backend
 
     env:
+      # İzole CI veritabanı — adı "test" içermek zorunda (test/helpers/db-guard.js).
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/grc_test_db?schema=public
       JWT_SECRET: test-jwt-secret
       JWT_REFRESH_SECRET: test-jwt-refresh-secret
       NODE_ENV: test
+      # E2E veritabanı koruması: açık test ortamı işareti (test/helpers/db-guard.js).
+      E2E_TEST_DATABASE: "1"
+      # AI testleri dış servise çıkmaz (istemciler taklit; network-guard dış çağrıyı engeller).
+      AI_BASE_URL: http://127.0.0.1:9/v1
+      AI_API_KEY: ci-offline
 
     steps:
       - uses: actions/checkout@v4
@@ -55,17 +61,24 @@ jobs:
       - name: Run database migrations
         run: npx prisma migrate deploy
 
+      # Migration geçmişi ile schema.prisma aynı şemayı üretmeli (sapma = 2 → başarısız).
+      - name: Migration / schema drift check
+        run: npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+
       - name: Lint
         run: npm run lint
 
       - name: Unit Tests
         run: npm run test -- --passWithNoTests
 
+      - name: E2E Tests (izole PostgreSQL)
+        run: npm run test:e2e -- --runInBand
+
       - name: Build
         run: npm run build
 
   frontend:
-    name: Frontend (Lint + Build)
+    name: Frontend (Lint + Test + Build)
     runs-on: ubuntu-latest
 
     defaults:
@@ -87,6 +100,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Unit Tests
+        run: npm test -- --ci
 
       - name: Build
         run: npm run build

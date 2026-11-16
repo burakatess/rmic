@@ -24,6 +24,8 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 DB_CONTAINER="${DB_CONTAINER:-rmic_1-postgres-1}"
 DB_NAME="${DB_NAME:-grc_db}"
 DB_USER="${DB_USER:-postgres}"
+# Ekler hedefi: izole geri yüklemede canlı dizinin üzerine yazmamak için değiştirilebilir.
+UPLOADS_DIR="${UPLOADS_DIR:-$ROOT_DIR/backend/uploads}"
 
 if [ ! -f "$DUMP_FILE" ]; then
     echo "Hata: Dump dosyası bulunamadı: $DUMP_FILE"
@@ -47,8 +49,11 @@ if [ -n "$UPLOADS_ARCHIVE" ]; then
         echo "Uyarı: Dosya ekleri arşivi bulunamadı: $UPLOADS_ARCHIVE — atlanıyor."
     else
         echo "[$(date)] Dosya ekleri geri yükleniyor: $UPLOADS_ARCHIVE"
-        rm -rf "$ROOT_DIR/backend/uploads"
-        tar -xzf "$UPLOADS_ARCHIVE" -C "$ROOT_DIR/backend"
+        PARENT="$(dirname "$UPLOADS_DIR")"
+        mkdir -p "$PARENT"
+        rm -rf "$UPLOADS_DIR"
+        tar -xzf "$UPLOADS_ARCHIVE" -C "$PARENT"
+        [ "$(basename "$UPLOADS_DIR")" = "uploads" ] || mv "$PARENT/uploads" "$UPLOADS_DIR"
         echo "[$(date)] Dosya ekleri geri yüklendi."
     fi
 fi

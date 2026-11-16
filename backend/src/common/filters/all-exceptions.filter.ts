@@ -26,6 +26,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
             return response.status(status).json(exception.getResponse());
         }
 
+        // Gövde ayrıştırıcı (body-parser) hataları istemci hatasıdır: çok büyük veya bozuk gövde.
+        const bp = bodyParserError(exception);
+        if (bp) return response.status(bp.statusCode).json(bp);
+
         this.logger.error(
             exception instanceof Error ? exception.message : 'Bilinmeyen hata',
             exception instanceof Error ? exception.stack : undefined,
@@ -37,4 +41,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
             message: 'Sunucu hatası oluştu',
         });
     }
+}
+
+export function bodyParserError(e: unknown): { statusCode: number; message: string } | null {
+    if (!e || typeof e !== 'object') return null;
+    const { type, status } = e as { type?: unknown; status?: unknown };
+    if (typeof type !== 'string' || !type.startsWith('entity.') || typeof status !== 'number' || status < 400 || status >= 500) return null;
+    if (type === 'entity.too.large') return { statusCode: 413, message: 'İstek gövdesi çok büyük.' };
+    return { statusCode: status, message: 'İstek gövdesi okunamadı.' };
 }

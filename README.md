@@ -125,6 +125,20 @@ http://localhost:3001/api/docs
 | `npm run prisma:migrate` | DB migration |
 | `npm run prisma:seed` | Demo veri yükleme |
 
+### E2E testleri (izole PostgreSQL)
+
+E2E testleri yalnız adı `test` içeren bir veritabanında çalışır (`backend/test/helpers/db-guard.js`). Yerel kurulu bir PostgreSQL ya da `docker-compose.yml`'daki 5432 ile çakışmaması için ayrı bir test konteyneri kullanılır (`127.0.0.1:55432`, veri tmpfs'te):
+
+```bash
+cd backend
+cp .env.test.example .env.test      # ilk kurulumda
+npm run test:e2e:db:up              # docker-compose.test.yml → postgres-test
+npm run test:e2e -- --runInBand
+npm run test:e2e:db:down
+```
+
+Kayıt kapsamı politikası ve devreye alma adımları: `docs/access-scope.md`.
+
 ## Lisans
 
 UNLICENSED — Özel kullanım

@@ -6,6 +6,8 @@ const { execSync } = require('child_process');
 
 module.exports = async () => {
     dotenv.config({ path: path.join(__dirname, '..', '.env.test') });
+    const dbName = require('./helpers/db-guard').assertTestDatabase(process.env.DATABASE_URL);
+    console.log(`[globalSetup] hedef test veritabanı: ${dbName}`);
 
     console.log('\n[globalSetup] grc_db_test şeması senkronize ediliyor...');
     execSync('npx prisma db push --accept-data-loss', {

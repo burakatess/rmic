@@ -41,6 +41,11 @@ services:
       FRONTEND_URL: http://localhost:3000
       # Roller + izinleri (ai:* dahil) her açılışta idempotent seed'le.
       RUN_SEED_SYSTEM: "true"
+      # Bu dosya YEREL GELİŞTİRME kurulumudur (NODE_ENV=production ile çalışsa da).
+      # Kayıt kapsamı burada bilinçli olarak kapalı; üretimde docker-compose.prod.yml
+      # RECORD_SCOPE_ENFORCEMENT=true kullanır ve gerekçesiz kapatma başlatmayı durdurur.
+      RECORD_SCOPE_ENFORCEMENT: "false"
+      RECORD_SCOPE_ENFORCEMENT_DISABLED_REASON: "Yerel geliştirme ortamı (docker-compose.yml) — üretim değil"
     depends_on:
       postgres:
         condition: service_healthy
