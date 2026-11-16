@@ -289,10 +289,21 @@ describe('E2E — Risk simülasyonu çalışma alanı', () => {
             const list = await http().get(base()).set(as('admin')).expect(200);
             expect(list.body.map((t: any) => t.status)).toEqual(['ACTIVE', 'FINISHED']);
 
-            const viewer = await prisma.role.create({ data: { name: 'SIM_VIEWER', permissions: ['risk:sim:view'] } });
-            const u = await createTestUser(prisma, viewer.id, { email: 'simws-viewer@e2e.local' });
-            const tk = (await http().post('/auth/login').send({ email: 'simws-viewer@e2e.local', password: E2E_TEST_PASSWORD }).expect(200)).body.accessToken;
-            await http().get(base()).set({ Authorization: `Bearer ${tk}` }).expect(403);
+            // Risk Yönetimi modülünü (risk:view) gören herkes simülasyonu kullanır; risk izni olmayan erişemez.
+            const login = async (name: string, permissions: string[]) => {
+                const role = await prisma.role.create({ data: { name, permissions } });
+                await createTestUser(prisma, role.id, { email: `simws-${name.toLowerCase()}@e2e.local` });
+                return (await http().post('/auth/login').send({ email: `simws-${name.toLowerCase()}@e2e.local`, password: E2E_TEST_PASSWORD }).expect(200)).body.accessToken as string;
+            };
+            const riskViewer = { Authorization: `Bearer ${await login('RISK_VIEWER', ['risk:view', 'scope:org:risk'])}` };
+            const outsider = { Authorization: `Bearer ${await login('NO_RISK', ['finding:view'])}` };
+            await http().get(base()).set(riskViewer).expect(200);
+            await http().get('/risk-simulations').set(riskViewer).expect(200);
+            await http().post('/risk-simulations/workspaces/live').set(riskViewer).send({}).expect(201);
+            await http().get(base()).set(outsider).expect(403);
+            await http().post('/risk-simulations/workspaces/live').set(outsider).send({}).expect(403);
+            // Envantere aktarma kısıtlı kalır.
+            await http().post(`/risk-simulations/scenarios/${re1.id}/transfer/preview`).set(riskViewer).expect(403);
         });
     });
 
@@ -348,6 +359,7 @@ describe('E2E — Risk simülasyonu çalışma alanı', () => {
         });
 
         it('toplu silme: yetkisiz rol 403; kayıtlı ve eski senaryo simülasyonları silinir; aktarım yapılmış olan atlanır', async () => {
+            // Analist rolünde risk:view / risk:sim:delete yok → 403.
             await http().post('/risk-simulations/bulk-delete').set(as('analyst')).send({ ids: [ids.saved] }).expect(403);
             const old = await http().post('/risk-simulations').set(as('admin')).send({ name: 'Eski senaryo' }).expect(201);
             // Aktarım yapılmış simülasyon (denetim izi) silinmez.

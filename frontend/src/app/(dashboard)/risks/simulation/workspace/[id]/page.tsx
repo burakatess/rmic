@@ -325,7 +325,7 @@ function RiskDetail({ scenarioId, row, canEdit, onChanged, fromExcel }: { scenar
 export default function SimulationWorkspacePage() {
     const { id } = useParams<{ id: string }>();
     const { hasPermission } = useAuth();
-    const canEdit = hasPermission('risk:sim:edit');
+    const canEdit = hasPermission('risk:sim:edit') || hasPermission('risk:view');
     const [ws, setWs] = useState<Workspace | null>(null);
     const [error, setError] = useState<LoadError | null>(null);
     const [selected, setSelected] = useState<string | null>(null);

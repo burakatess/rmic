@@ -297,7 +297,7 @@ export default function ScenarioWorkspacePage() {
     const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error' | 'conflict'>('idle');
 
-    const canEdit = hasPermission('risk:sim:edit');
+    const canEdit = hasPermission('risk:sim:edit') || hasPermission('risk:view');
     const canTransfer = hasPermission('risk:sim:transfer');
     const { widths: colWidths, startResize } = useResizableColumns('risk-sim-controls-table-colwidths', CONTROL_TABLE_COLS);
 

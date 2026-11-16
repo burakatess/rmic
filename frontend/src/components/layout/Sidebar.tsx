@@ -63,7 +63,7 @@ const navigation: NavItem[] = [
             { label: 'Kontrol Alanı', href: '/risks/controls' },
             { label: 'Aksiyon Tablosu', href: '/risks/actions' },
             { label: 'RCA Haritalama', href: '/risks/rca-mapping' },
-            { label: 'Risk Simülasyonu', href: '/risks/simulation', permission: 'risk:sim:view' },
+            { label: 'Risk Simülasyonu', href: '/risks/simulation' }, // Risk Yönetimi (risk:view) gören herkes
         ],
     },
     {

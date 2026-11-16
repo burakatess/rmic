@@ -45,8 +45,9 @@ export default function RiskSimulationListPage() {
     const [deleting, setDeleting] = useState(false);
     const { success, error: showError, warning } = useToast();
     const { hasPermission } = useAuth();
-    const canCreate = hasPermission('risk:sim:create');
-    const canDelete = hasPermission('risk:sim:delete');
+    // Risk Yönetimi modülünü (risk:view) gören herkes simülasyonu kullanır (backend ile aynı kural).
+    const canCreate = hasPermission('risk:sim:create') || hasPermission('risk:view');
+    const canDelete = hasPermission('risk:sim:delete') || hasPermission('risk:view');
 
     const load = useCallback(async () => {
         setLoading(true);
