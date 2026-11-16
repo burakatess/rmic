@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import api, { ApiError } from '@/lib/api';
-import { PageShell, PageHeader, Button, Modal, Input, Select, Textarea, StatusBadge, KpiCard, KpiGrid, Tabs, EmptyState } from '@/components/ui';
+import { PageShell, PageHeader, Button, Modal, Input, Select, Textarea, StatusBadge, KpiCard, KpiGrid, Tabs, EmptyState, type KpiVariant } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/components/auth';
 
@@ -27,7 +27,8 @@ const P5_OPTIONS = [
 const IMPACT_AREA_OPTIONS = [{ value: 'PROBABILITY', label: 'Olasılığı azaltır' }, { value: 'IMPACT', label: 'Etkiyi azaltır' }, { value: 'BOTH', label: 'Her ikisini de azaltır' }];
 
 const CONTROL_TABLE_COLS = [
-    { key: 'name', label: 'Kontrol', defaultWidth: 220, minWidth: 140 },
+    { key: 'approved', label: 'Onaylı', defaultWidth: 70, minWidth: 60 },
+    { key: 'name', label: 'Kontrol / Tanım', defaultWidth: 260, minWidth: 160 },
     { key: 'p1', label: 'P1', defaultWidth: 140, minWidth: 90 },
     { key: 'p2', label: 'P2', defaultWidth: 140, minWidth: 90 },
     { key: 'p3', label: 'P3', defaultWidth: 180, minWidth: 100 },
@@ -88,14 +89,16 @@ function ResizableTh({ label, colKey, width, minWidth, onResizeStart, className 
     );
 }
 
-function levelVariant(label?: string | null): 'critical' | 'high' | 'medium' | 'low' | 'success' | 'neutral' {
+// KpiCard yalnız kendi variant setini tanır; StatusBadge seviyeleri (medium/low/neutral) ona
+// verilirse stil bulunamaz ve sayfa çöker. Seviye etiketi KPI rengine burada eşlenir.
+function levelKpiVariant(label?: string | null): KpiVariant {
     switch (label) {
         case 'Çok Yüksek': return 'critical';
         case 'Yüksek': return 'high';
-        case 'Orta': return 'medium';
-        case 'Düşük': return 'low';
+        case 'Orta': return 'warning';
+        case 'Düşük': return 'info';
         case 'Çok Düşük': return 'success';
-        default: return 'neutral';
+        default: return 'default';
     }
 }
 function fmt(n: number | null | undefined, digits = 1) {
@@ -125,12 +128,42 @@ function ControlRow({ scenarioId, control, onChanged, onRemoved, canEdit, missin
             showError('Hata', e instanceof ApiError ? e.message : 'Kontrol güncellenemedi.');
         } finally { setSaving(false); }
     };
+    // Ad/tanım yerelde düzenlenir, alan terk edilince (değiştiyse) kaydedilir. Envanterden gelen
+    // kontrolde de yalnız senaryodaki kopya değişir; gerçek kontrol envanteri etkilenmez.
+    const [name, setName] = useState(control.name ?? '');
+    const [description, setDescription] = useState(control.description ?? '');
+    useEffect(() => { setName(control.name ?? ''); setDescription(control.description ?? ''); }, [control.name, control.description]);
+    const saveText = () => {
+        const n = name.trim();
+        if (!n) { setName(control.name ?? ''); showError('Eksik bilgi', 'Kontrol adı boş bırakılamaz.'); return; }
+        const changes: Record<string, string> = {};
+        if (n !== control.name) changes.name = n;
+        if (description !== (control.description ?? '')) changes.description = description;
+        if (Object.keys(changes).length) patch(changes);
+    };
+    const approved = control.isApproved !== false;
     return (
-        <tr className={`border-b border-slate-100 ${saving ? 'opacity-60' : ''} ${missingKts ? 'bg-amber-50/60' : ''}`}>
+        <tr className={`border-b border-slate-100 ${saving ? 'opacity-60' : ''} ${missingKts && approved ? 'bg-amber-50/60' : ''} ${approved ? '' : 'bg-slate-50 text-slate-400'}`}>
+            <td className="py-2 pr-2 align-top text-center">
+                <input type="checkbox" aria-label={`${control.name} onaylı (hesaplamaya dahil)`} checked={approved} disabled={!canEdit || saving}
+                    onChange={e => patch({ isApproved: e.target.checked })} className="mt-2 h-4 w-4 accent-emerald-600" />
+            </td>
             <td className="py-2 pr-3 align-top">
-                <div className="font-medium text-slate-800 text-sm">{control.name}</div>
+                {canEdit ? (
+                    <>
+                        <Input value={name} maxLength={300} onChange={e => setName(e.target.value)} onBlur={saveText} aria-label="Kontrol adı" />
+                        <Textarea value={description} maxLength={5000} rows={2} className="mt-1 text-xs" placeholder="Kontrol tanımı…"
+                            onChange={e => setDescription(e.target.value)} onBlur={saveText} aria-label="Kontrol tanımı" />
+                    </>
+                ) : (
+                    <>
+                        <div className="font-medium text-slate-800 text-sm">{control.name}</div>
+                        {control.description && <div className="text-xs text-slate-500 mt-0.5 whitespace-pre-line">{control.description}</div>}
+                    </>
+                )}
+                {!approved && <div className="text-[11px] font-medium text-slate-500 mt-0.5">Onaylı değil — hesaplamaya dahil edilmiyor</div>}
                 {control.sourceControlId ? <span className="text-[11px] text-emerald-600">Gerçek envanterden</span> : <span className="text-[11px] text-amber-600">Yalnızca simülasyon</span>}
-                {missingKts && <div className="text-[11px] font-medium text-amber-700 mt-0.5">⚠ KTS eksik — bu kontrol BKP&apos;yi &quot;bilinmiyor&quot; yapıyor</div>}
+                {missingKts && approved && <div className="text-[11px] font-medium text-amber-700 mt-0.5">⚠ KTS eksik — bu kontrol BKP&apos;yi &quot;bilinmiyor&quot; yapıyor</div>}
             </td>
             <td className="py-2 pr-2 align-top"><Select value={control.p1} disabled={!canEdit} onChange={e => patch({ p1: e.target.value })} options={P1_OPTIONS} /></td>
             <td className="py-2 pr-2 align-top"><Select value={control.p2} disabled={!canEdit} onChange={e => patch({ p2: e.target.value })} options={P2_OPTIONS} /></td>
@@ -167,6 +200,7 @@ function ControlRow({ scenarioId, control, onChanged, onRemoved, canEdit, missin
 
 function AddControlModal({ scenarioId, open, onClose, onAdded }: { scenarioId: string; open: boolean; onClose: () => void; onAdded: () => void }) {
     const [name, setName] = useState('');
+    const [description, setDescription] = useState('');
     const [saving, setSaving] = useState(false);
     const { success, error: showError } = useToast();
     const submit = async () => {
@@ -174,11 +208,11 @@ function AddControlModal({ scenarioId, open, onClose, onAdded }: { scenarioId: s
         setSaving(true);
         try {
             await api.addSimControl(scenarioId, {
-                name: name.trim(), p1: 'MANUEL', p2: 'TESPIT_EDICI', p3: 'IZ_KAYDI_YOK', p4: 'YOK', p5: 'YOK',
+                name: name.trim(), description: description.trim() || undefined, p1: 'MANUEL', p2: 'TESPIT_EDICI', p3: 'IZ_KAYDI_YOK', p4: 'YOK', p5: 'YOK',
                 ktsMode: 'MANUAL', weight: 0, impactArea: 'BOTH',
             });
             success('Eklendi', 'Hipotetik kontrol eklendi.');
-            setName('');
+            setName(''); setDescription('');
             onAdded();
         } catch (e) {
             showError('Hata', e instanceof ApiError ? e.message : 'Kontrol eklenemedi.');
@@ -188,6 +222,7 @@ function AddControlModal({ scenarioId, open, onClose, onAdded }: { scenarioId: s
         <Modal open={open} onClose={onClose} title="Hipotetik Kontrol Ekle" size="sm"
             footer={<><Button variant="secondary" onClick={onClose}>Vazgeç</Button><Button variant="primary" loading={saving} onClick={submit}>Ekle</Button></>}>
             <Input label="Kontrol Adı" value={name} onChange={e => setName(e.target.value)} placeholder="örn. Otomatik anomali izleme" />
+            <Textarea label="Kontrol Tanımı" value={description} maxLength={5000} rows={3} className="mt-2" onChange={e => setDescription(e.target.value)} placeholder="Kontrolün ne yaptığı, kapsamı…" />
             <p className="text-xs text-slate-500 mt-2">Yalnızca bu senaryoda var olacak, gerçek envantere bağlı olmayan bir kontrol.</p>
         </Modal>
     );
@@ -226,7 +261,7 @@ function AddActionModal({ scenarioId, controls, open, onClose, onAdded }: { scen
             <div className="space-y-4">
                 <Input label="Aksiyon Adı" value={name} onChange={e => setName(e.target.value)} placeholder="örn. Kontrolü otomatikleştir" />
                 <Select label="Hedef Kontrol" value={targetControlSimId} onChange={e => setTargetControlSimId(e.target.value)}
-                    placeholder="Kontrol seçin..." options={controls.map(c => ({ value: c.id, label: c.name }))} />
+                    placeholder="Kontrol seçin..." options={controls.map(c => ({ value: c.id, label: c.isApproved === false ? `${c.name} (onaylı değil — etkisi hesaplanmaz)` : c.name }))} />
                 <Select label="Etki Modeli" value={effectMode} onChange={e => setEffectMode(e.target.value as any)}
                     options={[{ value: 'TARGET_KEP', label: 'Doğrudan hedef KEP gir' }, { value: 'P1P5_KTS', label: 'P1-P5 / KTS değişikliği (senaryoda düzenlenir)' }]} />
                 {effectMode === 'TARGET_KEP' && (
@@ -418,7 +453,7 @@ export default function ScenarioWorkspacePage() {
                 <KpiCard title="Aksiyon Öncesi Artık Risk (öneri)" value={baseline?.residualSuggestion?.residualRisk ?? '—'}
                     subtitle={baseline?.residualSuggestion?.hasUnknownKts && missingKtsNames.length > 0 ? `Eksik KTS: ${missingKtsNames.join(', ')}` : undefined}
                     variant="warning" />
-                <KpiCard title="Hedef (Aksiyon Sonrası) Artık Risk" value={residual?.risk ?? '—'} subtitle={residual?.level?.label} variant={residual?.level ? levelVariant(residual.level.label) as any : 'default'} />
+                <KpiCard title="Hedef (Aksiyon Sonrası) Artık Risk" value={residual?.risk ?? '—'} subtitle={residual?.level?.label} variant={levelKpiVariant(residual?.level?.label)} />
             </KpiGrid>
 
             {target?.residualSuggestion && (
@@ -493,7 +528,8 @@ export default function ScenarioWorkspacePage() {
                         <div>
                             <div className="flex items-center justify-between mb-3">
                                 <div className="text-xs text-slate-500">
-                                    Ağırlık toplamı: %{((calc?.weightCheck?.totalWeight ?? 0) * 100).toFixed(1)}
+                                    Onaylı kontrollerin ağırlık toplamı: %{((calc?.weightCheck?.totalWeight ?? 0) * 100).toFixed(1)}
+                                    <span className="ml-2 text-slate-400">· Yalnız &quot;Onaylı&quot; işaretli kontroller hesaplamaya dahil edilir.</span>
                                     {calc?.weightCheck?.unallocatedWeight > 0 && <span className="ml-2 text-amber-600">· Kontrolsüz pay: %{(calc.weightCheck.unallocatedWeight * 100).toFixed(1)}</span>}
                                 </div>
                                 {canEdit && <Button variant="secondary" size="sm" onClick={() => setAddControlOpen(true)}>Hipotetik Kontrol Ekle</Button>}
@@ -703,7 +739,7 @@ function TransferModal({ scenarioId, contentVersion, open, onClose, onDone }: { 
     useEffect(() => {
         if (!open) { setPreview(null); setConfirmResidual(false); setAssignments({}); setNewControlSelections({}); return; }
         setLoadingPreview(true);
-        Promise.all([api.previewSimTransfer(scenarioId), api.getUsers().catch(() => []), api.getDirectorates().catch(() => [])]).then(([p, u, d]: any) => {
+        Promise.all([api.previewSimTransfer(scenarioId), api.getUserChoices().catch(() => []), api.getDirectorates().catch(() => [])]).then(([p, u, d]: any) => {
             setPreview(p);
             setUsers(Array.isArray(u) ? u : (u?.data ?? []));
             setDirectorates(Array.isArray(d) ? d : (d?.data ?? []));

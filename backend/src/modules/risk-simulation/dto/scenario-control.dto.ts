@@ -1,5 +1,5 @@
 import {
-  IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min,
+  IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min,
 } from 'class-validator';
 import {
   SIM_IMPACT_AREA_VALUES, SIM_KTS_MODE_VALUES, SIM_P1_VALUES, SIM_P2_VALUES,
@@ -35,6 +35,7 @@ export class CreateScenarioControlDto {
   @IsEnum(SIM_IMPACT_AREA_VALUES) impactArea!: (typeof SIM_IMPACT_AREA_VALUES)[number];
 
   @IsOptional() @IsInt() sortOrder?: number;
+  @IsOptional() @IsBoolean() isApproved?: boolean;
 }
 
 export class UpdateScenarioControlDto {
@@ -54,6 +55,8 @@ export class UpdateScenarioControlDto {
   @IsOptional() @IsNumber() @Min(0) @Max(1) weight?: number;
   @IsOptional() @IsEnum(SIM_IMPACT_AREA_VALUES) impactArea?: (typeof SIM_IMPACT_AREA_VALUES)[number];
   @IsOptional() @IsInt() sortOrder?: number;
+  // Onaylı (hesaplamaya dahil) işareti.
+  @IsOptional() @IsBoolean() isApproved?: boolean;
 }
 
 export class RedistributeWeightsDto {

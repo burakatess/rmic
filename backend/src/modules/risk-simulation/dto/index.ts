@@ -4,3 +4,4 @@ export * from './scenario.dto';
 export * from './scenario-control.dto';
 export * from './scenario-action.dto';
 export * from './transfer.dto';
+export * from './workspace-import.dto';

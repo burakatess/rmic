@@ -27,3 +27,9 @@ export class UpdateRiskSimulationDto {
   @IsEnum(SIM_STATUS_VALUES)
   status?: (typeof SIM_STATUS_VALUES)[number];
 }
+
+export class StartSimulationTestDto {
+  @IsString()
+  @MaxLength(200)
+  name!: string;
+}

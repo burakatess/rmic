@@ -7,6 +7,7 @@ import { PageShell, PageHeader, DataTable, Button, Modal, Input, Textarea, Statu
 import type { ColumnDef } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/components/auth';
+import { ImportSimWorkspaceModal } from '@/components/modals/ImportSimWorkspaceModal';
 
 interface SimRow {
     id: string;
@@ -14,9 +15,43 @@ interface SimRow {
     name: string;
     description?: string | null;
     status: 'ACTIVE' | 'ARCHIVED';
+    mode?: 'SCENARIO' | 'WORKSPACE';
     createdAt: string;
     createdBy?: { firstName: string; lastName: string };
     _count?: { scenarios: number };
+}
+
+const simHref = (r: SimRow) => (r.mode === 'WORKSPACE' ? `/risks/simulation/workspace/${r.id}` : `/risks/simulation/${r.id}`);
+
+function NewWorkspaceModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (sim: SimRow) => void }) {
+    const [name, setName] = useState('');
+    const [saving, setSaving] = useState(false);
+    const { success, error: showError } = useToast();
+    const submit = async () => {
+        if (!name.trim()) { showError('Eksik bilgi', 'Çalışma alanı adı zorunludur.'); return; }
+        setSaving(true);
+        try {
+            const sim = await api.createSimWorkspace({ name: name.trim() });
+            success('Oluşturuldu', `${sim.simulationId}: ${sim.riskCount} risk yüklendi${sim.unmatched?.length ? ` · ${sim.unmatched.length} kontrol metni tanınmadı (en düşük seçenek atandı)` : ''}.`);
+            onCreated(sim);
+            setName('');
+        } catch (e) {
+            showError('Oluşturulamadı', e instanceof ApiError ? e.message : 'Çalışma alanı oluşturulamadı.');
+        } finally { setSaving(false); }
+    };
+    return (
+        <Modal open={open} onClose={onClose} title="Yeni Simülasyon Çalışma Alanı" size="md"
+            footer={<><Button variant="secondary" onClick={onClose}>Vazgeç</Button><Button variant="primary" onClick={submit} loading={saving}>Oluştur</Button></>}>
+            <div className="space-y-4">
+                <Input label="Ad" value={name} onChange={e => setName(e.target.value)} placeholder="örn. Kasım 2026 BGD risk kütüğü" />
+                <p className="text-xs text-slate-500">
+                    Yetkili olduğunuz risk kütüğünün tamamı (kapatılmış riskler hariç) Risk Envanteri ve Kontrol Alanı&apos;ndaki
+                    kontrolleriyle tek ekrana yüklenir. Kontrol Alanı&apos;nda KTS ve ağırlık bulunmadığından KTS boş, ağırlık aktif kontroller
+                    arasında eşit paylaştırılmış olarak başlar. Gerçek envanter değişmez.
+                </p>
+            </div>
+        </Modal>
+    );
 }
 
 function NewSimulationModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (sim: SimRow) => void }) {
@@ -62,6 +97,8 @@ export default function RiskSimulationListPage() {
     const [rows, setRows] = useState<SimRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
+    const [wsOpen, setWsOpen] = useState(false);
+    const [importOpen, setImportOpen] = useState(false);
     const { error: showError } = useToast();
     const { hasPermission } = useAuth();
 
@@ -82,9 +119,10 @@ export default function RiskSimulationListPage() {
     const columns: ColumnDef<SimRow>[] = [
         {
             key: 'simulationId', header: 'Kod', minWidth: 120,
-            render: (r) => <Link href={`/risks/simulation/${r.id}`} className="font-mono text-sm text-blue-600 hover:underline">{r.simulationId}</Link>,
+            render: (r) => <Link href={simHref(r)} className="font-mono text-sm text-blue-600 hover:underline">{r.simulationId}</Link>,
         },
-        { key: 'name', header: 'Ad', minWidth: 260, render: (r) => <Link href={`/risks/simulation/${r.id}`} className="text-slate-900 hover:underline font-medium">{r.name}</Link> },
+        { key: 'name', header: 'Ad', minWidth: 260, render: (r) => <Link href={simHref(r)} className="text-slate-900 hover:underline font-medium">{r.name}</Link> },
+        { key: 'mode', header: 'Tür', minWidth: 120, render: (r) => <StatusBadge variant={r.mode === 'WORKSPACE' ? 'info' : 'neutral'}>{r.mode === 'WORKSPACE' ? 'Çalışma alanı' : 'Senaryo'}</StatusBadge> },
         { key: 'scenarios', header: 'Senaryo Sayısı', minWidth: 100, render: (r) => r._count?.scenarios ?? 0 },
         {
             key: 'status', header: 'Durum', minWidth: 100,
@@ -100,7 +138,11 @@ export default function RiskSimulationListPage() {
                 title="Risk Simülasyonu"
                 description="Gerçek envanteri değiştirmeden 'bu kontrolü kaldırırsam / bu aksiyonu uygularsam risk ne olur?' sorularını test edin."
                 breadcrumbs={[{ label: 'Risk Yönetimi' }, { label: 'Risk Simülasyonu' }]}
-                actions={hasPermission('risk:sim:create') ? <Button variant="primary" onClick={() => setModalOpen(true)}>Yeni Simülasyon</Button> : undefined}
+                actions={hasPermission('risk:sim:create') ? <div className="flex gap-2">
+                    <Button variant="secondary" onClick={() => setModalOpen(true)}>Yeni Senaryo Simülasyonu</Button>
+                    <Button variant="secondary" onClick={() => setImportOpen(true)}>Excel&apos;den Çalışma Alanı</Button>
+                    <Button variant="primary" onClick={() => setWsOpen(true)}>Yeni Çalışma Alanı</Button>
+                </div> : undefined}
             />
             <DataTable
                 columns={columns}
@@ -118,6 +160,8 @@ export default function RiskSimulationListPage() {
                 onEmptyAction={hasPermission('risk:sim:create') ? () => setModalOpen(true) : undefined}
                 onRefresh={load}
             />
+            <NewWorkspaceModal open={wsOpen} onClose={() => setWsOpen(false)} onCreated={(sim) => { setWsOpen(false); window.location.href = simHref({ ...sim, mode: 'WORKSPACE' }); }} />
+            <ImportSimWorkspaceModal open={importOpen} onClose={() => setImportOpen(false)} onCreated={(sim) => { setImportOpen(false); window.location.href = `/risks/simulation/workspace/${sim.id}`; }} />
             <NewSimulationModal open={modalOpen} onClose={() => setModalOpen(false)} onCreated={(sim) => { setModalOpen(false); load(); window.location.href = `/risks/simulation/${sim.id}`; }} />
         </PageShell>
     );

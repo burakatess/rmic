@@ -4,10 +4,14 @@ import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { CurrentUser, Roles, RequirePermissions } from '../../common/decorators';
 import { RiskSimulationService } from './risk-simulation.service';
 import { TransferService } from './transfer.service';
+import { WorkspaceService } from './workspace.service';
+import { WorkspaceExcelService } from './workspace-excel.service';
+import { WorkspaceTestService } from './workspace-test.service';
+import type { AccessActor } from '../../common/services/access-scope.service';
 import {
     CreateRiskSimulationDto, UpdateRiskSimulationDto, CreateScenarioDto, UpdateScenarioDto,
     CreateScenarioControlDto, UpdateScenarioControlDto, RedistributeWeightsDto,
-    CreateScenarioActionDto, UpdateScenarioActionDto, ToggleScenarioActionDto, TransferDto,
+    CreateScenarioActionDto, UpdateScenarioActionDto, ToggleScenarioActionDto, TransferDto, ImportWorkspaceDto, StartSimulationTestDto,
 } from './dto';
 
 const SIM_ROLES = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'RISK_ANALYST'];
@@ -21,7 +25,79 @@ export class RiskSimulationController {
     constructor(
         private simService: RiskSimulationService,
         private transferService: TransferService,
+        private workspaceService: WorkspaceService,
+        private workspaceExcel: WorkspaceExcelService,
+        private workspaceTests: WorkspaceTestService,
     ) { }
+
+    // ── Çalışma alanı (risk kütüğünün tamamı) ──
+    // Kapsamdaki riskler (kayıt kapsamı) ve Kontrol Alanı kontrolleriyle oluşturulur.
+    @Post('workspaces')
+    @Roles(...SIM_ROLES)
+    @RequirePermissions('risk:sim:create')
+    createWorkspace(@Body() dto: CreateRiskSimulationDto, @CurrentUser() actor: AccessActor) {
+        return this.workspaceService.createWorkspace(dto, actor);
+    }
+
+    // Excel'den yeni çalışma alanı. Dosya tarayıcıda okunur; burada yalnız doğrulanmış satırlar
+    // işlenir. dryRun=true → yalnız kontrol raporu (yazma yok).
+    @Post('workspaces/import')
+    @Roles(...SIM_ROLES)
+    @RequirePermissions('risk:sim:create')
+    importWorkspace(@Body() dto: ImportWorkspaceDto, @CurrentUser() actor: AccessActor) {
+        return this.workspaceExcel.importWorkspace(dto, actor);
+    }
+
+    // GRC kolonlarıyla Risk/Kontrol tabloları (simülasyon sonuçları hesaplanmış).
+    @Get('workspaces/:id/tables')
+    @Roles(...SIM_ROLES)
+    @RequirePermissions('risk:sim:view')
+    getWorkspaceTables(@Param('id') id: string) {
+        return this.workspaceExcel.getTables(id);
+    }
+
+    // ── Simülasyon testi: başlangıç anı kaydedilir, sonraki değişiklikler raporlanır ──
+    @Get('workspaces/:id/tests')
+    @Roles(...SIM_ROLES)
+    @RequirePermissions('risk:sim:view')
+    listTests(@Param('id') id: string) {
+        return this.workspaceTests.list(id);
+    }
+
+    @Post('workspaces/:id/tests')
+    @Roles(...SIM_ROLES)
+    @RequirePermissions('risk:sim:edit')
+    startTest(@Param('id') id: string, @Body() dto: StartSimulationTestDto, @CurrentUser('id') userId: string) {
+        return this.workspaceTests.start(id, dto.name, userId);
+    }
+
+    @Post('workspaces/:id/tests/:tid/finish')
+    @Roles(...SIM_ROLES)
+    @RequirePermissions('risk:sim:edit')
+    finishTest(@Param('id') id: string, @Param('tid') tid: string, @CurrentUser('id') userId: string) {
+        return this.workspaceTests.finish(id, tid, userId);
+    }
+
+    @Post('workspaces/:id/tests/:tid/reset')
+    @Roles(...SIM_ROLES)
+    @RequirePermissions('risk:sim:edit')
+    resetTest(@Param('id') id: string, @Param('tid') tid: string, @CurrentUser('id') userId: string) {
+        return this.workspaceTests.reset(id, tid, userId);
+    }
+
+    @Get('workspaces/:id/tests/:tid/report')
+    @Roles(...SIM_ROLES)
+    @RequirePermissions('risk:sim:view')
+    testReport(@Param('id') id: string, @Param('tid') tid: string) {
+        return this.workspaceTests.report(id, tid);
+    }
+
+    @Get('workspaces/:id')
+    @Roles(...SIM_ROLES)
+    @RequirePermissions('risk:sim:view')
+    getWorkspace(@Param('id') id: string) {
+        return this.workspaceService.getWorkspace(id);
+    }
 
     @Get()
     @Roles(...SIM_ROLES)

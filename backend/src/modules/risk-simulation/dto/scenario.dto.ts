@@ -43,14 +43,14 @@ export class UpdateScenarioDto {
 
   @IsOptional() @IsInt() @Min(1) @Max(5) naturalProbability?: number;
 
-  @IsOptional() @IsInt() @Min(1) @Max(5) finansalEtki?: number;
-  @IsOptional() @IsInt() @Min(1) @Max(5) itibarEtkisi?: number;
-  @IsOptional() @IsInt() @Min(1) @Max(5) regulasyonEtkisi?: number;
-  @IsOptional() @IsInt() @Min(1) @Max(5) musteriEtkisi?: number;
+  @IsOptional() @ValidateIf(o => o.finansalEtki !== null) @IsInt() @Min(1) @Max(5) finansalEtki?: number | null;
+  @IsOptional() @ValidateIf(o => o.itibarEtkisi !== null) @IsInt() @Min(1) @Max(5) itibarEtkisi?: number | null;
+  @IsOptional() @ValidateIf(o => o.regulasyonEtkisi !== null) @IsInt() @Min(1) @Max(5) regulasyonEtkisi?: number | null;
+  @IsOptional() @ValidateIf(o => o.musteriEtkisi !== null) @IsInt() @Min(1) @Max(5) musteriEtkisi?: number | null;
 
-  @IsOptional() @IsInt() @Min(1) @Max(5) gizlilikEtkisi?: number;
-  @IsOptional() @IsInt() @Min(1) @Max(5) butunlukEtkisi?: number;
-  @IsOptional() @IsInt() @Min(1) @Max(5) erisilebilirlikEtkisi?: number;
+  @IsOptional() @ValidateIf(o => o.gizlilikEtkisi !== null) @IsInt() @Min(1) @Max(5) gizlilikEtkisi?: number | null;
+  @IsOptional() @ValidateIf(o => o.butunlukEtkisi !== null) @IsInt() @Min(1) @Max(5) butunlukEtkisi?: number | null;
+  @IsOptional() @ValidateIf(o => o.erisilebilirlikEtkisi !== null) @IsInt() @Min(1) @Max(5) erisilebilirlikEtkisi?: number | null;
 
   @IsOptional()
   @IsEnum(SIM_FINAL_IMPACT_CHOICE_VALUES)
