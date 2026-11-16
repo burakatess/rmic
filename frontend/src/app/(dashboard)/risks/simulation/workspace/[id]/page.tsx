@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import api, { ApiError } from '@/lib/api';
 import { classifyLoadError, type LoadError } from '@/lib/load-error';
-import { PageShell, LoadingState, ErrorState, EmptyState, Button, ConfirmDialog } from '@/components/ui';
+import { PageShell, LoadingState, ErrorState, EmptyState, Button, ConfirmDialog, Modal, Input, Textarea } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/components/auth';
 import { ExcelTables } from './ExcelTables';
@@ -49,7 +49,7 @@ interface Row {
     changed: boolean;
 }
 interface Workspace {
-    simulation: { id: string; simulationId: string; name: string; description?: string | null; createdAt: string; createdBy?: { firstName: string; lastName: string } };
+    simulation: { id: string; simulationId: string; name: string; description?: string | null; createdAt: string; updatedAt?: string; isDraft?: boolean; createdBy?: { firstName: string; lastName: string } };
     source: 'PLATFORM' | 'EXCEL';
     activeTest: { id: string; name: string; startedAt: string } | null;
     riskLevels: { min: number; max: number; score: number; label: string }[];
@@ -338,6 +338,8 @@ export default function SimulationWorkspacePage() {
     const [testName, setTestName] = useState<string | null>(null);
     const [confirm, setConfirm] = useState<'finish' | 'reset' | null>(null);
     const [testBusy, setTestBusy] = useState(false);
+    const [saveForm, setSaveForm] = useState<{ name: string; description: string } | null>(null);
+    const router = useRouter();
     const { success, error: showError } = useToast();
     const seq = useRef(0);
 
@@ -388,13 +390,42 @@ export default function SimulationWorkspacePage() {
         } catch (e) { showError('İşlem yapılamadı', e instanceof ApiError ? e.message : 'İşlem tamamlanamadı.'); }
         finally { setTestBusy(false); }
     };
-    const defaultTestName = () => `Simülasyon testi · ${new Date().toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}`;
+    const isDraft = !!ws.simulation.isDraft;
+    const saveDraft = async () => {
+        if (!saveForm || !saveForm.name.trim()) { showError('Eksik bilgi', 'Simülasyon adı zorunludur.'); return; }
+        setTestBusy(true);
+        try {
+            const saved = await api.saveSimWorkspace(ws.simulation.id, { name: saveForm.name.trim(), description: saveForm.description.trim() || undefined });
+            success('Simülasyon kaydedildi', `${saved.simulationId} · ${saved.name}. Kayıtlı simülasyonlar listesinden yeniden açabilirsiniz.`);
+            setSaveForm(null); await load();
+        } catch (e) { showError('Kaydedilemedi', e instanceof ApiError ? e.message : 'Simülasyon kaydedilemedi.'); }
+        finally { setTestBusy(false); }
+    };
+    const refreshLive = async () => {
+        setTestBusy(true);
+        try { const r = await api.openLiveSim(true); router.replace(`/risks/simulation/workspace/${r.id}`); }
+        catch (e) { showError('Yenilenemedi', e instanceof ApiError ? e.message : 'Güncel veriyle yeniden kurulamadı.'); }
+        finally { setTestBusy(false); }
+    };
+    const defaultTestName = () => `Simülasyon · ${new Date().toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}`;
 
     return (
         <PageShell>
             <div className="mb-5">
-                <div className="text-[11px] font-bold tracking-[0.12em] text-slate-500 uppercase">Risk Yönetimi · Risk Simülasyonu · Çalışma alanı</div>
-                <h1 className="mt-1 text-[24px] font-bold text-slate-900">{ws.simulation.name} <span className="font-mono text-base text-slate-400">{ws.simulation.simulationId}</span></h1>
+                <div className="text-[11px] font-bold tracking-[0.12em] text-slate-500 uppercase">Risk Yönetimi · Risk Simülasyonu · {isDraft ? 'Güncel simülatör' : 'Kayıtlı simülasyon'}</div>
+                <div className="mt-1 flex flex-wrap items-center gap-3">
+                    <h1 className="text-[24px] font-bold text-slate-900">{isDraft ? 'Güncel simülatör' : ws.simulation.name} <span className="font-mono text-base text-slate-400">{ws.simulation.simulationId}</span></h1>
+                    {isDraft
+                        ? <span className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800">Kaydedilmedi</span>
+                        : <span className="rounded-full border border-teal-300 bg-teal-50 px-2.5 py-0.5 text-[11px] font-semibold text-teal-800">Kayıtlı</span>}
+                    {isDraft && canEdit && (
+                        <div className="ml-auto flex gap-2">
+                            <Button variant="secondary" onClick={refreshLive} loading={testBusy && saveForm === null}>Güncel veriyle yeniden başla</Button>
+                            <Button variant="primary" onClick={() => setSaveForm({ name: test?.name ?? '', description: '' })}>Kaydet</Button>
+                        </div>
+                    )}
+                </div>
+                {!isDraft && ws.simulation.description && <p className="mt-1 max-w-3xl text-sm font-medium text-slate-700">{ws.simulation.description}</p>}
                 <p className="mt-1 max-w-3xl text-sm text-slate-600">
                     Etki, olasılık ve kontrol niteliklerini değiştirin; doğal risk, bütünleşik kontrol ve kalıntı risk uygulamanın simülasyon
                     metodolojisiyle anında yeniden hesaplanır. Sapma işareti, sonucun {fromExcel ? 'yüklenen Excel\'deki' : 'envanterdeki'} kayıtlı değerden farklı olduğunu gösterir.
@@ -429,26 +460,29 @@ export default function SimulationWorkspacePage() {
             <div className={`mb-4 flex flex-wrap items-center gap-3 rounded-xl border px-4 py-2.5 text-[13px] ${test ? 'border-teal-300 bg-teal-50 text-teal-900' : 'border-slate-200 bg-white text-slate-600'}`}>
                 {test ? (<>
                     <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-teal-600" />
-                    <span><b>Simülasyon testi</b> · {test.name} · başladı {new Date(test.startedAt).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                    <span><b>Simülasyon devam ediyor</b> · {test.name} · başladı {new Date(test.startedAt).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}</span>
                     <div className="ml-auto flex gap-2">
                         <Button size="sm" variant="secondary" onClick={() => setTab('report')}>Raporu gör</Button>
                         {canEdit && <Button size="sm" variant="secondary" onClick={() => setConfirm('reset')}>Başlangıca dön</Button>}
-                        {canEdit && <Button size="sm" variant="primary" onClick={() => setConfirm('finish')}>Testi bitir</Button>}
+                        {canEdit && !isDraft && <Button size="sm" variant="primary" onClick={() => setConfirm('finish')}>Simülasyonu bitir</Button>}
+                    {canEdit && isDraft && <Button size="sm" variant="primary" onClick={() => setSaveForm({ name: test.name, description: '' })}>Bitir ve kaydet</Button>}
                     </div>
                 </>) : testName !== null ? (<>
-                    <span>Simülasyon testi başlar; bu andan sonraki değişiklikler raporlanır.</span>
-                    <input autoFocus value={testName} onChange={e => setTestName(e.target.value)} maxLength={200} aria-label="Test adı"
-                        className="min-w-[260px] flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm" placeholder="Test adı" />
+                    <span>Simülasyon başlar; bu andan sonraki değişiklikler raporlanır.</span>
+                    <input autoFocus value={testName} onChange={e => setTestName(e.target.value)} maxLength={200} aria-label="Simülasyon adı"
+                        className="min-w-[260px] flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm" placeholder="Simülasyon adı" />
                     <Button size="sm" variant="primary" onClick={startTest} loading={testBusy}>Başlat</Button>
                     <Button size="sm" variant="secondary" onClick={() => setTestName(null)} disabled={testBusy}>Vazgeç</Button>
                 </>) : (<>
-                    <span>Değişikliklerinizi bir başlangıç anına göre raporlamak için simülasyon testi başlatın.</span>
-                    {canEdit && <Button size="sm" variant="primary" className="ml-auto" onClick={() => setTestName(defaultTestName())}>Simülasyon testi başlat</Button>}
+                    <span>{isDraft
+                        ? 'Simülasyonu başlatın, değişikliklerinizi yapın ve kaydedin. Başlangıçtan bu yana yapılanlar raporlanır.'
+                        : 'Bu kayıtlı simülasyonda yeniden değişiklik yapıp test etmek için simülasyonu başlatın.'}</span>
+                    {canEdit && <Button size="sm" variant="primary" className="ml-auto" onClick={() => setTestName(defaultTestName())}>Simülasyonu başlat</Button>}
                 </>)}
             </div>
 
             <div className="mb-4 flex gap-1 border-b border-slate-200">
-                {([['sim', 'Simülatör'], ['tables', 'Excel tabloları'], ['report', 'Test raporu'], ['heat', 'Isı haritası']] as const).map(([k, label]) => (
+                {([['sim', 'Simülatör'], ['tables', 'Excel tabloları'], ['report', 'Simülasyon raporu'], ['heat', 'Isı haritası']] as const).map(([k, label]) => (
                     <button key={k} type="button" onClick={() => setTab(k)}
                         className={`-mb-px border-b-2 px-4 py-2 text-sm font-semibold ${tab === k ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{label}</button>
                 ))}
@@ -508,13 +542,26 @@ export default function SimulationWorkspacePage() {
                 </div>
             </div>
             )}
+            <Modal open={saveForm !== null} onClose={() => !testBusy && setSaveForm(null)} title="Simülasyonu kaydet" size="md"
+                footer={<><Button variant="secondary" onClick={() => setSaveForm(null)} disabled={testBusy}>Vazgeç</Button><Button variant="primary" onClick={saveDraft} loading={testBusy}>Kaydet</Button></>}>
+                {saveForm && (
+                    <div className="space-y-4">
+                        <Input label="Ad" value={saveForm.name} onChange={e => setSaveForm({ ...saveForm, name: e.target.value })} maxLength={200} placeholder="örn. Ana kontrol KTS 90 senaryosu" />
+                        <Textarea label="Açıklama (isteğe bağlı)" value={saveForm.description} onChange={e => setSaveForm({ ...saveForm, description: e.target.value })} rows={3} maxLength={5000} />
+                        <p className="text-xs text-slate-500">
+                            {test ? 'Devam eden simülasyon bitirilir; raporu bu anın durumuyla saklanır. ' : ''}
+                            Kayıtlı simülasyonlar listesinden açıp neler yaptığınızı görebilir, yeniden değiştirip test edebilirsiniz. Güncel simülatör bir sonraki açılışta en güncel veriyle yeniden kurulur.
+                        </p>
+                    </div>
+                )}
+            </Modal>
             <ConfirmDialog open={confirm !== null} onClose={() => !testBusy && setConfirm(null)} onConfirm={runConfirm} loading={testBusy}
                 variant={confirm === 'reset' ? 'danger' : 'warning'}
-                title={confirm === 'reset' ? 'Başlangıca dönülsün mü?' : 'Simülasyon testi bitirilsin mi?'}
+                title={confirm === 'reset' ? 'Başlangıca dönülsün mü?' : 'Simülasyon bitirilsin mi?'}
                 message={confirm === 'reset'
                     ? 'Test başladığından bu yana simülasyonda yapılan tüm değişiklikler geri alınır (risk girdileri ve kontroller). Gerçek envanter etkilenmez. Değişiklik günlüğü korunur.'
                     : 'Rapor bu anın durumuyla dondurulur ve test geçmişte saklanır. Simülasyonda çalışmaya devam edebilir, yeni bir test başlatabilirsiniz.'}
-                confirmLabel={confirm === 'reset' ? 'Başlangıca dön' : 'Testi bitir'} cancelLabel="Vazgeç" />
+                confirmLabel={confirm === 'reset' ? 'Başlangıca dön' : 'Simülasyonu bitir'} cancelLabel="Vazgeç" />
         </PageShell>
     );
 }

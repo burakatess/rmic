@@ -49,6 +49,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
     { key: 'risk:sim:view', group: 'risk', label: 'Simülasyon — görüntüleme', description: 'Risk simülasyonu senaryoları', enforcedIn: ['api', 'ui'] },
     { key: 'risk:sim:create', group: 'risk', label: 'Simülasyon — oluşturma', description: 'Senaryo oluşturma', enforcedIn: ['api', 'ui'] },
     { key: 'risk:sim:edit', group: 'risk', label: 'Simülasyon — düzenleme', description: 'Senaryo düzenleme', enforcedIn: ['api', 'ui'] },
+    { key: 'risk:sim:delete', group: 'risk', label: 'Simülasyon — silme', description: 'Kayıtlı simülasyonları silme (envantere aktarım yapılmış olanlar silinemez)', enforcedIn: ['api', 'ui'] },
     { key: 'risk:sim:transfer', group: 'risk', label: 'Simülasyon — envantere aktarma', description: 'Senaryoyu gerçek envantere aktarma', enforcedIn: ['api', 'ui'] },
 
     { key: 'control:view', group: 'control', label: 'Kontrol Havuzu görüntüleme', description: 'Ortak ana veri; ilişkili test/bulgu/kanıtlar kendi kapsamından geçer', enforcedIn: ['api', 'ui'] },

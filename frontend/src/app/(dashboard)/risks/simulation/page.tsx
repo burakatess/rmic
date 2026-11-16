@@ -2,12 +2,20 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import api, { ApiError } from '@/lib/api';
-import { PageShell, PageHeader, DataTable, Button, Modal, Input, Textarea, StatusBadge } from '@/components/ui';
+import { PageShell, PageHeader, DataTable, Button, Modal, StatusBadge, ConfirmDialog } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/components/auth';
 import { ImportSimWorkspaceModal } from '@/components/modals/ImportSimWorkspaceModal';
+
+/*
+ * Risk Simülasyonu. Üstte "Güncel simülatör": Risk Envanteri + Kontrol Alanı'nın şimdiki hali
+ * (kullanıcının kaydedilmemiş çalışma kopyası). Simülatörde simülasyon başlatılır, değişiklik
+ * yapılır ve adıyla kaydedilir. Altta kayıtlı simülasyonlar: açılıp incelenir, yeniden
+ * değiştirilip test edilir; toplu seçilip silinebilir.
+ */
 
 interface SimRow {
     id: string;
@@ -17,96 +25,35 @@ interface SimRow {
     status: 'ACTIVE' | 'ARCHIVED';
     mode?: 'SCENARIO' | 'WORKSPACE';
     createdAt: string;
+    updatedAt: string;
     createdBy?: { firstName: string; lastName: string };
-    _count?: { scenarios: number };
+    _count?: { scenarios: number; tests: number };
 }
 
 const simHref = (r: SimRow) => (r.mode === 'WORKSPACE' ? `/risks/simulation/workspace/${r.id}` : `/risks/simulation/${r.id}`);
-
-function NewWorkspaceModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (sim: SimRow) => void }) {
-    const [name, setName] = useState('');
-    const [saving, setSaving] = useState(false);
-    const { success, error: showError } = useToast();
-    const submit = async () => {
-        if (!name.trim()) { showError('Eksik bilgi', 'Çalışma alanı adı zorunludur.'); return; }
-        setSaving(true);
-        try {
-            const sim = await api.createSimWorkspace({ name: name.trim() });
-            success('Oluşturuldu', `${sim.simulationId}: ${sim.riskCount} risk yüklendi${sim.unmatched?.length ? ` · ${sim.unmatched.length} kontrol metni tanınmadı (en düşük seçenek atandı)` : ''}.`);
-            onCreated(sim);
-            setName('');
-        } catch (e) {
-            showError('Oluşturulamadı', e instanceof ApiError ? e.message : 'Çalışma alanı oluşturulamadı.');
-        } finally { setSaving(false); }
-    };
-    return (
-        <Modal open={open} onClose={onClose} title="Yeni Simülasyon Çalışma Alanı" size="md"
-            footer={<><Button variant="secondary" onClick={onClose}>Vazgeç</Button><Button variant="primary" onClick={submit} loading={saving}>Oluştur</Button></>}>
-            <div className="space-y-4">
-                <Input label="Ad" value={name} onChange={e => setName(e.target.value)} placeholder="örn. Kasım 2026 BGD risk kütüğü" />
-                <p className="text-xs text-slate-500">
-                    Yetkili olduğunuz risk kütüğünün tamamı (kapatılmış riskler hariç) Risk Envanteri ve Kontrol Alanı&apos;ndaki
-                    kontrolleriyle tek ekrana yüklenir. Kontrol Alanı&apos;nda KTS ve ağırlık bulunmadığından KTS boş, ağırlık aktif kontroller
-                    arasında eşit paylaştırılmış olarak başlar. Gerçek envanter değişmez.
-                </p>
-            </div>
-        </Modal>
-    );
-}
-
-function NewSimulationModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (sim: SimRow) => void }) {
-    const [name, setName] = useState('');
-    const [description, setDescription] = useState('');
-    const [saving, setSaving] = useState(false);
-    const { success, error: showError } = useToast();
-
-    const submit = async () => {
-        if (!name.trim()) { showError('Eksik bilgi', 'Simülasyon adı zorunludur.'); return; }
-        setSaving(true);
-        try {
-            const sim = await api.createRiskSimulation({ name: name.trim(), description: description.trim() || undefined }) as SimRow;
-            success('Oluşturuldu', `${sim.simulationId} oluşturuldu.`);
-            onCreated(sim);
-            setName(''); setDescription('');
-        } catch (e) {
-            showError('Hata', e instanceof ApiError ? e.message : 'Simülasyon oluşturulamadı.');
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    return (
-        <Modal open={open} onClose={onClose} title="Yeni Risk Simülasyonu" size="md"
-            footer={<>
-                <Button variant="secondary" onClick={onClose}>Vazgeç</Button>
-                <Button variant="primary" onClick={submit} loading={saving}>Oluştur</Button>
-            </>}>
-            <div className="space-y-4">
-                <Input label="Simülasyon Adı" value={name} onChange={e => setName(e.target.value)} placeholder="örn. Veri Bütünlüğü Riski - Kontrol Kaldırma Senaryoları" />
-                <Textarea label="Açıklama (opsiyonel)" value={description} onChange={e => setDescription(e.target.value)} rows={3} />
-                <p className="text-xs text-slate-500">
-                    Bu simülasyon gerçek risk envanterinden tamamen bağımsızdır. İçindeki senaryolarda yaptığınız
-                    değişiklikler yalnızca açıkça onayladığınız &quot;Envantere Aktar&quot; adımıyla gerçek kayıtlara işlenir.
-                </p>
-            </div>
-        </Modal>
-    );
-}
+const dt = (v: string) => new Date(v).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' });
 
 export default function RiskSimulationListPage() {
+    const router = useRouter();
     const [rows, setRows] = useState<SimRow[]>([]);
     const [loading, setLoading] = useState(true);
-    const [modalOpen, setModalOpen] = useState(false);
-    const [wsOpen, setWsOpen] = useState(false);
     const [importOpen, setImportOpen] = useState(false);
-    const { error: showError } = useToast();
+    const [opening, setOpening] = useState(false);
+    const [unsaved, setUnsaved] = useState<{ id: string; builtAt: string } | null>(null);
+    const [selected, setSelected] = useState<Set<string>>(new Set());
+    const [confirmDelete, setConfirmDelete] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const { success, error: showError, warning } = useToast();
     const { hasPermission } = useAuth();
+    const canCreate = hasPermission('risk:sim:create');
+    const canDelete = hasPermission('risk:sim:delete');
 
     const load = useCallback(async () => {
         setLoading(true);
         try {
             const res = await api.getRiskSimulations() as SimRow[];
             setRows(Array.isArray(res) ? res : []);
+            setSelected(prev => new Set([...prev].filter(id => (res as SimRow[]).some(r => r.id === id))));
         } catch {
             showError('Hata', 'Simülasyonlar yüklenemedi.');
         } finally {
@@ -116,57 +63,87 @@ export default function RiskSimulationListPage() {
 
     useEffect(() => { load(); }, [load]);
 
+    const openSimulator = async (refresh = false) => {
+        setOpening(true);
+        try {
+            const res = await api.openLiveSim(refresh);
+            if (res.hasUnsavedChanges && !refresh) { setUnsaved({ id: res.id, builtAt: res.builtAt }); return; }
+            setUnsaved(null);
+            router.push(`/risks/simulation/workspace/${res.id}`);
+        } catch (e) {
+            showError('Simülatör açılamadı', e instanceof ApiError ? e.message : 'Güncel veriyle çalışma alanı kurulamadı.');
+        } finally { setOpening(false); }
+    };
+
+    const runDelete = async () => {
+        setDeleting(true);
+        try {
+            const res = await api.bulkDeleteSims([...selected]);
+            if (res.deleted.length) success('Silindi', `${res.deleted.length} simülasyon silindi.`);
+            if (res.skipped.length) warning('Silinmeyenler', res.skipped.map(s => `${s.simulationId ?? s.id}: ${s.reason}`).join(' · '));
+            setConfirmDelete(false);
+            setSelected(new Set());
+            await load();
+        } catch (e) {
+            showError('Silinemedi', e instanceof ApiError ? e.message : 'Simülasyonlar silinemedi.');
+        } finally { setDeleting(false); }
+    };
+
+    const toggle = (id: string) => setSelected(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+    const toggleAll = () => setSelected(prev => (prev.size === rows.length ? new Set() : new Set(rows.map(r => r.id))));
+
     const columns: ColumnDef<SimRow>[] = [
         {
             key: 'simulationId', header: 'Kod', minWidth: 120,
             render: (r) => <Link href={simHref(r)} className="font-mono text-sm text-blue-600 hover:underline">{r.simulationId}</Link>,
         },
-        { key: 'name', header: 'Ad', minWidth: 260, render: (r) => <Link href={simHref(r)} className="text-slate-900 hover:underline font-medium">{r.name}</Link> },
-        { key: 'mode', header: 'Tür', minWidth: 120, render: (r) => <StatusBadge variant={r.mode === 'WORKSPACE' ? 'info' : 'neutral'}>{r.mode === 'WORKSPACE' ? 'Çalışma alanı' : 'Senaryo'}</StatusBadge> },
-        { key: 'scenarios', header: 'Senaryo Sayısı', minWidth: 100, render: (r) => r._count?.scenarios ?? 0 },
         {
-            key: 'status', header: 'Durum', minWidth: 100,
-            render: (r) => <StatusBadge variant={r.status === 'ACTIVE' ? 'success' : 'neutral'}>{r.status === 'ACTIVE' ? 'Aktif' : 'Arşivlendi'}</StatusBadge>,
+            key: 'name', header: 'Ad', minWidth: 260,
+            render: (r) => (
+                <div>
+                    <Link href={simHref(r)} className="text-slate-900 hover:underline font-medium">{r.name}</Link>
+                    {r.description && <div className="text-xs text-slate-500 line-clamp-1">{r.description}</div>}
+                </div>
+            ),
         },
-        { key: 'createdBy', header: 'Oluşturan', minWidth: 140, render: (r) => r.createdBy ? `${r.createdBy.firstName} ${r.createdBy.lastName}` : '—' },
-        { key: 'createdAt', header: 'Oluşturulma', minWidth: 120, render: (r) => new Date(r.createdAt).toLocaleDateString('tr-TR') },
+        {
+            key: 'mode', header: 'Tür', minWidth: 130,
+            render: (r) => r.mode === 'WORKSPACE'
+                ? <StatusBadge variant="info">Simülasyon</StatusBadge>
+                : <StatusBadge variant="neutral">Eski senaryo</StatusBadge>,
+        },
+        { key: 'risks', header: 'Risk', minWidth: 70, render: (r) => r._count?.scenarios ?? 0 },
+        { key: 'tests', header: 'Simülasyon testi', minWidth: 110, render: (r) => (r.mode === 'WORKSPACE' ? r._count?.tests ?? 0 : '—') },
+        { key: 'createdBy', header: 'Kaydeden', minWidth: 140, render: (r) => r.createdBy ? `${r.createdBy.firstName} ${r.createdBy.lastName}` : '—' },
+        { key: 'updatedAt', header: 'Son değişiklik', minWidth: 130, render: (r) => dt(r.updatedAt) },
     ];
 
     return (
         <PageShell>
             <PageHeader
                 title="Risk Simülasyonu"
-                description="Gerçek envanteri değiştirmeden 'bu kontrolü kaldırırsam / bu aksiyonu uygularsam risk ne olur?' sorularını test edin."
+                description="Gerçek envanteri değiştirmeden kontrol ve risk niteliklerini değiştirip sonuçlarını görün; denemelerinizi kaydedip sonra yeniden açın."
                 breadcrumbs={[{ label: 'Risk Yönetimi' }, { label: 'Risk Simülasyonu' }]}
-                actions={hasPermission('risk:sim:create') ? <div className="flex gap-2">
-                    <Button variant="secondary" onClick={() => setModalOpen(true)}>Yeni Senaryo Simülasyonu</Button>
-                    <Button variant="secondary" onClick={() => setImportOpen(true)}>Excel&apos;den Çalışma Alanı</Button>
-                    <Button variant="primary" onClick={() => setWsOpen(true)}>Yeni Çalışma Alanı</Button>
-                </div> : undefined}
             />
-            {!loading && (() => {
-                const latest = rows.find(r => r.mode === 'WORKSPACE' && r.status === 'ACTIVE');
-                const canCreate = hasPermission('risk:sim:create');
-                return (
-                    <div className="mb-5 flex flex-wrap items-center gap-4 rounded-2xl border border-teal-200 bg-gradient-to-r from-teal-50 to-white px-5 py-4">
-                        <div className="min-w-0 flex-1">
-                            <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-teal-700">Risk Yönetimi Simülatörü</div>
-                            <div className="mt-0.5 text-[15px] font-semibold text-slate-900">
-                                {latest ? <>Son çalışma alanı: {latest.name} <span className="font-mono text-sm text-slate-400">{latest.simulationId}</span></> : 'Risk kütüğünün tamamını tek ekranda simüle edin'}
-                            </div>
-                            <p className="mt-0.5 text-[13px] text-slate-600">
-                                Risk kütüğü, kontrol kartları, GRC Excel tabloları, simülasyon testi ve raporu, ısı haritası. Platform verisiyle veya GRC Excel&apos;inden başlatın.
-                                Aşağıdaki &quot;Senaryo&quot; türündeki eski simülasyonlar önceki ekranda açılır.
-                            </p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                            {latest && <Link href={simHref(latest)} className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800">Simülatörü aç</Link>}
-                            {canCreate && <Button variant={latest ? 'secondary' : 'primary'} onClick={() => setWsOpen(true)}>Platform verisiyle başlat</Button>}
-                            {canCreate && <Button variant="secondary" onClick={() => setImportOpen(true)}>Excel&apos;den yükle</Button>}
-                        </div>
+
+            <div className="mb-6 flex flex-wrap items-center gap-4 rounded-2xl border border-teal-200 bg-gradient-to-r from-teal-50 to-white px-5 py-5">
+                <div className="min-w-0 flex-1">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-teal-700">Güncel simülatör</div>
+                    <div className="mt-0.5 text-[17px] font-semibold text-slate-900">Risk kütüğünün şimdiki hali üzerinde çalışın</div>
+                    <p className="mt-1 max-w-3xl text-[13px] text-slate-600">
+                        Risk Envanteri ve Kontrol Alanı&apos;ndaki en güncel verilerle açılır. <b>Simülatörü aç</b> → <b>Simülasyonu başlat</b> → değişiklik yapın →
+                        <b> Kaydet</b>. Kaydettiğiniz simülasyonlar aşağıda listelenir; açıp neler yaptığınızı görebilir, yeniden değiştirip test edebilirsiniz.
+                    </p>
+                </div>
+                {canCreate && (
+                    <div className="flex flex-wrap gap-2">
+                        <Button variant="primary" onClick={() => openSimulator(false)} loading={opening}>Simülatörü aç</Button>
+                        <Button variant="secondary" onClick={() => setImportOpen(true)}>Excel&apos;den yükle</Button>
                     </div>
-                );
-            })()}
+                )}
+            </div>
+
+            <div className="mb-2 text-[15px] text-slate-900"><b>Kayıtlı simülasyonlar</b> <span className="text-slate-500">{rows.length}</span></div>
             <DataTable
                 columns={columns}
                 data={rows}
@@ -174,18 +151,44 @@ export default function RiskSimulationListPage() {
                 loading={loading}
                 totalCount={rows.length}
                 page={1}
-                pageSize={50}
+                pageSize={100}
                 onPageChange={() => {}}
-                storageKey="risk-simulation-list-table"
-                emptyTitle="Henüz simülasyon yok"
-                emptyDescription="Bir gerçek riskten veya sıfırdan hipotetik bir senaryo ile yeni bir simülasyon başlatın."
-                emptyActionLabel={hasPermission('risk:sim:create') ? 'Yeni Simülasyon' : undefined}
-                onEmptyAction={hasPermission('risk:sim:create') ? () => setModalOpen(true) : undefined}
+                storageKey="risk-simulation-saved-table"
+                showCheckbox={canDelete}
+                selectedRows={selected}
+                onRowSelect={toggle}
+                onSelectAll={toggleAll}
+                toolbar={canDelete && selected.size > 0 ? (
+                    <div className="flex items-center gap-2 text-sm">
+                        <span className="text-slate-600">{selected.size} seçili</span>
+                        <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)}>Seçilenleri sil</Button>
+                        <Button size="sm" variant="secondary" onClick={() => setSelected(new Set())}>Seçimi kaldır</Button>
+                    </div>
+                ) : undefined}
+                emptyTitle="Henüz kayıtlı simülasyon yok"
+                emptyDescription="Simülatörü açın, simülasyonu başlatın ve değişikliklerinizi kaydedin; burada listelenir."
+                emptyActionLabel={canCreate ? 'Simülatörü aç' : undefined}
+                onEmptyAction={canCreate ? () => openSimulator(false) : undefined}
                 onRefresh={load}
             />
-            <NewWorkspaceModal open={wsOpen} onClose={() => setWsOpen(false)} onCreated={(sim) => { setWsOpen(false); window.location.href = simHref({ ...sim, mode: 'WORKSPACE' }); }} />
-            <ImportSimWorkspaceModal open={importOpen} onClose={() => setImportOpen(false)} onCreated={(sim) => { setImportOpen(false); window.location.href = `/risks/simulation/workspace/${sim.id}`; }} />
-            <NewSimulationModal open={modalOpen} onClose={() => setModalOpen(false)} onCreated={(sim) => { setModalOpen(false); load(); window.location.href = `/risks/simulation/${sim.id}`; }} />
+
+            <ImportSimWorkspaceModal open={importOpen} onClose={() => setImportOpen(false)} onCreated={(sim) => { setImportOpen(false); router.push(`/risks/simulation/workspace/${sim.id}`); }} />
+
+            <Modal open={unsaved !== null} onClose={() => !opening && setUnsaved(null)} title="Kaydedilmemiş çalışmanız var" size="md"
+                footer={<>
+                    <Button variant="secondary" onClick={() => openSimulator(true)} loading={opening}>Güncel veriyle yeniden başla</Button>
+                    <Button variant="primary" onClick={() => unsaved && router.push(`/risks/simulation/workspace/${unsaved.id}`)} disabled={opening}>Kaldığım yerden devam et</Button>
+                </>}>
+                <p className="text-sm text-slate-600">
+                    Güncel simülatörde {unsaved ? dt(unsaved.builtAt) : ''} tarihinde kurulan ve henüz kaydetmediğiniz değişiklikler (veya devam eden bir simülasyon) var.
+                    Kaldığınız yerden devam edebilir ya da bu değişiklikleri atıp Risk Envanteri ve Kontrol Alanı&apos;nın şimdiki haliyle yeniden başlayabilirsiniz.
+                </p>
+            </Modal>
+
+            <ConfirmDialog open={confirmDelete} onClose={() => !deleting && setConfirmDelete(false)} onConfirm={runDelete} loading={deleting}
+                title={`${selected.size} simülasyon silinsin mi?`}
+                message="Seçilen simülasyonlar; riskleri, kontrolleri, simülasyon testleri ve raporlarıyla birlikte kalıcı olarak silinir. Gerçek envanter etkilenmez. Envantere aktarım yapılmış simülasyonlar denetim izi için silinmez."
+                confirmLabel="Kalıcı olarak sil" cancelLabel="Vazgeç" />
         </PageShell>
     );
 }

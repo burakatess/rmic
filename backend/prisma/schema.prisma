@@ -2806,6 +2806,11 @@ model RiskSimulation {
   // SCENARIO: tek risk üzerinde senaryolar (mevcut akış). WORKSPACE: risk kütüğünün tamamı;
   // kapsamdaki her risk için bir senaryo açılır ve hepsi tek ekranda simüle edilir.
   mode         RiskSimulationMode   @default(SCENARIO)
+  // Güncel simülatör: kullanıcının kaydedilmemiş çalışma kopyası (her açılışta güncel
+  // veriyle kurulur). Kaydedilince isDraft=false olur ve kayıtlı simülasyonlar listesine geçer.
+  isDraft      Boolean              @default(false)
+  // Taslakken sahibinin kullanıcı kimliği, kaydedilince null: kullanıcı başına tek taslak.
+  draftOwnerId String?              @unique
 
   createdBy   User   @relation("RiskSimulationCreatedBy", fields: [createdById], references: [id])
   createdById String

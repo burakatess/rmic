@@ -295,4 +295,75 @@ describe('E2E — Risk simülasyonu çalışma alanı', () => {
             await http().get(base()).set({ Authorization: `Bearer ${tk}` }).expect(403);
         });
     });
+
+    describe('Güncel simülatör, kayıt ve toplu silme', () => {
+        const live = (who = 'admin', body: object = {}) => http().post('/risk-simulations/workspaces/live').set(as(who)).send(body);
+
+        it('güncel simülatör taslak olarak kurulur, listede görünmez; değişiklik yoksa her açılışta yeniden kurulur', async () => {
+            const a = await live().expect(201);
+            expect(a.body).toMatchObject({ rebuilt: true, hasUnsavedChanges: false });
+            const list = await http().get('/risk-simulations').set(as('admin')).expect(200);
+            expect(list.body.some((x: any) => x.id === a.body.id)).toBe(false);
+            const ws = await http().get(`/risk-simulations/workspaces/${a.body.id}`).set(as('admin')).expect(200);
+            expect(ws.body.simulation.isDraft).toBe(true);
+            const b = await live().expect(201);
+            expect(b.body.rebuilt).toBe(true);
+            expect(b.body.id).not.toBe(a.body.id);
+            expect(await prisma.riskSimulation.findUnique({ where: { id: a.body.id } })).toBeNull();
+            ids.draft = b.body.id;
+        });
+
+        it('kaydedilmemiş değişiklik varsa taslak korunur; refresh ile atılır', async () => {
+            const sc = await prisma.riskSimulationScenario.findFirstOrThrow({ where: { simulationId: ids.draft, name: 'RE-1' }, include: { controls: true } });
+            const ke1 = sc.controls.find(c => c.name === 'KE-1')!;
+            await http().patch(`/risk-simulations/scenarios/${sc.id}/controls/${ke1.id}`).set(as('admin')).send({ ktsManualValue: 70 }).expect(200);
+            const kept = await live().expect(201);
+            expect(kept.body).toMatchObject({ id: ids.draft, rebuilt: false, hasUnsavedChanges: true });
+            const fresh = await live('admin', { refresh: true }).expect(201);
+            expect(fresh.body.rebuilt).toBe(true);
+            ids.draft = fresh.body.id;
+        });
+
+        it('simülasyon başlatılıp kaydedilir: test bitirilir, kayıt listeye girer, yeni açılış yeni taslak kurar', async () => {
+            const t = await http().post(`/risk-simulations/workspaces/${ids.draft}/tests`).set(as('admin')).send({ name: 'KTS 90 denemesi' }).expect(201);
+            const sc = await prisma.riskSimulationScenario.findFirstOrThrow({ where: { simulationId: ids.draft, name: 'RE-1' }, include: { controls: true } });
+            await http().patch(`/risk-simulations/scenarios/${sc.id}/controls/${sc.controls.find(c => c.name === 'KE-1')!.id}`).set(as('admin')).send({ ktsManualValue: 90 }).expect(200);
+            // Başkasının taslağı kaydedilemez.
+            await http().post(`/risk-simulations/workspaces/${ids.draft}/save`).set(as('analyst')).send({ name: 'x' }).expect(403);
+            const saved = await http().post(`/risk-simulations/workspaces/${ids.draft}/save`).set(as('admin')).send({ name: 'KTS 90 senaryosu', description: 'Ana kontrol iyileşirse' }).expect(201);
+            expect(saved.body).toMatchObject({ isDraft: false, draftOwnerId: null, name: 'KTS 90 senaryosu' });
+            const test = await prisma.riskSimulationTest.findUniqueOrThrow({ where: { id: t.body.id } });
+            expect(test.status).toBe('FINISHED');
+            const report = await http().get(`/risk-simulations/workspaces/${ids.draft}/tests/${t.body.id}/report`).set(as('admin')).expect(200);
+            expect(report.body.summary.changedRisks).toBe(1);
+            const list = await http().get('/risk-simulations').set(as('admin')).expect(200);
+            expect(list.body.find((x: any) => x.id === ids.draft)).toMatchObject({ name: 'KTS 90 senaryosu', _count: { tests: 1 } });
+            await http().post(`/risk-simulations/workspaces/${ids.draft}/save`).set(as('admin')).send({ name: 'tekrar' }).expect(400);
+            // Kayıtlı simülasyonda yeniden değişiklik yapılıp yeni test başlatılabilir.
+            await http().post(`/risk-simulations/workspaces/${ids.draft}/tests`).set(as('admin')).send({ name: 'İkinci deneme' }).expect(201);
+            const next = await live().expect(201);
+            expect(next.body).toMatchObject({ rebuilt: true });
+            expect(next.body.id).not.toBe(ids.draft);
+            ids.saved = ids.draft; ids.draft = next.body.id;
+        });
+
+        it('toplu silme: yetkisiz rol 403; kayıtlı ve eski senaryo simülasyonları silinir; aktarım yapılmış olan atlanır', async () => {
+            await http().post('/risk-simulations/bulk-delete').set(as('analyst')).send({ ids: [ids.saved] }).expect(403);
+            const old = await http().post('/risk-simulations').set(as('admin')).send({ name: 'Eski senaryo' }).expect(201);
+            // Aktarım yapılmış simülasyon (denetim izi) silinmez.
+            const withTransfer = ids.xws;
+            const sc = await prisma.riskSimulationScenario.findFirstOrThrow({ where: { simulationId: withTransfer } });
+            await prisma.riskSimulationTransfer.create({
+                data: { transferId: 'TRF-E2E-1', scenarioId: sc.id, scenarioVersionAtTransfer: 1, performedById: ids.admin, resultSummary: {} },
+            });
+            const res = await http().post('/risk-simulations/bulk-delete').set(as('admin')).send({ ids: [ids.saved, old.body.id, withTransfer, 'yok-boyle-bir-id'] }).expect(201);
+            expect(res.body.deleted).toHaveLength(2);
+            expect(res.body.skipped).toEqual(expect.arrayContaining([
+                expect.objectContaining({ id: 'yok-boyle-bir-id', reason: 'Bulunamadı' }),
+                expect.objectContaining({ id: withTransfer, reason: expect.stringContaining('aktarım') }),
+            ]));
+            expect(await prisma.riskSimulation.findUnique({ where: { id: ids.saved } })).toBeNull();
+            expect(await prisma.auditLog.count({ where: { action: 'DELETE', entityType: 'RiskSimulation', entityId: ids.saved } })).toBe(1);
+        });
+    });
 });

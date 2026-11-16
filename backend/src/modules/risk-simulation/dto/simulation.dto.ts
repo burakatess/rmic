@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import { SIM_STATUS_VALUES } from './methodology-types';
 
 export class CreateRiskSimulationDto {
@@ -32,4 +32,31 @@ export class StartSimulationTestDto {
   @IsString()
   @MaxLength(200)
   name!: string;
+}
+
+export class OpenLiveWorkspaceDto {
+  /** true: kaydedilmemiş değişiklikler atılır, güncel veriyle yeniden kurulur. */
+  @IsOptional()
+  @IsBoolean()
+  refresh?: boolean;
+}
+
+export class SaveWorkspaceDto {
+  @IsString()
+  @MaxLength(200)
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  description?: string;
+}
+
+export class DeleteSimulationsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  @MaxLength(50, { each: true })
+  ids!: string[];
 }

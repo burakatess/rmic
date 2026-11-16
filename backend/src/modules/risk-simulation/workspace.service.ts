@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma';
 import { nextCounterValue, formatRecordId } from '../../common/util/sequential-id';
@@ -6,6 +6,7 @@ import { AccessScopeService, and, riskWhere, type AccessActor } from '../../comm
 import { calcNaturalRiskLevel, getBkpLevel, type MethodologyConfig } from './calculation-engine';
 import { calculateScenarioRow, RiskSimulationService } from './risk-simulation.service';
 import { matchPOptions } from './p-option-match';
+import { WorkspaceTestService } from './workspace-test.service';
 
 /**
  * Risk simülasyonu ÇALIŞMA ALANI: risk kütüğünün tamamı tek ekranda. Kapsamdaki her risk
@@ -64,9 +65,9 @@ function projection(s: {
 
 @Injectable()
 export class WorkspaceService {
-    constructor(private prisma: PrismaService, private scope: AccessScopeService, private sims: RiskSimulationService) { }
+    constructor(private prisma: PrismaService, private scope: AccessScopeService, private sims: RiskSimulationService, private tests: WorkspaceTestService) { }
 
-    async createWorkspace(dto: { name: string; description?: string }, actor: AccessActor) {
+    async createWorkspace(dto: { name: string; description?: string }, actor: AccessActor, opts: { draft?: boolean } = {}) {
         const ctx = await this.scope.context(actor);
         const methodology = await this.sims.getActiveMethodology();
         const risks = await this.prisma.risk.findMany({
@@ -84,7 +85,10 @@ export class WorkspaceService {
         const unmatched: { riskId: string; kontrolId: string; param: string; text: string }[] = [];
         const result = await this.prisma.$transaction(async (tx) => {
             const sim = await tx.riskSimulation.create({
-                data: { simulationId, name: dto.name, description: dto.description, mode: 'WORKSPACE', createdById: actor.id },
+                data: {
+                    simulationId, name: dto.name, description: dto.description, mode: 'WORKSPACE', createdById: actor.id,
+                    ...(opts.draft ? { isDraft: true, draftOwnerId: actor.id } : {}),
+                },
             });
             for (const risk of risks) {
                 const links = risk.riskControls.map(l => l.riskControl);
@@ -191,5 +195,81 @@ export class WorkspaceService {
             summary: { riskCount: rows.length, activeControls, residualDistribution: simDist, recordDistribution: recDist, unknownResidual, deviationCount: deviation, changedCount: changed },
             rows,
         };
+    }
+
+    // ─── Güncel simülatör (taslak) ve kayıtlı simülasyonlar ───────────────────
+
+    /**
+     * Kullanıcının güncel simülatörünü açar. Taslak yoksa ya da taslakta kaydedilmemiş bir şey
+     * yoksa Risk Envanteri + Kontrol Alanı'nın şimdiki haliyle yeniden kurulur. Kaydedilmemiş
+     * değişiklik veya devam eden simülasyon varsa taslak korunur (refresh=true ile atılır).
+     */
+    async openLive(actor: AccessActor, refresh = false) {
+        const draft = await this.prisma.riskSimulation.findUnique({ where: { draftOwnerId: actor.id }, select: { id: true, createdAt: true } });
+        if (draft && !refresh) {
+            const ws = await this.getWorkspace(draft.id);
+            const unsaved = ws.summary.changedCount > 0 || !!ws.activeTest;
+            if (unsaved) return { id: draft.id, rebuilt: false, hasUnsavedChanges: true, builtAt: draft.createdAt };
+        }
+        if (draft) await this.removeDraft(draft.id, actor);
+        const sim = await this.createWorkspace({ name: 'Güncel simülatör' }, actor, { draft: true });
+        return { id: sim.id, rebuilt: true, hasUnsavedChanges: false, builtAt: sim.createdAt, unmatched: sim.unmatched };
+    }
+
+    private async removeDraft(id: string, actor: AccessActor) {
+        const transfers = await this.prisma.riskSimulationTransfer.count({ where: { scenario: { simulationId: id } } });
+        if (transfers > 0) {
+            // Envantere aktarım yapılmış taslak silinmez (denetim izi): kayıtlı simülasyona çevrilir.
+            await this.prisma.riskSimulation.update({
+                where: { id }, data: { isDraft: false, draftOwnerId: null, name: `Güncel simülatör · ${new Date().toLocaleString('tr-TR')} (otomatik kayıt)` },
+            });
+            return;
+        }
+        await this.prisma.riskSimulation.delete({ where: { id } });
+        await this.prisma.auditLog.create({ data: { userId: actor.id, action: 'DELETE', entityType: 'RiskSimulation', entityId: id, oldValue: { reason: 'Güncel simülatör yenilendi' } } });
+    }
+
+    /** Güncel simülatörü adıyla kaydeder; devam eden simülasyon testi bitirilip raporu dondurulur. */
+    async saveDraft(id: string, dto: { name: string; description?: string }, actor: AccessActor) {
+        const sim = await this.prisma.riskSimulation.findUnique({ where: { id }, select: { id: true, isDraft: true, draftOwnerId: true, simulationId: true } });
+        if (!sim) throw new NotFoundException('Risk simülasyonu bulunamadı');
+        if (!sim.isDraft) throw new BadRequestException('Bu simülasyon zaten kayıtlı.');
+        if (sim.draftOwnerId !== actor.id) throw new ForbiddenException('Yalnız kendi güncel simülatörünüzü kaydedebilirsiniz.');
+        const active = await this.prisma.riskSimulationTest.findUnique({ where: { activeFor: id }, select: { id: true } });
+        if (active) await this.tests.finish(id, active.id, actor.id);
+        const saved = await this.prisma.riskSimulation.update({
+            where: { id }, data: { isDraft: false, draftOwnerId: null, name: dto.name, description: dto.description ?? null },
+        });
+        await this.prisma.auditLog.create({
+            data: { userId: actor.id, action: 'SIM_SAVE', entityType: 'RiskSimulation', entityId: id, newValue: { simulationId: saved.simulationId, name: saved.name, finishedTestId: active?.id ?? null } },
+        });
+        return saved;
+    }
+
+    /** Toplu silme. Envantere aktarım yapılmış simülasyonlar denetim izi için silinmez. */
+    async deleteMany(ids: string[], actor: AccessActor) {
+        const unique = [...new Set(ids)];
+        const sims = await this.prisma.riskSimulation.findMany({
+            where: { id: { in: unique } },
+            select: { id: true, simulationId: true, name: true, mode: true, isDraft: true, draftOwnerId: true },
+        });
+        const found = new Map(sims.map(s => [s.id, s]));
+        const deleted: string[] = [];
+        const skipped: { id: string; simulationId: string | null; reason: string }[] = [];
+        for (const id of unique) {
+            const sim = found.get(id);
+            if (!sim) { skipped.push({ id, simulationId: null, reason: 'Bulunamadı' }); continue; }
+            if (sim.isDraft && sim.draftOwnerId !== actor.id) { skipped.push({ id, simulationId: sim.simulationId, reason: 'Başka kullanıcının güncel simülatörü' }); continue; }
+            const transfers = await this.prisma.riskSimulationTransfer.count({ where: { scenario: { simulationId: id } } });
+            if (transfers > 0) { skipped.push({ id, simulationId: sim.simulationId, reason: 'Envantere aktarım yapılmış; denetim izi için silinemez' }); continue; }
+            await this.prisma.$transaction([
+                this.prisma.riskSimulation.delete({ where: { id } }),
+                this.prisma.auditLog.create({
+                    data: { userId: actor.id, action: 'DELETE', entityType: 'RiskSimulation', entityId: id, oldValue: { simulationId: sim.simulationId, name: sim.name, mode: sim.mode } },
+                }),
+            ]);
+            deleted.push(sim.simulationId);
+        }
+        return { deleted, skipped };
     }
 }

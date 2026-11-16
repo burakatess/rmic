@@ -11,7 +11,7 @@ import type { AccessActor } from '../../common/services/access-scope.service';
 import {
     CreateRiskSimulationDto, UpdateRiskSimulationDto, CreateScenarioDto, UpdateScenarioDto,
     CreateScenarioControlDto, UpdateScenarioControlDto, RedistributeWeightsDto,
-    CreateScenarioActionDto, UpdateScenarioActionDto, ToggleScenarioActionDto, TransferDto, ImportWorkspaceDto, StartSimulationTestDto,
+    CreateScenarioActionDto, UpdateScenarioActionDto, ToggleScenarioActionDto, TransferDto, ImportWorkspaceDto, StartSimulationTestDto, OpenLiveWorkspaceDto, SaveWorkspaceDto, DeleteSimulationsDto,
 } from './dto';
 
 const SIM_ROLES = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'RISK_ANALYST'];
@@ -37,6 +37,29 @@ export class RiskSimulationController {
     @RequirePermissions('risk:sim:create')
     createWorkspace(@Body() dto: CreateRiskSimulationDto, @CurrentUser() actor: AccessActor) {
         return this.workspaceService.createWorkspace(dto, actor);
+    }
+
+    // Güncel simülatör: Risk Envanteri + Kontrol Alanı'nın şimdiki hali (kullanıcı başına taslak).
+    @Post('workspaces/live')
+    @Roles(...SIM_ROLES)
+    @RequirePermissions('risk:sim:create')
+    openLive(@Body() dto: OpenLiveWorkspaceDto, @CurrentUser() actor: AccessActor) {
+        return this.workspaceService.openLive(actor, !!dto.refresh);
+    }
+
+    @Post('workspaces/:id/save')
+    @Roles(...SIM_ROLES)
+    @RequirePermissions('risk:sim:create')
+    saveWorkspace(@Param('id') id: string, @Body() dto: SaveWorkspaceDto, @CurrentUser() actor: AccessActor) {
+        return this.workspaceService.saveDraft(id, dto, actor);
+    }
+
+    // Toplu silme (en kısıtlayıcı rol seti).
+    @Post('bulk-delete')
+    @Roles(...TRANSFER_ROLES)
+    @RequirePermissions('risk:sim:delete')
+    bulkDelete(@Body() dto: DeleteSimulationsDto, @CurrentUser() actor: AccessActor) {
+        return this.workspaceService.deleteMany(dto.ids, actor);
     }
 
     // Excel'den yeni çalışma alanı. Dosya tarayıcıda okunur; burada yalnız doğrulanmış satırlar

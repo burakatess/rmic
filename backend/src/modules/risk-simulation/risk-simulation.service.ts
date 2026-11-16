@@ -136,6 +136,7 @@ export class RiskSimulationService {
     async listSimulations(query: { status?: string; search?: string }) {
         return this.prisma.riskSimulation.findMany({
             where: {
+                isDraft: false, // güncel simülatör taslakları listede yer almaz
                 status: query.status as any,
                 ...(query.search ? {
                     OR: [
@@ -144,8 +145,8 @@ export class RiskSimulationService {
                     ],
                 } : {}),
             },
-            include: { _count: { select: { scenarios: true } }, createdBy: { select: { id: true, firstName: true, lastName: true } } },
-            orderBy: { createdAt: 'desc' },
+            include: { _count: { select: { scenarios: true, tests: true } }, createdBy: { select: { id: true, firstName: true, lastName: true } } },
+            orderBy: { updatedAt: 'desc' },
         });
     }
 

@@ -115,9 +115,9 @@ export function TestReport({ simulationId, activeTestId, refreshKey, onOpenRisk 
     if (!tests) return <LoadingState message="Test raporu hazırlanıyor..." />;
     if (!tests.length || !report) return (
         <div className="rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center">
-            <div className="text-base font-semibold text-slate-800">Henüz simülasyon testi yok</div>
+            <div className="text-base font-semibold text-slate-800">Henüz başlatılmış simülasyon yok</div>
             <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">
-                Üstteki &quot;Simülasyon testi başlat&quot; düğmesiyle şu anki durumu başlangıç olarak kaydedin. Sonra simülatörde yaptığınız
+                Üstteki &quot;Simülasyonu başlat&quot; düğmesiyle şu anki durumu başlangıç olarak kaydedin. Sonra simülatörde yaptığınız
                 değişiklikler ve bunların doğal, bütünleşik ve kalıntı riske etkisi burada raporlanır.
             </p>
         </div>

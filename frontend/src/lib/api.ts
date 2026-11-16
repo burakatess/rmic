@@ -1549,6 +1549,16 @@ class ApiClient {
     async getSimWorkspaceTables(id: string) {
         return this.request<any>(`/risk-simulations/workspaces/${id}/tables`);
     }
+    /** Güncel simülatör: kullanıcının taslak çalışma alanı (güncel veriyle). */
+    async openLiveSim(refresh = false) {
+        return this.request<{ id: string; rebuilt: boolean; hasUnsavedChanges: boolean; builtAt: string }>('/risk-simulations/workspaces/live', { method: 'POST', body: { refresh } });
+    }
+    async saveSimWorkspace(id: string, data: { name: string; description?: string }) {
+        return this.request<any>(`/risk-simulations/workspaces/${id}/save`, { method: 'POST', body: data });
+    }
+    async bulkDeleteSims(ids: string[]) {
+        return this.request<{ deleted: string[]; skipped: { id: string; simulationId: string | null; reason: string }[] }>('/risk-simulations/bulk-delete', { method: 'POST', body: { ids } });
+    }
     async listSimTests(simId: string) {
         return this.request<any[]>(`/risk-simulations/workspaces/${simId}/tests`);
     }
