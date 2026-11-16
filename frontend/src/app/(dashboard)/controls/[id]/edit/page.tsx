@@ -4,14 +4,15 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import api from '@/lib/api';
+import { ErrorState } from '@/components/ui';
+import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import { useToast } from '@/components/ui/Toast';
 
 interface User {
     id: string;
     firstName: string;
     lastName: string;
-    email: string;
-    department?: string;
+    department?: string | null;
 }
 
 interface Directorate {
@@ -39,6 +40,7 @@ export default function ControlEditPage() {
     const { success: toastSuccess, error: toastError } = useToast();
 
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<LoadError | null>(null);
     const [saving, setSaving] = useState(false);
     const [users, setUsers] = useState<User[]>([]);
     const [directorates, setDirectorates] = useState<Directorate[]>([]);
@@ -77,7 +79,7 @@ export default function ControlEditPage() {
             try {
                 let loadedUsers: User[] = [];
                 try {
-                    const data = await api.getUsers();
+                    const data = await api.getUserChoices();
                     if (Array.isArray(data)) {
                         loadedUsers = data;
                         setUsers(data);
@@ -112,8 +114,9 @@ export default function ControlEditPage() {
                     setDisplayStatus(cData.displayStatus === 'AKTIF' ? 'AKTIF' : 'PASIF');
                 }
             } catch (error) {
-                console.error('Failed to load control edit data:', error);
-                toastError('Hata', 'Kontrol bilgileri yüklenemedi.');
+                const le = classifyLoadError(error, 'Kontrol');
+                setLoadError(le);
+                toastError(le.title, le.description);
             } finally {
                 setLoading(false);
             }
@@ -222,6 +225,12 @@ export default function ControlEditPage() {
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
             </div>
         );
+    }
+
+    // Yüklenemeyen kayıt için varsayılan değerli form gösterilmez — kaydetmek kaydı ezerdi.
+    if (loadError) {
+        return <ErrorState title={loadError.title} description={loadError.description}
+            onRetry={loadError.retryable ? () => window.location.reload() : undefined} />;
     }
 
     return (
@@ -392,7 +401,7 @@ export default function ControlEditPage() {
                                         className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm font-semibold"
                                     >
                                         <option value="">İletişim Kişisi Seçin</option>
-                                        {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName} ({u.email})</option>)}
+                                        {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}{u.department ? ` (${u.department})` : ''}</option>)}
                                     </select>
                                 </div>
                             </div>

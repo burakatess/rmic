@@ -61,6 +61,8 @@ export interface AnnualPlanWorkspace {
     draftId: string;
     draftRevision: number;
     draftStatus: 'OPEN' | 'PENDING_APPROVAL' | 'CHANGES_REQUESTED' | 'APPROVED' | 'APPLIED';
+    /** Backend hesaplar (annual-plan.service getWorkspace): onay/değişiklik isteme yetenekleri. */
+    capabilities?: { canApprove: boolean; canRequestChanges: boolean };
     draftUpdatedAt: string;
     draftLastAppliedAt: string | null;
     submittedAt?: string | null;

@@ -8,20 +8,26 @@ describe('SearchService', () => {
         findingFollowUp: { findMany: jest.fn() },
     };
     const scope: any = { getScopeOptions: jest.fn() };
+    // Kapsam uygulaması kapalı (varsayılan) → mevcut arama davranışı.
+    const accessScope: any = { context: jest.fn() };
     let service: SearchService;
 
     beforeEach(() => {
         jest.clearAllMocks();
         Object.values(db).forEach((model: any) => model.findMany.mockResolvedValue([]));
         scope.getScopeOptions.mockResolvedValue({ org: { available: false }, unit: { directorates: [] } });
-        service = new SearchService(db, scope);
+        accessScope.context.mockImplementation(async (a: any) => ({
+            userId: a.id, permissions: a.permissions, enforced: false, directorateIds: [],
+            orgModules: new Set(['finding', 'action', 'followUp', 'controlTest', 'risk', 'control']),
+        }));
+        service = new SearchService(db, scope, accessScope);
     });
 
     it('trims Turkish text and restricts an unprivileged search to owned records', async () => {
         db.control.findMany.mockResolvedValue([{ id: 'c1', controlId: 'BTK.0042', name: 'İşlem Kontrolü', description: 'İç süreç', directorateRel: null }]);
         const response = await service.search({ q: '  İşlem  ', category: 'control' as any, limit: 10 }, 'u1', ['control:view']);
         expect(db.control.findMany).toHaveBeenCalledWith(expect.objectContaining({
-            where: expect.objectContaining({ ownerId: 'u1' }),
+            where: expect.objectContaining({ AND: [{ ownerId: 'u1' }] }),
         }));
         expect(response.query).toBe('İşlem');
         expect(response.data[0]).toMatchObject({ code: 'BTK.0042', url: '/controls/c1' });
@@ -47,5 +53,19 @@ describe('SearchService', () => {
                 expect.objectContaining({ OR: expect.any(Array) }),
             ] },
         }));
+    });
+
+    it('kapsam uygulaması açıkken merkezi politika kullanılır; report:org kayıt kapsamı vermez', async () => {
+        accessScope.context.mockImplementation(async (a: any) => ({
+            userId: a.id, permissions: a.permissions, enforced: true, directorateIds: ['d1'], orgModules: new Set(),
+        }));
+        await service.search({ q: 'bulgu', category: 'finding' as any, limit: 10 }, 'u1', ['finding:view', 'report:org']);
+        const where = db.finding.findMany.mock.calls[0][0].where;
+        expect(where.AND[0]).toEqual({
+            OR: [
+                { directorateId: { in: ['d1'] }, workflowStatus: { not: 'TASLAK' } },
+                { assigneeId: 'u1' },
+            ],
+        });
     });
 });

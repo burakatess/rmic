@@ -28,6 +28,8 @@ model User {
   role                       Role               @relation(fields: [roleId], references: [id])
   roleId                     String
   ownedRisks                 Risk[]             @relation("RiskOwner")
+  responsibleRisks           Risk[]             @relation("RiskResponsible")
+  responsibleGmys            Gmy[]              @relation("GmyResponsible")
   ownedControls              Control[]          @relation("ControlOwner")
   testPerformerControls      Control[]          @relation("ControlTestPerformer")
   reviewerControls           Control[]          @relation("ControlReviewer")
@@ -40,16 +42,20 @@ model User {
   assignedScopeYears         ControlYearScope[] @relation("ScopeAssignee")
   secondControlledScopeYears ControlYearScope[] @relation("ScopeSecondController")
 
-  createdSimMethodologies SimulationMethodology[]  @relation("SimMethodologyCreatedBy")
-  createdRiskSimulations  RiskSimulation[]         @relation("RiskSimulationCreatedBy")
-  createdSimScenarios     RiskSimulationScenario[] @relation("RiskSimScenarioCreatedBy")
-  performedSimTransfers   RiskSimulationTransfer[] @relation("RiskSimTransferPerformedBy")
+  createdSimMethodologies SimulationMethodology[]         @relation("SimMethodologyCreatedBy")
+  createdRiskSimulations  RiskSimulation[]                @relation("RiskSimulationCreatedBy")
+  createdSimScenarios     RiskSimulationScenario[]        @relation("RiskSimScenarioCreatedBy")
+  startedSimTests         RiskSimulationTest[]            @relation("RiskSimTestStartedBy")
+  requestedSimTransfers   RiskSimulationTransferRequest[] @relation("SimTransferRequestedBy")
+  decidedSimTransfers     RiskSimulationTransferRequest[] @relation("SimTransferDecidedBy")
+  finishedSimTests        RiskSimulationTest[]            @relation("RiskSimTestFinishedBy")
+  performedSimTransfers   RiskSimulationTransfer[]        @relation("RiskSimTransferPerformedBy")
 
   directorateMemberships        DirectorateMembership[] @relation("DirectorateMembershipUser")
   createdDirectorateMemberships DirectorateMembership[] @relation("DirectorateMembershipCreatedBy")
 
-  updatedAnnualPlanDrafts AnnualPlanDraft[] @relation("AnnualPlanDraftUpdatedBy")
-  appliedAnnualPlanDrafts AnnualPlanDraft[] @relation("AnnualPlanDraftAppliedBy")
+  updatedAnnualPlanDrafts   AnnualPlanDraft[] @relation("AnnualPlanDraftUpdatedBy")
+  appliedAnnualPlanDrafts   AnnualPlanDraft[] @relation("AnnualPlanDraftAppliedBy")
   submittedAnnualPlanDrafts AnnualPlanDraft[] @relation("AnnualPlanDraftSubmittedBy")
   approvedAnnualPlanDrafts  AnnualPlanDraft[] @relation("AnnualPlanDraftApprovedBy")
   decidedAnnualPlanDrafts   AnnualPlanDraft[] @relation("AnnualPlanDraftDecidedBy")
@@ -77,11 +83,32 @@ model RefreshToken {
 // DIRECTORATE (İlgili Direktörlük — FK tabanlı)
 // ==========================================
 
+/// Genel Müdür Yardımcılığı — direktörlüklerin bağlı olduğu üst birim; riskte "İlgili GMY" seçimi
+/// bu listeden yapılır. Sorumlu kullanıcı kişisel veridir (gerekçe: organizasyonel hesap verebilirlik).
+model Gmy {
+  id                String  @id @default(cuid())
+  name              String  @unique
+  code              String? @unique
+  isActive          Boolean @default(true)
+  responsibleUser   User?   @relation("GmyResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  responsibleUserId String?
+
+  directorates Directorate[] @relation("DirectorateGmy")
+  risks        Risk[]        @relation("RiskGmy")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
 model Directorate {
   id       String  @id @default(cuid())
   name     String  @unique // "BT Ağ Yönetimi"
   code     String? @unique // "BT-AG"
-  gmy      String? // Bağlı GMY bilgisi
+  gmy      String? // Bağlı GMY bilgisi (eski serbest metin; gmyId geldikçe yalnız gösterim)
+  gmyUnit  Gmy?    @relation("DirectorateGmy", fields: [gmyId], references: [id], onDelete: SetNull)
+  gmyId    String?
   isActive Boolean @default(true)
 
   // Relations
@@ -91,6 +118,7 @@ model Directorate {
   followUps     FindingFollowUp[]       @relation("FollowUpDirectorate")
   controlTests  ControlTest[]           @relation("ControlTestDirectorate")
   riskProposals RiskProposal[]          @relation("RiskProposalDirectorate")
+  risks         Risk[]                  @relation("RiskDirectorate")
   memberships   DirectorateMembership[]
 
   createdAt DateTime @default(now())
@@ -159,15 +187,31 @@ model Risk {
   ozet        String?    @db.Text // Özet / summary
 
   // Organizasyon
-  ilgiliGmy String? // İlgili Genel Müdür Yardımcılığı
+  ilgiliGmy String? // İlgili GMY adı — gmyId'den türetilir (listeler/raporlar için gösterim kopyası)
+  gmy       Gmy?    @relation("RiskGmy", fields: [gmyId], references: [id], onDelete: SetNull)
+  gmyId     String?
   surec     String? // Süreç
   altSurec  String? // Alt Süreç
   flagForIT Boolean @default(false) // Flag 4 IT
 
   // Owner
-  owner         User    @relation("RiskOwner", fields: [ownerId], references: [id])
-  ownerId       String
-  riskSorumlusu String? // Risk Sorumlusu (serbest metin, LDAP gelince FK olacak)
+  owner   User   @relation("RiskOwner", fields: [ownerId], references: [id])
+  ownerId String
+
+  // Kayıt kapsamı için riskin bağlı olduğu direktörlük (mevcut Directorate modeli).
+  // Başlangıçta nullable: mevcut riskler eşlenene kadar boş kalır ve kurum geneline AÇILMAZ
+  // (yalnız kurum geneli kapsamlılar + risk sahibi görür). Sorumlunun güncel biriminden
+  // otomatik doldurulmaz. Değişikliği ayrı izin (risk:directorate:change) + denetim kaydı ister.
+  directorate       Directorate? @relation("RiskDirectorate", fields: [directorateId], references: [id])
+  directorateId     String?
+  // Riskin niteliği: true = kurum geneli risk (direktörlüğü yok, bilinçli). Yeni risklerde
+  // ya direktörlük ya da isOrgWide=true zorunludur; ikisi birlikte olamaz.
+  isOrgWide         Boolean      @default(false)
+  riskSorumlusu     String? // Risk Sorumlusu adı — riskSorumlusuId'den türetilir (gösterim kopyası; eski kayıtlarda serbest metin)
+  // Kişisel veri: risk sorumlusu kullanıcı referansı. Gerekçe: risk yönetiminde hesap verebilirlik
+  // (SPK VII-128.10 iç kontrol sorumluluk ataması). Kullanıcı silinirse referans boşalır.
+  riskSorumlusuUser User?        @relation("RiskResponsible", fields: [riskSorumlusuId], references: [id], onDelete: SetNull)
+  riskSorumlusuId   String?
 
   // Category
   category   RiskCategory @relation(fields: [categoryId], references: [id])
@@ -246,8 +290,11 @@ model Risk {
   updatedAt DateTime @updatedAt
 
   @@index([status])
+  @@index([directorateId])
   @@index([ownerId])
   @@index([categoryId])
+  @@index([gmyId])
+  @@index([riskSorumlusuId])
 }
 
 model RiskCategory {
@@ -524,22 +571,26 @@ model AnnualPlanDraft {
   lastAppliedBy   User?     @relation("AnnualPlanDraftAppliedBy", fields: [lastAppliedById], references: [id])
   lastAppliedById String?
 
-  submittedAt   DateTime?
-  submittedBy   User?     @relation("AnnualPlanDraftSubmittedBy", fields: [submittedById], references: [id])
-  submittedById String?
-  approvedAt    DateTime?
-  approvedBy    User?     @relation("AnnualPlanDraftApprovedBy", fields: [approvedById], references: [id])
-  approvedById  String?
-  approvedRevision Int?
+  submittedAt         DateTime?
+  submittedBy         User?     @relation("AnnualPlanDraftSubmittedBy", fields: [submittedById], references: [id])
+  submittedById       String?
+  approvedAt          DateTime?
+  approvedBy          User?     @relation("AnnualPlanDraftApprovedBy", fields: [approvedById], references: [id])
+  approvedById        String?
+  approvedRevision    Int?
   assignmentDecisions Json?
-  decisionNote  String?   @db.Text
-  decidedBy     User?     @relation("AnnualPlanDraftDecidedBy", fields: [decidedById], references: [id])
-  decidedById   String?
+  decisionNote        String?   @db.Text
+  decidedBy           User?     @relation("AnnualPlanDraftDecidedBy", fields: [decidedById], references: [id])
+  decidedById         String?
 
   items AnnualPlanDraftItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // migration 20260929100000 bu indeksleri oluşturur — şema ile hizalı tutulur.
+  @@index([submittedById])
+  @@index([approvedById])
 }
 
 enum AnnualPlanDraftStatus {
@@ -869,7 +920,10 @@ model Finding {
   gmy         String?
 
   // Assignee
-  assigneeId String? // User id reference
+  assigneeId  String? // User id reference
+  // Bulguyu oluşturan kullanıcı (sunucu @CurrentUser'dan yazar; istemciden kabul edilmez).
+  // Taslak silme yetkisinin (finding:delete:own) dayanağıdır. Eski kayıtlar CREATE denetim izinden doldurulur.
+  createdById String?
 
   // Direktörlük (FK)
   directorateRel Directorate? @relation("FindingDirectorate", fields: [directorateId], references: [id])
@@ -931,6 +985,7 @@ model Finding {
   @@index([directorateId])
   @@index([status])
   @@index([severity])
+  @@index([createdById])
   @@index([assigneeId])
   @@index([workflowStatus])
   @@index([resolutionStatus])
@@ -1071,10 +1126,10 @@ model FindingFollowUp {
   explanation String?         @db.Text // Değerlendirme açıklaması
 
   // Approval
-  approvalStatus FollowUpApprovalStatus? @default(BEKLIYOR)
-  approvedBy     String?
-  approvedAt     DateTime?
-  rejectionReason String? @db.Text
+  approvalStatus  FollowUpApprovalStatus? @default(BEKLIYOR)
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectionReason String?                 @db.Text
 
   // Takip işi ataması: ControlTest ataması varsa ondan snapshot alınır; legacy
   // kayıtlarda Finding assignee / Action owner fallback'i kullanılır.
@@ -1292,7 +1347,7 @@ model Attachment {
   id           String               @id @default(cuid())
   fileName     String // storage dosya adı
   originalName String // kullanıcının yüklediği orijinal isim
-  displayName  String?
+  displayName  String?              @db.VarChar(255) // migration 20260930100000 ile aynı sınır
   description  String?              @db.Text
   mimeType     String // "application/pdf", "image/png" vb.
   sizeBytes    Int // byte cinsinden boyut
@@ -1339,7 +1394,7 @@ model FindingAttachment {
   findingId    String
   fileName     String // storage dosya adı (uuid.pdf)
   originalName String // kullanıcının yüklediği orijinal isim
-  displayName  String?
+  displayName  String?  @db.VarChar(255) // migration 20260930100000 ile aynı sınır
   description  String?  @db.Text
   mimeType     String // "application/pdf", "image/png" vb.
   sizeBytes    Int // dosya boyutu (byte)
@@ -1356,7 +1411,7 @@ model ActionAttachment {
   actionId     String
   fileName     String
   originalName String
-  displayName  String?
+  displayName  String?  @db.VarChar(255) // migration 20260930100000 ile aynı sınır
   description  String?  @db.Text
   mimeType     String
   sizeBytes    Int
@@ -1373,8 +1428,8 @@ model FollowUpAttachment {
   followUpId   String
   fileName     String
   originalName String
-  displayName  String?
-  description  String?  @db.Text
+  displayName  String?         @db.VarChar(255) // migration 20260930100000 ile aynı sınır
+  description  String?         @db.Text
   mimeType     String
   sizeBytes    Int
   url          String?
@@ -1390,7 +1445,7 @@ model ControlTestAttachment {
   controlTestId String
   fileName      String
   originalName  String
-  displayName   String?
+  displayName   String?     @db.VarChar(255) // migration 20260930100000 ile aynı sınır
   description   String?     @db.Text
   mimeType      String
   sizeBytes     Int
@@ -1559,12 +1614,15 @@ model AuditLog {
   newValue   Json?
   ipAddress  String?
   userAgent  String?
+  // USER: HTTP isteğiyle gelen kullanıcı işlemi; SYSTEM: cron/arka plan işi (IP/UA yoktur, hata değildir).
+  actorType  String?
   createdAt  DateTime @default(now())
 
   @@index([entityType, entityId])
   @@index([userId])
   @@index([createdAt])
   @@index([action])
+  @@index([actorType])
 }
 
 // ==========================================
@@ -2712,14 +2770,20 @@ model QualityRunItem {
 // ==========================================
 
 model SimulationMethodology {
-  id         String  @id @default(cuid())
-  version    Int     @unique
+  id                String  @id @default(cuid())
+  // Resmî sürüm numarası; deneme (simülasyon içi) metodolojilerde null.
+  version           Int?    @unique
   // calculation-engine.ts::MethodologyConfig serileştirilmiş hali. Her senaryo
   // oluşturulduğu andaki sürüme sabitlenir — config değişse bile eski senaryolar
   // sessizce yeniden hesaplanmaz.
-  config     Json
-  isActive   Boolean @default(false)
-  changeNote String? @db.Text
+  config            Json
+  isActive          Boolean @default(false)
+  changeNote        String? @db.Text
+  // Deneme metodolojisi: yalnız bir simülasyonun içinde kullanılır (resmî ayarı değiştirmez).
+  // trialSimulationId bilinçli olarak ilişki değil: simülasyon silinince servis temizler.
+  isTrial           Boolean @default(false)
+  trialSimulationId String?
+  basedOnVersion    Int?
 
   createdBy   User   @relation("SimMethodologyCreatedBy", fields: [createdById], references: [id])
   createdById String
@@ -2729,6 +2793,12 @@ model SimulationMethodology {
   createdAt DateTime @default(now())
 
   @@index([isActive])
+  @@index([trialSimulationId])
+}
+
+enum RiskSimulationMode {
+  SCENARIO
+  WORKSPACE
 }
 
 enum RiskSimulationStatus {
@@ -2742,17 +2812,95 @@ model RiskSimulation {
   name         String
   description  String?              @db.Text
   status       RiskSimulationStatus @default(ACTIVE)
+  // SCENARIO: tek risk üzerinde senaryolar (mevcut akış). WORKSPACE: risk kütüğünün tamamı;
+  // kapsamdaki her risk için bir senaryo açılır ve hepsi tek ekranda simüle edilir.
+  mode         RiskSimulationMode   @default(SCENARIO)
+  // Güncel simülatör: kullanıcının kaydedilmemiş çalışma kopyası (her açılışta güncel
+  // veriyle kurulur). Kaydedilince isDraft=false olur ve kayıtlı simülasyonlar listesine geçer.
+  isDraft      Boolean              @default(false)
+  // Taslakken sahibinin kullanıcı kimliği, kaydedilince null: kullanıcı başına tek taslak.
+  draftOwnerId String?              @unique
 
   createdBy   User   @relation("RiskSimulationCreatedBy", fields: [createdById], references: [id])
   createdById String
 
-  scenarios RiskSimulationScenario[]
+  scenarios        RiskSimulationScenario[]
+  tests            RiskSimulationTest[]
+  transferRequests RiskSimulationTransferRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([status])
   @@index([createdById])
+}
+
+// Simülasyon testi: çalışma alanının bir andaki durumu "başlangıç" olarak saklanır; sonraki
+// değişiklikler ve doğal / bütünleşik / kalıntı riske etkisi test raporunda raporlanır.
+enum RiskSimulationTestStatus {
+  ACTIVE
+  FINISHED
+}
+
+model RiskSimulationTest {
+  id           String                   @id @default(cuid())
+  simulation   RiskSimulation           @relation(fields: [simulationId], references: [id], onDelete: Cascade)
+  simulationId String
+  name         String
+  status       RiskSimulationTestStatus @default(ACTIVE)
+  // Aktifken simulationId, bitince null: bir simülasyonda aynı anda tek aktif test.
+  activeFor    String?                  @unique
+
+  baseline   Json // başlangıç anı: risk girdileri + kontroller + sonuçlar
+  finalState Json? // bitirildiği an (rapor dondurulur)
+
+  startedBy    User      @relation("RiskSimTestStartedBy", fields: [startedById], references: [id])
+  startedById  String
+  startedAt    DateTime  @default(now())
+  finishedBy   User?     @relation("RiskSimTestFinishedBy", fields: [finishedById], references: [id])
+  finishedById String?
+  finishedAt   DateTime?
+
+  @@index([simulationId])
+  @@index([startedById])
+}
+
+// Çalışma alanından envantere aktarım talebi (iki aşamalı): talep önizlemeyle oluşturulur,
+// Risk ve Kontrol Yöneticisi / Sistem Yöneticisi onaylayınca Risk Envanteri ve Kontrol
+// Alanı'na yazılır. Talep eden kendi talebini onaylayamaz. Simülasyon silinse de talep
+// (denetim izi) kalır.
+enum SimTransferRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model RiskSimulationTransferRequest {
+  id              String                   @id @default(cuid())
+  requestNo       String                   @unique // TRQ-YYYY-XXXX
+  simulation      RiskSimulation?          @relation(fields: [simulationId], references: [id], onDelete: SetNull)
+  simulationId    String?
+  simulationLabel String
+  status          SimTransferRequestStatus @default(PENDING)
+
+  scenarioIds Json // seçilen riskler (senaryo kimlikleri)
+  preview     Json // talep anındaki önizleme (alan bazında envanter → simülasyon)
+  note        String? @db.Text
+
+  requestedBy   User     @relation("SimTransferRequestedBy", fields: [requestedById], references: [id])
+  requestedById String
+  requestedAt   DateTime @default(now())
+
+  decidedBy    User?     @relation("SimTransferDecidedBy", fields: [decidedById], references: [id])
+  decidedById  String?
+  decidedAt    DateTime?
+  decisionNote String?   @db.Text
+  result       Json?
+
+  @@index([status])
+  @@index([simulationId])
+  @@index([requestedById])
 }
 
 enum ScenarioSourceType {
@@ -2882,9 +3030,11 @@ model RiskSimulationControl {
   scenarioId String
 
   // Gerçek Control.id referansı (FK DEĞİL — snapshot bağımsızlığı kasıtlı).
-  sourceControlId String?
-  name            String
-  description     String? @db.Text
+  sourceControlId     String?
+  // Çalışma alanında Kontrol Alanı (RiskControl) kaynağı (FK DEĞİL — aynı gerekçe).
+  sourceRiskControlId String?
+  name                String
+  description         String? @db.Text
 
   p1 SimP1
   p2 SimP2
@@ -2903,6 +3053,11 @@ model RiskSimulationControl {
   weight     Float
   impactArea SimImpactArea
 
+  // Onaylı (dahil) kontrol: yalnız işaretli kontroller (ve onlara bağlı aksiyonlar) BKP /
+  // artık risk hesaplamasına ve envantere aktarıma girer. Simülasyonda aç/kapa ile
+  // alternatif kontrol setleri denenir. Varsayılan true: mevcut senaryoların sonucu değişmez.
+  isApproved Boolean @default(true)
+
   sortOrder Int @default(0)
 
   actions RiskSimulationAction[]
@@ -2912,6 +3067,7 @@ model RiskSimulationControl {
 
   @@index([scenarioId])
   @@index([sourceControlId])
+  @@index([sourceRiskControlId])
 }
 
 enum SimActionEffectMode {

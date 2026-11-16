@@ -96,7 +96,7 @@ export default function RiskTreatmentPage() {
 
     useEffect(() => {
         loadRisks();
-        api.getUsers().then((u: any) => setUsers(u || [])).catch(() => setUsers([]));
+        api.getUserChoices().then((u: any) => setUsers(u || [])).catch(() => setUsers([]));
     }, [loadRisks]);
 
     const selectedRisk = risks.find(r => r.id === selectedRiskId) || null;

@@ -9,6 +9,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { AiProviderService } from '../src/modules/ai/ai-provider.service';
+import { AiEmbeddingService } from '../src/modules/ai/ai-embedding.service';
 import { resetDatabase, seedRoles, createTestUser, E2E_TEST_PASSWORD } from './helpers/fixtures';
 import { validV3 } from '../src/modules/ai/eval-v3/eval-v3.fixtures';
 
@@ -43,6 +44,10 @@ describe('E2E — AI Kontrol & Kanıt Değerlendirme v3', () => {
                 chat, isEnabled: () => true, reload: () => undefined,
                 config: { enabled: true, evalModel: null, models: { heavy: 'mock-heavy', light: 'mock-light', vision: 'mock-vision' }, maxTokens: 4096 },
             })
+            .overrideProvider(AiEmbeddingService)
+            // Embedding istemcisi de taklit: dış servise çağrı YOK (network-guard ayrıca engeller).
+            // Boş vektör → anlamsal arama devre dışı, sözcük tabanlı (BM25) sıralama kullanılır.
+            .useValue({ enabled: true, modelName: 'mock-embed', embed: jest.fn().mockResolvedValue([]), embedQuery: jest.fn().mockResolvedValue([]) })
             .compile();
         app = moduleRef.createNestApplication();
         app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true, transformOptions: { enableImplicitConversion: true } }));

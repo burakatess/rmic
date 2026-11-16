@@ -26,6 +26,8 @@ export class UpdateStandaloneActionDto {
     @IsOptional() @IsString() ownerId?: string;
     @IsOptional() @EmptyToUndefined() @IsDateString() dueDate?: string;
     @IsOptional() @IsIn(['BEKLIYOR', 'DEVAM_EDIYOR', 'YETERSIZ', 'OPEN', 'IN_PROGRESS']) status?: ActionStatus;
+    // Servis notları zaten iletiyordu; DTO'da olmadığı için sorumlu ilerleme notu giremiyordu.
+    @IsOptional() @IsString() @MaxLength(5000) notes?: string;
 }
 
 export class ExtendActionDto {

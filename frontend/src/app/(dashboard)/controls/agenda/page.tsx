@@ -234,30 +234,39 @@ export default function PeriodControlsPage() {
         ...(filters.onlyWithFindings && { onlyWithFindings: 'true' }),
     }), [filters, page]);
 
+    // Filtre değişince (ör. URL'deki yıl varsayılan yılın yerine geçtiğinde) önceki istek
+    // geç dönebilir; yalnız EN SON isteğin sonucu yazılır, eski yanıt yenisini ezmez.
+    const statsSeq = useRef(0);
+    const rowsSeq = useRef(0);
+
     const loadStats = useCallback(async () => {
+        const seq = ++statsSeq.current;
         setStatsLoading(true);
         try {
             const r = await api.getControlDashboard(dashboardQuery as any);
-            setStats(r);
+            if (seq === statsSeq.current) setStats(r);
         } catch {
-            setStats(null);
+            if (seq === statsSeq.current) setStats(null);
         } finally {
-            setStatsLoading(false);
+            if (seq === statsSeq.current) setStatsLoading(false);
         }
     }, [dashboardQuery]);
 
     const loadRows = useCallback(async () => {
+        const seq = ++rowsSeq.current;
         setRowsLoading(true);
         setRowsError(null);
         try {
             const r = await api.getPeriodControls(periodQuery as any);
+            if (seq !== rowsSeq.current) return;
             setRows(r.data || []);
             setTotalCount(r.totalCount || 0);
         } catch (err) {
+            if (seq !== rowsSeq.current) return;
             setRowsError(err instanceof Error ? err.message : 'Dönem kontrolleri yüklenemedi.');
             setRows([]);
         } finally {
-            setRowsLoading(false);
+            if (seq === rowsSeq.current) setRowsLoading(false);
         }
     }, [periodQuery]);
 

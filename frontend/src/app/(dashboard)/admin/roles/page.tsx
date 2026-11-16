@@ -17,109 +17,41 @@ const roleLabels: Record<string, string> = {
     SYSTEM_ADMIN: 'Sistem Yöneticisi',
     RISK_CONTROL_MANAGER: 'Risk ve İK Yöneticisi',
     AUDITOR: 'Denetçi',
-    AUDITEE: 'Denetlenen',
+    AUDITEE: 'Birim Kullanıcısı (Denetlenen)',
+    RISK_ANALYST: 'Risk Analisti',
+    VIEWER: 'Görüntüleyici',
+    IKS_MANAGER: 'İKS Yöneticisi (eski)',
+    IKS_EMPLOYEE: 'İKS Çalışanı (eski)',
 };
 
 const roleDescriptions: Record<string, string> = {
     SYSTEM_ADMIN: 'Kullanıcı ve sistem yönetimi yetkilerine sahip',
     RISK_CONTROL_MANAGER: 'Risk ve kontrol yönetimi işlemlerini gerçekleştirir',
-    AUDITOR: 'Denetim ve bulgu oluşturma yetkilerine sahip',
-    AUDITEE: 'Sadece kendisine atanan bulgu ve aksiyonları görür',
+    AUDITOR: 'Merkezi iç kontrol çalışanı — kurum geneli kayıt kapsamı',
+    AUDITEE: 'Yetkili birimlerinin ve kendisine atanmış işlerin kayıtları',
+    RISK_ANALYST: 'Riskte kurum geneli; diğer kayıtlarda birim + atama',
+    VIEWER: 'Yetkili birimlerinde salt okunur',
 };
 
-// Permission categories and items
-const permissionCategories = [
-    {
-        name: 'Dashboard',
-        key: 'dashboard',
-        permissions: [
-            { key: 'dashboard:read', label: 'Görüntüleme', description: 'Dashboard görüntüleme' },
-            { key: 'dashboard:read:own', label: 'Kendi Verileri', description: 'Sadece kendi verilerini görür' },
-        ]
-    },
-    {
-        name: 'Risk Yönetimi',
-        key: 'risk',
-        permissions: [
-            { key: 'risk:read', label: 'Görüntüleme', description: 'Riskleri görüntüleme' },
-            { key: 'risk:create', label: 'Oluşturma', description: 'Yeni risk oluşturma' },
-            { key: 'risk:update', label: 'Düzenleme', description: 'Risk düzenleme' },
-            { key: 'risk:delete', label: 'Silme', description: 'Risk silme' },
-            { key: 'risk:*', label: 'Tam Yetki', description: 'Tüm risk yetkileri' },
-        ]
-    },
-    {
-        name: 'Kontrol Yönetimi',
-        key: 'control',
-        permissions: [
-            { key: 'control:read', label: 'Görüntüleme', description: 'Kontrolleri görüntüleme' },
-            { key: 'control:create', label: 'Oluşturma', description: 'Yeni kontrol oluşturma' },
-            { key: 'control:update', label: 'Düzenleme', description: 'Kontrol düzenleme' },
-            { key: 'control:delete', label: 'Silme', description: 'Kontrol silme' },
-            { key: 'control:*', label: 'Tam Yetki', description: 'Tüm kontrol yetkileri' },
-        ]
-    },
-    {
-        name: 'Denetim',
-        key: 'audit',
-        permissions: [
-            { key: 'audit:read', label: 'Görüntüleme', description: 'Denetimleri görüntüleme' },
-            { key: 'audit:create', label: 'Oluşturma', description: 'Denetim planı oluşturma' },
-            { key: 'audit:update', label: 'Düzenleme', description: 'Denetim düzenleme' },
-            { key: 'audit:*', label: 'Tam Yetki', description: 'Tüm denetim yetkileri' },
-        ]
-    },
-    {
-        name: 'Bulgular',
-        key: 'finding',
-        permissions: [
-            { key: 'finding:read', label: 'Görüntüleme', description: 'Bulguları görüntüleme' },
-            { key: 'finding:read:own', label: 'Kendi Bulguları', description: 'Sadece atanmış bulguları görür' },
-            { key: 'finding:create', label: 'Oluşturma', description: 'Yeni bulgu oluşturma' },
-            { key: 'finding:update', label: 'Düzenleme', description: 'Bulgu düzenleme' },
-            { key: 'finding:delete', label: 'Silme', description: 'Bulgu silme' },
-            { key: 'finding:*', label: 'Tam Yetki', description: 'Tüm bulgu yetkileri' },
-        ]
-    },
-    {
-        name: 'Aksiyonlar',
-        key: 'action',
-        permissions: [
-            { key: 'action:read', label: 'Görüntüleme', description: 'Aksiyonları görüntüleme' },
-            { key: 'action:read:own', label: 'Kendi Aksiyonları', description: 'Sadece atanmış aksiyonları görür' },
-            { key: 'action:create', label: 'Oluşturma', description: 'Yeni aksiyon oluşturma' },
-            { key: 'action:update:own', label: 'Kendi Aksiy. Düzenle', description: 'Kendi aksiyonlarını düzenleme' },
-            { key: 'action:upload:own', label: 'Kanıt Yükleme', description: 'Kendi aksiyonlarına kanıt yükleme' },
-            { key: 'action:*', label: 'Tam Yetki', description: 'Tüm aksiyon yetkileri' },
-        ]
-    },
-    {
-        name: 'Uyum',
-        key: 'compliance',
-        permissions: [
-            { key: 'compliance:read', label: 'Görüntüleme', description: 'Uyum verilerini görüntüleme' },
-            { key: 'compliance:*', label: 'Tam Yetki', description: 'Tüm uyum yetkileri' },
-        ]
-    },
-    {
-        name: 'Raporlama',
-        key: 'report',
-        permissions: [
-            { key: 'report:read', label: 'Görüntüleme', description: 'Raporları görüntüleme' },
-            { key: 'report:*', label: 'Tam Yetki', description: 'Tüm raporlama yetkileri' },
-        ]
-    },
-    {
-        name: 'Yönetim',
-        key: 'admin',
-        permissions: [
-            { key: 'admin:*', label: 'Admin Paneli', description: 'Admin paneline erişim' },
-            { key: 'user:*', label: 'Kullanıcı Yönetimi', description: 'Kullanıcı oluşturma/düzenleme' },
-            { key: 'role:*', label: 'Rol Yönetimi', description: 'Rol oluşturma/düzenleme' },
-            { key: 'system:*', label: 'Sistem Ayarları', description: 'Sistem parametreleri yönetimi' },
-        ]
-    },
-];
+// İzin kataloğu backend'den gelir (GET /admin/permissions) — burada elle tutulan liste YOK.
+interface PermissionDef {
+    key: string;
+    group: string;
+    label: string;
+    description: string;
+    enforcedIn: ('api' | 'ui')[];
+}
+interface PermissionCatalog {
+    groups: { key: string; label: string }[];
+    permissions: PermissionDef[];
+    legacy: Record<string, { target: string | null; equivalent: boolean; note: string }>;
+}
+
+function enforcementLabel(p: PermissionDef): { text: string; tone: string } | null {
+    if (p.enforcedIn.length === 0) return { text: 'Henüz denetlenmiyor', tone: 'text-slate-400' };
+    if (!p.enforcedIn.includes('api')) return { text: 'Yalnız menü/görünürlük', tone: 'text-amber-600' };
+    return null;
+}
 
 export default function RolesPage() {
     const { success, error: showError } = useToast();
@@ -128,6 +60,7 @@ export default function RolesPage() {
     const [selectedRole, setSelectedRole] = useState<Role | null>(null);
     const [saving, setSaving] = useState(false);
     const [editedPermissions, setEditedPermissions] = useState<string[]>([]);
+    const [catalog, setCatalog] = useState<PermissionCatalog | null>(null);
 
     useEffect(() => {
         loadRoles();
@@ -136,11 +69,13 @@ export default function RolesPage() {
 
     const loadRoles = async () => {
         try {
-            const rolesRes = await api.request<Role[]>('/admin/roles');
-            // Filter only 4 active roles
-            const activeRoles = rolesRes.filter(r =>
-                ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR', 'AUDITEE'].includes(r.name)
-            );
+            const [rolesRes, catalogRes] = await Promise.all([
+                api.request<Role[]>('/admin/roles'),
+                api.request<PermissionCatalog>('/admin/permissions'),
+            ]);
+            setCatalog(catalogRes);
+            // Tüm roller yönetilebilir (önceden yalnız 4 rol listeleniyordu).
+            const activeRoles = rolesRes;
             setRoles(activeRoles);
             if (activeRoles.length > 0 && !selectedRole) {
                 setSelectedRole(activeRoles[0]);
@@ -148,6 +83,7 @@ export default function RolesPage() {
             }
         } catch (error) {
             console.error('Failed to load roles:', error);
+            showError('Hata', error instanceof Error ? error.message : 'Roller veya izin kataloğu yüklenemedi');
         } finally {
             setLoading(false);
         }
@@ -207,11 +143,17 @@ export default function RolesPage() {
             success('Kaydedildi', 'Yetkiler başarıyla kaydedildi.');
         } catch (error) {
             console.error('Failed to save permissions:', error);
-            showError('Hata', 'Yetkiler kaydedilirken bir hata oluştu');
+            showError('Hata', error instanceof Error ? error.message : 'Yetkiler kaydedilirken bir hata oluştu');
         } finally {
             setSaving(false);
         }
     };
+
+    // Rolde bulunan ama katalogda olmayan (eski ekrandan kalma) anahtarlar.
+    const knownKeys = new Set((catalog?.permissions ?? []).map(p => p.key));
+    const knownResources = new Set([...knownKeys].map(k => k.split(':')[0]));
+    const legacyKeys = editedPermissions.filter(p =>
+        p !== '*' && !knownKeys.has(p) && !(p.endsWith(':*') && knownResources.has(p.split(':')[0])));
 
     const hasChanges = () => {
         if (!selectedRole) return false;
@@ -296,26 +238,65 @@ export default function RolesPage() {
                             </div>
 
                             <div className="p-4 space-y-6">
-                                {permissionCategories.map((category) => (
-                                    <div key={category.key} className="border border-slate-200 rounded-xl overflow-hidden">
+                                {legacyKeys.length > 0 && (
+                                    <div className="border border-amber-300 bg-amber-50 rounded-xl p-4">
+                                        <h4 className="text-sm font-semibold text-amber-800 mb-1">Katalogda olmayan eski anahtarlar</h4>
+                                        <p className="text-xs text-amber-700 mb-3">
+                                            Bu anahtarlar hiçbir yerde denetlenmiyor. Otomatik dönüştürülmez; önerilen karşılığı kontrol edip elle verin, ardından eskisini kaldırın.
+                                        </p>
+                                        <ul className="space-y-2">
+                                            {legacyKeys.map(k => {
+                                                const m = catalog?.legacy[k];
+                                                return (
+                                                    <li key={k} className="flex items-center justify-between gap-3 text-xs">
+                                                        <span>
+                                                            <code className="font-mono text-amber-900">{k}</code>
+                                                            {m?.target
+                                                                ? <> → öneri <code className="font-mono">{m.target}</code>{m.equivalent ? ' (eşdeğer)' : ' (eşdeğer değil)'}</>
+                                                                : ' → karşılığı yok'}
+                                                            {m?.note ? <span className="text-amber-700"> — {m.note}</span> : null}
+                                                        </span>
+                                                        <button type="button" className="text-amber-800 underline" onClick={() => setEditedPermissions(editedPermissions.filter(p => p !== k))}>
+                                                            Kaldır
+                                                        </button>
+                                                    </li>
+                                                );
+                                            })}
+                                        </ul>
+                                    </div>
+                                )}
+                                {(catalog?.groups ?? []).map((group) => {
+                                    const perms = (catalog?.permissions ?? []).filter(p => p.group === group.key);
+                                    if (perms.length === 0) return null;
+                                    // Joker yalnız tek kaynaklı gruplarda sunulur (matchesPermission: kaynak:*).
+                                    const resources = [...new Set(perms.map(p => p.key.split(':')[0]))];
+                                    const wildcard = resources.length === 1 ? `${resources[0]}:*` : null;
+                                    const items = wildcard
+                                        ? [...perms, { key: wildcard, group: group.key, label: 'Tam yetki', description: `${resources[0]} kaynağının tüm izinleri`, enforcedIn: ['api', 'ui'] } as PermissionDef]
+                                        : perms;
+                                    return (
+                                    <div key={group.key} className="border border-slate-200 rounded-xl overflow-hidden">
                                         <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
-                                            <h4 className="text-sm font-semibold text-slate-700">{category.name}</h4>
+                                            <h4 className="text-sm font-semibold text-slate-700">{group.label}</h4>
                                         </div>
                                         <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-3">
-                                            {category.permissions.map((perm) => {
+                                            {items.map((perm) => {
                                                 const isActive = hasPermission(perm.key);
                                                 const isWildcard = perm.key.endsWith(':*');
+                                                const enforcement = enforcementLabel(perm);
                                                 return (
                                                     <button
                                                         key={perm.key}
                                                         onClick={() => togglePermission(perm.key)}
+                                                        aria-pressed={isActive}
+                                                        data-permission={perm.key}
                                                         className={`p-3 rounded-lg border-2 text-left transition-all cursor-pointer ${isActive
                                                                 ? isWildcard
                                                                     ? 'border-amber-400 bg-amber-50'
                                                                     : 'border-emerald-400 bg-emerald-50'
                                                                 : 'border-slate-200 hover:border-slate-300'
                                                             }`}
-                                                        title={perm.description}
+                                                        title={`${perm.key} — ${perm.description}`}
                                                     >
                                                         <div className="flex items-center gap-2">
                                                             <div className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 ${isActive
@@ -334,12 +315,15 @@ export default function RolesPage() {
                                                                 {perm.label}
                                                             </span>
                                                         </div>
+                                                        <p className="mt-1 text-[11px] font-mono text-slate-400">{perm.key}</p>
+                                                        {enforcement && <p className={`mt-0.5 text-[11px] ${enforcement.tone}`}>{enforcement.text}</p>}
                                                     </button>
                                                 );
                                             })}
                                         </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                     ) : (

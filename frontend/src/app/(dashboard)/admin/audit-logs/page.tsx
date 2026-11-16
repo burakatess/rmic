@@ -18,6 +18,7 @@ interface AuditLog {
     newValue?: unknown;
     ipAddress?: string;
     userAgent?: string;
+    actorType?: 'USER' | 'SYSTEM' | null;
     createdAt: string;
     user?: { id: string; email: string; firstName: string; lastName: string };
 }
@@ -27,6 +28,10 @@ const ACTION_LABELS: Record<string, { label: string; variant: 'critical' | 'warn
     UPDATE: { label: 'Güncelleme', variant: 'warning' },
     DELETE: { label: 'Silme', variant: 'critical' },
     LOGIN: { label: 'Giriş', variant: 'info' },
+    LOGIN_FAILED: { label: 'Başarısız Giriş', variant: 'critical' },
+    ROLE_CHANGE: { label: 'Rol Değişikliği', variant: 'warning' },
+    USER_ACTIVATION_CHANGE: { label: 'Kullanıcı Aktiflik', variant: 'warning' },
+    PASSWORD_RESET: { label: 'Parola Sıfırlama', variant: 'warning' },
     LOGOUT: { label: 'Çıkış', variant: 'neutral' },
     APPROVAL: { label: 'Onay', variant: 'info' },
 };
@@ -54,7 +59,13 @@ export default function AuditLogsPage() {
     const [action, setAction] = useState('');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
-    const [limit, setLimit] = useState('200');
+    const [entityId, setEntityId] = useState('');
+    const [actorType, setActorType] = useState('');
+    const [ipAddress, setIpAddress] = useState('');
+    // Sunucu taraflı sayfalama — tüm kayıtlar sayfa sayfa gezilebilir (limit tavanı yok).
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(50);
+    const [total, setTotal] = useState(0);
 
     // SIEM
     const [siemFormat, setSiemFormat] = useState('cef');
@@ -64,27 +75,36 @@ export default function AuditLogsPage() {
 
     const isAdmin = user?.role?.name === 'SYSTEM_ADMIN' || user?.role?.permissions?.includes('*');
 
+    // Filtreler (sayfa hariç) — liste ve SIEM dışa aktarımı aynı filtreyi kullanır.
+    // Bitiş tarihi gün olarak gönderilir; sunucu o günü tamamen dahil eder.
     const buildParams = useCallback(() => {
         const params = new URLSearchParams();
         if (entityType) params.set('entityType', entityType);
+        if (entityId) params.set('entityId', entityId.trim());
         if (action) params.set('action', action);
+        if (actorType) params.set('actorType', actorType);
+        if (ipAddress) params.set('ipAddress', ipAddress.trim());
         if (startDate) params.set('startDate', startDate);
-        if (endDate) params.set('endDate', `${endDate}T23:59:59`);
-        if (limit) params.set('limit', limit);
+        if (endDate) params.set('endDate', endDate);
         return params;
-    }, [entityType, action, startDate, endDate, limit]);
+    }, [entityType, entityId, action, actorType, ipAddress, startDate, endDate]);
 
-    const loadLogs = useCallback(async () => {
+    const loadLogs = useCallback(async (targetPage = page, targetSize = pageSize) => {
         setLoading(true);
         try {
-            const data = await api.request<AuditLog[]>(`/admin/audit-logs?${buildParams()}`);
-            setLogs(data);
+            const params = buildParams();
+            params.set('page', String(targetPage));
+            params.set('pageSize', String(targetSize));
+            const res = await api.request<{ data: AuditLog[]; pagination: { total: number; page: number } }>(`/admin/audit-logs?${params}`);
+            setLogs(res.data);
+            setTotal(res.pagination.total);
+            setPage(res.pagination.page);
         } catch (err: any) {
             toastError('Hata', err.message || 'Denetim izleri yüklenemedi.');
         } finally {
             setLoading(false);
         }
-    }, [buildParams, toastError]);
+    }, [buildParams, toastError, page, pageSize]);
 
     useEffect(() => {
         if (isAdmin) {
@@ -161,8 +181,13 @@ export default function AuditLogsPage() {
             render: (l) => <span className="text-[10px] font-mono text-slate-500 truncate block">{l.entityId}</span>,
         },
         {
+            key: 'actorType', header: 'Aktör', defaultWidth: 90,
+            render: (l) => <span className="text-xs text-slate-500">{l.actorType === 'SYSTEM' ? 'Sistem' : l.actorType === 'USER' ? 'Kullanıcı' : '—'}</span>,
+        },
+        {
             key: 'ipAddress', header: 'IP', defaultWidth: 110,
-            render: (l) => <span className="text-xs text-slate-500">{l.ipAddress ?? '—'}</span>,
+            // Sistem (cron/arka plan) olaylarında IP yoktur — bu bir hata değildir.
+            render: (l) => <span className="text-xs text-slate-500">{l.ipAddress ?? (l.actorType === 'SYSTEM' ? 'sistem' : '—')}</span>,
         },
     ];
 
@@ -210,12 +235,25 @@ export default function AuditLogsPage() {
                     <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100" />
                 </div>
                 <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Limit</label>
-                    <select value={limit} onChange={e => setLimit(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100">
-                        {['100', '200', '500', '1000'].map(l => <option key={l} value={l}>{l}</option>)}
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Kayıt ID</label>
+                    <input type="text" value={entityId} onChange={e => setEntityId(e.target.value)} placeholder="Kayıt kimliği"
+                        className="px-3 py-2 border border-slate-200 rounded-lg text-sm w-44 focus:outline-none focus-visible:ring-2 ring-blue-100" />
+                </div>
+                <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Aktör</label>
+                    <select value={actorType} onChange={e => setActorType(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus-visible:ring-2 ring-blue-100">
+                        <option value="">Tümü</option>
+                        <option value="USER">Kullanıcı (HTTP)</option>
+                        <option value="SYSTEM">Sistem (cron/arka plan)</option>
+                        <option value="UNKNOWN">Bilinmiyor (eski kayıt)</option>
                     </select>
                 </div>
-                <Button onClick={loadLogs} loading={loading}>
+                <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">IP</label>
+                    <input type="text" value={ipAddress} onChange={e => setIpAddress(e.target.value)} placeholder="10.0.0.1"
+                        className="px-3 py-2 border border-slate-200 rounded-lg text-sm w-32 focus:outline-none focus-visible:ring-2 ring-blue-100" />
+                </div>
+                <Button onClick={() => loadLogs(1)} loading={loading}>
                     {loading ? 'Yükleniyor...' : 'Filtrele'}
                 </Button>
             </div>
@@ -230,6 +268,11 @@ export default function AuditLogsPage() {
                     loading={loading}
                     emptyTitle="Denetim izi bulunamadı"
                     storageKey="audit-logs-table"
+                    totalCount={total}
+                    page={page}
+                    pageSize={pageSize}
+                    onPageChange={(p) => loadLogs(p)}
+                    onPageSizeChange={(size) => { setPageSize(size); loadLogs(1, size); }}
                 />
             </div>
 
@@ -309,6 +352,8 @@ export default function AuditLogsPage() {
                             <div><p className="text-xs text-slate-400">İşlem</p><p>{ACTION_LABELS[detail.action]?.label ?? detail.action}</p></div>
                             <div><p className="text-xs text-slate-400">Kayıt</p><p className="font-mono text-xs">{detail.entityType} / {detail.entityId}</p></div>
                             {detail.ipAddress && <div><p className="text-xs text-slate-400">IP</p><p className="font-mono text-xs">{detail.ipAddress}</p></div>}
+                            {detail.actorType && <div><p className="text-xs text-slate-400">Aktör</p><p className="text-xs">{detail.actorType === 'SYSTEM' ? 'Sistem (cron/arka plan)' : 'Kullanıcı (HTTP)'}</p></div>}
+                            {detail.userAgent && <div className="col-span-2"><p className="text-xs text-slate-400">Tarayıcı (User-Agent)</p><p className="font-mono text-[11px] break-all">{detail.userAgent}</p></div>}
                         </div>
                         {detail.oldValue != null && (
                             <div>

@@ -110,7 +110,8 @@ export function KpiCard({
   active = false,
   className = '',
 }: KpiCardProps) {
-  const s = variantStyles[variant];
+  // Bilinmeyen variant (ör. `as any` ile gelen) sayfayı çökertmesin: varsayılana düş.
+  const s = variantStyles[variant] ?? variantStyles.default;
   const interactive = !!onClick;
 
   const content = (

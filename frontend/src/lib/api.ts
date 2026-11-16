@@ -39,6 +39,17 @@ function buildQuery(params?: object): string {
     return qs ? `?${qs}` : '';
 }
 
+/** Backend MAX_PAGE_LIMIT (list-query.ts) ile aynı. */
+const LIST_FETCH_LIMIT = 500;
+
+export interface GmyOption {
+    id: string; name: string; code?: string | null; isActive: boolean;
+    responsibleUser?: { id: string; firstName: string; lastName: string } | null;
+    _count?: { directorates: number; risks: number };
+}
+
+export interface UserOption { id: string; firstName: string; lastName: string; department?: string | null; isActive: boolean }
+
 export class ApiError extends Error {
     status: number;
     body: unknown;
@@ -240,8 +251,30 @@ class ApiClient {
         return this.request<any[]>('/admin/users');
     }
 
+    // ── GMY (Genel Müdür Yardımcılıkları) — okuma herkese, tanımlama yalnız sistem yöneticisine ──
+    async getGmys(includeInactive = false) {
+        return this.request<GmyOption[]>(`/gmys${includeInactive ? '?includeInactive=true' : ''}`);
+    }
+
+    async createGmy(data: { name: string; code?: string; responsibleUserId?: string }) {
+        return this.request<GmyOption>('/gmys', { method: 'POST', body: data });
+    }
+
+    async updateGmy(id: string, data: { name?: string; code?: string | null; responsibleUserId?: string | null; isActive?: boolean }) {
+        return this.request<GmyOption>(`/gmys/${id}`, { method: 'PUT', body: data });
+    }
+
     async getUserOptions(params?: { search?: string; page?: number; limit?: number }) {
-        return this.request<{ data: Array<{ id: string; firstName: string; lastName: string; isActive: boolean }>; pagination: { total: number; page: number; limit: number; totalPages: number } }>(`/admin/users/options${buildQuery(params)}`);
+        return this.request<{ data: UserOption[]; pagination: { total: number; page: number; limit: number; totalPages: number } }>(`/admin/users/options${buildQuery(params)}`);
+    }
+
+    /**
+     * Normal ekranlardaki kişi seçim listeleri için: yalnız ad/birim/aktiflik döner.
+     * Yönetim ekranı dışında `/admin/users` (e-posta, rol, izin içerir) çağrılmaz.
+     */
+    async getUserChoices(): Promise<UserOption[]> {
+        const res = await this.getUserOptions({ limit: 500 });
+        return res.data;
     }
 
     // ─── Dosya Yükleme / İndirme ──────────────────────────────────────────────
@@ -418,8 +451,10 @@ class ApiClient {
 
     // Risks
     async getRisks(params?: Record<string, string | number>) {
-        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
-        return this.request(`/risks${query}`);
+        // Çağıranların çoğu yanıtı TAM liste olarak kullanır (seçim listeleri, envanter);
+        // sunucu varsayılanı 20 kayıttır. limit verilmemişse sunucu üst sınırı (500) istenir.
+        const merged = { limit: String(LIST_FETCH_LIMIT), ...(params as Record<string, string> | undefined) };
+        return this.request(`/risks?${new URLSearchParams(merged).toString()}`);
     }
 
     async getRisk(id: string) {
@@ -456,8 +491,10 @@ class ApiClient {
 
     // Controls
     async getControls(params?: Record<string, string | number>) {
-        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
-        return this.request(`/controls${query}`);
+        // Çağıranların çoğu yanıtı TAM liste olarak kullanır (seçim listeleri, envanter);
+        // sunucu varsayılanı 20 kayıttır. limit verilmemişse sunucu üst sınırı (500) istenir.
+        const merged = { limit: String(LIST_FETCH_LIMIT), ...(params as Record<string, string> | undefined) };
+        return this.request(`/controls?${new URLSearchParams(merged).toString()}`);
     }
 
     async getControl(id: string) {
@@ -1085,6 +1122,15 @@ class ApiClient {
     }
 
     // İkinci kontrolcü ataması — genel takip güncellemesinden ayrı, gerekçeli (Madde 4).
+    // Birinci kontrolcü (maker) yeniden atama — yalnız yetkili yönetici, gerekçeli ve denetim kayıtlı.
+    async getFollowUpAssigneeCandidates(findingId: string, followUpId: string) {
+        return this.request<UserOption[]>(`/findings/${findingId}/follow-ups/${followUpId}/assignee-candidates`);
+    }
+
+    async reassignFollowUpAssignee(findingId: string, followUpId: string, body: { assigneeId: string; reason: string }) {
+        return this.request(`/findings/${findingId}/follow-ups/${followUpId}/assignee`, { method: 'POST', body });
+    }
+
     async assignSecondController(findingId: string, followUpId: string, body: { secondControllerId: string; reason: string }) {
         return this.request(`/findings/${findingId}/follow-ups/${followUpId}/second-controller`, { method: 'POST', body });
     }
@@ -1492,6 +1538,77 @@ class ApiClient {
     }
     async updateRiskSimulation(id: string, data: unknown) {
         return this.request<unknown>(`/risk-simulations/${id}`, { method: 'PATCH', body: data });
+    }
+    // Çalışma alanı: kapsamdaki riskler + Kontrol Alanı kontrolleri tek simülasyonda.
+    async createSimWorkspace(data: { name: string; description?: string }) {
+        return this.request<any>('/risk-simulations/workspaces', { method: 'POST', body: data });
+    }
+    async getSimWorkspace(id: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${id}`);
+    }
+    async getSimWorkspaceTables(id: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${id}/tables`);
+    }
+    /** Güncel simülatör: kullanıcının taslak çalışma alanı (güncel veriyle). */
+    async openLiveSim(refresh = false) {
+        return this.request<{ id: string; rebuilt: boolean; hasUnsavedChanges: boolean; builtAt: string }>('/risk-simulations/workspaces/live', { method: 'POST', body: { refresh } });
+    }
+    async saveSimWorkspace(id: string, data: { name: string; description?: string }) {
+        return this.request<any>(`/risk-simulations/workspaces/${id}/save`, { method: 'POST', body: data });
+    }
+    async bulkDeleteSims(ids: string[]) {
+        return this.request<{ deleted: string[]; skipped: { id: string; simulationId: string | null; reason: string }[] }>('/risk-simulations/bulk-delete', { method: 'POST', body: { ids } });
+    }
+    // ── Simülasyon metodolojisi ──
+    async getSimMethodologies() {
+        return this.request<any>('/risk-simulations/methodologies');
+    }
+    async publishSimMethodology(settings: unknown, changeNote: string) {
+        return this.request<any>('/risk-simulations/methodologies', { method: 'POST', body: { settings, changeNote } });
+    }
+    async getWorkspaceMethodology(simId: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/methodology`);
+    }
+    async setTrialMethodology(simId: string, settings: unknown, note?: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/methodology/trial`, { method: 'POST', body: { settings, note } });
+    }
+    async useOfficialMethodology(simId: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/methodology/official`, { method: 'POST' });
+    }
+    // ── Envantere aktarım (iki aşamalı) ──
+    async previewWorkspaceTransfer(simId: string, scenarioIds?: string[]) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/transfer-preview`, { method: 'POST', body: { scenarioIds } });
+    }
+    async createTransferRequest(simId: string, scenarioIds: string[], note?: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/transfer-requests`, { method: 'POST', body: { scenarioIds, note } });
+    }
+    async listTransferRequests(status?: string) {
+        return this.request<any[]>(`/risk-simulations/transfer-requests${status ? `?status=${status}` : ''}`);
+    }
+    async getTransferRequest(id: string) {
+        return this.request<any>(`/risk-simulations/transfer-requests/${id}`);
+    }
+    async decideTransferRequest(id: string, decision: 'approve' | 'reject' | 'cancel', note?: string) {
+        return this.request<any>(`/risk-simulations/transfer-requests/${id}/${decision}`, { method: 'POST', body: decision === 'cancel' ? undefined : { note } });
+    }
+    async listSimTests(simId: string) {
+        return this.request<any[]>(`/risk-simulations/workspaces/${simId}/tests`);
+    }
+    async startSimTest(simId: string, name: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/tests`, { method: 'POST', body: { name } });
+    }
+    async finishSimTest(simId: string, testId: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/tests/${testId}/finish`, { method: 'POST' });
+    }
+    async resetSimTest(simId: string, testId: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/tests/${testId}/reset`, { method: 'POST' });
+    }
+    async getSimTestReport(simId: string, testId: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/tests/${testId}/report`);
+    }
+    /** Excel'den çalışma alanı. dryRun=true yalnız kontrol raporu döner. */
+    async importSimWorkspace(data: { name: string; description?: string; sourceFileName?: string; dryRun?: boolean; risks: unknown[]; controls: unknown[] }) {
+        return this.request<any>('/risk-simulations/workspaces/import', { method: 'POST', body: data });
     }
     async createSimScenario(simulationId: string, data: unknown) {
         return this.request<unknown>(`/risk-simulations/${simulationId}/scenarios`, { method: 'POST', body: data });

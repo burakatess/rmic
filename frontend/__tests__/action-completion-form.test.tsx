@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import AddActionModal from '@/components/modals/AddActionModal';
 import api from '@/lib/api';
 
-jest.mock('@/lib/api', () => ({ __esModule: true, default: { getUsers: jest.fn().mockResolvedValue([]) } }));
+jest.mock('@/lib/api', () => ({ __esModule: true, default: { getUserChoices: jest.fn().mockResolvedValue([]) } }));
 
 describe('Aksiyon tamamlama formu', () => {
   it('backend hatasında açıklama ve form değerlerini korur, başarı gibi kapanmaz', async () => {
@@ -17,6 +17,6 @@ describe('Aksiyon tamamlama formu', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Kanıt bu aksiyona bağlı değil');
     expect(description).toHaveValue('Kullanıcının düzenlediği ve kaybolmaması gereken açıklama.');
     expect(onClose).not.toHaveBeenCalled();
-    await waitFor(() => expect(api.getUsers).toHaveBeenCalled());
+    await waitFor(() => expect(api.getUserChoices).toHaveBeenCalled());
   });
 });

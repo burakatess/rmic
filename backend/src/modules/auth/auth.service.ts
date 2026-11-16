@@ -20,15 +20,38 @@ export class AuthService {
         });
 
         if (!user || !user.isActive) {
+            await this.logFailedLogin(email, user ? 'INACTIVE_USER' : 'UNKNOWN_USER', user?.id);
             throw new UnauthorizedException('Invalid credentials');
         }
 
         const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
         if (!isPasswordValid) {
+            await this.logFailedLogin(email, 'INVALID_PASSWORD', user.id);
             throw new UnauthorizedException('Invalid credentials');
         }
 
         return user;
+    }
+
+    /**
+     * Başarısız giriş güvenlik olayı (SIEM: action=LOGIN_FAILED). Parola ASLA yazılmaz;
+     * e-posta yalnız maskeli tutulur (KVKK — entityId olarak kullanılmaz). IP/UA merkezi
+     * istek bağlamından eklenir. Log hatası girişin yanıtını değiştirmez.
+     */
+    private async logFailedLogin(email: string, reason: 'UNKNOWN_USER' | 'INACTIVE_USER' | 'INVALID_PASSWORD', userId?: string) {
+        try {
+            await this.prisma.auditLog.create({
+                data: {
+                    userId: userId ?? null,
+                    action: 'LOGIN_FAILED',
+                    entityType: 'User',
+                    entityId: userId ?? 'UNKNOWN',
+                    newValue: { reason, email: maskEmail(email) },
+                },
+            });
+        } catch {
+            // Denetim izi yazılamasa da kimlik doğrulama yanıtı aynı kalmalı.
+        }
     }
 
     async login(loginDto: LoginDto): Promise<TokenResponseDto> {
@@ -89,14 +112,24 @@ export class AuthService {
                 include: { user: { include: { role: true } } },
             });
 
-            if (!storedToken || storedToken.expiresAt < new Date()) {
+            if (!storedToken || storedToken.expiresAt < new Date() || storedToken.userId !== payload.sub) {
                 throw new UnauthorizedException('Invalid refresh token');
             }
 
-            // Delete the used refresh token
-            await this.prisma.refreshToken.delete({
+            // Pasif kullanıcı refresh ile yeni oturum alamaz; kalan tüm refresh token'ları iptal edilir.
+            if (!storedToken.user.isActive) {
+                await this.prisma.refreshToken.deleteMany({ where: { userId: storedToken.userId } });
+                throw new UnauthorizedException('Invalid refresh token');
+            }
+
+            // Tek kullanımlık rotasyon: aynı token'la eşzamanlı iki istekten yalnızca biri
+            // yeni oturum alır (koşullu silme count=1).
+            const consumed = await this.prisma.refreshToken.deleteMany({
                 where: { id: storedToken.id },
             });
+            if (consumed.count !== 1) {
+                throw new UnauthorizedException('Invalid refresh token');
+            }
 
             // Generate new tokens
             return this.generateTokens(storedToken.user);
@@ -180,19 +213,24 @@ export class AuthService {
         }
 
         const passwordHash = await bcrypt.hash(dto.newPassword, 10);
-        await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
-
-        await this.prisma.auditLog.create({
-            data: {
-                userId,
-                action: 'UPDATE',
-                entityType: 'User',
-                entityId: userId,
-                newValue: { event: 'CHANGE_PASSWORD' },
-            },
+        // Şifre + oturum iptali + güvenlik olayı tek transaction'da. Parola değişince kalan tüm
+        // refresh token'lar iptal edilir: diğer cihazlardaki oturumlar yenilenemez (mevcut access
+        // token en geç kısa ömrü dolunca düşer).
+        await this.prisma.$transaction(async (tx) => {
+            await tx.user.update({ where: { id: userId }, data: { passwordHash } });
+            const revoked = await tx.refreshToken.deleteMany({ where: { userId } });
+            await tx.auditLog.create({
+                data: {
+                    userId,
+                    action: 'CHANGE_PASSWORD',
+                    entityType: 'User',
+                    entityId: userId,
+                    newValue: { event: 'CHANGE_PASSWORD', revokedSessions: revoked.count },
+                },
+            });
         });
 
-        return { message: 'Şifre başarıyla değiştirildi' };
+        return { message: 'Şifre başarıyla değiştirildi; diğer oturumlar sonlandırıldı.' };
     }
 
     private async generateTokens(user: any): Promise<TokenResponseDto> {
@@ -247,4 +285,12 @@ export class AuthService {
             },
         };
     }
+}
+
+/** a****@kurum.com — kullanıcı adı maskelenir, alan adı korunur (deneme kalıplarını izlemek için). */
+export function maskEmail(email: string): string {
+    const value = String(email ?? '').trim().toLowerCase().slice(0, 254);
+    const at = value.lastIndexOf('@');
+    if (at <= 0) return '***';
+    return `${value[0]}***${value.slice(at)}`;
 }

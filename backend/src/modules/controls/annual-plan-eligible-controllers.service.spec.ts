@@ -2,65 +2,73 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AnnualPlanService } from './annual-plan.service';
 import { PrismaService } from '../../prisma';
 import { DirectorateScopeService } from '../../common/services/directorate-scope.service';
+import { AccessScopeService } from '../../common/services/access-scope.service';
 import { ControlScopeService } from './control-scope.service';
+import { controllerIneligibility } from '../../common/services/controller-eligibility';
 
-// İç Kontrol çalışanları (IKS_EMPLOYEE/IKS_MANAGER) ve sistem yöneticisi
-// (SYSTEM_ADMIN) kontrolcü atama listesinde birim (UNIT) daraltmasından
-// ETKİLENMEMELİ — bu roller kurum genelinde kontrol sorumluluğu taşır.
-describe('AnnualPlanService.getEligibleControllers — UNIT kapsamında İç Kontrol/admin istisnası', () => {
+// Kontrolcü uygunluğu sabit rol listesiyle DEĞİL, ortak kuralla belirlenir:
+// aktiflik + işlem izni (birinci: control:test / test:execute, ikinci: control:approve)
+// + kontrolün birimi üzerinde kayıt kapsamı (kapsam uygulaması açıkken).
+const user = (id: string, permissions: string[], dirs: string[] = []) => ({
+    id, firstName: id, lastName: 'X', email: `${id}@x`, isActive: true,
+    role: { permissions }, directorateMemberships: dirs.map(directorateId => ({ directorateId })),
+});
+
+const USERS = [
+    user('auditor', ['control:view', 'control:test', 'scope:org']),          // merkezi iç kontrol
+    user('rcm', ['control:*', 'scope:org']),                                 // yönetici
+    user('admin', ['*']),
+    user('iks', ['control:view', 'test:execute']),                          // eski IKS (uyumluluk)
+    user('viewer', ['control:view'], ['dir-1']),                             // salt okunur
+    user('unitTester', ['control:test'], ['dir-1']),                          // birim kontrolcüsü
+    user('otherUnitTester', ['control:test'], ['dir-2']),
+];
+
+describe('AnnualPlanService.getEligibleControllers — ortak uygunluk kuralı', () => {
     let service: AnnualPlanService;
-    let prisma: Record<string, any>;
+    let enforced = false;
 
     beforeEach(async () => {
-        prisma = {
+        enforced = false;
+        const prisma = {
             control: { findUnique: jest.fn().mockResolvedValue({ directorateId: 'dir-1' }) },
-            user: { findMany: jest.fn().mockResolvedValue([]) },
+            user: { findMany: jest.fn().mockResolvedValue(USERS) },
         };
-
         const module: TestingModule = await Test.createTestingModule({
             providers: [
                 AnnualPlanService,
                 { provide: PrismaService, useValue: prisma },
-                {
-                    provide: DirectorateScopeService,
-                    useValue: { resolveScope: jest.fn().mockResolvedValue({ appliedScope: 'UNIT', userId: 'u1', directorateIds: ['dir-1'] }) },
-                },
+                { provide: DirectorateScopeService, useValue: { resolveScope: jest.fn().mockResolvedValue({ appliedScope: 'UNIT', userId: 'u1', directorateIds: ['dir-1'] }) } },
                 { provide: ControlScopeService, useValue: {} },
+                { provide: AccessScopeService, useValue: { isEnforced: () => enforced } },
             ],
         }).compile();
         service = module.get(AnnualPlanService);
     });
 
-    afterEach(() => jest.clearAllMocks());
+    const ids = async (role: 'assignee' | 'secondController') =>
+        (await service.getEligibleControllers(2026, 'u1', ['control:*'], role, 'c1', {})).data.map(u => u.id);
 
-    it('UNIT kapsamında where.OR, birim üyeliği İLE İç Kontrol/admin rollerini birlikte içerir', async () => {
-        await service.getEligibleControllers(2026, 'u1', ['control:*'], 'assignee', 'c1', {});
-
-        const whereArg = prisma.user.findMany.mock.calls[0][0].where;
-        expect(whereArg.isActive).toBe(true);
-        expect(whereArg.OR).toEqual([
-            { directorateMemberships: { some: { directorateId: { in: ['dir-1'] } } } },
-            { role: { name: { in: ['IKS_EMPLOYEE', 'IKS_MANAGER', 'SYSTEM_ADMIN'] } } },
-        ]);
+    it('birinci kontrolcü: test yürütme izni gerekir; AUDITOR ve RCM dışlanmaz; VIEWER dışlanır', async () => {
+        expect(await ids('assignee')).toEqual(['auditor', 'rcm', 'admin', 'iks', 'unitTester', 'otherUnitTester']);
     });
 
-    it('ORG kapsamında ekstra bir where.OR eklenmez (zaten tüm aktif kullanıcılar dahil)', async () => {
-        (service as any).scopeService.resolveScope = jest.fn().mockResolvedValue({ appliedScope: 'ORG', userId: 'u1', directorateIds: null });
-        await service.getEligibleControllers(2026, 'u1', ['control:*'], 'assignee', undefined, {});
-
-        const whereArg = prisma.user.findMany.mock.calls[0][0].where;
-        expect(whereArg.OR).toBeUndefined();
-        expect(whereArg.isActive).toBe(true);
+    it('ikinci kontrolcü: onay izni (control:approve) gerekir; control:view yetmez', async () => {
+        expect(await ids('secondController')).toEqual(['rcm', 'admin']);
     });
 
-    it('farklı birimden bir IKS_MANAGER kullanıcı secondController listesinde de yer alır (control:view yetkisiyle geçer)', async () => {
-        prisma.user.findMany = jest.fn().mockResolvedValue([
-            { id: 'iks-1', firstName: 'İç', lastName: 'Kontrolcü', email: 'iks@rmic.com', role: { name: 'IKS_MANAGER', permissions: ['control:view', 'finding:view'] } },
-        ]);
+    it('kayıt kapsamı açıkken birim kontrolcüsü yalnız kendi biriminin kontrolünde uygun; kurum geneli kapsamlılar her birimde', async () => {
+        enforced = true;
+        expect(await ids('assignee')).toEqual(['auditor', 'rcm', 'admin', 'unitTester']);
+    });
+});
 
-        const result = await service.getEligibleControllers(2026, 'u1', ['control:*'], 'secondController', 'c1', {});
-
-        expect(result.data).toHaveLength(1);
-        expect(result.data[0].id).toBe('iks-1');
+describe('controllerIneligibility', () => {
+    it('pasif kullanıcı uygun değil', () => {
+        expect(controllerIneligibility({ isActive: false, permissions: ['*'], directorateIds: [] }, 'assignee', 'd', false)).toBe('kullanıcı pasif');
+    });
+    it('kapsam açıkken direktörlüğü olmayan kontrolde yalnız kurum geneli kapsamlı uygun', () => {
+        expect(controllerIneligibility({ isActive: true, permissions: ['control:test'], directorateIds: ['d'] }, 'assignee', null, true)).toMatch(/direktörlüğü yok/);
+        expect(controllerIneligibility({ isActive: true, permissions: ['control:test', 'scope:org'], directorateIds: [] }, 'assignee', null, true)).toBeNull();
     });
 });

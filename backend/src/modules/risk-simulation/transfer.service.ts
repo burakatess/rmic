@@ -114,7 +114,19 @@ export class TransferService {
 
         // ── Kontrol-Risk bağlantıları ──
         const transferableControlIds = new Set<string>();
+        // Onaysız kontroller hesaplamaya girmediği gibi aktarımda da DEĞİŞİKLİK üretmez:
+        // yeni bağlantı/kontrol oluşturulmaz, mevcut gerçek bağlantı da KALDIRILMAZ.
+        const untouchedControlIds = new Set<string>();
         for (const c of scenario.controls) {
+            if (!c.isApproved) {
+                if (c.sourceControlId) untouchedControlIds.add(c.sourceControlId);
+                rows.push({
+                    kind: 'CONTROL', classification: 'SKIP', refId: c.id,
+                    label: `"${c.name}" onaylı değil — aktarımda değişiklik yapılmayacak`,
+                    reason: 'Onaylı işareti kapalı kontroller hesaplamaya ve aktarıma dahil edilmez; mevcut gerçek bağlantısı korunur.',
+                });
+                continue;
+            }
             if (!c.sourceControlId) {
                 const suggestedMapping = suggestControlMapping(c.p1, c.p2);
                 rows.push({
@@ -140,7 +152,7 @@ export class TransferService {
         if (scenario.sourceType === 'EXISTING_RISK' && scenario.sourceRiskSnapshot) {
             const originalControlIds: string[] = ((scenario.sourceRiskSnapshot as any).controls ?? []).map((c: any) => c.controlId);
             for (const origId of originalControlIds) {
-                if (!transferableControlIds.has(origId)) {
+                if (!transferableControlIds.has(origId) && !untouchedControlIds.has(origId)) {
                     rows.push({
                         kind: 'CONTROL_MAPPING', classification: 'REMOVE', refId: origId,
                         label: `Kontrol bağlantısı kaldırılacak (senaryoda çıkarılmış): ${origId}`,
@@ -159,6 +171,10 @@ export class TransferService {
             }
             if (a.sourceActionId) {
                 rows.push({ kind: 'ACTION', classification: 'LINK_EXISTS', refId: a.id, label: `"${a.name}" zaten gerçek bir aksiyona bağlı`, reason: 'Yeniden oluşturulmayacak.' });
+                continue;
+            }
+            if (targetControl && !targetControl.isApproved) {
+                rows.push({ kind: 'ACTION', classification: 'SKIP', refId: a.id, label: `"${a.name}" aktarılmayacak`, reason: 'Hedef kontrol onaylı değil (hesaplamaya dahil değil).' });
                 continue;
             }
             if (!targetControl?.sourceControlId) {
@@ -323,6 +339,7 @@ export class TransferService {
                         const simControl = scenario.controls.find(c => c.id === assignment.scenarioControlId);
                         if (!simControl) throw new BadRequestException(`Geçersiz kontrol: senaryoda "${assignment.scenarioControlId}" id'li kontrol yok.`);
                         if (simControl.sourceControlId) throw new BadRequestException(`"${simControl.name}" zaten gerçek envanterden — yeniden oluşturulamaz.`);
+                        if (!simControl.isApproved) throw new BadRequestException(`"${simControl.name}" onaylı değil — envantere aktarılamaz.`);
                         const owner = await tx.user.findUnique({ where: { id: assignment.ownerId } });
                         if (!owner) throw new BadRequestException('Geçersiz kullanıcı: kontrol sorumlusu bulunamadı');
                         if (assignment.directorateId) {
@@ -370,6 +387,7 @@ export class TransferService {
                     const finding = await tx.finding.create({
                         data: {
                             findingId,
+                            createdById: userId,
                             description: `Risk Simülasyonu aktarımı — "${scenario.name}" senaryosundan aktarılan aksiyon için otomatik oluşturuldu.`,
                             impact: simAction.description || 'Simülasyon senaryosunda tanımlanan hipotetik aksiyonun gerçek envantere aktarımı.',
                             severity: severityFromRiskLevel(calc.residual.level?.label),
