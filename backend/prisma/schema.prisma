@@ -42,12 +42,14 @@ model User {
   assignedScopeYears         ControlYearScope[] @relation("ScopeAssignee")
   secondControlledScopeYears ControlYearScope[] @relation("ScopeSecondController")
 
-  createdSimMethodologies SimulationMethodology[]  @relation("SimMethodologyCreatedBy")
-  createdRiskSimulations  RiskSimulation[]         @relation("RiskSimulationCreatedBy")
-  createdSimScenarios     RiskSimulationScenario[] @relation("RiskSimScenarioCreatedBy")
-  startedSimTests         RiskSimulationTest[]     @relation("RiskSimTestStartedBy")
-  finishedSimTests        RiskSimulationTest[]     @relation("RiskSimTestFinishedBy")
-  performedSimTransfers   RiskSimulationTransfer[] @relation("RiskSimTransferPerformedBy")
+  createdSimMethodologies SimulationMethodology[]         @relation("SimMethodologyCreatedBy")
+  createdRiskSimulations  RiskSimulation[]                @relation("RiskSimulationCreatedBy")
+  createdSimScenarios     RiskSimulationScenario[]        @relation("RiskSimScenarioCreatedBy")
+  startedSimTests         RiskSimulationTest[]            @relation("RiskSimTestStartedBy")
+  requestedSimTransfers   RiskSimulationTransferRequest[] @relation("SimTransferRequestedBy")
+  decidedSimTransfers     RiskSimulationTransferRequest[] @relation("SimTransferDecidedBy")
+  finishedSimTests        RiskSimulationTest[]            @relation("RiskSimTestFinishedBy")
+  performedSimTransfers   RiskSimulationTransfer[]        @relation("RiskSimTransferPerformedBy")
 
   directorateMemberships        DirectorateMembership[] @relation("DirectorateMembershipUser")
   createdDirectorateMemberships DirectorateMembership[] @relation("DirectorateMembershipCreatedBy")
@@ -2768,14 +2770,20 @@ model QualityRunItem {
 // ==========================================
 
 model SimulationMethodology {
-  id         String  @id @default(cuid())
-  version    Int     @unique
+  id                String  @id @default(cuid())
+  // Resmî sürüm numarası; deneme (simülasyon içi) metodolojilerde null.
+  version           Int?    @unique
   // calculation-engine.ts::MethodologyConfig serileştirilmiş hali. Her senaryo
   // oluşturulduğu andaki sürüme sabitlenir — config değişse bile eski senaryolar
   // sessizce yeniden hesaplanmaz.
-  config     Json
-  isActive   Boolean @default(false)
-  changeNote String? @db.Text
+  config            Json
+  isActive          Boolean @default(false)
+  changeNote        String? @db.Text
+  // Deneme metodolojisi: yalnız bir simülasyonun içinde kullanılır (resmî ayarı değiştirmez).
+  // trialSimulationId bilinçli olarak ilişki değil: simülasyon silinince servis temizler.
+  isTrial           Boolean @default(false)
+  trialSimulationId String?
+  basedOnVersion    Int?
 
   createdBy   User   @relation("SimMethodologyCreatedBy", fields: [createdById], references: [id])
   createdById String
@@ -2785,6 +2793,7 @@ model SimulationMethodology {
   createdAt DateTime @default(now())
 
   @@index([isActive])
+  @@index([trialSimulationId])
 }
 
 enum RiskSimulationMode {
@@ -2815,8 +2824,9 @@ model RiskSimulation {
   createdBy   User   @relation("RiskSimulationCreatedBy", fields: [createdById], references: [id])
   createdById String
 
-  scenarios RiskSimulationScenario[]
-  tests     RiskSimulationTest[]
+  scenarios        RiskSimulationScenario[]
+  tests            RiskSimulationTest[]
+  transferRequests RiskSimulationTransferRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2853,6 +2863,44 @@ model RiskSimulationTest {
 
   @@index([simulationId])
   @@index([startedById])
+}
+
+// Çalışma alanından envantere aktarım talebi (iki aşamalı): talep önizlemeyle oluşturulur,
+// Risk ve Kontrol Yöneticisi / Sistem Yöneticisi onaylayınca Risk Envanteri ve Kontrol
+// Alanı'na yazılır. Talep eden kendi talebini onaylayamaz. Simülasyon silinse de talep
+// (denetim izi) kalır.
+enum SimTransferRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model RiskSimulationTransferRequest {
+  id              String                   @id @default(cuid())
+  requestNo       String                   @unique // TRQ-YYYY-XXXX
+  simulation      RiskSimulation?          @relation(fields: [simulationId], references: [id], onDelete: SetNull)
+  simulationId    String?
+  simulationLabel String
+  status          SimTransferRequestStatus @default(PENDING)
+
+  scenarioIds Json // seçilen riskler (senaryo kimlikleri)
+  preview     Json // talep anındaki önizleme (alan bazında envanter → simülasyon)
+  note        String? @db.Text
+
+  requestedBy   User     @relation("SimTransferRequestedBy", fields: [requestedById], references: [id])
+  requestedById String
+  requestedAt   DateTime @default(now())
+
+  decidedBy    User?     @relation("SimTransferDecidedBy", fields: [decidedById], references: [id])
+  decidedById  String?
+  decidedAt    DateTime?
+  decisionNote String?   @db.Text
+  result       Json?
+
+  @@index([status])
+  @@index([simulationId])
+  @@index([requestedById])
 }
 
 enum ScenarioSourceType {

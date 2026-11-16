@@ -378,4 +378,97 @@ describe('E2E — Risk simülasyonu çalışma alanı', () => {
             expect(await prisma.auditLog.count({ where: { action: 'DELETE', entityType: 'RiskSimulation', entityId: ids.saved } })).toBe(1);
         });
     });
+
+    describe('Metodoloji ayarları ve envantere aktarım', () => {
+        const settings = async () => (await http().get('/risk-simulations/methodologies').set(as('admin')).expect(200)).body.active.settings;
+        const scenarioOf = (simId: string, name: string) => prisma.riskSimulationScenario.findFirstOrThrow({ where: { simulationId: simId, name }, include: { controls: true, methodology: true } });
+
+        it('deneme ayarı yalnız o simülasyonu etkiler; resmî ayara dönülebilir; tutarsız ayar reddedilir', async () => {
+            const base = await settings();
+            expect(base).toMatchObject({ kypWeightPct: 40, riskLevelUpperBounds: [1, 4, 10, 16] });
+            const before = (await http().get(`/risk-simulations/workspaces/${ids.ws}`).set(as('admin')).expect(200)).body.rows.find((r: any) => r.riskId === 'RE-1');
+            const trial = await http().post(`/risk-simulations/workspaces/${ids.ws}/methodology/trial`).set(as('analyst'))
+                .send({ settings: { ...base, kypWeightPct: 100 }, note: 'Yalnız P puanı' }).expect(201);
+            expect(trial.body).toMatchObject({ current: { isTrial: true, basedOnVersion: 1, settings: { kypWeightPct: 100 } }, usesLatestOfficial: false });
+            const after = (await http().get(`/risk-simulations/workspaces/${ids.ws}`).set(as('admin')).expect(200)).body.rows.find((r: any) => r.riskId === 'RE-1');
+            expect(after.bkp.value).not.toBeCloseTo(before.bkp.value, 3);
+            expect((await settings()).kypWeightPct).toBe(40); // resmî ayar değişmedi
+            await http().post(`/risk-simulations/workspaces/${ids.ws}/methodology/trial`).set(as('analyst'))
+                .send({ settings: { ...base, businessWeightsPct: { ...base.businessWeightsPct, financial: 10 } } }).expect(400);
+            const back = await http().post(`/risk-simulations/workspaces/${ids.ws}/methodology/official`).set(as('analyst')).expect(201);
+            expect(back.body).toMatchObject({ current: { isTrial: false, version: 1 }, usesLatestOfficial: true });
+            expect(await prisma.simulationMethodology.count({ where: { isTrial: true, trialSimulationId: ids.ws } })).toBe(0);
+        });
+
+        it('resmî ayarı yalnız Sistem Yöneticisi yayınlar; yeni sürüm yeni simülasyonlarda kullanılır, eskiler sürümünde kalır', async () => {
+            const base = await settings();
+            await http().post('/risk-simulations/methodologies').set(as('analyst')).send({ settings: base, changeNote: 'x' }).expect(403);
+            const pub = await http().post('/risk-simulations/methodologies').set(as('admin')).send({ settings: { ...base, rounding: 'CEIL' }, changeNote: 'Etki yukarı yuvarlansın' }).expect(201);
+            expect(pub.body.version).toBe(2);
+            const m = await http().get(`/risk-simulations/workspaces/${ids.ws}/methodology`).set(as('admin')).expect(200);
+            expect(m.body).toMatchObject({ current: { version: 1 }, official: { version: 2 }, usesLatestOfficial: false });
+            const fresh = await http().post('/risk-simulations/workspaces').set(as('admin')).send({ name: 'v2 kütük' }).expect(201);
+            expect((await scenarioOf(fresh.body.id, 'RE-1')).methodology.version).toBe(2);
+            ids.ws2 = fresh.body.id;
+        });
+
+        it('aktarım: taslaktan yapılamaz; talep önizlemeyle oluşur; talep eden onaylayamaz; onayla envanter ve Kontrol Alanı güncellenir', async () => {
+            const draft = await http().post('/risk-simulations/workspaces/live').set(as('admin')).send({}).expect(201);
+            await http().post(`/risk-simulations/workspaces/${draft.body.id}/transfer-preview`).set(as('admin')).send({}).expect(400);
+
+            const sc = await scenarioOf(ids.ws2, 'RE-1');
+            await http().patch(`/risk-simulations/scenarios/${sc.id}`).set(as('admin')).send({ naturalProbability: 5, expectedContentVersion: sc.contentVersion }).expect(200);
+            await http().post(`/risk-simulations/scenarios/${sc.id}/controls`).set(as('admin')).send({
+                name: 'YENİ-KONTROL', description: 'Yeni otomatik kontrol', p1: 'OTOMATIK', p2: 'ONLEYICI', p3: 'ELEKTRONIK_IMZA', p4: 'HER_IKISI', p5: 'DUZENLI_UST_AMIR',
+                ktsMode: 'MANUAL', ktsManualValue: 80, weight: 0, impactArea: 'BOTH',
+            }).expect(201);
+
+            const pv = await http().post(`/risk-simulations/workspaces/${ids.ws2}/transfer-preview`).set(as('analyst')).send({}).expect(201);
+            // Simülasyonda değiştirilmeyen riskler (RE-2) aktarım adayı olmaz.
+            expect(pv.body.rows.map((r: any) => r.riskId)).toEqual(['RE-1']);
+            const row = pv.body.rows.find((r: any) => r.riskId === 'RE-1');
+            expect(row.fields.map((f: any) => f.field)).toEqual(expect.arrayContaining(['olasilik', 'dogalRiskPuani', 'dogalRiskSeviyesi']));
+            expect(row.fields.find((f: any) => f.field === 'olasilik')).toMatchObject({ before: 4, after: 5 });
+            expect(row.controls.map((c: any) => [c.action, c.name ?? c.kontrolId])).toEqual(expect.arrayContaining([['CREATE', 'YENİ-KONTROL']]));
+
+            const req = await http().post(`/risk-simulations/workspaces/${ids.ws2}/transfer-requests`).set(as('analyst')).send({ scenarioIds: [row.scenarioId], note: 'Olasılık güncellemesi' }).expect(201);
+            expect(req.body).toMatchObject({ status: 'PENDING' });
+            await http().post(`/risk-simulations/workspaces/${ids.ws2}/transfer-requests`).set(as('analyst')).send({ scenarioIds: [row.scenarioId] }).expect(409);
+            await http().post(`/risk-simulations/transfer-requests/${req.body.id}/approve`).set(as('analyst')).send({}).expect(403); // rol yok
+            const del = await http().post('/risk-simulations/bulk-delete').set(as('admin')).send({ ids: [ids.ws2] }).expect(201);
+            expect(del.body.skipped[0].reason).toContain('Bekleyen');
+
+            const before = await prisma.risk.findUniqueOrThrow({ where: { id: ids.rA } });
+            const ok = await http().post(`/risk-simulations/transfer-requests/${req.body.id}/approve`).set(as('admin')).send({ note: 'Uygun' }).expect(201);
+            expect(ok.body).toMatchObject({ status: 'APPROVED', risksUpdated: 1, controlsCreated: 1 });
+            const after = await prisma.risk.findUniqueOrThrow({ where: { id: ids.rA }, include: { riskControls: { include: { riskControl: true } } } });
+            expect(after).toMatchObject({ olasilik: 5, dogalRiskPuani: 20, dogalRiskSeviyesi: 'KRİTİK', version: before.version + 1 });
+            const created = after.riskControls.map(l => l.riskControl).find(c => c.kontrolTanimi === 'Yeni otomatik kontrol')!;
+            expect(created).toMatchObject({ status: 'AKTIF', kontrolIslevi: 'Otomatik', kontrolTuru: 'Önleyici' });
+            const simCtrl = await prisma.riskSimulationControl.findFirstOrThrow({ where: { scenarioId: sc.id, name: 'YENİ-KONTROL' } });
+            expect(simCtrl.sourceRiskControlId).toBe(created.id);
+            expect(await prisma.auditLog.count({ where: { action: 'SIM_TRANSFER_APPROVE', entityId: req.body.id } })).toBe(1);
+            // Simülasyon artık güncel envanterle aynı: yeni önizlemede RE-1 için risk alanı farkı kalmaz.
+            const pv2 = await http().post(`/risk-simulations/workspaces/${ids.ws2}/transfer-preview`).set(as('admin')).send({ scenarioIds: [row.scenarioId] }).expect(201);
+            expect(pv2.body.rows[0].fields.filter((f: any) => ['olasilik', 'dogalRiskPuani'].includes(f.field))).toEqual([]);
+        });
+
+        it('envanter talepten sonra değişirse onay reddedilir; kendi talebini onaylayamaz; iptal ve ret', async () => {
+            const sc = await scenarioOf(ids.ws2, 'RE-1');
+            await http().patch(`/risk-simulations/scenarios/${sc.id}`).set(as('admin')).send({ naturalProbability: 3, expectedContentVersion: sc.contentVersion }).expect(200);
+            const mine = await http().post(`/risk-simulations/workspaces/${ids.ws2}/transfer-requests`).set(as('admin')).send({ scenarioIds: [sc.id] }).expect(201);
+            await http().post(`/risk-simulations/transfer-requests/${mine.body.id}/approve`).set(as('admin')).send({}).expect(403);
+            await http().post(`/risk-simulations/transfer-requests/${mine.body.id}/cancel`).set(as('analyst')).expect(403);
+            await http().post(`/risk-simulations/transfer-requests/${mine.body.id}/cancel`).set(as('admin')).expect(201);
+
+            const req = await http().post(`/risk-simulations/workspaces/${ids.ws2}/transfer-requests`).set(as('analyst')).send({ scenarioIds: [sc.id] }).expect(201);
+            await prisma.risk.update({ where: { id: ids.rA }, data: { version: { increment: 1 } } });
+            const stale = await http().post(`/risk-simulations/transfer-requests/${req.body.id}/approve`).set(as('admin')).send({}).expect(409);
+            expect(stale.body.message).toContain('talepten sonra');
+            expect((await prisma.risk.findUniqueOrThrow({ where: { id: ids.rA } })).olasilik).toBe(5);
+            await http().post(`/risk-simulations/transfer-requests/${req.body.id}/reject`).set(as('admin')).send({ note: 'Eski veri' }).expect(201);
+            const list = await http().get('/risk-simulations/transfer-requests').set(as('analyst')).expect(200);
+            expect(list.body.slice(0, 3).map((r: any) => r.status)).toEqual(['REJECTED', 'CANCELLED', 'APPROVED']);
+        });
+    });
 });

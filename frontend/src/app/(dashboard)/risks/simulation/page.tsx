@@ -43,6 +43,7 @@ export default function RiskSimulationListPage() {
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [pendingTransfers, setPendingTransfers] = useState<{ id: string; requestNo: string; simulationId: string | null; simulationLabel: string; scenarioIds: string[]; requestedAt: string; requestedBy: { firstName: string; lastName: string } }[]>([]);
     const { success, error: showError, warning } = useToast();
     const { hasPermission } = useAuth();
     // Risk Yönetimi modülünü (risk:view) gören herkes simülasyonu kullanır (backend ile aynı kural).
@@ -52,7 +53,8 @@ export default function RiskSimulationListPage() {
     const load = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await api.getRiskSimulations() as SimRow[];
+            const [res, pend] = await Promise.all([api.getRiskSimulations() as Promise<SimRow[]>, api.listTransferRequests('PENDING').catch(() => [])]);
+            setPendingTransfers(Array.isArray(pend) ? pend : []);
             setRows(Array.isArray(res) ? res : []);
             setSelected(prev => new Set([...prev].filter(id => (res as SimRow[]).some(r => r.id === id))));
         } catch {
@@ -143,6 +145,22 @@ export default function RiskSimulationListPage() {
                     </div>
                 )}
             </div>
+
+            {pendingTransfers.length > 0 && (
+                <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50/60 px-5 py-4">
+                    <div className="mb-2 text-[15px] text-slate-900"><b>Onay bekleyen envantere aktarım talepleri</b> <span className="text-slate-500">{pendingTransfers.length}</span></div>
+                    <ul className="divide-y divide-amber-100 text-sm">
+                        {pendingTransfers.map(t => (
+                            <li key={t.id} className="flex flex-wrap items-center gap-3 py-2">
+                                <span className="font-mono font-semibold">{t.requestNo}</span>
+                                <span className="min-w-0 flex-1 truncate text-slate-700">{t.simulationLabel} · {t.scenarioIds.length} risk</span>
+                                <span className="text-[12px] text-slate-500">{t.requestedBy.firstName} {t.requestedBy.lastName} · {dt(t.requestedAt)}</span>
+                                {t.simulationId && <Link href={`/risks/simulation/workspace/${t.simulationId}?tab=transfer`} className="rounded-lg border border-amber-300 bg-white px-3 py-1 text-[13px] font-medium text-amber-900 hover:bg-amber-100">İncele</Link>}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
 
             <div className="mb-2 text-[15px] text-slate-900"><b>Kayıtlı simülasyonlar</b> <span className="text-slate-500">{rows.length}</span></div>
             <DataTable

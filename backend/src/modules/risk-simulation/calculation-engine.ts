@@ -22,6 +22,7 @@ export type P4 = 'YOK' | 'AYNI_EKIP' | 'FARKLI_EKIP' | 'HER_IKISI';
 export type P5 = 'YOK' | 'DUZENSIZ_UST_AMIR' | 'DUZENLI_UST_AMIR' | 'FARKLI_BIRIM_GOZETIM';
 export type ImpactArea = 'PROBABILITY' | 'IMPACT' | 'BOTH';
 export type FinalImpactChoice = 'BUSINESS' | 'INFOSEC';
+export type ImpactRounding = 'ROUND_HALF_UP' | 'CEIL' | 'FLOOR';
 
 export interface RiskLevelBand { min: number; max: number; score: number; label: string }
 export interface BkpLevelBand { min: number; max: number; label: string; tierReduction: number }
@@ -39,7 +40,8 @@ export interface MethodologyConfig {
     infosecImpactWeights: { confidentiality: number; integrity: number; availability: number };
     riskLevels: RiskLevelBand[]; // doğal risk puanı (1-25) → 5 kademe
     bkpLevels: BkpLevelBand[]; // 5 kademe + kademe azaltım tablosu
-    rounding: 'ROUND_HALF_UP';
+    /** Etki yuvarlama: yarım yukarı (varsayılan), her zaman yukarı veya her zaman aşağı. */
+    rounding: ImpactRounding;
 }
 
 /** SIM_METHODOLOGY_V1 — spec'in kendi sayılarıyla birebir. */
@@ -136,8 +138,10 @@ export function calcInfosecImpact(i: InfosecImpactInputs, cfg: MethodologyConfig
 
 /** Ondalıklı ağırlıklı etkiyi 1-5 kademeye çevirir — SIM_METHODOLOGY_V1'in KENDİ
  * kararı olan round-half-up kuralı (onaylı başka bir kural mevcut değildi, bkz. teslim raporu). */
-export function roundImpactToTier(impact: number): number {
-    const rounded = Math.floor(impact + 0.5);
+export function roundImpactToTier(impact: number, mode: ImpactRounding = 'ROUND_HALF_UP'): number {
+    // Kayan nokta artığı (3.0000001) yukarı yuvarlamada kademe atlatmasın.
+    const x = Math.round(impact * 1e6) / 1e6;
+    const rounded = mode === 'CEIL' ? Math.ceil(x) : mode === 'FLOOR' ? Math.floor(x) : Math.floor(x + 0.5);
     return Math.min(5, Math.max(1, rounded));
 }
 
@@ -388,8 +392,8 @@ export function calculateScenario(input: ScenarioCalcInput): ScenarioCalcResult 
     const { cfg } = input;
     const businessRaw = input.businessImpactInputs ? calcBusinessImpact(input.businessImpactInputs, cfg) : null;
     const infosecRaw = input.infosecImpactInputs ? calcInfosecImpact(input.infosecImpactInputs, cfg) : null;
-    const businessTier = businessRaw !== null ? roundImpactToTier(businessRaw) : null;
-    const infosecTier = infosecRaw !== null ? roundImpactToTier(infosecRaw) : null;
+    const businessTier = businessRaw !== null ? roundImpactToTier(businessRaw, cfg.rounding) : null;
+    const infosecTier = infosecRaw !== null ? roundImpactToTier(infosecRaw, cfg.rounding) : null;
     const finalImpactTier = input.finalImpactChoice === 'BUSINESS' ? businessTier : infosecTier;
 
     const naturalRisk = finalImpactTier !== null ? calcNaturalRisk(input.naturalProbability, finalImpactTier, cfg) : null;

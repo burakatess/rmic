@@ -1559,6 +1559,38 @@ class ApiClient {
     async bulkDeleteSims(ids: string[]) {
         return this.request<{ deleted: string[]; skipped: { id: string; simulationId: string | null; reason: string }[] }>('/risk-simulations/bulk-delete', { method: 'POST', body: { ids } });
     }
+    // ── Simülasyon metodolojisi ──
+    async getSimMethodologies() {
+        return this.request<any>('/risk-simulations/methodologies');
+    }
+    async publishSimMethodology(settings: unknown, changeNote: string) {
+        return this.request<any>('/risk-simulations/methodologies', { method: 'POST', body: { settings, changeNote } });
+    }
+    async getWorkspaceMethodology(simId: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/methodology`);
+    }
+    async setTrialMethodology(simId: string, settings: unknown, note?: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/methodology/trial`, { method: 'POST', body: { settings, note } });
+    }
+    async useOfficialMethodology(simId: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/methodology/official`, { method: 'POST' });
+    }
+    // ── Envantere aktarım (iki aşamalı) ──
+    async previewWorkspaceTransfer(simId: string, scenarioIds?: string[]) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/transfer-preview`, { method: 'POST', body: { scenarioIds } });
+    }
+    async createTransferRequest(simId: string, scenarioIds: string[], note?: string) {
+        return this.request<any>(`/risk-simulations/workspaces/${simId}/transfer-requests`, { method: 'POST', body: { scenarioIds, note } });
+    }
+    async listTransferRequests(status?: string) {
+        return this.request<any[]>(`/risk-simulations/transfer-requests${status ? `?status=${status}` : ''}`);
+    }
+    async getTransferRequest(id: string) {
+        return this.request<any>(`/risk-simulations/transfer-requests/${id}`);
+    }
+    async decideTransferRequest(id: string, decision: 'approve' | 'reject' | 'cancel', note?: string) {
+        return this.request<any>(`/risk-simulations/transfer-requests/${id}/${decision}`, { method: 'POST', body: decision === 'cancel' ? undefined : { note } });
+    }
     async listSimTests(simId: string) {
         return this.request<any[]>(`/risk-simulations/workspaces/${simId}/tests`);
     }

@@ -7,11 +7,14 @@ import { TransferService } from './transfer.service';
 import { WorkspaceService } from './workspace.service';
 import { WorkspaceExcelService } from './workspace-excel.service';
 import { WorkspaceTestService } from './workspace-test.service';
+import { MethodologyService } from './methodology.service';
+import { WorkspaceTransferService } from './workspace-transfer.service';
 import type { AccessActor } from '../../common/services/access-scope.service';
 import {
     CreateRiskSimulationDto, UpdateRiskSimulationDto, CreateScenarioDto, UpdateScenarioDto,
     CreateScenarioControlDto, UpdateScenarioControlDto, RedistributeWeightsDto,
     CreateScenarioActionDto, UpdateScenarioActionDto, ToggleScenarioActionDto, TransferDto, ImportWorkspaceDto, StartSimulationTestDto, OpenLiveWorkspaceDto, SaveWorkspaceDto, DeleteSimulationsDto,
+    PublishMethodologyDto, TrialMethodologyDto, TransferPreviewDto, CreateTransferRequestDto, TransferDecisionDto,
 } from './dto';
 
 // Ürün kararı (2026-11-16): Risk Simülasyonu, Risk Yönetimi modülünü (risk:view) gören herkese
@@ -38,6 +41,8 @@ export class RiskSimulationController {
         private workspaceService: WorkspaceService,
         private workspaceExcel: WorkspaceExcelService,
         private workspaceTests: WorkspaceTestService,
+        private methodology: MethodologyService,
+        private workspaceTransfer: WorkspaceTransferService,
     ) { }
 
     // ── Çalışma alanı (risk kütüğünün tamamı) ──
@@ -46,6 +51,84 @@ export class RiskSimulationController {
     @SIM.create()
     createWorkspace(@Body() dto: CreateRiskSimulationDto, @CurrentUser() actor: AccessActor) {
         return this.workspaceService.createWorkspace(dto, actor);
+    }
+
+    // ── Metodoloji: resmî sürümler (yalnız Sistem Yöneticisi yayınlar) ve simülasyon içi deneme ──
+    @Get('methodologies')
+    @SIM.view()
+    listMethodologies() {
+        return this.methodology.listOfficial();
+    }
+
+    @Post('methodologies')
+    @Roles('SYSTEM_ADMIN')
+    @SIM.edit()
+    publishMethodology(@Body() dto: PublishMethodologyDto, @CurrentUser('id') userId: string) {
+        return this.methodology.publish(dto.settings, dto.changeNote, userId);
+    }
+
+    @Get('workspaces/:id/methodology')
+    @SIM.view()
+    workspaceMethodology(@Param('id') id: string) {
+        return this.methodology.forSimulation(id);
+    }
+
+    @Post('workspaces/:id/methodology/trial')
+    @SIM.edit()
+    trialMethodology(@Param('id') id: string, @Body() dto: TrialMethodologyDto, @CurrentUser('id') userId: string) {
+        return this.methodology.setTrial(id, dto.settings, dto.note, userId);
+    }
+
+    @Post('workspaces/:id/methodology/official')
+    @SIM.edit()
+    officialMethodology(@Param('id') id: string, @CurrentUser('id') userId: string) {
+        return this.methodology.useOfficial(id, userId);
+    }
+
+    // ── Envantere aktarım (iki aşamalı): talep herkes, onay/ret yetkili rol ──
+    @Post('workspaces/:id/transfer-preview')
+    @SIM.view()
+    workspaceTransferPreview(@Param('id') id: string, @Body() dto: TransferPreviewDto) {
+        return this.workspaceTransfer.preview(id, dto.scenarioIds);
+    }
+
+    @Post('workspaces/:id/transfer-requests')
+    @SIM.edit()
+    createTransferRequest(@Param('id') id: string, @Body() dto: CreateTransferRequestDto, @CurrentUser('id') userId: string) {
+        return this.workspaceTransfer.createRequest(id, dto.scenarioIds, dto.note, userId);
+    }
+
+    @Get('transfer-requests')
+    @SIM.view()
+    listTransferRequests(@Query('status') status?: string) {
+        const allowed = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'];
+        return this.workspaceTransfer.list(status && allowed.includes(status) ? status : undefined);
+    }
+
+    @Get('transfer-requests/:rid')
+    @SIM.view()
+    getTransferRequest(@Param('rid') rid: string) {
+        return this.workspaceTransfer.get(rid);
+    }
+
+    @Post('transfer-requests/:rid/approve')
+    @Roles(...TRANSFER_ROLES)
+    @RequirePermissions('risk:sim:transfer')
+    approveTransferRequest(@Param('rid') rid: string, @Body() dto: TransferDecisionDto, @CurrentUser('id') userId: string) {
+        return this.workspaceTransfer.approve(rid, dto.note, userId);
+    }
+
+    @Post('transfer-requests/:rid/reject')
+    @Roles(...TRANSFER_ROLES)
+    @RequirePermissions('risk:sim:transfer')
+    rejectTransferRequest(@Param('rid') rid: string, @Body() dto: TransferDecisionDto, @CurrentUser('id') userId: string) {
+        return this.workspaceTransfer.reject(rid, dto.note, userId);
+    }
+
+    @Post('transfer-requests/:rid/cancel')
+    @SIM.edit()
+    cancelTransferRequest(@Param('rid') rid: string, @CurrentUser('id') userId: string) {
+        return this.workspaceTransfer.cancel(rid, userId);
     }
 
     // Güncel simülatör: Risk Envanteri + Kontrol Alanı'nın şimdiki hali (kullanıcı başına taslak).

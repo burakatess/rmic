@@ -208,7 +208,8 @@ export class WorkspaceService {
         const draft = await this.prisma.riskSimulation.findUnique({ where: { draftOwnerId: actor.id }, select: { id: true, createdAt: true } });
         if (draft && !refresh) {
             const ws = await this.getWorkspace(draft.id);
-            const unsaved = ws.summary.changedCount > 0 || !!ws.activeTest;
+            const trial = await this.prisma.riskSimulationScenario.count({ where: { simulationId: draft.id, methodology: { isTrial: true } } });
+            const unsaved = ws.summary.changedCount > 0 || !!ws.activeTest || trial > 0;
             if (unsaved) return { id: draft.id, rebuilt: false, hasUnsavedChanges: true, builtAt: draft.createdAt };
         }
         if (draft) await this.removeDraft(draft.id, actor);
@@ -226,6 +227,7 @@ export class WorkspaceService {
             return;
         }
         await this.prisma.riskSimulation.delete({ where: { id } });
+        await this.prisma.simulationMethodology.deleteMany({ where: { trialSimulationId: id, isTrial: true, scenarios: { none: {} } } });
         await this.prisma.auditLog.create({ data: { userId: actor.id, action: 'DELETE', entityType: 'RiskSimulation', entityId: id, oldValue: { reason: 'Güncel simülatör yenilendi' } } });
     }
 
@@ -262,12 +264,16 @@ export class WorkspaceService {
             if (sim.isDraft && sim.draftOwnerId !== actor.id) { skipped.push({ id, simulationId: sim.simulationId, reason: 'Başka kullanıcının güncel simülatörü' }); continue; }
             const transfers = await this.prisma.riskSimulationTransfer.count({ where: { scenario: { simulationId: id } } });
             if (transfers > 0) { skipped.push({ id, simulationId: sim.simulationId, reason: 'Envantere aktarım yapılmış; denetim izi için silinemez' }); continue; }
+            const pending = await this.prisma.riskSimulationTransferRequest.count({ where: { simulationId: id, status: 'PENDING' } });
+            if (pending > 0) { skipped.push({ id, simulationId: sim.simulationId, reason: 'Bekleyen envantere aktarım talebi var; önce sonuçlanmalı veya iptal edilmeli' }); continue; }
             await this.prisma.$transaction([
                 this.prisma.riskSimulation.delete({ where: { id } }),
                 this.prisma.auditLog.create({
                     data: { userId: actor.id, action: 'DELETE', entityType: 'RiskSimulation', entityId: id, oldValue: { simulationId: sim.simulationId, name: sim.name, mode: sim.mode } },
                 }),
             ]);
+            // Bu simülasyona özel deneme metodolojileri temizlenir (ilişki değil, düz alan).
+            await this.prisma.simulationMethodology.deleteMany({ where: { trialSimulationId: id, isTrial: true, scenarios: { none: {} } } });
             deleted.push(sim.simulationId);
         }
         return { deleted, skipped };

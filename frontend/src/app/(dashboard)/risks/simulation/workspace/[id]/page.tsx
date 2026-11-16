@@ -11,6 +11,8 @@ import { useAuth } from '@/components/auth';
 import { ExcelTables } from './ExcelTables';
 import { TestReport } from './TestReport';
 import { HeatMap } from './HeatMap';
+import { MethodologyPanel } from './MethodologyPanel';
+import { TransferPanel } from './TransferPanel';
 import { LEVELS, LEVEL_SHORT, BAR_TONE, fmt, fmtDate, LevelBadge } from './ws-ui';
 
 /*
@@ -333,7 +335,9 @@ export default function SimulationWorkspacePage() {
     const [proc, setProc] = useState('');
     const [pageSize, setPageSize] = useState(30);
     const [page, setPage] = useState(1);
-    const [tab, setTab] = useState<'sim' | 'tables' | 'report' | 'heat'>('sim');
+    const [tab, setTab] = useState<'sim' | 'tables' | 'report' | 'heat' | 'method' | 'transfer'>('sim');
+    // ?tab=transfer gibi bağlantılar (ör. listedeki bekleyen talepler) ilgili sekmeyi açar.
+    useEffect(() => { const t = new URLSearchParams(window.location.search).get('tab'); if (t && ['sim', 'tables', 'report', 'heat', 'method', 'transfer'].includes(t)) setTab(t as typeof tab); }, []);
     const [refreshKey, setRefreshKey] = useState(0);
     const [testName, setTestName] = useState<string | null>(null);
     const [confirm, setConfirm] = useState<'finish' | 'reset' | null>(null);
@@ -482,7 +486,7 @@ export default function SimulationWorkspacePage() {
             </div>
 
             <div className="mb-4 flex gap-1 border-b border-slate-200">
-                {([['sim', 'Simülatör'], ['tables', 'Excel tabloları'], ['report', 'Simülasyon raporu'], ['heat', 'Isı haritası']] as const).map(([k, label]) => (
+                {([['sim', 'Simülatör'], ['tables', 'Excel tabloları'], ['report', 'Simülasyon raporu'], ['heat', 'Isı haritası'], ['method', 'Metodoloji ve sınırlar'], ['transfer', 'Envantere aktar']] as const).map(([k, label]) => (
                     <button key={k} type="button" onClick={() => setTab(k)}
                         className={`-mb-px border-b-2 px-4 py-2 text-sm font-semibold ${tab === k ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{label}</button>
                 ))}
@@ -490,6 +494,8 @@ export default function SimulationWorkspacePage() {
 
             {tab === 'tables' ? <ExcelTables simulationId={ws.simulation.id} onOpenRisk={openRisk} />
                 : tab === 'report' ? <TestReport simulationId={ws.simulation.id} activeTestId={test?.id ?? null} refreshKey={refreshKey} onOpenRisk={openRisk} />
+                : tab === 'method' ? <MethodologyPanel simulationId={ws.simulation.id} canEdit={canEdit} onChanged={load} />
+                : tab === 'transfer' ? <TransferPanel simulationId={ws.simulation.id} isDraft={isDraft} onChanged={load} />
                 : tab === 'heat' ? <HeatMap rows={ws.rows} riskLevels={ws.riskLevels} recordLabel={fromExcel ? 'Excel kaydı' : 'Envanter kaydı'} onOpenRisk={openRisk} /> : (
             <div className="grid grid-cols-[minmax(0,46%)_minmax(0,54%)] gap-4 items-start">
                 <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">

@@ -60,3 +60,33 @@ export class DeleteSimulationsDto {
   @MaxLength(50, { each: true })
   ids!: string[];
 }
+
+export class TransferPreviewDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(2000)
+  @IsString({ each: true })
+  @MaxLength(50, { each: true })
+  scenarioIds?: string[];
+}
+
+export class CreateTransferRequestDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(2000)
+  @IsString({ each: true })
+  @MaxLength(50, { each: true })
+  scenarioIds!: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  note?: string;
+}
+
+export class TransferDecisionDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  note?: string;
+}
