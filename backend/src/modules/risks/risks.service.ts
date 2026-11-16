@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
 import {
     CreateRiskDto,
@@ -7,6 +7,10 @@ import {
     TreatRiskDto,
     RiskQueryDto,
 } from './dto';
+import { parsePaging, safeOrderBy } from '../../common/util/list-query';
+import { Prisma } from '@prisma/client';
+import { matchesPermission } from '../../common/util/permission-match';
+import { computeRiskScores, RISK_SCORING_FIELDS } from './risk-scoring.util';
 
 @Injectable()
 export class RisksService {
@@ -24,11 +28,11 @@ export class RisksService {
         return probability * impact;
     }
 
-    async findAll(query: RiskQueryDto) {
+    async findAll(query: RiskQueryDto, riskScope?: Prisma.RiskWhereInput | null) {
         const { search, categoryId, ownerId, status, page, limit, sortBy, sortOrder } = query;
         const skip = ((page || 1) - 1) * (limit || 20);
 
-        const where: any = {};
+        const where: any = riskScope ? { AND: [riskScope] } : {};
 
         if (search) {
             where.OR = [
@@ -40,12 +44,14 @@ export class RisksService {
 
         if (categoryId) where.categoryId = categoryId;
         if (ownerId) where.ownerId = ownerId;
+        if (query.directorateId) where.directorateId = query.directorateId;
         if (status) where.status = status;
 
         const [risks, total] = await Promise.all([
             this.prisma.risk.findMany({
                 where,
                 include: {
+                    directorate: { select: { id: true, name: true } },
                     category: true,
                     owner: {
                         select: {
@@ -125,7 +131,7 @@ export class RisksService {
                 },
                 skip,
                 take: limit || 20,
-                orderBy: { [sortBy || 'createdAt']: sortOrder || 'desc' },
+                orderBy: safeOrderBy(sortBy, sortOrder, Prisma.RiskScalarFieldEnum, 'createdAt', 'desc'),
             }),
             this.prisma.risk.count({ where }),
         ]);
@@ -141,10 +147,11 @@ export class RisksService {
         };
     }
 
-    async findOne(id: string) {
+    async findOne(id: string, sc: RiskRelatedScopes = {}) {
         const risk = await this.prisma.risk.findUnique({
             where: { id },
             include: {
+                directorate: { select: { id: true, name: true } },
                 category: true,
                 owner: {
                     select: {
@@ -168,9 +175,11 @@ export class RisksService {
                                 },
                                 // Include findings linked to this control
                                 findings: {
+                                    where: sc.finding ?? undefined,
                                     include: {
                                         // Include actions linked to each finding
                                         actions: {
+                                            where: sc.action ?? undefined,
                                             include: {
                                                 owner: {
                                                     select: {
@@ -191,9 +200,11 @@ export class RisksService {
                 },
                 // Keep direct findings for backward compatibility
                 findings: {
+                    where: sc.finding ?? undefined,
                     include: {
                         control: true,
                         actions: {
+                            where: sc.action ?? undefined,
                             include: {
                                 owner: {
                                     select: {
@@ -210,6 +221,7 @@ export class RisksService {
                 },
                 // Keep direct actions for backward compatibility
                 actions: {
+                    where: sc.action ?? undefined,
                     include: {
                         owner: {
                             select: {
@@ -267,27 +279,13 @@ export class RisksService {
     }
 
     async create(createRiskDto: CreateRiskDto, userId: string) {
-        // If categoryId is not a UUID, try to find category by name
-        let categoryId = createRiskDto.categoryId;
-        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(categoryId);
-
-        if (!isUUID) {
-            const category = await this.prisma.riskCategory.findFirst({
-                where: { name: { contains: categoryId, mode: 'insensitive' } }
-            });
-            if (category) {
-                categoryId = category.id;
-            } else {
-                // Create a default category if not found
-                const newCategory = await this.prisma.riskCategory.create({
-                    data: { name: createRiskDto.categoryId, description: '', color: '#3b82f6' }
-                });
-                categoryId = newCategory.id;
-            }
-        }
+        const categoryId = await this.resolveCategoryId(createRiskDto.categoryId);
 
         // Use current user as owner if not provided
         const ownerId = createRiskDto.ownerId || userId;
+        if (createRiskDto.ownerId) await this.assertActiveUser(createRiskDto.ownerId, 'risk sahibi');
+        const placement = await this.resolveRiskPlacement(createRiskDto.directorateId, createRiskDto.isOrgWide);
+        const assignment = await this.resolveRiskAssignment(createRiskDto.gmyId, createRiskDto.riskSorumlusuId);
 
         const inherentRiskScore = this.calculateRiskScore(
             createRiskDto.inherentProbability,
@@ -298,13 +296,32 @@ export class RisksService {
             ? inherentRiskScore > createRiskDto.riskAppetite
             : false;
 
-        const risk = await this.prisma.risk.create({
+        // Risk + ilk tarihçe + denetim izi tek transaction'da (yarım kayıt kalmaz).
+        return this.prisma.$transaction(async (tx) => {
+        const risk = await tx.risk.create({
             data: {
                 riskId: this.generateRiskId(),
                 name: createRiskDto.name,
                 description: createRiskDto.description || '',
                 categoryId: categoryId,
                 ownerId: ownerId,
+                directorateId: placement.directorateId,
+                isOrgWide: placement.isOrgWide,
+                ozet: createRiskDto.ozet,
+                ...assignment,
+                surec: createRiskDto.surec,
+                altSurec: createRiskDto.altSurec,
+                flagForIT: createRiskDto.flagForIT ?? false,
+                riskIsleme: createRiskDto.riskIsleme,
+                finansalEtki: createRiskDto.finansalEtki,
+                itibarEtkisi: createRiskDto.itibarEtkisi,
+                regulasyonEtkisi: createRiskDto.regulasyonEtkisi,
+                musteriEtkisi: createRiskDto.musteriEtkisi,
+                gizlilikEtkisi: createRiskDto.gizlilikEtkisi,
+                butunlukEtkisi: createRiskDto.butunlukEtkisi,
+                erisilebilirlikEtkisi: createRiskDto.erisilebilirlikEtkisi,
+                olasilik: createRiskDto.olasilik,
+                ...computeRiskScores(createRiskDto),
                 inherentProbability: createRiskDto.inherentProbability,
                 inherentImpact: createRiskDto.inherentImpact,
                 inherentRiskScore,
@@ -326,7 +343,7 @@ export class RisksService {
         });
 
         // Create initial history entry
-        await this.prisma.riskHistory.create({
+        await tx.riskHistory.create({
             data: {
                 riskId: risk.id,
                 version: 1,
@@ -337,7 +354,7 @@ export class RisksService {
         });
 
         // Log the action
-        await this.prisma.auditLog.create({
+        await tx.auditLog.create({
             data: {
                 userId,
                 action: 'CREATE',
@@ -348,28 +365,92 @@ export class RisksService {
         });
 
         return risk;
+        });
     }
 
-    async update(id: string, updateRiskDto: UpdateRiskDto, userId: string) {
+    /**
+     * Riskin organizasyon yerleşimi: birim riski (directorateId) XOR kurum geneli risk
+     * (isOrgWide=true). Direktörlük var ve aktif olmalı.
+     */
+    private async resolveRiskPlacement(directorateId: string | null | undefined, isOrgWide: boolean | undefined) {
+        const orgWide = isOrgWide === true;
+        if (orgWide && directorateId) {
+            throw new BadRequestException('Kurum geneli risk bir direktörlüğe bağlanamaz; birini seçin.');
+        }
+        if (!orgWide && !directorateId) {
+            throw new BadRequestException('Risk için sorumlu direktörlük seçin veya riski "kurum geneli" olarak işaretleyin.');
+        }
+        if (directorateId) {
+            const dir = await this.prisma.directorate.findUnique({ where: { id: directorateId }, select: { isActive: true } });
+            if (!dir || !dir.isActive) throw new BadRequestException('Geçersiz direktörlük: seçilen direktörlük bulunamadı veya pasif');
+        }
+        return { directorateId: directorateId || null, isOrgWide: orgWide };
+    }
+
+    /**
+     * Kategori: önce KİMLİKLE (cuid) aranır, yoksa adla (geriye uyum: Excel/serbest metin).
+     * Önceki kod kimliği UUID sanıp bulamayınca kimlik metniyle yeni kategori üretiyordu.
+     * Adla da bulunamazsa yeni kategori oluşturulur (mevcut davranış).
+     */
+    private async resolveCategoryId(input: string): Promise<string> {
+        const byId = await this.prisma.riskCategory.findUnique({ where: { id: input }, select: { id: true } });
+        if (byId) return byId.id;
+        const byName = await this.prisma.riskCategory.findFirst({ where: { name: { equals: input, mode: 'insensitive' } }, select: { id: true } });
+        if (byName) return byName.id;
+        const created = await this.prisma.riskCategory.create({ data: { name: input, description: '', color: '#3b82f6' } });
+        return created.id;
+    }
+
+    /**
+     * İlgili GMY ve Risk Sorumlusu: veritabanında tanımlı, aktif kayıt olmalı. Gösterim adları
+     * (ilgiliGmy / riskSorumlusu) kimlikten türetilir. undefined = dokunma, null = kaldır.
+     */
+    private async resolveRiskAssignment(gmyId: string | null | undefined, riskSorumlusuId: string | null | undefined) {
+        const out: { gmyId?: string | null; ilgiliGmy?: string | null; riskSorumlusuId?: string | null; riskSorumlusu?: string | null } = {};
+        if (gmyId === null) Object.assign(out, { gmyId: null, ilgiliGmy: null });
+        else if (gmyId !== undefined) {
+            const g = await this.prisma.gmy.findUnique({ where: { id: gmyId }, select: { name: true, isActive: true } });
+            if (!g || !g.isActive) throw new BadRequestException('Geçersiz GMY: seçilen GMY bulunamadı veya pasif');
+            Object.assign(out, { gmyId, ilgiliGmy: g.name });
+        }
+        if (riskSorumlusuId === null) Object.assign(out, { riskSorumlusuId: null, riskSorumlusu: null });
+        else if (riskSorumlusuId !== undefined) {
+            const u = await this.prisma.user.findUnique({ where: { id: riskSorumlusuId }, select: { firstName: true, lastName: true, isActive: true } });
+            if (!u || !u.isActive) throw new BadRequestException('Geçersiz risk sorumlusu: kullanıcı bulunamadı veya pasif');
+            Object.assign(out, { riskSorumlusuId, riskSorumlusu: `${u.firstName} ${u.lastName}` });
+        }
+        return out;
+    }
+
+    private async assertActiveUser(id: string, label: string) {
+        const u = await this.prisma.user.findUnique({ where: { id }, select: { isActive: true } });
+        if (!u || !u.isActive) throw new BadRequestException(`Geçersiz ${label}: kullanıcı bulunamadı veya pasif`);
+    }
+
+    async update(id: string, updateRiskDto: UpdateRiskDto, userId: string, permissions: string[] = []) {
         const existingRisk = await this.findOne(id);
 
-        let categoryId = updateRiskDto.categoryId;
-        if (categoryId) {
-            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(categoryId);
-            if (!isUUID) {
-                const category = await this.prisma.riskCategory.findFirst({
-                    where: { name: { contains: categoryId, mode: 'insensitive' } }
-                });
-                if (category) {
-                    categoryId = category.id;
-                } else {
-                    const newCategory = await this.prisma.riskCategory.create({
-                        data: { name: categoryId, description: '', color: '#3b82f6' }
-                    });
-                    categoryId = newCategory.id;
-                }
+        // Direktörlük/nitelik değişikliği erişimi etkiler → ayrı izin + ayrı denetim olayı.
+        const { directorateId: nextDirectorateId, isOrgWide: nextOrgWide, gmyId, riskSorumlusuId, ...restDto } = updateRiskDto;
+        const assignment = await this.resolveRiskAssignment(gmyId, riskSorumlusuId);
+        const placementChanged =
+            (nextDirectorateId !== undefined && (nextDirectorateId || null) !== (existingRisk.directorateId ?? null))
+            || (nextOrgWide !== undefined && nextOrgWide !== existingRisk.isOrgWide);
+        let placement: { directorateId: string | null; isOrgWide: boolean } | null = null;
+        if (placementChanged) {
+            if (!matchesPermission(permissions, 'risk:directorate:change')) {
+                throw new ForbiddenException('Riskin direktörlüğünü değiştirme yetkiniz yok (risk:directorate:change).');
             }
-            updateRiskDto.categoryId = categoryId;
+            placement = await this.resolveRiskPlacement(
+                nextDirectorateId !== undefined ? nextDirectorateId : existingRisk.directorateId,
+                nextOrgWide !== undefined ? nextOrgWide : existingRisk.isOrgWide,
+            );
+        }
+        if (restDto.ownerId && restDto.ownerId !== existingRisk.ownerId) await this.assertActiveUser(restDto.ownerId, 'risk sahibi');
+        updateRiskDto = restDto as UpdateRiskDto;
+
+        if (updateRiskDto.categoryId) {
+            updateRiskDto.categoryId = await this.resolveCategoryId(updateRiskDto.categoryId);
         }
 
         // Calculate new scores if probability/impact changed
@@ -385,10 +466,19 @@ export class RisksService {
             isAboveAppetite = appetite ? inherentRiskScore > appetite : false;
         }
 
-        const risk = await this.prisma.risk.update({
+        return this.prisma.$transaction(async (tx) => {
+        // Puanlama girdisi değiştiyse doğal puan/seviye mevcut + yeni değerlerden yeniden hesaplanır.
+        const scoringChanged = RISK_SCORING_FIELDS.some(f => (updateRiskDto as Record<string, unknown>)[f] !== undefined);
+        const recomputed = scoringChanged
+            ? computeRiskScores({ ...(existingRisk as Record<string, any>), ...updateRiskDto })
+            : {};
+        const risk = await tx.risk.update({
             where: { id },
             data: {
                 ...updateRiskDto,
+                ...recomputed,
+                ...(placement ?? {}),
+                ...assignment,
                 inherentRiskScore,
                 isAboveAppetite,
                 version: { increment: 1 },
@@ -408,7 +498,7 @@ export class RisksService {
         });
 
         // Create history entry
-        await this.prisma.riskHistory.create({
+        await tx.riskHistory.create({
             data: {
                 riskId: risk.id,
                 version: risk.version,
@@ -422,7 +512,7 @@ export class RisksService {
         });
 
         // Log the action
-        await this.prisma.auditLog.create({
+        await tx.auditLog.create({
             data: {
                 userId,
                 action: 'UPDATE',
@@ -433,7 +523,21 @@ export class RisksService {
             },
         });
 
+        if (placement) {
+            await tx.auditLog.create({
+                data: {
+                    userId,
+                    action: 'RISK_DIRECTORATE_CHANGE',
+                    entityType: 'Risk',
+                    entityId: risk.id,
+                    oldValue: { directorateId: existingRisk.directorateId ?? null, isOrgWide: existingRisk.isOrgWide },
+                    newValue: placement,
+                },
+            });
+        }
+
         return risk;
+        });
     }
 
     async assess(id: string, assessRiskDto: AssessRiskDto, userId: string) {
@@ -658,11 +762,11 @@ export class RisksService {
         });
     }
 
-    async getFindings(id: string) {
-        await this.findOne(id);
+    async getFindings(id: string, sc: RiskRelatedScopes = {}) {
+        await this.findOne(id, sc);
 
         return this.prisma.finding.findMany({
-            where: { riskId: id },
+            where: sc.finding ? { AND: [{ riskId: id }, sc.finding] } : { riskId: id },
             include: {
                 control: true,
             },
@@ -670,11 +774,11 @@ export class RisksService {
         });
     }
 
-    async getActions(id: string) {
-        await this.findOne(id);
+    async getActions(id: string, sc: RiskRelatedScopes = {}) {
+        await this.findOne(id, sc);
 
         return this.prisma.action.findMany({
-            where: { riskId: id },
+            where: sc.action ? { AND: [{ riskId: id }, sc.action] } : { riskId: id },
             include: {
                 owner: {
                     select: {
@@ -689,7 +793,7 @@ export class RisksService {
         });
     }
 
-    async getRelations(id: string) {
+    async getRelations(id: string, sc: RiskRelatedScopes = {}) {
         const risk = await this.prisma.risk.findUnique({
             where: { id },
             include: {
@@ -714,9 +818,9 @@ export class RisksService {
         // Get findings linked to these controls or directly to the risk
         const findings = await this.prisma.finding.findMany({
             where: {
-                OR: [
-                    { controlId: { in: controlIds } },
-                    { riskId: id },
+                AND: [
+                    { OR: [{ controlId: { in: controlIds } }, { riskId: id }] },
+                    ...(sc.finding ? [sc.finding] : []),
                 ],
             },
             select: { id: true, findingId: true, description: true, status: true, severity: true, controlId: true },
@@ -726,9 +830,9 @@ export class RisksService {
         // Get actions linked to these findings or directly to the risk
         const actions = await this.prisma.action.findMany({
             where: {
-                OR: [
-                    { findingId: { in: findingIds } },
-                    { riskId: id },
+                AND: [
+                    { OR: [{ findingId: { in: findingIds } }, { riskId: id }] },
+                    ...(sc.action ? [sc.action] : []),
                 ],
             },
             select: {
@@ -822,4 +926,9 @@ export class RisksService {
             orderBy: { name: 'asc' },
         });
     }
+}
+
+export interface RiskRelatedScopes {
+    finding?: Prisma.FindingWhereInput | null;
+    action?: Prisma.ActionWhereInput | null;
 }

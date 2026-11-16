@@ -21,17 +21,27 @@ import {
 } from './dto';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
+import { AccessScopeService, actionWhere, findingFullWhere, riskWhere } from '../../common/services/access-scope.service';
+import type { AccessActor } from '../../common/services/access-scope.service';
+import type { RiskRelatedScopes } from './risks.service';
 
 @ApiTags('Risks')
 @ApiBearerAuth('JWT-Auth')
 @Controller('risks')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class RisksController {
-    constructor(private risksService: RisksService) { }
+    constructor(private risksService: RisksService, private scope: AccessScopeService) { }
+
+    // Risk kapsamı + riskten açılan bulgu/aksiyonlar kendi kapsamlarından geçer.
+    private async gate(user: AccessActor, id?: string): Promise<RiskRelatedScopes> {
+        const ctx = await this.scope.context(user);
+        if (id) await this.scope.assertRiskAccess(ctx, id);
+        return { finding: findingFullWhere(ctx), action: actionWhere(ctx) };
+    }
 
     @Get()
-    async findAll(@Query() query: RiskQueryDto) {
-        return this.risksService.findAll(query);
+    async findAll(@Query() query: RiskQueryDto, @CurrentUser() user: AccessActor) {
+        return this.risksService.findAll(query, riskWhere(await this.scope.context(user)));
     }
 
     @Get('categories')
@@ -40,13 +50,13 @@ export class RisksController {
     }
 
     @Get(':id/relations')
-    async getRelations(@Param('id') id: string) {
-        return this.risksService.getRelations(id);
+    async getRelations(@Param('id') id: string, @CurrentUser() user: AccessActor) {
+        return this.risksService.getRelations(id, await this.gate(user, id));
     }
 
     @Get(':id')
-    async findOne(@Param('id') id: string) {
-        return this.risksService.findOne(id);
+    async findOne(@Param('id') id: string, @CurrentUser() user: AccessActor) {
+        return this.risksService.findOne(id, await this.gate(user, id));
     }
 
     @Post()
@@ -60,9 +70,10 @@ export class RisksController {
     async update(
         @Param('id') id: string,
         @Body() updateRiskDto: UpdateRiskDto,
-        @CurrentUser('id') userId: string,
+        @CurrentUser() user: AccessActor,
     ) {
-        return this.risksService.update(id, updateRiskDto, userId);
+        const perms = Array.isArray(user.permissions) ? (user.permissions as string[]) : [];
+        return this.risksService.update(id, updateRiskDto, user.id, perms);
     }
 
     @Post(':id/assess')
@@ -92,23 +103,25 @@ export class RisksController {
     }
 
     @Get(':id/history')
-    async getHistory(@Param('id') id: string) {
+    async getHistory(@Param('id') id: string, @CurrentUser() user: AccessActor) {
+        await this.gate(user, id);
         return this.risksService.getHistory(id);
     }
 
     @Get(':id/controls')
-    async getControls(@Param('id') id: string) {
+    async getControls(@Param('id') id: string, @CurrentUser() user: AccessActor) {
+        await this.gate(user, id);
         return this.risksService.getControls(id);
     }
 
     @Get(':id/findings')
-    async getFindings(@Param('id') id: string) {
-        return this.risksService.getFindings(id);
+    async getFindings(@Param('id') id: string, @CurrentUser() user: AccessActor) {
+        return this.risksService.getFindings(id, await this.gate(user, id));
     }
 
     @Get(':id/actions')
-    async getActions(@Param('id') id: string) {
-        return this.risksService.getActions(id);
+    async getActions(@Param('id') id: string, @CurrentUser() user: AccessActor) {
+        return this.risksService.getActions(id, await this.gate(user, id));
     }
 
     @Delete(':id')

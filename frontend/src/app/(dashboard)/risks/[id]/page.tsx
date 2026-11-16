@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
+import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import {
     EmptyState, LoadingState, DetailShell, DetailHeader, DetailSection,
     Tabs, StatusBadge, Button,
@@ -128,6 +129,7 @@ export default function RiskDetailPage() {
     const [findings, setFindings] = useState<Finding[]>([]);
     const [actions, setActions] = useState<Action[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<LoadError | null>(null);
 
     useEffect(() => {
         const fetchRiskData = async () => {
@@ -297,7 +299,7 @@ export default function RiskDetailPage() {
                     }
                 }
             } catch (err) {
-                console.error('Failed to fetch risk:', err);
+                setLoadError(classifyLoadError(err, 'Risk'));
             } finally {
                 setLoading(false);
             }
@@ -328,10 +330,10 @@ export default function RiskDetailPage() {
         return (
             <DetailShell>
                 <EmptyState
-                    title="Risk bulunamadı"
-                    description="Aradığınız risk kaydı mevcut değil veya erişim yetkiniz yok."
-                    actionLabel="Risk Envanterine Dön"
-                    onAction={() => router.push('/risks')}
+                    title={(loadError ?? classifyLoadError(null, 'Risk')).title}
+                    description={(loadError ?? classifyLoadError(null, 'Risk')).description}
+                    actionLabel={loadError?.retryable ? 'Sayfayı Yenile' : 'Risk Envanterine Dön'}
+                    onAction={() => (loadError?.retryable ? window.location.reload() : router.push('/risks'))}
                 />
             </DetailShell>
         );

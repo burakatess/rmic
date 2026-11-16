@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import api from '@/lib/api';
+import { ErrorState } from '@/components/ui';
+import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import { useToast } from '@/components/ui/Toast';
 
 interface RiskCategory { id: string; name: string; }
@@ -15,6 +17,7 @@ export default function RiskEditPage() {
     const { success, error: showError } = useToast();
 
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<LoadError | null>(null);
     const [saving, setSaving] = useState(false);
     const [riskCode, setRiskCode] = useState('');
     const [categories, setCategories] = useState<RiskCategory[]>([]);
@@ -32,10 +35,12 @@ export default function RiskEditPage() {
 
     useEffect(() => {
         const id = params.id as string;
+        // Ana kayıt yardımcı listelerden bağımsız: kategori/kullanıcı listesi alınamazsa form
+        // kaybolmaz, yalnız uyarı verilir (seçili değerler korunur).
         Promise.all([
             api.getRisk(id),
-            api.getRiskCategories(),
-            api.getUsers(),
+            api.getRiskCategories().catch(() => { showError('Uyarı', 'Kategori listesi yüklenemedi.'); return []; }),
+            api.getUserChoices().catch(() => { showError('Uyarı', 'Kullanıcı listesi yüklenemedi.'); return []; }),
         ]).then(([risk, cats, userList]: any[]) => {
             setRiskCode(risk.riskId);
             setFormData({
@@ -49,8 +54,10 @@ export default function RiskEditPage() {
             });
             setCategories(Array.isArray(cats) ? cats : (cats as any)?.data || []);
             setUsers(Array.isArray(userList) ? userList : (userList as any)?.data || []);
-        }).catch((err: any) => {
-            showError('Hata', err.message || 'Risk yüklenemedi.');
+        }).catch((err: unknown) => {
+            const le = classifyLoadError(err, 'Risk');
+            setLoadError(le);
+            showError(le.title, le.description);
         }).finally(() => setLoading(false));
     }, [params.id, showError]);
 
@@ -93,6 +100,12 @@ export default function RiskEditPage() {
                 <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
             </div>
         );
+    }
+
+    // Risk yüklenemediyse varsayılan değerlerle dolu form GÖSTERİLMEZ — kaydetmek kaydı ezerdi.
+    if (loadError) {
+        return <ErrorState title={loadError.title} description={loadError.description}
+            onRetry={loadError.retryable ? () => window.location.reload() : undefined} />;
     }
 
     return (
