@@ -89,6 +89,7 @@ async function main() {
     await prisma.user.deleteMany({});
     await prisma.role.deleteMany({});
     await prisma.directorate.deleteMany({});
+    await prisma.gmy.deleteMany({});
     await prisma.systemOption.deleteMany({});
     await prisma.parameter.deleteMany({});
     await prisma.auditExecution.deleteMany({});
@@ -107,12 +108,18 @@ async function main() {
     console.log('✅ 6 rol');
 
     // ── 3. Direktörlükler ────────────────────────────────────────────────────
+    // GMY'ler (Genel Müdür Yardımcılıkları) — riskte "İlgili GMY" bu listeden seçilir.
+    const [gmyBT, gmyOps, gmyIs] = await Promise.all([
+        prisma.gmy.create({ data: { name: 'Bilgi Teknolojileri GMY', code: 'GMY-1' } }),
+        prisma.gmy.create({ data: { name: 'Operasyon GMY',           code: 'GMY-2' } }),
+        prisma.gmy.create({ data: { name: 'İş Süreçleri GMY',        code: 'GMY-3' } }),
+    ]);
     const [dirBTAg, dirBG, dirUG, dirAO, dirISY] = await Promise.all([
-        prisma.directorate.create({ data: { name: 'BT Ağ Yönetimi',       code: 'BT-AG', gmy: 'GMY-1' } }),
-        prisma.directorate.create({ data: { name: 'Bilgi Güvenliği',       code: 'BG',    gmy: 'GMY-1' } }),
-        prisma.directorate.create({ data: { name: 'Uygulama Geliştirme',   code: 'UG',    gmy: 'GMY-2' } }),
-        prisma.directorate.create({ data: { name: 'Altyapı Operasyonları', code: 'AO',    gmy: 'GMY-2' } }),
-        prisma.directorate.create({ data: { name: 'İş Süreçleri Yönetimi', code: 'ISY',   gmy: 'GMY-3' } }),
+        prisma.directorate.create({ data: { name: 'BT Ağ Yönetimi',       code: 'BT-AG', gmy: gmyBT.name,  gmyId: gmyBT.id } }),
+        prisma.directorate.create({ data: { name: 'Bilgi Güvenliği',       code: 'BG',    gmy: gmyBT.name,  gmyId: gmyBT.id } }),
+        prisma.directorate.create({ data: { name: 'Uygulama Geliştirme',   code: 'UG',    gmy: gmyOps.name, gmyId: gmyOps.id } }),
+        prisma.directorate.create({ data: { name: 'Altyapı Operasyonları', code: 'AO',    gmy: gmyOps.name, gmyId: gmyOps.id } }),
+        prisma.directorate.create({ data: { name: 'İş Süreçleri Yönetimi', code: 'ISY',   gmy: gmyIs.name,  gmyId: gmyIs.id } }),
     ]);
     const directorates = [dirBTAg, dirBG, dirUG, dirAO, dirISY];
     console.log('✅ 5 direktörlük');
@@ -133,6 +140,8 @@ async function main() {
     ]);
     const auditors = [uAud1, uAud2, uAud3];
     const managers = [uMgr1, uMgr2];
+    await prisma.gmy.update({ where: { id: gmyBT.id }, data: { responsibleUserId: uMgr1.id } });
+    await prisma.gmy.update({ where: { id: gmyOps.id }, data: { responsibleUserId: uMgr2.id } });
     console.log('✅ 10 kullanıcı');
 
     // ── 5. Riskler ───────────────────────────────────────────────────────────
@@ -157,9 +166,13 @@ async function main() {
     ];
     const risks: any[] = [];
     for (const r of riskDefs) {
+        const gmy = randOf([gmyBT, gmyOps, gmyIs]);
+        const sorumlu = randOf([uAna1, uAna2]);
         risks.push(await prisma.risk.create({ data: {
             riskId: r.id, name: r.name, description: `${r.name} — kapsamlı risk açıklaması`,
             status: 'ASSESSED', ownerId: randOf([uAna1, uAna2, uMgr1]).id, categoryId: r.cat,
+            gmyId: gmy.id, ilgiliGmy: gmy.name,
+            riskSorumlusuId: sorumlu.id, riskSorumlusu: `${sorumlu.firstName} ${sorumlu.lastName}`,
             inherentProbability: r.p, inherentImpact: r.i, inherentRiskScore: r.p * r.i,
             residualProbability: r.rp, residualImpact: r.ri, residualRiskScore: r.rp * r.ri,
         }}));

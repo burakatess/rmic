@@ -1,11 +1,13 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
 import { getLastBusinessDay, getFridaysInYear, TURKISH_MONTH_INDEX } from './control-period.util';
 import { generateControlCode } from './control-code.util';
 import { nextTestCode } from './test-code.util';
 import { projectControlStatus } from '../../common/workflow/workflow-projection';
 import { personFieldWhere } from '../../common/util/person-filter';
-import { CompleteControlTestDto } from './dto';
+import { CompleteControlTestDto, CreateControlTestDto } from './dto';
+import { parsePaging, safeOrderBy } from '../../common/util/list-query';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class ControlsService {
@@ -22,12 +24,12 @@ export class ControlsService {
     }
 
     // ─── Controls CRUD ────────────────────────────────────────────────────────
+    // Kontrol Havuzu kurum geneli açıktır; ancak ilişkili test/bulgu/risk kayıtları
+    // (sayıları dahil) kendi kapsam politikalarından geçer → RelatedScopes.
 
-    async findAll(query: any) {
+    async findAll(query: any, sc: RelatedScopes = {}) {
         const { search, type, nature, ownerId, status, directorateId, sortBy, sortOrder, year } = query;
-        const page = parseInt(query.page, 10) || 1;
-        const limit = parseInt(query.limit, 10) || 20;
-        const skip = (page - 1) * limit;
+        const { page, limit, skip } = parsePaging(query, 20);
 
         const where: any = {};
         if (search) {
@@ -61,13 +63,19 @@ export class ControlsService {
                 include: {
                     owner: { select: { id: true, firstName: true, lastName: true, email: true, department: true } },
                     directorateRel: { select: { id: true, name: true, code: true } },
-                    risks: { include: { risk: { select: { id: true, riskId: true, name: true } } } },
+                    risks: { where: sc.risk ? { risk: sc.risk } : undefined, include: { risk: { select: { id: true, riskId: true, name: true } } } },
                     yearScopes: { where: { status: 'ACTIVE' }, select: { year: true }, orderBy: { year: 'asc' } },
-                    _count: { select: { risks: true, tests: true, findings: true } },
+                    _count: {
+                        select: {
+                            risks: sc.risk ? { where: { risk: sc.risk } } : true,
+                            tests: sc.test ? { where: sc.test } : true,
+                            findings: sc.finding ? { where: sc.finding } : true,
+                        },
+                    },
                 },
                 skip,
                 take: limit,
-                orderBy: { [sortBy || 'createdAt']: sortOrder || 'desc' },
+                orderBy: safeOrderBy(sortBy, sortOrder, Prisma.ControlScalarFieldEnum, 'createdAt', 'desc'),
             }),
             this.prisma.control.count({ where }),
         ]);
@@ -81,7 +89,7 @@ export class ControlsService {
         return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
     }
 
-    async findOne(id: string) {
+    async findOne(id: string, sc: RelatedScopes = {}) {
         const control = await this.prisma.control.findUnique({
             where: { id },
             include: {
@@ -89,7 +97,7 @@ export class ControlsService {
                 testPerformer: { select: { id: true, firstName: true, lastName: true, email: true } },
                 reviewer: { select: { id: true, firstName: true, lastName: true, email: true } },
                 directorateRel: { select: { id: true, name: true, code: true, gmy: true } },
-                risks: { include: { risk: true } },
+                risks: { where: sc.risk ? { risk: sc.risk } : undefined, include: { risk: true } },
                 yearScopes: {
                     orderBy: { year: 'asc' },
                     include: {
@@ -99,16 +107,18 @@ export class ControlsService {
                     },
                 },
                 tests: {
+                    where: sc.test ?? undefined,
                     orderBy: { plannedDate: 'asc' },
                     include: {
-                        findings: { select: { id: true, findingId: true, severity: true, resolutionStatus: true } },
+                        findings: { where: sc.finding ?? undefined, select: { id: true, findingId: true, severity: true, resolutionStatus: true } },
                     },
                 },
                 findings: {
+                    where: sc.finding ?? undefined,
                     orderBy: { createdAt: 'desc' },
                     take: 10,
                     include: {
-                        actions: { include: { owner: { select: { firstName: true, lastName: true } } } },
+                        actions: { where: sc.action ?? undefined, include: { owner: { select: { firstName: true, lastName: true } } } },
                     },
                 },
                 regulations: { include: { article: { include: { regulation: true } } } },
@@ -301,7 +311,7 @@ export class ControlsService {
     // Yerine: passivate() (ACTIVE→PASSIVE) kullanılır — geçmiş yıl kapsamları,
     // taskları ve değerlendirmeleri etkilenmez.
 
-    async getRelations(id: string) {
+    async getRelations(id: string, sc: RelatedScopes = {}) {
         const control = await this.prisma.control.findUnique({
             where: { id },
             include: { owner: { select: { id: true, firstName: true, lastName: true } } },
@@ -309,17 +319,19 @@ export class ControlsService {
         if (!control) throw new NotFoundException(`Control ${id} not found`);
 
         const riskMappings = await this.prisma.controlRiskMapping.findMany({
-            where: { controlId: id },
+            where: sc.risk ? { controlId: id, risk: sc.risk } : { controlId: id },
             include: { risk: { select: { id: true, riskId: true, name: true, status: true, residualRiskScore: true } } },
         });
 
         const findings = await this.prisma.finding.findMany({
-            where: { controlId: id },
+            where: sc.finding ? { AND: [{ controlId: id }, sc.finding] } : { controlId: id },
             select: { id: true, findingId: true, description: true, status: true, severity: true },
         });
 
         const actions = await this.prisma.action.findMany({
-            where: { findingId: { in: findings.map(f => f.id) } },
+            where: sc.action
+                ? { AND: [{ findingId: { in: findings.map(f => f.id) } }, sc.action] }
+                : { findingId: { in: findings.map(f => f.id) } },
             select: { id: true, actionId: true, description: true, status: true, dueDate: true },
         });
 
@@ -333,14 +345,12 @@ export class ControlsService {
 
     // ─── ControlTest CRUD ─────────────────────────────────────────────────────
 
-    async getAllTests(query: any, currentUserId?: string) {
+    async getAllTests(query: any, currentUserId?: string, testScope?: Prisma.ControlTestWhereInput | null) {
         const {
             status, controlId, directorateId, assigneeId, assigneeIds, secondControllerIds, findingStatus, sortBy, sortOrder,
             year, month, period, frequency, overdue, includeOutOfScope, search,
         } = query;
-        const page = parseInt(query.page, 10) || 1;
-        const limit = parseInt(query.limit, 10) || 50;
-        const skip = (page - 1) * limit;
+        const { page, limit, skip } = parsePaging(query, 50);
 
         const where: any = {};
         if (status) where.status = status;
@@ -378,6 +388,7 @@ export class ControlsService {
             where.status = { in: ['BEKLIYOR', 'DEVAM_EDIYOR', 'GERI_GONDERILDI'] };
             where.plannedDate = { lt: new Date() };
         }
+        if (testScope) where.AND = [...(where.AND || []), testScope];
 
         const [tests, total] = await Promise.all([
             this.prisma.controlTest.findMany({
@@ -390,7 +401,7 @@ export class ControlsService {
                 },
                 skip,
                 take: limit,
-                orderBy: { [sortBy || 'plannedDate']: sortOrder || 'asc' },
+                orderBy: safeOrderBy(sortBy, sortOrder, Prisma.ControlTestScalarFieldEnum, 'plannedDate', 'asc'),
             }),
             this.prisma.controlTest.count({ where }),
         ]);
@@ -398,11 +409,11 @@ export class ControlsService {
         return { data: tests, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
     }
 
-    async getTests(controlId: string) {
+    async getTests(controlId: string, sc: RelatedScopes = {}) {
         return this.prisma.controlTest.findMany({
-            where: { controlId },
+            where: sc.test ? { AND: [{ controlId }, sc.test] } : { controlId },
             include: {
-                findings: { select: { id: true, findingId: true, severity: true, resolutionStatus: true } },
+                findings: { where: sc.finding ?? undefined, select: { id: true, findingId: true, severity: true, resolutionStatus: true } },
                 directorate: { select: { id: true, name: true } },
                 attachments: true,
             },
@@ -411,7 +422,7 @@ export class ControlsService {
     }
 
     /** Kontrol Testi çalışma sayfası için tekil, tam detaylı test kaydı (Bölüm A + B). */
-    async getTestById(testId: string) {
+    async getTestById(testId: string, sc: RelatedScopes = {}) {
         const test = await this.prisma.controlTest.findUnique({
             where: { id: testId },
             include: {
@@ -419,13 +430,13 @@ export class ControlsService {
                     include: {
                         owner: { select: { id: true, firstName: true, lastName: true, email: true } },
                         directorateRel: { select: { id: true, name: true, code: true, gmy: true } },
-                        risks: { include: { risk: { select: { id: true, riskId: true, name: true, category: { select: { name: true } } } } } },
+                        risks: { where: sc.risk ? { risk: sc.risk } : undefined, include: { risk: { select: { id: true, riskId: true, name: true, category: { select: { name: true } } } } } },
                         regulations: { include: { article: { select: { id: true, articleCode: true, title: true, regulation: { select: { id: true, code: true, name: true } } } } } },
                         sourceMappings: { include: { version: { select: { id: true, versionLabel: true, source: { select: { id: true, title: true } } } } } },
                     },
                 },
                 directorate: { select: { id: true, name: true, code: true } },
-                findings: { select: { id: true, findingId: true, severity: true, resolutionStatus: true, summary: true, status: true } },
+                findings: { where: sc.finding ?? undefined, select: { id: true, findingId: true, severity: true, resolutionStatus: true, summary: true, status: true } },
                 referencedFinding: { select: { id: true, findingId: true, status: true, summary: true } },
                 attachments: { orderBy: { createdAt: 'desc' } },
                 // Dönem Kontrolü çapraz bağlantısı için (madde 16) — "Dönem Kontrolü: 2027.BTK.0042".
@@ -455,6 +466,16 @@ export class ControlsService {
     }
 
     /**
+     * Maker/checker: testin ikinci kontrolcüsü testi yürütemez (başlatma, taslak, tamamlama).
+     * Onaylayıcı maker içeriğini değiştirirse onay bağımsızlığını yitirir.
+     */
+    private assertNotChecker(test: { secondControllerId: string | null }, userId: string) {
+        if (test.secondControllerId && test.secondControllerId === userId) {
+            throw new ForbiddenException('Bu testin ikinci kontrolcüsü testi yürütemez veya içeriğini değiştiremez.');
+        }
+    }
+
+    /**
      * Taslak kaydetme (durum değiştirmez) — iyimser eşzamanlılık kontrolü ile.
      * dto.contentVersion sunucudaki güncel değerle eşleşmezse ConflictException (409):
      * çağıran taraf sessizce üzerine yazmak yerine kullanıcıya açıkça sormalı.
@@ -462,9 +483,11 @@ export class ControlsService {
     async saveDraft(testId: string, dto: any, userId: string) {
         const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
         if (!test) throw new NotFoundException(`Test ${testId} bulunamadı`);
-        if (['ONAYLANDI', 'IPTAL', 'KAPSAM_DISI'].includes(test.status)) {
-            throw new BadRequestException(`Bu statüdeki (${test.status}) bir testte taslak kaydedilemez.`);
+        // Onay bekleyen (TAMAMLANDI) testin içeriği dondurulur: değişiklik yalnız geri gönderimle.
+        if (!['BEKLIYOR', 'DEVAM_EDIYOR', 'GERI_GONDERILDI'].includes(test.status)) {
+            throw new ConflictException(`Bu statüdeki (${test.status}) bir testte taslak kaydedilemez.`);
         }
+        this.assertNotChecker(test, userId);
         if (typeof dto.contentVersion !== 'number' || dto.contentVersion !== test.contentVersion) {
             throw new ConflictException({
                 message: 'Bu test başka bir oturumda güncellendi. Sayfayı yenileyip devam edin.',
@@ -487,9 +510,22 @@ export class ControlsService {
         return updated;
     }
 
-    async createTest(controlId: string, data: any, userId: string) {
+    async createTest(controlId: string, data: CreateControlTestDto, userId: string) {
         const control = await this.prisma.control.findUnique({ where: { id: controlId }, select: { type: true, controlId: true } });
-        if (!control) throw new NotFoundException(`Control ${controlId} not found`);
+        if (!control) throw new NotFoundException('Kontrol bulunamadı');
+        // Görev ayrılığı: testi yapan ile ikinci kontrolcü aynı kişi olamaz.
+        if (data.assigneeId && data.secondControllerId && data.assigneeId === data.secondControllerId) {
+            throw new BadRequestException('Test sorumlusu ile ikinci kontrolcü aynı kişi olamaz.');
+        }
+        for (const [field, id] of [['test sorumlusu', data.assigneeId], ['ikinci kontrolcü', data.secondControllerId]] as const) {
+            if (!id) continue;
+            const user = await this.prisma.user.findUnique({ where: { id }, select: { isActive: true } });
+            if (!user || !user.isActive) throw new BadRequestException(`Geçersiz ${field}: kullanıcı bulunamadı veya pasif`);
+        }
+        if (data.directorateId) {
+            const dir = await this.prisma.directorate.findUnique({ where: { id: data.directorateId }, select: { id: true } });
+            if (!dir) throw new BadRequestException('Geçersiz birim: seçilen birim bulunamadı');
+        }
         const plannedDate = data.plannedDate ? new Date(data.plannedDate) : new Date();
         // AD_HOC/manuel testler de aynı (kontrol,yıl) sayacından çeker — madde 13:
         // "plansız testler de bu kodu kullanacaksa aynı benzersiz sayaçtan yararlansın".
@@ -588,20 +624,20 @@ export class ControlsService {
         const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
         if (!test) throw new NotFoundException(`Test ${testId} not found`);
         if (test.status !== 'BEKLIYOR') throw new BadRequestException('Test başlatmak için BEKLIYOR statüsünde olmalı.');
+        this.assertNotChecker(test, userId);
 
-        const updated = await this.prisma.controlTest.update({
-            where: { id: testId },
-            data: { status: 'DEVAM_EDIYOR' },
+        // Durum koşulu UPDATE içinde + denetim kaydı aynı transaction'da (atomik, yarışa dayanıklı).
+        return this.prisma.$transaction(async (tx) => {
+            const res = await tx.controlTest.updateMany({ where: { id: testId, status: 'BEKLIYOR' }, data: { status: 'DEVAM_EDIYOR' } });
+            if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti; başlatılmadı.');
+            await tx.auditLog.create({
+                data: { userId, action: 'START_TEST', entityType: 'ControlTest', entityId: testId },
+            });
+            return tx.controlTest.findUniqueOrThrow({ where: { id: testId } });
         });
-
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'START_TEST', entityType: 'ControlTest', entityId: testId },
-        });
-
-        return updated;
     }
 
-    async getOpenFindingReferences(testId: string) {
+    async getOpenFindingReferences(testId: string, findingScope?: Prisma.FindingWhereInput | null) {
         const test = await this.prisma.controlTest.findUnique({ where: { id: testId }, select: { id: true, controlId: true, plannedDate: true } });
         if (!test) throw new NotFoundException(`Test ${testId} bulunamadı`);
         const findings = await this.prisma.finding.findMany({
@@ -609,6 +645,7 @@ export class ControlsService {
                 AND: [
                     { OR: [{ controlId: test.controlId }, { controlTest: { controlId: test.controlId } }] },
                     { status: { not: 'CLOSED' }, workflowStatus: { not: 'IPTAL' }, resolutionStatus: { not: 'KAPATILDI' } },
+                    ...(findingScope ? [findingScope] : []),
                 ],
             },
             select: {
@@ -634,6 +671,7 @@ export class ControlsService {
         if (!['DEVAM_EDIYOR', 'GERI_GONDERILDI'].includes(test.status)) {
             throw new BadRequestException(`Test tamamlanmak için DEVAM_EDIYOR veya GERI_GONDERILDI statüsünde olmalı. Mevcut: ${test.status}`);
         }
+        this.assertNotChecker(test, userId);
 
         // ── Madde 6: Açık bulguya referans ile ilerletme ────────────────────────
         if (data.referencedFindingId) {
@@ -652,23 +690,24 @@ export class ControlsService {
                 throw new BadRequestException('Kapalı, sonuçlandırılmış veya iptal edilmiş bir bulguya referans verilemez.');
             }
 
-            const updated = await this.prisma.controlTest.update({
-                where: { id: testId },
-                data: {
-                    status: 'TAMAMLANDI',
-                    completedAt: new Date(),
-                    findingStatus: 'BULGUSU_VAR',
-                    referencedFindingId: ref.id,
-                    referenceReason: data.referenceReason!.trim(),
-                    resultText: data.resultText || `Devam eden açık bulgu (${ref.findingId}) referans alınarak ilerletildi.`,
-                },
+            return this.prisma.$transaction(async (tx) => {
+                const res = await tx.controlTest.updateMany({
+                    where: { id: testId, status: { in: ['DEVAM_EDIYOR', 'GERI_GONDERILDI'] } },
+                    data: {
+                        status: 'TAMAMLANDI',
+                        completedAt: new Date(),
+                        findingStatus: 'BULGUSU_VAR',
+                        referencedFindingId: ref.id,
+                        referenceReason: data.referenceReason!.trim(),
+                        resultText: data.resultText || `Devam eden açık bulgu (${ref.findingId}) referans alınarak ilerletildi.`,
+                    },
+                });
+                if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti; tamamlanmadı.');
+                await tx.auditLog.create({
+                    data: { userId, action: 'REFERENCE_FINDING', entityType: 'ControlTest', entityId: testId, newValue: { referencedFindingId: ref.id, findingId: ref.findingId, referenceReason: data.referenceReason!.trim() } },
+                });
+                return tx.controlTest.findUniqueOrThrow({ where: { id: testId } });
             });
-
-            await this.prisma.auditLog.create({
-                data: { userId, action: 'REFERENCE_FINDING', entityType: 'ControlTest', entityId: testId, newValue: { referencedFindingId: ref.id, findingId: ref.findingId, referenceReason: data.referenceReason!.trim() } },
-            });
-
-            return updated;
         }
 
         // İş kuralı: BULGUSU_VAR seçildiyse en az 1 bulgu kaydı olmalı
@@ -686,23 +725,25 @@ export class ControlsService {
 
         // Test tamamlandığında BULGUSU_VAR/YOK farketmeksizin doğrudan final onaylı
         // sayılmaz — TAMAMLANDI = 2. kontrolcü onayına gönderildi.
-        const updated = await this.prisma.controlTest.update({
-            where: { id: testId },
-            data: {
-                status: 'TAMAMLANDI',
-                completedAt: new Date(),
-                findingStatus: data.findingStatus || 'BULGUSU_YOK',
-                resultText: data.resultText || null,
-                evidenceSummary: data.evidenceSummary || null,
-                evidenceUrls: data.evidenceUrls || [],
-            },
+        return this.prisma.$transaction(async (tx) => {
+            const res = await tx.controlTest.updateMany({
+                where: { id: testId, status: { in: ['DEVAM_EDIYOR', 'GERI_GONDERILDI'] } },
+                data: {
+                    status: 'TAMAMLANDI',
+                    completedAt: new Date(),
+                    findingStatus: data.findingStatus || 'BULGUSU_YOK',
+                    resultText: data.resultText || null,
+                    evidenceSummary: data.evidenceSummary || null,
+                    evidenceUrls: data.evidenceUrls || [],
+                },
+            });
+            if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti; tamamlanmadı.');
+            const updated = await tx.controlTest.findUniqueOrThrow({ where: { id: testId } });
+            await tx.auditLog.create({
+                data: { userId, action: 'COMPLETE_TEST', entityType: 'ControlTest', entityId: testId, newValue: updated },
+            });
+            return updated;
         });
-
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'COMPLETE_TEST', entityType: 'ControlTest', entityId: testId, newValue: updated },
-        });
-
-        return updated;
     }
 
     async approveTest(testId: string, userId: string) {
@@ -724,18 +765,18 @@ export class ControlsService {
             throw new BadRequestException('Bu test size atanmış bir onay değil.');
         }
 
-        const updated = await this.prisma.controlTest.update({
-            where: { id: testId },
-            data: { status: 'ONAYLANDI', approvedAt: new Date(), approvedById: userId },
+        return this.prisma.$transaction(async (tx) => {
+            const res = await tx.controlTest.updateMany({
+                where: { id: testId, status: 'TAMAMLANDI' },
+                data: { status: 'ONAYLANDI', approvedAt: new Date(), approvedById: userId },
+            });
+            if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti; onaylanmadı.');
+            await this.recalculateControlTestSummary(test.controlId, tx);
+            await tx.auditLog.create({
+                data: { userId, action: 'APPROVE_TEST', entityType: 'ControlTest', entityId: testId },
+            });
+            return tx.controlTest.findUniqueOrThrow({ where: { id: testId } });
         });
-
-        await this.recalculateControlTestSummary(test.controlId);
-
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'APPROVE_TEST', entityType: 'ControlTest', entityId: testId },
-        });
-
-        return updated;
     }
 
     async returnTest(testId: string, reason: string, userId: string) {
@@ -752,21 +793,17 @@ export class ControlsService {
             throw new BadRequestException('Bu test size atanmış bir onay değil.');
         }
 
-        const updated = await this.prisma.controlTest.update({
-            where: { id: testId },
-            data: {
-                status: 'GERI_GONDERILDI',
-                rejectionReason: reason,
-                returnedById: userId,
-                returnedAt: new Date(),
-            },
+        return this.prisma.$transaction(async (tx) => {
+            const res = await tx.controlTest.updateMany({
+                where: { id: testId, status: 'TAMAMLANDI' },
+                data: { status: 'GERI_GONDERILDI', rejectionReason: reason, returnedById: userId, returnedAt: new Date() },
+            });
+            if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti; geri gönderilmedi.');
+            await tx.auditLog.create({
+                data: { userId, action: 'RETURN_TEST', entityType: 'ControlTest', entityId: testId, newValue: { reason } },
+            });
+            return tx.controlTest.findUniqueOrThrow({ where: { id: testId } });
         });
-
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'RETURN_TEST', entityType: 'ControlTest', entityId: testId, newValue: { reason } },
-        });
-
-        return updated;
     }
 
     /** Final (ONAYLANDI) bir testi iptal eder — yalnızca SYSTEM_ADMIN çağırabilir (RBAC controller'da). */
@@ -777,29 +814,24 @@ export class ControlsService {
             throw new BadRequestException('Yalnızca final onaylanmış (ONAYLANDI) testler iptal edilebilir.');
         }
 
-        const updated = await this.prisma.controlTest.update({
-            where: { id: testId },
-            data: {
-                status: 'IPTAL',
-                cancelledAt: new Date(),
-                cancelledById: userId,
-                cancelReason: reason || null,
-            },
+        return this.prisma.$transaction(async (tx) => {
+            const res = await tx.controlTest.updateMany({
+                where: { id: testId, status: 'ONAYLANDI' },
+                data: { status: 'IPTAL', cancelledAt: new Date(), cancelledById: userId, cancelReason: reason || null },
+            });
+            if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti; iptal edilmedi.');
+            await this.recalculateControlTestSummary(test.controlId, tx);
+            await tx.auditLog.create({
+                data: { userId, action: 'CANCEL_FINAL_APPROVAL', entityType: 'ControlTest', entityId: testId, newValue: { reason } },
+            });
+            return tx.controlTest.findUniqueOrThrow({ where: { id: testId } });
         });
-
-        await this.recalculateControlTestSummary(test.controlId);
-
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'CANCEL_FINAL_APPROVAL', entityType: 'ControlTest', entityId: testId, newValue: { reason } },
-        });
-
-        return updated;
     }
 
     /** Kontrol özeti, onaylama sırasına değil tamamlanma tarihine göre en yeni
      * onaylı teste dayanır. Final onay iptalinde bir önceki onaylı teste döner. */
-    private async recalculateControlTestSummary(controlId: string) {
-        const latestApproved = await this.prisma.controlTest.findFirst({
+    private async recalculateControlTestSummary(controlId: string, db: Prisma.TransactionClient | PrismaService = this.prisma) {
+        const latestApproved = await db.controlTest.findFirst({
             where: { controlId, status: 'ONAYLANDI' },
             orderBy: [{ completedAt: 'desc' }, { approvedAt: 'desc' }],
             select: { findingStatus: true, completedAt: true, approvedAt: true },
@@ -811,7 +843,7 @@ export class ControlsService {
         const effectiveness = latestApproved?.findingStatus
             ? (effectivenessMap[latestApproved.findingStatus] || 'NOT_TESTED')
             : 'NOT_TESTED';
-        await this.prisma.control.update({
+        await db.control.update({
             where: { id: controlId },
             data: {
                 lastTestDate: latestApproved?.completedAt || latestApproved?.approvedAt || null,
@@ -885,4 +917,11 @@ export class ControlsService {
     // idempotent olmayan) kaldırıldı. Task üretimi artık ControlScopeService'te
     // yıllık kapsam bazlı, eşzamanlılığa dayanıklı motor ile yapılıyor
     // (bkz. control-scope.service.ts, control-period.util.ts).
+}
+
+export interface RelatedScopes {
+    test?: Prisma.ControlTestWhereInput | null;
+    finding?: Prisma.FindingWhereInput | null;
+    action?: Prisma.ActionWhereInput | null;
+    risk?: Prisma.RiskWhereInput | null;
 }

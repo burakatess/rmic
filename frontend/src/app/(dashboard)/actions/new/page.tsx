@@ -46,7 +46,7 @@ export default function NewActionPage() {
             try {
                 const [findingsRes, usersRes] = await Promise.all([
                     api.getFindings({}) as Promise<any>,
-                    api.getUsers() as Promise<any>,
+                    api.getUserChoices() as Promise<any>,
                 ]);
                 const fList = Array.isArray(findingsRes) ? findingsRes : (findingsRes.data || []);
                 const uList = Array.isArray(usersRes) ? usersRes : (usersRes.data || usersRes.users || []);

@@ -8,7 +8,7 @@ import {
     DetailShell, DetailHeader, DetailSection, StatusBadge, Button,
     LoadingState, EmptyState, ConfirmDialog,
 } from '@/components/ui';
-import { PermissionGate, useAuth } from '@/components/auth/AuthProvider';
+import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import { useToast } from '@/components/ui/Toast';
 import ActionEditModal from '@/components/actions/ActionEditModal';
 
@@ -36,10 +36,10 @@ function fmt(d?: string | null) {
 export default function ActionDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
     const router = useRouter();
-    const { user } = useAuth();
     const { success, error: showError } = useToast();
     const [action, setAction] = useState<any | null>(null);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<LoadError | null>(null);
     const [editOpen, setEditOpen] = useState(false);
     const [completeOpen, setCompleteOpen] = useState(false);
     const [completing, setCompleting] = useState(false);
@@ -49,8 +49,12 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
         try {
             const data = await api.getAction(id);
             setAction(data);
-        } catch {
-            setAction(null);
+            setLoadError(null);
+        } catch (e) {
+            // İşlem sonrası yeniden yüklemede hata: mevcut kayıt korunur, yalnız bildirilir.
+            const le = classifyLoadError(e, 'Aksiyon');
+            setLoadError(le);
+            showError(le.title, le.description);
         } finally {
             setLoading(false);
         }
@@ -67,13 +71,14 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
     }
 
     if (!action) {
+        const le = loadError ?? classifyLoadError(null, 'Aksiyon');
         return (
             <DetailShell>
                 <EmptyState
-                    title="Aksiyon bulunamadı"
-                    description="Aradığınız aksiyon kaydı mevcut değil veya erişim yetkiniz yok."
-                    actionLabel="Aksiyon Listesine Dön"
-                    onAction={() => router.push('/actions')}
+                    title={le.title}
+                    description={le.description}
+                    actionLabel={le.retryable ? 'Tekrar Dene' : 'Aksiyon Listesine Dön'}
+                    onAction={() => (le.retryable ? load() : router.push('/actions'))}
                 />
             </DetailShell>
         );
@@ -82,9 +87,9 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
     const statusCfg = statusLabels[action.status] ?? { label: action.status, variant: 'neutral' as const };
     const overdue = action.dueDate && new Date(action.dueDate) < new Date()
         && !['TAMAMLANDI', 'KAPATILDI', 'COMPLETED', 'CLOSED'].includes(action.status);
-    const role = user?.role?.name;
-    const canComplete = !['TAMAMLANDI', 'KAPATILDI', 'COMPLETED', 'CLOSED'].includes(action.status)
-        && (role === 'SYSTEM_ADMIN' || role === 'AUDITOR' || (role === 'AUDITEE' && action.owner?.id === user?.id));
+    // Yetenekler backend'den (finding-capabilities.ts): rol + kapsam + sahiplik + durum.
+    const caps: { canEdit?: boolean; canComplete?: boolean } = action.capabilities ?? {};
+    const canComplete = !!caps.canComplete;
 
     const handleComplete = async () => {
         setCompleting(true);
@@ -125,13 +130,13 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
                 actions={
                     <div className="flex items-center gap-2">
                         {canComplete && <Button variant="success" size="sm" onClick={() => setCompleteOpen(true)}>Aksiyonu Tamamla</Button>}
-                        <PermissionGate permission="action:update">
+                        {caps.canEdit && action.finding?.id && (
                             <Button variant="primary" size="sm" onClick={() => setEditOpen(true)}
                                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>}
                             >
                                 Düzenle
                             </Button>
-                        </PermissionGate>
+                        )}
                     </div>
                 }
             />

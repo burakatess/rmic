@@ -5,6 +5,7 @@ import { ReportsService } from './reports.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { CurrentUser, Roles, RequirePermissions } from '../../common/decorators';
 import { matchesPermission } from '../../common/util/permission-match';
+import { AccessScopeService, findingFullWhere, followUpWhere } from '../../common/services/access-scope.service';
 import { ReportPeriodQueryDto, RiskTrendsQueryDto } from './dto/report-query.dto';
 
 // Raporlara erişebilen roller — anonim/oturumsuz erişim JwtAuthGuard ile zaten
@@ -19,7 +20,7 @@ const REPORT_ROLES = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR', 'IKS_MA
 @Roles(...REPORT_ROLES)
 @RequirePermissions('report:view')
 export class ReportsController {
-    constructor(private reportsService: ReportsService) { }
+    constructor(private reportsService: ReportsService, private scope: AccessScopeService) { }
 
     // Kurum geneli yönetim raporları — ek olarak report:org izni ister.
     @Get('dashboard')
@@ -95,11 +96,25 @@ export class ReportsController {
         @Query() q: ReportPeriodQueryDto,
     ) {
         const canOrgWide = matchesPermission(perms || [], 'report:org');
-        return this.reportsService.getBulgeTakipReport({
+        const ctx = await this.scope.context({ id: userId, permissions: perms });
+        const base = {
             year: q.year,
             month: q.month,
             startDate: q.startDate ? new Date(q.startDate) : undefined,
             endDate: q.endDate ? new Date(q.endDate) : undefined,
+        };
+        if (ctx.enforced && !canOrgWide) {
+            // Kurum geneli rapor izni yoksa: merkezi kayıt kapsamı (birim + doğrudan atama).
+            // directorateId filtresi kapsamın İÇİNDE daraltır, genişletemez.
+            return this.reportsService.getBulgeTakipReport({
+                ...base,
+                directorateId: q.directorateId || undefined,
+                findingScope: findingFullWhere(ctx),
+                followUpScope: followUpWhere(ctx),
+            });
+        }
+        return this.reportsService.getBulgeTakipReport({
+            ...base,
             directorateId: canOrgWide ? (q.directorateId || undefined) : undefined,
             scopeAssigneeId: canOrgWide ? undefined : userId,
         });

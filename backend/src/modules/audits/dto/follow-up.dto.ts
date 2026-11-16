@@ -65,6 +65,11 @@ export class UpdateFollowUpDto {
     @IsOptional() @ValidateNested() @Type(() => NewActionInputDto) newAction?: NewActionInputDto;
 }
 
+export class ReassignFollowUpAssigneeDto {
+    @IsString() @IsNotEmpty() assigneeId: string;
+    @IsString() @IsNotEmpty() @MaxLength(1000) reason: string;
+}
+
 export class AssignSecondControllerDto {
     @IsString() @IsNotEmpty() secondControllerId: string;
     @IsString() @IsNotEmpty() @MaxLength(1000) reason: string;

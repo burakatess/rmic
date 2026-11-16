@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma';
 import { CLOSED_ACTION_STATUSES } from '../../common/util/metric-definitions';
 
@@ -716,11 +717,15 @@ export class ReportsService {
         directorateId?: string;
         /** Kurum geneli yetkisi olmayan kullanıcı — yalnızca bu kişiye atanmış bulgular. */
         scopeAssigneeId?: string;
+        /** Merkezi kayıt kapsamı (RECORD_SCOPE_ENFORCEMENT) — scopeAssigneeId yerine geçer. */
+        findingScope?: Prisma.FindingWhereInput | null;
+        followUpScope?: Prisma.FindingFollowUpWhereInput | null;
     }) {
         const { start, end, label } = this.resolveMonthlyPeriod(params);
-        const dirFilter = {
+        const dirFilter: Prisma.FindingWhereInput = {
             ...(params.directorateId ? { directorateId: params.directorateId } : {}),
             ...(params.scopeAssigneeId ? { assigneeId: params.scopeAssigneeId } : {}),
+            ...(params.findingScope ? { AND: [params.findingScope] } : {}),
         };
 
         // 1. Dönemde tespit edilen bulgular
@@ -742,6 +747,7 @@ export class ReportsService {
                 status: { not: 'BEKLIYOR' as any },
                 ...(params.directorateId ? { directorateId: params.directorateId } : {}),
                 ...(params.scopeAssigneeId ? { finding: { assigneeId: params.scopeAssigneeId } } : {}),
+                ...(params.followUpScope ? { AND: [params.followUpScope] } : {}),
             },
             include: {
                 finding: { select: { findingId: true, summary: true, severity: true } },

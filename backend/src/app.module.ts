@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { requestContextMiddleware } from './common/context/request-context';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
@@ -17,6 +18,7 @@ import { RiskEntryModule } from './modules/risk-entry/risk-entry.module';
 import { RiskManagementControlsModule } from './modules/risk-management-controls/risk-management-controls.module';
 import { TestsModule } from './modules/tests/tests.module';
 import { DirectoratesModule } from './modules/directorates/directorates.module';
+import { GmysModule } from './modules/gmys/gmys.module';
 import { RiskControlsModule } from './modules/risk-controls/risk-controls.module';
 import { RiskActionsModule } from './modules/risk-actions/risk-actions.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
@@ -29,6 +31,7 @@ import { RiskSimulationModule } from './modules/risk-simulation/risk-simulation.
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { WorkflowHealthModule } from './modules/workflow-health/workflow-health.module';
 import { SearchModule } from './modules/search/search.module';
+import { AccessScopeModule } from './common/services/access-scope.service';
 import { JwtAuthGuard, PermissionsGuard } from './common/guards';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -45,6 +48,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     ScheduleModule.forRoot(),
     PrismaModule,
+    AccessScopeModule,
     HealthModule,
     AuthModule,
     RisksModule,
@@ -59,6 +63,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     RiskManagementControlsModule,
     TestsModule,
     DirectoratesModule,
+    GmysModule,
     RiskControlsModule,
     RiskActionsModule,
     UploadsModule,
@@ -99,4 +104,9 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     },
   ],
 })
-export class AppModule { }
+export class AppModule implements NestModule {
+  // Her HTTP isteği için denetim izi bağlamı (IP/UA) — bkz. common/context/request-context.ts
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(requestContextMiddleware).forRoutes('*');
+  }
+}

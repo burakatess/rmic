@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
+import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import {
     EmptyState, LoadingState, DetailShell, DetailHeader,
     Tabs, StatusBadge, Button,
@@ -137,6 +138,7 @@ export default function ControlDetailPage() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const [editFindingContext, setEditFindingContext] = useState<any | null>(null);
 
+    const [loadError, setLoadError] = useState<LoadError | null>(null);
     const fetchControlData = useCallback(async (silent = false) => {
         if (!params.id) return;
         if (!silent) setLoading(true);
@@ -222,8 +224,10 @@ export default function ControlDetailPage() {
                 });
             }
         } catch (err) {
-            console.error('Failed to fetch control:', err);
-            showError('Hata', 'Kontrol detayları yüklenemedi.');
+            // Sessiz yeniden yüklemede mevcut kontrol korunur; yalnız bildirilir.
+            const le = classifyLoadError(err, 'Kontrol');
+            setLoadError(le);
+            showError(le.title, le.description);
         } finally {
             if (!silent) setLoading(false);
         }
@@ -258,10 +262,10 @@ export default function ControlDetailPage() {
         return (
             <DetailShell>
                 <EmptyState
-                    title="Kontrol bulunamadı"
-                    description="Aradığınız kontrol kaydı mevcut değil veya erişim yetkiniz yok."
-                    actionLabel="Kontrol Envanterine Dön"
-                    onAction={() => router.push('/controls')}
+                    title={(loadError ?? classifyLoadError(null, 'Kontrol')).title}
+                    description={(loadError ?? classifyLoadError(null, 'Kontrol')).description}
+                    actionLabel={loadError?.retryable ? 'Tekrar Dene' : 'Kontrol Envanterine Dön'}
+                    onAction={() => (loadError?.retryable ? fetchControlData() : router.push('/controls'))}
                 />
             </DetailShell>
         );

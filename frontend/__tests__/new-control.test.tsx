@@ -10,7 +10,7 @@ jest.mock('next/navigation', () => ({
 jest.mock('@/lib/api', () => ({
     __esModule: true,
     default: {
-        getUsers: jest.fn().mockResolvedValue([]),
+        getUserChoices: jest.fn().mockResolvedValue([]),
         getDirectorates: jest.fn().mockResolvedValue([{ id: 'dir-1', name: 'Test Direktörlüğü' }]),
         createControl: jest.fn(() => new Promise(() => undefined)),
     },

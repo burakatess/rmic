@@ -1,6 +1,8 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ControlFrequency, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma';
+import { controllerIneligibility } from '../../common/services/controller-eligibility';
+import { AccessScopeService } from '../../common/services/access-scope.service';
 import { DirectorateScopeService } from '../../common/services/directorate-scope.service';
 import { ControlScopeService } from './control-scope.service';
 import { computeScopePeriods, computeMonthGroup, monthNumbersToLabels } from './control-period.util';
@@ -140,6 +142,7 @@ export class AnnualPlanService {
         private prisma: PrismaService,
         private scopeService: DirectorateScopeService,
         private controlScopeService: ControlScopeService,
+        @Optional() private accessScope?: AccessScopeService,
     ) { }
 
     private assertDraftEditable(draft: { status: string }) {
@@ -257,7 +260,7 @@ export class AnnualPlanService {
             const assigneeId = item.assigneeId !== undefined ? (item.assigneeId || null) : (existing?.assigneeId ?? null);
             const secondControllerId = item.secondControllerId !== undefined ? (item.secondControllerId || null) : (existing?.secondControllerId ?? null);
             if (item.assigneeId !== undefined || item.secondControllerId !== undefined) {
-                await this.controlScopeService.validateAssignment(tx, assigneeId, secondControllerId);
+                await this.controlScopeService.validateAssignment(tx, assigneeId, secondControllerId, [item.controlId]);
             }
 
             await tx.annualPlanDraftItem.upsert({
@@ -315,7 +318,7 @@ export class AnnualPlanService {
         const assigneeId = dto.assigneeId !== undefined ? (dto.assigneeId || null) : undefined;
         const secondControllerId = dto.secondControllerId !== undefined ? (dto.secondControllerId || null) : undefined;
         if (assigneeId !== undefined || secondControllerId !== undefined) {
-            await this.controlScopeService.validateAssignment(this.prisma, assigneeId ?? null, secondControllerId ?? null);
+            await this.controlScopeService.validateAssignment(this.prisma, assigneeId ?? null, secondControllerId ?? null, controls.map(c => c.id));
         }
 
         const controlIds = controls.map(c => c.id);
@@ -614,6 +617,11 @@ export class AnnualPlanService {
             submittedAt: draft.submittedAt, submittedById: draft.submittedById,
             approvedAt: draft.approvedAt, approvedById: draft.approvedById,
             approvedRevision: draft.approvedRevision, decisionNote: draft.decisionNote,
+            // Arayüz yetenekleri approve() kurallarıyla aynı: gönderen kendi planını onaylayamaz.
+            capabilities: {
+                canApprove: draft.status === 'PENDING_APPROVAL' && draft.submittedById !== userId,
+                canRequestChanges: draft.status === 'PENDING_APPROVAL' || draft.status === 'APPROVED',
+            },
             scope: { applied: resolved.appliedScope, directorateIds: resolved.directorateIds, options: scopeOptions },
             workload, changedCount,
             page, pageSize, totalCount,
@@ -660,32 +668,25 @@ export class AnnualPlanService {
             directorateId = control?.directorateId ?? null;
         }
 
-        // İç Kontrol çalışanları (IKS_EMPLOYEE/IKS_MANAGER) ve sistem yöneticisi
-        // (SYSTEM_ADMIN), kontrolcü atama listesinde birim (UNIT) kapsamı
-        // daraltmasından ETKİLENMEZ — bunlar zaten kurum genelinde kontrol
-        // test/onay sorumluluğu taşıyan org-wide roller, her birimin
-        // kontrolcü listesinde her zaman görünmeli.
-        const ALWAYS_ELIGIBLE_ROLES = ['IKS_EMPLOYEE', 'IKS_MANAGER', 'SYSTEM_ADMIN'];
-
-        const where: any = { isActive: true };
-        if (resolved.appliedScope === 'UNIT') {
-            where.OR = [
-                { directorateMemberships: { some: { directorateId: { in: resolved.directorateIds! } } } },
-                { role: { name: { in: ALWAYS_ELIGIBLE_ROLES } } },
-            ];
-        }
-
+        // Ortak uygunluk kuralı (rol adı listesi yok): aktif + işlem izni + kontrolün birimi
+        // üzerinde kayıt kapsamı. Merkezi iç kontrol (AUDITOR) ve yönetici (RCM) izinleri ve
+        // kurum geneli kapsamlarıyla her birimin listesinde görünür. Görüntüleyenin kapsamı
+        // (resolved) listeyi daraltmaz: uygunluk ADAYIN kendi izni ve kapsamıdır.
+        void resolved;
         const users = await this.prisma.user.findMany({
-            where, select: { id: true, firstName: true, lastName: true, email: true, role: { select: { name: true, permissions: true } } },
+            where: { isActive: true },
+            select: {
+                id: true, firstName: true, lastName: true, email: true, isActive: true,
+                role: { select: { permissions: true } },
+                directorateMemberships: { select: { directorateId: true } },
+            },
             orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
         });
-
-        const filtered = role === 'secondController'
-            ? users.filter(u => {
-                const perms: string[] = Array.isArray(u.role?.permissions) ? (u.role.permissions as unknown as string[]) : [];
-                return perms.some(p => p === '*' || p === 'control:*' || p === 'control:test' || p.startsWith('control:'));
-            })
-            : users;
+        const enforced = (this.accessScope?.isEnforced() ?? false) && !!controlId;
+        const filtered = users.filter(u => controllerIneligibility(
+            { isActive: u.isActive, permissions: u.role?.permissions, directorateIds: u.directorateMemberships.map(m => m.directorateId) },
+            role, directorateId, enforced,
+        ) === null);
 
         return { data: filtered.map(u => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, email: u.email })), directorateId };
     }

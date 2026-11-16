@@ -10,8 +10,7 @@ interface User {
     id: string;
     firstName: string;
     lastName: string;
-    email: string;
-    department?: string;
+    department?: string | null;
 }
 
 interface Directorate {
@@ -70,7 +69,7 @@ export default function NewControlPage() {
 
     const loadUsers = async () => {
         try {
-            const data = await api.getUsers();
+            const data = await api.getUserChoices();
             if (Array.isArray(data)) {
                 setUsers(data);
             }
@@ -318,7 +317,7 @@ export default function NewControlPage() {
                                         className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm font-semibold"
                                     >
                                         <option value="">İletişim Kişisi Seçin</option>
-                                        {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName} ({u.email})</option>)}
+                                        {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}{u.department ? ` (${u.department})` : ''}</option>)}
                                     </select>
                                 </div>
                             </div>

@@ -180,6 +180,7 @@ const navigation: NavItem[] = [
             { label: 'Kullanıcılar', href: '/admin/users' },
             { label: 'Roller & Yetkiler', href: '/admin/roles', permission: 'role:manage' },
             { label: 'Risk Öneri Talepleri', href: '/admin/risk-proposals', permission: 'user:view' },
+            { label: 'GMY Tanımları', href: '/admin/gmys' },
             { label: 'Sistem Parametreleri', href: '/admin/parameters', permission: 'parameter:view' },
             { label: 'Denetim İzleri', href: '/admin/audit-logs', permission: 'audit_log:view' },
         ],

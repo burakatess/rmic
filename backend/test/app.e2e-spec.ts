@@ -56,7 +56,11 @@ describe('E2E (Auth Flow & Risks)', () => {
         }),
       },
       riskCategory: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'cat-1' }),
         findFirst: jest.fn().mockResolvedValue({ id: 'cat-1' }),
+      },
+      directorate: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'dir-1', isActive: true }),
       },
       riskHistory: {
         create: jest.fn(),
@@ -68,6 +72,8 @@ describe('E2E (Auth Flow & Risks)', () => {
         findMany: jest.fn().mockResolvedValue([]),
       }
     };
+    // Risk oluşturma artık risk + tarihçe + denetim kaydını tek transaction'da yazar.
+    (mockPrismaService as any).$transaction = jest.fn((fn: any) => fn(mockPrismaService));
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -142,6 +148,7 @@ describe('E2E (Auth Flow & Risks)', () => {
           name: 'E2E Risk',
           description: 'E2E Testing',
           categoryId: 'cat-1',
+          directorateId: 'dir-1',
           inherentProbability: 3,
           inherentImpact: 4
         })

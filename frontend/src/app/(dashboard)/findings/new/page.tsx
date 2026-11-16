@@ -116,7 +116,7 @@ export default function NewFindingPage() {
         }
 
         try {
-            const userData = await api.getUsers() as any;
+            const userData = await api.getUserChoices() as any;
             const userList = Array.isArray(userData) ? userData : (userData?.data || []);
             setUsers(userList.map((u: any) => ({ id: String(u.id), firstName: String(u.firstName || ''), lastName: String(u.lastName || '') })));
         } catch (error) {

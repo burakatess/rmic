@@ -1,4 +1,7 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { isKnownPermission, LEGACY_PERMISSION_MAP, PERMISSION_CATALOG, PERMISSION_GROUPS } from '../../common/permissions/permission-catalog';
+import { Prisma } from '@prisma/client';
+import { AuditLogQueryDto } from './dto/audit-log-query.dto';
 import { PrismaService } from '../../prisma';
 import * as bcrypt from 'bcrypt';
 
@@ -37,7 +40,8 @@ export class AdminService {
         const [data, total] = await Promise.all([
             this.prisma.user.findMany({
                 where, skip: (params.page - 1) * params.limit, take: params.limit,
-                select: { id: true, firstName: true, lastName: true, isActive: true },
+                // Seçim listeleri için asgari alan seti: e-posta, rol/izin, üyelik ve oturum bilgisi dönmez.
+                select: { id: true, firstName: true, lastName: true, department: true, isActive: true },
                 orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
             }),
             this.prisma.user.count({ where }),
@@ -116,26 +120,33 @@ export class AdminService {
 
         const passwordHash = await bcrypt.hash(data.password, 10);
 
-        const user = await this.prisma.user.create({
-            data: {
-                email: data.email,
-                passwordHash,
-                firstName: data.firstName,
-                lastName: data.lastName,
-                department: data.department,
-                roleId: data.roleId,
-            },
-            include: { role: true },
-        });
+        const role = await this.prisma.role.findUnique({ where: { id: data.roleId }, select: { id: true } });
+        if (!role) throw new BadRequestException('Geçersiz rol: seçilen rol bulunamadı');
 
-        await this.prisma.auditLog.create({
-            data: {
-                userId: createdBy,
-                action: 'CREATE',
-                entityType: 'User',
-                entityId: user.id,
-                newValue: { email: user.email, firstName: user.firstName, lastName: user.lastName },
-            },
+        // Kullanıcı + denetim kaydı tek transaction'da. E-posta denetim kaydına yazılmaz
+        // (kişisel veri; kimlik cuid ile izlenir).
+        const user = await this.prisma.$transaction(async (tx) => {
+            const created = await tx.user.create({
+                data: {
+                    email: data.email,
+                    passwordHash,
+                    firstName: data.firstName,
+                    lastName: data.lastName,
+                    department: data.department,
+                    roleId: data.roleId,
+                },
+                include: { role: true },
+            });
+            await tx.auditLog.create({
+                data: {
+                    userId: createdBy,
+                    action: 'USER_CREATE',
+                    entityType: 'User',
+                    entityId: created.id,
+                    newValue: { roleId: created.roleId, roleName: created.role.name },
+                },
+            });
+            return created;
         });
 
         const { passwordHash: _, ...result } = user;
@@ -159,6 +170,11 @@ export class AdminService {
         // Kritik değişiklik (rol / aktiflik) + audit AYNI transaction'da (Madde 6).
         const updated = await this.prisma.$transaction(async (tx) => {
             const u = await tx.user.update({ where: { id }, data, include: { role: true } });
+            // Pasife alınan kullanıcının açık oturumları (refresh token) iptal edilir;
+            // access token zaten her istekte JwtStrategy'de isActive ile reddedilir.
+            if (data.isActive === false && user.isActive) {
+                await tx.refreshToken.deleteMany({ where: { userId: id } });
+            }
             await tx.auditLog.create({
                 data: {
                     userId: updatedBy,
@@ -222,11 +238,29 @@ export class AdminService {
         return role;
     }
 
+    // Kanonik katalog (rol ekranı bunu API'den alır; frontend'de elle tutulan liste yok).
+    getPermissionCatalog() {
+        return { groups: PERMISSION_GROUPS, permissions: PERMISSION_CATALOG, legacy: LEGACY_PERMISSION_MAP };
+    }
+
+    /**
+     * Bilinmeyen izin anahtarı role ATANAMAZ. Rolde zaten bulunan eski anahtarlar (eski
+     * rol ekranından kalma) sessizce silinmez; korunabilir ama yenisi eklenemez.
+     */
+    private assertKnownPermissions(next: string[], previous: unknown = []) {
+        const prev = new Set(Array.isArray(previous) ? previous.filter((p): p is string => typeof p === 'string') : []);
+        const unknown = [...new Set(next)].filter(p => !isKnownPermission(p) && !prev.has(p));
+        if (unknown.length > 0) {
+            throw new BadRequestException(`Bilinmeyen izin anahtarı: ${unknown.join(', ')}. Geçerli anahtarlar için izin kataloğuna bakın.`);
+        }
+    }
+
     async createRole(data: {
         name: string;
         description?: string;
         permissions: string[];
     }, userId: string) {
+        this.assertKnownPermissions(data.permissions);
         return this.prisma.$transaction(async (tx) => {
             const role = await tx.role.create({ data });
             await tx.auditLog.create({
@@ -250,6 +284,10 @@ export class AdminService {
     ) {
         const before = await this.prisma.role.findUnique({ where: { id } });
         if (!before) throw new NotFoundException('Role not found');
+        if (data.permissions !== undefined) {
+            this.assertKnownPermissions(data.permissions, before.permissions);
+            data = { ...data, permissions: [...new Set(data.permissions)] };
+        }
         return this.prisma.$transaction(async (tx) => {
             const role = await tx.role.update({ where: { id }, data });
             await tx.auditLog.create({
@@ -298,49 +336,38 @@ export class AdminService {
     }
 
     // Audit Logs
-    async findAuditLogs(params?: {
-        userId?: string;
-        entityType?: string;
-        action?: string;
-        startDate?: Date;
-        endDate?: Date;
-        limit?: number;
-    }) {
-        const where: Record<string, unknown> = {};
+    // Denetim izi listesi — sunucu taraflı sayfalama (toplam sayı + sayfa). Kayıtlar salt
+    // okunurdur; bu metot yalnız okur. Tarih-yalnız bitiş değeri o günü TAMAMEN kapsar.
+    async findAuditLogsPage(q: AuditLogQueryDto) {
+        const page = q.page ?? 1;
+        const pageSize = q.pageSize ?? 50;
+        const where = buildAuditWhere(q);
 
-        if (params?.userId) where.userId = params.userId;
-        if (params?.entityType) where.entityType = params.entityType;
-        if (params?.action) where.action = params.action;
-        if (params?.startDate || params?.endDate) {
-            where.createdAt = {};
-            if (params?.startDate) (where.createdAt as Record<string, Date>).gte = params.startDate;
-            if (params?.endDate) (where.createdAt as Record<string, Date>).lte = params.endDate;
-        }
-
-        return this.prisma.auditLog.findMany({
-            where,
-            include: {
-                user: {
-                    select: { id: true, email: true, firstName: true, lastName: true },
-                },
-            },
-            orderBy: { createdAt: 'desc' },
-            take: params?.limit || 100,
-        });
+        const [data, total] = await Promise.all([
+            this.prisma.auditLog.findMany({
+                where,
+                include: { user: { select: { id: true, email: true, firstName: true, lastName: true } } },
+                // Eşit zaman damgalarında deterministik sıra (sayfalar arası kayma olmasın).
+                orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                skip: (page - 1) * pageSize,
+                take: pageSize,
+            }),
+            this.prisma.auditLog.count({ where }),
+        ]);
+        return { data, pagination: { total, page, pageSize, totalPages: Math.ceil(total / pageSize) } };
     }
 
     // SIEM Export
-    async exportAuditLogs(params: {
-        userId?: string;
-        entityType?: string;
-        action?: string;
-        startDate?: Date;
-        endDate?: Date;
-        limit?: number;
-    }, format: 'cef' | 'leef' | 'json') {
-        const logs = await this.findAuditLogs({ ...params, limit: params.limit || 10000 });
+    // Liste ekranıyla AYNI filtre (buildAuditWhere) — ekranda görülen ile indirilen aynı küme.
+    async exportAuditLogs(params: AuditLogQueryDto & { limit?: number }, format: 'cef' | 'leef' | 'json') {
+        const logs = await this.prisma.auditLog.findMany({
+            where: buildAuditWhere(params),
+            include: { user: { select: { id: true, email: true, firstName: true, lastName: true } } },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: Math.min(params.limit || 10000, 50000),
+        });
 
-        const sevMap: Record<string, number> = { DELETE: 7, UPDATE: 4, CREATE: 3, APPROVAL: 4, LOGIN: 2, LOGOUT: 1 };
+        const sevMap: Record<string, number> = { DELETE: 7, LOGIN_FAILED: 6, ROLE_CHANGE: 6, USER_ACTIVATION_CHANGE: 5, PASSWORD_RESET: 5, UPDATE: 4, CREATE: 3, APPROVAL: 4, LOGIN: 2, LOGOUT: 1 };
         const esc = (v: unknown) => String(v ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/=/g, '\\=').replace(/[\r\n\t]/g, ' ');
 
         const lines = logs.map((log: any) => {
@@ -348,7 +375,7 @@ export class AdminService {
             const email = log.user?.email ?? 'system';
             switch (format) {
                 case 'cef':
-                    return `CEF:0|RMIC|GRC|1.0|${esc(log.action)}|${esc(log.action)} ${esc(log.entityType)}|${sevMap[log.action] ?? 3}|end=${ts} suser=${esc(email)} act=${esc(log.action)} cs1Label=entityType cs1=${esc(log.entityType)} cs2Label=entityId cs2=${esc(log.entityId)}${log.ipAddress ? ` src=${esc(log.ipAddress)}` : ''}${log.userAgent ? ` requestClientApplication=${esc(log.userAgent)}` : ''}`;
+                    return `CEF:0|RMIC|GRC|1.0|${esc(log.action)}|${esc(log.action)} ${esc(log.entityType)}|${sevMap[log.action] ?? 3}|end=${ts} suser=${esc(email)} act=${esc(log.action)} cs1Label=entityType cs1=${esc(log.entityType)} cs2Label=entityId cs2=${esc(log.entityId)} cs3Label=actorType cs3=${esc(log.actorType ?? 'UNKNOWN')}${log.ipAddress ? ` src=${esc(log.ipAddress)}` : ''}${log.userAgent ? ` requestClientApplication=${esc(log.userAgent)}` : ''}`;
                 case 'leef':
                     return `LEEF:2.0|RMIC|GRC|1.0|${esc(log.action)}|devTime=${new Date(log.createdAt).toISOString()}\tusrName=${email}\taction=${log.action}\tentityType=${log.entityType}\tentityId=${log.entityId}${log.ipAddress ? `\tsrc=${log.ipAddress}` : ''}`;
                 case 'json':
@@ -362,6 +389,7 @@ export class AdminService {
                         entityType: log.entityType,
                         entityId: log.entityId,
                         ipAddress: log.ipAddress ?? null,
+                        actorType: log.actorType ?? null,
                         userAgent: log.userAgent ?? null,
                         oldValue: log.oldValue ?? null,
                         newValue: log.newValue ?? null,
@@ -550,4 +578,34 @@ export class AdminService {
 
         return { message: 'Default options seeded successfully', count: defaultOptions.length };
     }
+}
+
+/** Tarih-yalnız (YYYY-MM-DD) bitiş değeri ertesi günün başına kadar (hariç) genişletilir. */
+export function auditDateRange(start?: string, end?: string): { gte?: Date; lt?: Date; lte?: Date } | null {
+    if (!start && !end) return null;
+    const range: { gte?: Date; lt?: Date; lte?: Date } = {};
+    if (start) range.gte = new Date(start);
+    if (end) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+            const d = new Date(`${end}T00:00:00`);
+            d.setDate(d.getDate() + 1);
+            range.lt = d;
+        } else {
+            range.lte = new Date(end);
+        }
+    }
+    return range;
+}
+
+export function buildAuditWhere(q: AuditLogQueryDto): Prisma.AuditLogWhereInput {
+    const where: Prisma.AuditLogWhereInput = {};
+    if (q.userId) where.userId = q.userId;
+    if (q.entityType) where.entityType = q.entityType;
+    if (q.entityId) where.entityId = q.entityId;
+    if (q.action) where.action = q.action;
+    if (q.ipAddress) where.ipAddress = q.ipAddress;
+    if (q.actorType) where.actorType = q.actorType === 'UNKNOWN' ? null : q.actorType;
+    const range = auditDateRange(q.startDate, q.endDate);
+    if (range) where.createdAt = range;
+    return where;
 }

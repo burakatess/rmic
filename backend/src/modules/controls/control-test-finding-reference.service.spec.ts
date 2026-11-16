@@ -3,10 +3,12 @@ import { ControlsService } from './controls.service';
 
 describe('ControlsService control test finding reference', () => {
     const db: any = {
-        controlTest: { findUnique: jest.fn(), update: jest.fn() },
+        controlTest: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
         finding: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn() },
         auditLog: { create: jest.fn() },
     };
+    db.$transaction = jest.fn((fn: any) => fn(db));
+    let written: any = {};
     let service: ControlsService;
 
     beforeEach(() => {
@@ -14,6 +16,9 @@ describe('ControlsService control test finding reference', () => {
         service = new ControlsService(db);
         db.controlTest.findUnique.mockResolvedValue({ id: 't-new', controlId: 'c1', status: 'DEVAM_EDIYOR', plannedDate: new Date('2026-10-01') });
         db.controlTest.update.mockImplementation(({ data }: any) => Promise.resolve({ id: 't-new', ...data }));
+        // Tamamlama artık koşullu (status UPDATE içinde) ve audit ile aynı transaction'da.
+        db.controlTest.updateMany.mockImplementation(({ data }: any) => { written = data; return Promise.resolve({ count: 1 }); });
+        db.controlTest.findUniqueOrThrow.mockImplementation(() => Promise.resolve({ id: 't-new', ...written }));
         db.auditLog.create.mockResolvedValue({});
     });
 
@@ -22,7 +27,11 @@ describe('ControlsService control test finding reference', () => {
         const result = await service.completeTest('t-new', { referencedFindingId: 'f1', referenceReason: 'Ekim döneminde sorun devam ediyor.', continuationConfirmed: true }, 'u1');
         expect(result).toMatchObject({ findingStatus: 'BULGUSU_VAR', referencedFindingId: 'f1', status: 'TAMAMLANDI' });
         expect(db.finding.findUnique).toHaveBeenCalledTimes(1);
-        expect(db.controlTest.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.not.objectContaining({ controlTestId: expect.anything() }) }));
+        expect(db.controlTest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: { id: 't-new', status: { in: ['DEVAM_EDIYOR', 'GERI_GONDERILDI'] } },
+            data: expect.not.objectContaining({ controlTestId: expect.anything() }),
+        }));
+        expect(db.$transaction).toHaveBeenCalled();
     });
 
     it.each([

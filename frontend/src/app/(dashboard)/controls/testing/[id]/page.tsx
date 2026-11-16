@@ -172,6 +172,11 @@ export default function ControlTestDetailPage() {
             .catch(() => setOpenFindings([]));
     }, [test]);
 
+    // İşlem yetenekleri backend'den (control-test-capabilities.ts): izin + durum + maker/checker.
+    // Arayüz kuralı yeniden hesaplamaz; bayrak yoksa hiçbir işlem açılmaz.
+    const caps: { canStart?: boolean; canEditContent?: boolean; canComplete?: boolean; canApprove?: boolean; canReturn?: boolean } = test?.capabilities ?? {};
+    const canEditContent = !!caps.canEditContent;
+
     // ── Otomatik kayıt (debounce + iyimser eşzamanlılık) ────────────────────
     // saveChainRef: her çağrı bir öncekinin TAMAMEN bitmesini bekleyen bir kuyruğa
     // eklenir (boolean bayraklarla el ile eşzamanlılık yönetimi yerine) — bu sayede
@@ -217,11 +222,12 @@ export default function ControlTestDetailPage() {
 
     const scheduleSave = useCallback(() => {
         if (saveStatus === 'conflict') return; // kullanıcı karar verene kadar otomatik kaydetme durur
+        if (!canEditContent) return;
         setDirty(true);
         if (saveTimer.current) clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => { void doSave(); }, 900);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [doSave, saveStatus]);
+    }, [doSave, saveStatus, canEditContent]);
 
     // Tetikleyici effect POST-RENDER çalışır (güncel closure/değerler garantili —
     // "stale closure" riski yok), ama yalnızca userEditedRef bir onChange/onClick
@@ -260,10 +266,13 @@ export default function ControlTestDetailPage() {
 
     // ── İş akışı aksiyonları ─────────────────────────────────────────────────
     const hasFindings = (test?.findings?.length ?? 0) > 0;
-    const canStart = test?.status === 'BEKLIYOR';
-    const canComplete = test?.status === 'DEVAM_EDIYOR' || test?.status === 'GERI_GONDERILDI';
-    const canApprove = test?.status === 'TAMAMLANDI';
-    const canReturn = test?.status === 'TAMAMLANDI';
+    // Görünüm durumu (salt okunur/açık bölümler) ile işlem yetkisi ayrı tutulur.
+    const inProgress = test?.status === 'DEVAM_EDIYOR' || test?.status === 'GERI_GONDERILDI';
+    const isPendingApproval = test?.status === 'TAMAMLANDI';
+    const canStart = !!caps.canStart;
+    const canComplete = !!caps.canComplete;
+    const canApprove = !!caps.canApprove;
+    const canReturn = !!caps.canReturn;
     const isDone = test?.status === 'ONAYLANDI';
     const isCancelled = test?.status === 'IPTAL' || test?.status === 'KAPSAM_DISI';
     const needsFindingFirst = form.findingStatus === 'BULGUSU_VAR' && !hasFindings;
@@ -503,7 +512,7 @@ export default function ControlTestDetailPage() {
     // ── Bölüm B — Sağ: Değerlendirme ────────────────────────────────────────
     const evaluationPane = (
         <div className="space-y-4">
-            {testSteps.length > 0 && (canComplete || isDone || canApprove) && (
+            {testSteps.length > 0 && (inProgress || isDone || isPendingApproval) && (
                 <div className="bg-white rounded-2xl border border-slate-200 p-5">
                     <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Adım Gözlemleri</p>
                     <div className="space-y-3">
@@ -511,7 +520,7 @@ export default function ControlTestDetailPage() {
                             <div key={i} className="border border-slate-100 rounded-xl p-3">
                                 <p className="text-xs font-semibold text-slate-600 mb-1.5">{i + 1}. {step}</p>
                                 <textarea
-                                    disabled={isDone || canApprove}
+                                    disabled={!canEditContent}
                                     value={stepObservations[i] || ''}
                                     onChange={(e) => { userEditedRef.current = true; setStepObservations(prev => { const n = [...prev]; n[i] = e.target.value; return n; }); }}
                                     rows={2}
@@ -529,13 +538,13 @@ export default function ControlTestDetailPage() {
                 <RichTextArea
                     value={form.resultText}
                     onChange={(v) => { userEditedRef.current = true; setForm(p => ({ ...p, resultText: v })); }}
-                    disabled={isDone || canApprove}
+                    disabled={!canEditContent}
                     minRows={12}
                     placeholder="Gerçekleştirilen test/inceleme, gözlemler ve sonuca ilişkin değerlendirmenizi yazın..."
                 />
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mt-4 mb-1.5">Kanıt Özeti</p>
                 <textarea
-                    disabled={isDone || canApprove}
+                    disabled={!canEditContent}
                     value={form.evidenceSummary}
                     onChange={(e) => { userEditedRef.current = true; setForm(p => ({ ...p, evidenceSummary: e.target.value })); }}
                     rows={3}
@@ -544,19 +553,19 @@ export default function ControlTestDetailPage() {
                 />
             </div>
 
-            {(canComplete || isDone || canApprove) && (
+            {(inProgress || isDone || isPendingApproval) && (
                 <div className="bg-white rounded-2xl border border-slate-200 p-5">
                     <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Kontrol Sonucu</p>
                     <div className="grid grid-cols-2 gap-2 mb-3">
                         {['BULGUSU_YOK', 'BULGUSU_VAR'].map(opt => (
                             <button key={opt} type="button"
-                                disabled={isDone || canApprove || (opt === 'BULGUSU_YOK' && hasFindings)}
+                                disabled={!canEditContent || (opt === 'BULGUSU_YOK' && hasFindings)}
                                 title={opt === 'BULGUSU_YOK' && hasFindings ? 'Bu teste bağlı bulgu kaydı var, sonuç Bulgu Yok olamaz.' : undefined}
                                 onClick={() => { userEditedRef.current = true; setForm(p => ({ ...p, findingStatus: opt })); }}
                                 className={`p-3 rounded-xl border-2 text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${form.findingStatus === opt
                                     ? opt === 'BULGUSU_YOK' ? 'border-emerald-400 bg-emerald-50 text-emerald-800' : 'border-red-400 bg-red-50 text-red-800'
                                     : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                                    } ${isDone || canApprove ? 'opacity-60 cursor-default' : ''}`}
+                                    } ${!canEditContent ? 'opacity-60 cursor-default' : ''}`}
                             >
                                 <span className="inline-flex items-center gap-1.5">
                                     {opt === 'BULGUSU_YOK' ? <IconCheck /> : <IconWarning />}
@@ -567,7 +576,7 @@ export default function ControlTestDetailPage() {
                     </div>
                     {!form.findingStatus && <p className="text-xs text-slate-400 mb-2">Değerlendirilmedi — devam etmeden önce bir sonuç seçin.</p>}
 
-                    {form.findingStatus === 'BULGUSU_VAR' && !isDone && !canApprove && (
+                    {form.findingStatus === 'BULGUSU_VAR' && canEditContent && (
                         <div className="grid grid-cols-2 gap-2">
                             <Button variant={referenceMode === 'new' ? 'primary' : 'secondary'} size="sm"
                                 onClick={() => setReferenceMode('new')} disabled={submitting} icon={<IconPlus />}>
@@ -580,7 +589,7 @@ export default function ControlTestDetailPage() {
                         </div>
                     )}
 
-                    {referenceMode === 'new' && form.findingStatus === 'BULGUSU_VAR' && !isDone && !canApprove && (
+                    {referenceMode === 'new' && form.findingStatus === 'BULGUSU_VAR' && canEditContent && (
                         <Button variant="primary" size="sm" className="w-full mt-2 bg-rose-600 hover:bg-rose-700 ring-rose-600"
                             onClick={handleOpenFinding} disabled={submitting} icon={<IconPlus />}>
                             Bulgu Kaydı Oluştur {hasFindings ? `(${test.findings.length})` : ''}
@@ -659,21 +668,20 @@ export default function ControlTestDetailPage() {
                 )}
             </div>
             <div className="flex items-center gap-2">
-                {!isDone && (
+                {canEditContent && (
                     <Button variant="outline" size="sm" onClick={() => void doSave()} disabled={saveStatus === 'saving'}>Taslak Kaydet</Button>
                 )}
-                {canStart && <Button variant="primary" size="sm" onClick={handleStart} disabled={submitting} icon={<IconPlay />}>Testi Başlat</Button>}
-                {canComplete && (
+                {canStart && canEditContent && <Button variant="primary" size="sm" onClick={handleStart} disabled={submitting} icon={<IconPlay />}>Testi Başlat</Button>}
+                {canComplete && canEditContent && (
                     <Button variant="primary" size="sm" onClick={handleComplete} disabled={submitting || !form.findingStatus || needsFindingFirst}
                         title={completeBlockedReason ?? undefined} icon={<IconCheck />}>
                         Testi Tamamla ve Onaya Gönder
                     </Button>
                 )}
-                {canApprove && (
-                    <>
-                        <Button variant="secondary" size="sm" onClick={() => setReasonModal('return')} disabled={submitting} icon={<IconReturn />}>Revizyona Gönder</Button>
-                        <Button variant="primary" size="sm" onClick={handleApprove} disabled={submitting} icon={<IconCheckCircle />}>Onayla</Button>
-                    </>
+                {canReturn && <Button variant="secondary" size="sm" onClick={() => setReasonModal('return')} disabled={submitting} icon={<IconReturn />}>Revizyona Gönder</Button>}
+                {canApprove && <Button variant="primary" size="sm" onClick={handleApprove} disabled={submitting} icon={<IconCheckCircle />}>Onayla</Button>}
+                {isPendingApproval && !canApprove && !canReturn && (
+                    <span className="text-[11px] text-slate-500">İkinci kontrolcü onayı bekleniyor</span>
                 )}
                 {isDone && isSystemAdmin && (
                     <Button variant="secondary" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => setReasonModal('cancel')} disabled={submitting} icon={<IconBan />}>

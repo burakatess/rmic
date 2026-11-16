@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
+import { useAuth } from '@/components/auth';
 import {
     PageShell,
     PageHeader,
@@ -192,6 +193,10 @@ function FindingsContent() {
 
     // Selection
     const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+    // Backend: DELETE /findings/:id → finding:delete (her taslak) veya finding:delete:own
+    // (yalnız kendi oluşturduğu taslak; başkasınınki sunucuda 403 ile reddedilir).
+    const { hasAnyPermission } = useAuth();
+    const canDeleteFindings = hasAnyPermission(['finding:delete', 'finding:delete:own']);
     const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
 
@@ -329,14 +334,24 @@ function FindingsContent() {
     const handleBulkDelete = async () => {
         setDeleting(true);
         try {
-            for (const id of selectedRows) await api.deleteFinding(id);
-            setFindings(prev => prev.filter(f => !selectedRows.has(f.id)));
-            setSelectedRows(new Set());
+            // Her bulgu ayrı değerlendirilir: biri reddedilse (ör. 409 — süreç başlamış)
+            // diğerleri silinir ve ekran yalnız gerçekten silinenleri listeden çıkarır.
+            const deletedIds = new Set<string>();
+            const failures: string[] = [];
+            for (const id of selectedRows) {
+                try {
+                    await api.deleteFinding(id);
+                    deletedIds.add(id);
+                } catch (err) {
+                    const label = findings.find(f => f.id === id)?.findingId || id;
+                    failures.push(`${label}: ${err instanceof Error ? err.message : 'silinemedi'}`);
+                }
+            }
+            setFindings(prev => prev.filter(f => !deletedIds.has(f.id)));
+            setSelectedRows(prev => new Set([...prev].filter(id => !deletedIds.has(id))));
             setConfirmDeleteOpen(false);
-            success('Başarılı', `${selectedRows.size} bulgu silindi.`);
-        } catch (err) {
-            console.error('Delete failed:', err);
-            showError('Hata', 'Bazı bulgular silinemedi.');
+            if (deletedIds.size > 0) success('Başarılı', `${deletedIds.size} bulgu silindi.`);
+            if (failures.length > 0) showError(`${failures.length} bulgu silinemedi`, failures.join('\n'));
         } finally {
             setDeleting(false);
         }
@@ -646,7 +661,7 @@ function FindingsContent() {
                 breadcrumbs={[{ label: 'Bulgular' }]}
                 actions={
                     <div className="flex items-center gap-2">
-                        {selectedRows.size > 0 && (
+                        {selectedRows.size > 0 && canDeleteFindings && (
                             <Button
                                 variant="danger"
                                 size="sm"
@@ -766,7 +781,7 @@ function FindingsContent() {
                 onClose={() => setConfirmDeleteOpen(false)}
                 onConfirm={handleBulkDelete}
                 title="Bulgular Silinecek"
-                message={`Seçilen ${selectedRows.size} bulgu kalıcı olarak silinecektir. Bu işlem geri alınamaz.`}
+                message={`Seçilen ${selectedRows.size} bulgu kalıcı olarak silinecektir. Yalnız TASLAK ve süreci başlamamış bulgular silinebilir (yetkiniz yalnız kendi taslaklarınızı kapsıyorsa diğerleri reddedilir); diğerleri için İptal Et kullanın. Bu işlem geri alınamaz.`}
                 confirmLabel="Evet, Sil"
                 loading={deleting}
                 variant="danger"

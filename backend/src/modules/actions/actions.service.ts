@@ -3,6 +3,8 @@ import { PrismaService } from '../../prisma';
 import { AuditsService } from '../audits/audits.service';
 import { projectActionStatus } from '../../common/workflow/workflow-projection';
 import { parseMultiValue, personFieldWhere } from '../../common/util/person-filter';
+import { parsePaging, safeOrderBy } from '../../common/util/list-query';
+import { Prisma } from '@prisma/client';
 
 const normalizeRole = (r?: string): string =>
     ({ ADMIN: 'SYSTEM_ADMIN', RISK_MANAGER: 'RISK_CONTROL_MANAGER', CONTROL_OWNER: 'AUDITEE' }[r ?? ''] ?? r ?? '');
@@ -29,11 +31,9 @@ export class ActionsService {
         return action;
     }
 
-    async findAll(query: any, currentUserId?: string) {
+    async findAll(query: any, currentUserId?: string, scope?: Prisma.ActionWhereInput | null) {
         const { search, ownerId, ownerIds, status, source, riskId, findingId, sortBy, sortOrder, overdue, dueMonth } = query;
-        const page = parseInt(query.page, 10) || 1;
-        const limit = parseInt(query.limit, 10) || 20;
-        const skip = (page - 1) * limit;
+        const { page, limit, skip } = parsePaging(query, 20);
         const where: any = {};
         if (search) {
             where.OR = [
@@ -57,6 +57,7 @@ export class ActionsService {
         if (source) where.source = source;
         if (riskId) where.riskId = riskId;
         if (findingId) where.findingId = findingId;
+        if (scope) where.AND = [...(where.AND || []), scope];
 
         const [actions, total] = await Promise.all([
             this.prisma.action.findMany({
@@ -69,7 +70,7 @@ export class ActionsService {
                 },
                 skip,
                 take: limit,
-                orderBy: { [sortBy || 'dueDate']: sortOrder || 'asc' },
+                orderBy: safeOrderBy(sortBy, sortOrder, Prisma.ActionScalarFieldEnum, 'dueDate', 'asc'),
             }),
             this.prisma.action.count({ where }),
         ]);
@@ -83,6 +84,12 @@ export class ActionsService {
         }));
 
         return { data: actionsWithOverdue, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+    }
+
+    async findingIdOf(id: string): Promise<string | null> {
+        const a = await this.prisma.action.findUnique({ where: { id }, select: { findingId: true } });
+        if (!a) throw new NotFoundException('Aksiyon bulunamadı');
+        return a.findingId;
     }
 
     async findOne(id: string) {
@@ -183,6 +190,18 @@ export class ActionsService {
 
     async update(id: string, data: any, userId: string, role?: string) {
         const action = await this.loadActionForMutation(id, userId, role);
+        // Aksiyon sorumlusu (AUDITEE) aksiyonu yeniden tanımlayamaz: sorumlu, termin ve tanım
+        // İKS'nindir. Termin değişikliği gerekçeli süre uzatma (extend) ile yapılır.
+        if (normalizeRole(role) === 'AUDITEE') {
+            const changed = [
+                data.ownerId !== undefined && data.ownerId !== action.ownerId,
+                data.description !== undefined && data.description !== action.description,
+                data.dueDate !== undefined && new Date(data.dueDate).getTime() !== action.dueDate?.getTime(),
+            ].some(Boolean);
+            if (changed) {
+                throw new ForbiddenException('Aksiyon sorumlusu yalnız not ve ilerleme bilgisini güncelleyebilir; termin için süre uzatma talebi kullanın.');
+            }
+        }
         // findingId/riskId/controlId genel update ile DEĞİŞTİRİLEMEZ (whitelist).
         // Tüm aksiyonlar bir bulguya bağlıdır → ORTAK domain servisine delege (Madde 2).
         return this.audits.updateAction(action.findingId, id, {

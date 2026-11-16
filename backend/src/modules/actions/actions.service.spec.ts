@@ -43,6 +43,18 @@ describe('ActionsService — nesne bazlı yetkilendirme + ortak domain delegasyo
         expect(audits.updateAction).not.toHaveBeenCalled();
     });
 
+    it('AUDITEE kendi aksiyonunda sorumlu/termin/tanım değiştiremez; not güncelleyebilir', async () => {
+        const own = { id: 'a-1', findingId: 'f-1', ownerId: 'auditee-1', description: 'Tanım', dueDate: new Date('2026-12-01') };
+        prisma.action.findUnique.mockResolvedValue(own);
+        for (const patch of [{ ownerId: 'someone-else' }, { dueDate: '2027-01-01' }, { description: 'Yeni tanım' }]) {
+            await expect(service.update('a-1', patch, 'auditee-1', 'AUDITEE')).rejects.toThrow(ForbiddenException);
+        }
+        expect(audits.updateAction).not.toHaveBeenCalled();
+        // Değişmeyen değerleri geri göndermek reddedilmez; not alanı serbest.
+        await service.update('a-1', { notes: 'İlerleme', ownerId: 'auditee-1', dueDate: '2026-12-01T00:00:00.000Z' }, 'auditee-1', 'AUDITEE');
+        expect(audits.updateAction).toHaveBeenCalledWith('f-1', 'a-1', expect.objectContaining({ notes: 'İlerleme' }), 'auditee-1');
+    });
+
     it('AUDITEE başka kullanıcının aksiyonunu tamamlayamaz', async () => {
         prisma.action.findUnique.mockResolvedValue({ id: 'a-1', findingId: 'f-1', ownerId: 'other-user' });
         await expect(service.complete('a-1', {}, 'auditee-1', 'AUDITEE')).rejects.toThrow(ForbiddenException);

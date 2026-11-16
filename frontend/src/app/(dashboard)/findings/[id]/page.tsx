@@ -11,6 +11,7 @@ import {
 import type { TimelineItem, TimelineVariant, AttachmentMeta, UploadedAttachmentMeta } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { PermissionGate, useAuth } from '@/components/auth';
+import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import AddActionModal from '@/components/modals/AddActionModal';
 import { FindingFollowUpModal } from '@/components/modals/FindingFollowUpModal';
 
@@ -24,7 +25,19 @@ interface Action {
     owner?: { id: string; firstName: string; lastName: string };
     responsibleDepartment?: string | null; notes?: string | null;
     attachments?: Attachment[];
+    capabilities?: ActionCapabilities;
 }
+// Backend (finding-capabilities.ts) hesaplar; arayüz kuralı yeniden türetmez.
+interface ActionCapabilities { canEdit: boolean; canComplete: boolean; canExtend: boolean; canManageAttachments: boolean }
+interface FindingCapabilities {
+    canEditFinding: boolean; canAdvanceWorkflow: boolean; canApproveWorkflow: boolean; canCreateAction: boolean;
+    canAddStatusNote: boolean; canManageAttachments: boolean; canLinkRisk: boolean; canViewHistory: boolean;
+}
+const NO_FINDING_CAPS: FindingCapabilities = {
+    canEditFinding: false, canAdvanceWorkflow: false, canApproveWorkflow: false, canCreateAction: false,
+    canAddStatusNote: false, canManageAttachments: false, canLinkRisk: false, canViewHistory: false,
+};
+const NO_ACTION_CAPS: ActionCapabilities = { canEdit: false, canComplete: false, canExtend: false, canManageAttachments: false };
 interface FollowUp {
     id: string; followUpId: string; status: string; actionId?: string | null;
     assigneeId?: string | null; secondControllerId?: string | null; approvalStatus?: string | null; evaluatorId?: string | null;
@@ -53,6 +66,7 @@ interface Finding {
     risk: LinkedRisk | null; control: LinkedControl | null; linkedRisks: LinkedRisk[];
     actions: Action[]; followUps: FollowUp[]; attachments: Attachment[]; statusLogs: StatusLog[];
     _count: { actions: number; followUps: number; linkedRisks: number; attachments: number };
+    capabilities?: FindingCapabilities;
     controlTest?: { id: string; testNo: string; periodLabel?: string | null; plannedDate?: string | null } | null;
     referencingTests?: Array<{ id: string; testNo: string; periodLabel?: string | null; plannedDate?: string | null; status: string; referenceReason?: string | null }>;
     currentStatusSummary: {
@@ -61,7 +75,8 @@ interface Finding {
         pending: null | { id: string; followUpId: string; evaluatedAt?: string | null };
         actionCounts: { open: number; closed: number; total: number };
         nextFollowUpDate?: string | null;
-    };
+    } | null; // PARTIAL erişimde (yalnız kendi aksiyonu) backend özet göndermez
+    accessLevel?: 'PARTIAL';
     createdAt: string; updatedAt: string;
 }
 
@@ -183,13 +198,13 @@ export default function FindingDetailPage() {
     const searchParams = useSearchParams();
     const { success, error: showError } = useToast();
     const { user } = useAuth();
-    const userRole = user?.role?.name;
-    const canAdvanceFinding = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR'].includes(userRole || '');
-    const canApproveFinding = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER'].includes(userRole || '');
 
     const [finding, setFinding] = useState<Finding | null>(null);
     const [auditTrail, setAuditTrail] = useState<AuditEntry[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<LoadError | null>(null);
+    const [historyFailed, setHistoryFailed] = useState(false);
+    const loadedRef = useRef(false);
     const [activeTab, setActiveTab] = useState<Tab>('detay');
 
     const [addActionOpen, setAddActionOpen] = useState(false);
@@ -215,15 +230,32 @@ export default function FindingDetailPage() {
 
     const load = useCallback(async () => {
         setLoading(true);
+        let f: Finding;
         try {
-            const [f, h] = await Promise.all([
-                api.getFinding(id) as Promise<Finding>,
-                api.getFindingStatusHistory(id) as Promise<AuditEntry[]>,
-            ]);
-            setFinding(f);
-            setAuditTrail(h);
-        } catch { showError('Hata', 'Bulgu yüklenemedi.'); }
-        finally { setLoading(false); }
+            f = await (api.getFinding(id) as Promise<Finding>);
+        } catch (e) {
+            // Yeniden yüklemede (ör. işlem sonrası) hata: mevcut kayıt korunur, yalnız bildirilir.
+            const le = classifyLoadError(e, 'Bulgu');
+            if (!loadedRef.current) setLoadError(le);
+            showError(le.title, le.description);
+            setLoading(false);
+            return;
+        }
+        setFinding(f);
+        loadedRef.current = true;
+        setLoadError(null);
+        setLoading(false);
+        // Geçmiş yardımcı istektir: alınamaması bulgu görünümünü düşürmez ama "boş" gibi de gösterilmez.
+        if (!(f.capabilities ?? NO_FINDING_CAPS).canViewHistory) {
+            setAuditTrail([]); setHistoryFailed(false);
+            return;
+        }
+        try {
+            setAuditTrail(await (api.getFindingStatusHistory(id) as Promise<AuditEntry[]>));
+            setHistoryFailed(false);
+        } catch {
+            setHistoryFailed(true);
+        }
     }, [id]);
 
     useEffect(() => { load(); }, [load]);
@@ -297,6 +329,18 @@ export default function FindingDetailPage() {
     };
 
     // Attachment upload/remove — finding / action / followup (aynı API çağrıları)
+    // Aksiyon sorumlusu (tam düzenleme yetkisi olmadan) yalnız tamamlandı bildirir — onaylı
+    // kapanış değildir; bulgu kapanışı takip onayından geçer.
+    const completeOwnAction = async (action: Action) => {
+        try {
+            await api.completeAction(action.id, (action.attachments || []).map(a => a.id));
+            success('Bildirildi', `${action.actionId} tamamlandı olarak işaretlendi.`);
+            load();
+        } catch (e) {
+            showError('İşlem yapılamadı', e instanceof Error ? e.message : 'Aksiyon güncellenemedi.');
+        }
+    };
+
     const uploadFindingAttachment = async (meta: UploadedAttachmentMeta) => {
         if (!finding) return;
         try {
@@ -354,18 +398,22 @@ export default function FindingDetailPage() {
     }
 
     if (!finding) {
+        const le = loadError ?? classifyLoadError(null, 'Bulgu');
         return (
             <DetailShell>
                 <EmptyState
-                    title="Bulgu bulunamadı"
-                    description="Aradığınız bulgu kaydı mevcut değil veya erişim yetkiniz yok."
-                    actionLabel="Bulgu Envanterine Dön"
-                    onAction={() => router.push('/findings')}
+                    title={le.title}
+                    description={le.description}
+                    actionLabel={le.retryable ? 'Tekrar Dene' : 'Bulgu Envanterine Dön'}
+                    onAction={() => (le.retryable ? load() : router.push('/findings'))}
                 />
             </DetailShell>
         );
     }
 
+    // İşlem butonları yalnız backend'in döndürdüğü yetenek bayraklarına göre gösterilir
+    // (rol + kayıt kapsamı + sahiplik + workflow durumu). Bayrak yoksa hiçbir işlem açılmaz.
+    const caps = finding.capabilities ?? NO_FINDING_CAPS;
     const typeCfg = findingTypeConfig[finding.findingType || ''];
     const sevCfg = severityConfig[finding.severity] || { label: finding.severity, sublabel: '', variant: 'neutral' as BV };
     const resCfg = resolutionConfig[finding.resolutionStatus] || resolutionConfig['DEVAM_EDIYOR'];
@@ -466,21 +514,21 @@ export default function FindingDetailPage() {
                 }
                 actions={
                     <>
-                        {canAdvanceFinding && finding.workflowStatus === 'TASLAK' && (
+                        {caps.canAdvanceWorkflow && finding.workflowStatus === 'TASLAK' && (
                             <Button variant="primary" size="sm" onClick={() => setWorkflowAction('mutabakata-gonder')}
                                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>}
                             >
                                 Mutabakata Gönder
                             </Button>
                         )}
-                        {canAdvanceFinding && finding.workflowStatus === 'MUTABAKATA_GONDERILDI' && (
+                        {caps.canAdvanceWorkflow && finding.workflowStatus === 'MUTABAKATA_GONDERILDI' && (
                             <Button variant="primary" size="sm" onClick={() => setWorkflowAction('ic-kontrol-onayina-gonder')}
                                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
                             >
                                 İKS Onayına Gönder
                             </Button>
                         )}
-                        {canApproveFinding && finding.workflowStatus === 'IC_KONTROL_ONAYINA_GONDERILDI' && (
+                        {caps.canApproveWorkflow && finding.workflowStatus === 'IC_KONTROL_ONAYINA_GONDERILDI' && (
                             <>
                                 <Button variant="success" size="sm" onClick={() => setWorkflowAction('mutabakat-onayla')}
                                     icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
@@ -494,37 +542,37 @@ export default function FindingDetailPage() {
                                 </Button>
                             </>
                         )}
-                        {canApproveFinding && finding.workflowStatus !== 'IPTAL' && finding.workflowStatus !== 'MUTABAKAT_YAPILDI' && (
+                        {caps.canApproveWorkflow && finding.workflowStatus !== 'IPTAL' && finding.workflowStatus !== 'MUTABAKAT_YAPILDI' && (
                             <Button variant="ghost" size="sm" onClick={() => setWorkflowAction('iptal-et')} className="text-red-500 hover:bg-red-50">
                                 İptal Et
                             </Button>
                         )}
-                        {canApproveFinding && finding.workflowStatus === 'MUTABAKAT_YAPILDI' && (
+                        {caps.canApproveWorkflow && finding.workflowStatus === 'MUTABAKAT_YAPILDI' && (
                             <Button variant="ghost" size="sm" onClick={() => setWorkflowAction('iptal-et')} className="text-red-500 hover:bg-red-50">
                                 İptal Et
                             </Button>
                         )}
-                        {canApproveFinding && finding.status !== 'CLOSED' && (
+                        {caps.canApproveWorkflow && finding.status !== 'CLOSED' && (
                             <Button variant="success" size="sm" onClick={() => setWorkflowAction('kapat')}
                                     icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
                             >
                                 Bulguyu Kapat
                             </Button>
                         )}
-                        {canApproveFinding && finding.status === 'CLOSED' && (
+                        {caps.canApproveWorkflow && finding.status === 'CLOSED' && (
                             <PermissionGate permission="finding:update">
                                 <Button variant="outline" size="sm" onClick={() => setWorkflowAction('yeniden-ac')}>
                                     Yeniden Aç
                                 </Button>
                             </PermissionGate>
                         )}
-                        <Link href={`/findings/${id}/edit`}>
+                        {caps.canEditFinding && <Link href={`/findings/${id}/edit`}>
                             <Button variant="secondary" size="sm"
                                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>}
                             >
                                 Düzenle
                             </Button>
-                        </Link>
+                        </Link>}
                     </>
                 }
             />
@@ -617,6 +665,7 @@ export default function FindingDetailPage() {
                                 {/* Güncel Durum Log */}
                                 <DetailSection title="Bulgunun Güncel Durumu">
                                     <div className="space-y-3">
+                                        {finding.currentStatusSummary && (
                                         <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-2">
                                             <div className="flex items-center justify-between gap-2 flex-wrap">
                                                 <p className="text-sm font-semibold text-blue-950">{finding.currentStatusSummary.systemSummary}</p>
@@ -632,7 +681,7 @@ export default function FindingDetailPage() {
                                                     {finding.currentStatusSummary.latestApproved.explanation && <p className="whitespace-pre-wrap"><strong>Sonuç açıklaması:</strong> {finding.currentStatusSummary.latestApproved.explanation}</p>}
                                                     <button type="button" className="text-blue-700 font-semibold hover:underline" onClick={() => {
                                                         setActiveTab('takip');
-                                                        const followUp = finding.followUps.find(item => item.id === finding.currentStatusSummary.latestApproved?.id);
+                                                        const followUp = finding.followUps.find(item => item.id === finding.currentStatusSummary?.latestApproved?.id);
                                                         if (followUp) { setSelectedFollowUp(followUp); setFollowUpOpen(true); }
                                                     }}>Takip çalışmasına git</button>
                                                 </div>
@@ -640,6 +689,7 @@ export default function FindingDetailPage() {
                                             {finding.currentStatusSummary.pending && <p className="text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">Yeni takip değerlendirmesi tamamlandı; ikinci kontrolcü onayı bekleniyor ({finding.currentStatusSummary.pending.followUpId}).</p>}
                                             {finding.currentStatusSummary.nextFollowUpDate && <p className="text-xs text-blue-800"><strong>Sonraki takip:</strong> {fmt(finding.currentStatusSummary.nextFollowUpDate)}</p>}
                                         </div>
+                                        )}
                                         {finding.currentStatusDetail && <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-[10px] font-bold text-slate-500 uppercase">Manuel / geçmiş açıklama</p><p className="text-xs text-slate-700 whitespace-pre-wrap mt-1">{finding.currentStatusDetail}</p></div>}
                                         {finding.statusLogs.length === 0 && <p className="text-xs text-slate-400 italic">Henüz güncelleme yok</p>}
                                         <div className="space-y-2 max-h-48 overflow-y-auto">
@@ -650,7 +700,7 @@ export default function FindingDetailPage() {
                                                 </div>
                                             ))}
                                         </div>
-                                        <div className="border-t border-slate-100 pt-3 space-y-2">
+                                        {caps.canAddStatusNote && <div className="border-t border-slate-100 pt-3 space-y-2">
                                             <textarea
                                                 value={logText}
                                                 onChange={e => setLogText(e.target.value)}
@@ -661,7 +711,7 @@ export default function FindingDetailPage() {
                                             <Button size="sm" variant="primary" onClick={addLog} disabled={logSaving || !logText.trim()} className="w-full">
                                                 {logSaving ? 'Kaydediliyor…' : 'Not Ekle'}
                                             </Button>
-                                        </div>
+                                        </div>}
                                     </div>
                                 </DetailSection>
 
@@ -700,9 +750,9 @@ export default function FindingDetailPage() {
                                 <h2 className="text-sm font-semibold text-slate-700">Düzeltici Aksiyonlar</h2>
                                 <p className="text-xs text-slate-500 mt-0.5">Aksiyon tamamlanma tarihine göre sistem otomatik Takip Çalışması oluşturur. Bulgunun hedef tarihi, en ileri aksiyona göre hesaplanır.</p>
                             </div>
-                            <Button variant="primary" size="sm" onClick={() => setAddActionOpen(true)}
+                            {caps.canCreateAction && <Button variant="primary" size="sm" onClick={() => setAddActionOpen(true)}
                                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}
-                            >Yeni Aksiyon</Button>
+                            >Yeni Aksiyon</Button>}
                         </div>
 
                         {finding.actions.length === 0 ? (
@@ -711,8 +761,8 @@ export default function FindingDetailPage() {
                                     title="Henüz aksiyon yok"
                                     description="Düzeltici bir aksiyon tanımlayın"
                                     icon={<svg className="w-12 h-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
-                                    actionLabel="Aksiyon Ekle"
-                                    onAction={() => setAddActionOpen(true)}
+                                    actionLabel={caps.canCreateAction ? 'Aksiyon Ekle' : undefined}
+                                    onAction={caps.canCreateAction ? () => setAddActionOpen(true) : undefined}
                                 />
                             </div>
                         ) : (
@@ -721,6 +771,7 @@ export default function FindingDetailPage() {
                                     const sCfg = actionStatusConfig[action.status] || { label: action.status, variant: 'neutral' as BV };
                                     const aOverdue = action.status !== 'KAPATILDI' && getDaysLeft(action.dueDate) !== null && getDaysLeft(action.dueDate)! < 0;
                                     const relFU = finding.followUps.filter(f => f.actionId === action.id);
+                                    const aCaps = action.capabilities ?? NO_ACTION_CAPS;
                                     return (
                                         <div key={action.id} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
                                             <div className="flex items-start gap-4 p-5">
@@ -736,7 +787,12 @@ export default function FindingDetailPage() {
                                                             <StatusBadge variant={sCfg.variant}>{sCfg.label}</StatusBadge>
                                                             {aOverdue && <StatusBadge variant="critical" dot>Gecikmiş</StatusBadge>}
                                                         </div>
-                                                        {action.status !== 'KAPATILDI' && (
+                                                        {!aCaps.canEdit && aCaps.canComplete && (
+                                                            <Button variant="success" size="xs" onClick={() => completeOwnAction(action)}>
+                                                                Tamamlandı Olarak Bildir
+                                                            </Button>
+                                                        )}
+                                                        {aCaps.canEdit && (
                                                             <Button variant="secondary" size="xs"
                                                                 onClick={() => {
                                                                     setEditAction(action);
@@ -764,6 +820,7 @@ export default function FindingDetailPage() {
                                                     compact
                                                     attachmentKind="action"
                                                     attachments={(action.attachments || []).map(toAttachmentMeta)}
+                                                    disabled={!aCaps.canManageAttachments}
                                                     onUpload={(meta) => uploadActionAttachment(action.id, meta)}
                                                     onUpdate={(att, patch) => { if (att.id) return updateActionAttachment(action.id, att.id, patch); }}
                                                     onRemove={(att) => { if (att.id) removeActionAttachment(action.id, att.id); }}
@@ -963,6 +1020,7 @@ export default function FindingDetailPage() {
                             <FileUpload
                                 attachmentKind="finding"
                                 attachments={finding.attachments.map(toAttachmentMeta)}
+                                disabled={!caps.canManageAttachments}
                                 onUpload={uploadFindingAttachment}
                                 onUpdate={(att, patch) => { if (att.id) return updateFindingAttachment(att.id, patch); }}
                             onRemove={(att) => { if (att.id) removeFindingAttachment(att.id); }}
@@ -975,7 +1033,11 @@ export default function FindingDetailPage() {
                 {activeTab === 'tarihce' && (
                     <DetailSection title="Denetim İzi (Audit Trail)">
                         <p className="text-xs text-slate-500 mb-5">Bulgu üzerindeki tüm işlemler kronolojik olarak kaydedilmektedir.</p>
-                        <Timeline items={timelineItems} emptyText="Henüz kayıt yok." />
+                        {historyFailed ? (
+                            <EmptyState title="Tarihçe yüklenemedi" description="Denetim izi alınamadı; bulgu bilgileri günceldir." actionLabel="Tekrar Dene" onAction={() => load()} />
+                        ) : (
+                            <Timeline items={timelineItems} emptyText="Henüz kayıt yok." />
+                        )}
                     </DetailSection>
                 )}
             </div>

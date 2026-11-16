@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 import { Button } from '../ui';
 import { useToast } from '../ui/Toast';
+import { useAuth } from '../auth';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,40 @@ const fmt = (d?: string | null) => {
 export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, followUp, actions = [], readOnly = false }: FindingFollowUpModalProps) {
     const { success, error: showError } = useToast();
     const isEdit = !!followUp;
+    const { user: currentUser } = useAuth();
+    // Yeniden atama yalnız takip onaylayabilen yöneticiye açık (backend aynı kuralı denetler).
+    const canReassign = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER'].includes(currentUser?.role?.name ?? '');
+    const fuState = followUp as unknown as { assigneeId?: string | null; approvalStatus?: string | null; status?: string } | undefined;
+    const reassignBlocked = fuState?.status === 'ONAYLANDI' || fuState?.approvalStatus === 'ONAYLANDI'
+        ? 'Onaylanmış takip tarihsel kayıttır; atanan kişi değiştirilemez.'
+        : fuState?.status === 'TAMAMLANDI' && fuState?.approvalStatus === 'BEKLIYOR'
+            ? 'Onay bekleyen takipte önce değerlendirmeyi gerekçeyle reddedin.'
+            : null;
+    const [reassign, setReassign] = useState({ assigneeId: '', reason: '' });
+    // Yeniden atama adayları backend kuralından (değerlendirme rolü + aktif + ikinci kontrolcü değil).
+    const [reassignCandidates, setReassignCandidates] = useState<{ id: string; firstName: string; lastName: string }[]>([]);
+    useEffect(() => {
+        if (!isOpen || !canReassign || !followUp?.id) { setReassignCandidates([]); return; }
+        api.getFollowUpAssigneeCandidates(findingId, followUp.id).then(setReassignCandidates).catch(() => setReassignCandidates([]));
+    }, [isOpen, canReassign, findingId, followUp?.id]);
+    const [reassigning, setReassigning] = useState(false);
+    const handleReassign = async () => {
+        if (!followUp || !reassign.assigneeId || !reassign.reason.trim()) {
+            showError('Zorunlu Alan', 'Yeni birinci kontrolcü ve gerekçe zorunludur.');
+            return;
+        }
+        setReassigning(true);
+        try {
+            await api.reassignFollowUpAssignee(findingId, followUp.id, { assigneeId: reassign.assigneeId, reason: reassign.reason.trim() });
+            success('Yeniden atandı', 'Birinci kontrolcü değiştirildi; değerlendirme yeni atanan kişi tarafından yapılacak.');
+            setReassign({ assigneeId: '', reason: '' });
+            onSuccess();
+        } catch (err: any) {
+            showError('Hata', err?.message || 'Yeniden atama yapılamadı.');
+        } finally {
+            setReassigning(false);
+        }
+    };
     const [saving, setSaving] = useState(false);
 
     const [form, setForm] = useState({
@@ -134,7 +169,7 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
             setForm({ actionId: '', status: 'BEKLIYOR', secondControllerId: '', birimCevabi: '', currentStatusDetail: '', internalControlAssessment: '', result: '', resolutionOutcome: '', newFollowUpDate: '', testDate: '', targetResolutionDate: '', explanation: '', notes: '' });
         }
         // İkinci kontrolcü ataması için kullanıcılar.
-        api.getUsers().then((res: any) => setUsers(Array.isArray(res) ? res : res?.data || [])).catch(() => setUsers([]));
+        api.getUserChoices().then((res: any) => setUsers(Array.isArray(res) ? res : res?.data || [])).catch(() => setUsers([]));
         api.getDirectorates({ isActive: 'true' })
             .then((res: any) => setDirectorates(Array.isArray(res) ? res : res?.data || []))
             .catch(() => setDirectorates([]));
@@ -509,6 +544,37 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                         )}
                     </div>
                     </fieldset>
+
+                    {/* Birinci kontrolcü yeniden atama — salt okunur görünümde de yöneticiye açık */}
+                    {isEdit && canReassign && (
+                        <div className="mx-6 mb-4 rounded-xl border border-slate-200 p-4" data-testid="followup-reassign">
+                            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1">Birinci kontrolcüyü yeniden ata</p>
+                            <p className="text-[11px] text-slate-500 mb-3">
+                                Atanan kişi pasife alındıysa veya ayrıldıysa kullanın. Gerekçe denetim izine yazılır; mevcut taslağın değerlendireni sıfırlanır.
+                                Kendinizi veya ikinci kontrolcüyü atayamazsınız.
+                            </p>
+                            {reassignBlocked ? (
+                                <p className="text-xs text-amber-700">{reassignBlocked}</p>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                                    <select aria-label="Yeni birinci kontrolcü" value={reassign.assigneeId}
+                                        onChange={e => setReassign(p => ({ ...p, assigneeId: e.target.value }))}
+                                        className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white">
+                                        <option value="">Yeni birinci kontrolcü…</option>
+                                        {reassignCandidates.filter(u => u.id !== currentUser?.id && u.id !== fuState?.assigneeId).map(u => (
+                                            <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>
+                                        ))}
+                                    </select>
+                                    <input aria-label="Yeniden atama gerekçesi" value={reassign.reason} maxLength={1000}
+                                        onChange={e => setReassign(p => ({ ...p, reason: e.target.value }))}
+                                        placeholder="Gerekçe (zorunlu)" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                                    <Button type="button" variant="secondary" size="sm" onClick={handleReassign} disabled={reassigning}>
+                                        {reassigning ? 'Atanıyor…' : 'Yeniden Ata'}
+                                    </Button>
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {/* Footer */}
                     <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/50">

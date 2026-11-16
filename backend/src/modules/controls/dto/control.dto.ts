@@ -1,4 +1,5 @@
-import { Equals, IsBoolean, IsString, IsNotEmpty, IsOptional, IsEnum, IsArray, IsIn, IsDateString, IsInt, MaxLength, MinLength, ValidateIf } from 'class-validator';
+import { ArrayMaxSize, Equals, IsBoolean, IsString, IsNotEmpty, IsOptional, IsEnum, IsArray, IsIn, IsDateString, IsInt, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { EmptyToUndefined } from '../../../common/decorators';
 
 export enum ControlType { IT_GENERAL = 'IT_GENERAL', IT_APPLICATION = 'IT_APPLICATION', OPERATIONAL = 'OPERATIONAL', FINANCIAL = 'FINANCIAL', COMPLIANCE = 'COMPLIANCE', BT = 'BT', BT_DISI = 'BT_DISI' }
@@ -74,10 +75,32 @@ export class UpdateControlDto {
     // Durum DTO'dan kabul edilmez; mevcut yılın aktif Yıllık Plan kapsamından türetilir.
 }
 
+// Test adımı bazlı gözlem (schema: [{index,text?,observation,attachmentId?}]). Açık sınıf şart:
+// `Record<string, unknown>[]` + implicit conversion her nesneyi boş diziye çeviriyordu (veri kaybı).
+export class StepObservationDto {
+    @Type(() => Number) @IsInt() @Min(0) @Max(199) index: number;
+    @IsOptional() @IsString() @MaxLength(5000) observation?: string;
+    @IsOptional() @IsString() @MaxLength(2000) text?: string;
+    @IsOptional() @IsString() @MaxLength(64) attachmentId?: string;
+}
+
 export class SaveTestDraftDto {
     @IsOptional() @IsString() @MaxLength(10000) resultText?: string;
     @IsOptional() @IsString() @MaxLength(10000) evidenceSummary?: string;
     @IsOptional() @IsIn(['BULGUSU_YOK', 'BULGUSU_VAR']) findingStatus?: string;
-    @IsOptional() @IsArray() stepObservations?: Record<string, unknown>[];
+    @IsOptional() @IsArray() @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => StepObservationDto)
+    stepObservations?: StepObservationDto[];
     @IsInt() contentVersion: number;
+}
+
+// POST controls/:id/tests (ve legacy :id/test) — plansız/manuel test oluşturma.
+// testNo sunucuda üretilir; durum her zaman BEKLIYOR başlar.
+export class CreateControlTestDto {
+    @IsOptional() @EmptyToUndefined() @IsDateString() plannedDate?: string;
+    @IsOptional() @IsString() @MaxLength(500) summary?: string;
+    @IsOptional() @IsString() @MaxLength(10000) description?: string;
+    @IsOptional() @EmptyToUndefined() @IsString() assigneeId?: string;
+    @IsOptional() @EmptyToUndefined() @IsString() secondControllerId?: string;
+    @IsOptional() @EmptyToUndefined() @IsString() directorateId?: string;
+    @IsOptional() @IsString() @MaxLength(100) sprint?: string;
 }

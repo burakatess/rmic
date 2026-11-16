@@ -1,5 +1,7 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
+import { AccessScopeService } from '../../common/services/access-scope.service';
+import { controllerIneligibility } from '../../common/services/controller-eligibility';
 import { computeScopePeriods, computeMonthGroup, monthNumbersToLabels, ScopePeriod } from './control-period.util';
 import { AddScopeDto, BulkAddScopeDto, ChangePeriodicityDto, CopyScopeDto, RemoveScopeDto } from './dto/control-scope.dto';
 import { nextTestCode } from './test-code.util';
@@ -20,7 +22,7 @@ const ACTIVE_TASK_STATUSES = ['BEKLIYOR', 'DEVAM_EDIYOR', 'TAMAMLANDI', 'GERI_GO
  */
 @Injectable()
 export class ControlScopeService {
-    constructor(private prisma: PrismaService) { }
+    constructor(private prisma: PrismaService, @Optional() private accessScope?: AccessScopeService) { }
 
     // ─── Yıl listesi (kod değişikliği gerektirmeden genişler) ────────────────
     async getScopeYears() {
@@ -109,27 +111,40 @@ export class ControlScopeService {
     }
 
     /**
-     * Kontrolcü atama doğrulaması — transaction İÇİNDE çalışır (stale/pasif
-     * kullanıcı okuma riski yok). Aynı kişi iki alana atanamaz; pasif kullanıcı
-     * yeni atama alamaz; ikinci kontrolcü için approveTest'teki asgari yetki
-     * tabanına eşdeğer bir kontrol uygulanır (controls.service.ts::approveTest).
+     * Kontrolcü atama doğrulaması — transaction İÇİNDE çalışır (stale/pasif kullanıcı okuma
+     * riski yok). Ortak uygunluk kuralı: common/services/controller-eligibility.ts (aktiflik +
+     * işlem izni + kayıt kapsamı). Aynı kişi iki alana atanamaz. `controlIds` verilirse kapsam
+     * her kontrolün direktörlüğüne göre doğrulanır.
      */
     /** Public — annual-plan.service.ts taslak satırı kaydederken de aynı doğrulamayı kullanır. */
-    async validateAssignment(tx: any, assigneeId?: string | null, secondControllerId?: string | null) {
+    async validateAssignment(tx: any, assigneeId?: string | null, secondControllerId?: string | null, controlIds: string[] = []) {
         if (assigneeId && secondControllerId && assigneeId === secondControllerId) {
             throw new BadRequestException('Aynı kişi hem atanan kontrolcü hem ikinci kontrolcü olamaz.');
         }
-        for (const [role, id] of [['Atanan Kontrolcü', assigneeId], ['İkinci Kontrolcü', secondControllerId]] as const) {
+        // Kapsam koşulu yalnız kayıt kapsamı uygulaması açıkken anlamlıdır (kapalıyken herkes
+        // kurum geneli) — kontrol direktörlükleri yalnız o durumda okunur.
+        const scopeOn = (this.accessScope?.isEnforced() ?? false) && controlIds.length > 0;
+        const controls: { directorateId: string | null }[] = scopeOn
+            ? await tx.control.findMany({ where: { id: { in: controlIds } }, select: { directorateId: true } })
+            : [];
+        const directorates = [...new Set(controls.map(c => c.directorateId))];
+        const enforced = scopeOn && directorates.length > 0;
+        for (const [label, role, id] of [['Atanan Kontrolcü', 'assignee', assigneeId], ['İkinci Kontrolcü', 'secondController', secondControllerId]] as const) {
             if (!id) continue;
-            const user = await tx.user.findUnique({ where: { id }, select: { isActive: true, role: { select: { permissions: true } } } });
-            if (!user) throw new BadRequestException(`Geçersiz kullanıcı (${role})`);
-            if (!user.isActive) throw new BadRequestException(`Pasif kullanıcı yeni atama alamaz (${role})`);
-            if (role === 'İkinci Kontrolcü') {
-                const perms: string[] = Array.isArray(user.role?.permissions) ? user.role.permissions : [];
-                const eligible = perms.some(p => p === '*' || p === 'control:*' || p === 'control:test' || p.startsWith('control:'));
-                if (!eligible) {
-                    throw new BadRequestException('Seçilen kullanıcı ikinci kontrolcü onayı verebilecek yetkiye sahip değil.');
-                }
+            const user = await tx.user.findUnique({
+                where: { id },
+                select: { isActive: true, role: { select: { permissions: true } }, directorateMemberships: { select: { directorateId: true } } },
+            });
+            if (!user) throw new BadRequestException(`Geçersiz kullanıcı (${label})`);
+            const candidate = {
+                isActive: user.isActive,
+                permissions: user.role?.permissions,
+                directorateIds: (user.directorateMemberships ?? []).map((m: { directorateId: string }) => m.directorateId),
+            };
+            for (const dir of directorates.length ? directorates : [undefined]) {
+                const reason = controllerIneligibility(candidate, role, dir, enforced);
+                if (reason === 'kullanıcı pasif') throw new BadRequestException(`Pasif kullanıcı yeni atama alamaz (${label})`);
+                if (reason) throw new BadRequestException(`Seçilen kullanıcı ${label.toLowerCase()} olamaz: ${reason}.`);
             }
         }
     }
@@ -147,7 +162,7 @@ export class ControlScopeService {
         }
 
         if (dto.assigneeId !== undefined || dto.secondControllerId !== undefined) {
-            await this.validateAssignment(db, dto.assigneeId || null, dto.secondControllerId || null);
+            await this.validateAssignment(db, dto.assigneeId || null, dto.secondControllerId || null, [controlId]);
         }
 
         const results: any[] = [];
@@ -429,7 +444,7 @@ export class ControlScopeService {
         }
 
         if (assignmentChanged) {
-            await this.validateAssignment(db, newAssigneeId, newSecondControllerId);
+            await this.validateAssignment(db, newAssigneeId, newSecondControllerId, [scope.controlId]);
             if (undecidedAssignmentTasks.length > 0) {
                 return {
                     requiresAssignmentDecision: true,
