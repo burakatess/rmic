@@ -264,7 +264,7 @@ class ApiClient {
         return this.request<GmyOption>(`/gmys/${id}`, { method: 'PUT', body: data });
     }
 
-    async getUserOptions(params?: { search?: string; page?: number; limit?: number }) {
+    async getUserOptions(params?: { search?: string; page?: number; limit?: number; approver?: boolean }) {
         return this.request<{ data: UserOption[]; pagination: { total: number; page: number; limit: number; totalPages: number } }>(`/admin/users/options${buildQuery(params)}`);
     }
 
@@ -275,6 +275,20 @@ class ApiClient {
     async getUserChoices(): Promise<UserOption[]> {
         const res = await this.getUserOptions({ limit: 500 });
         return res.data;
+    }
+
+    /** İkinci kontrolcü olabilecek (onay yetkili, aktif) kullanıcılar. */
+    async getApproverChoices(): Promise<UserOption[]> {
+        const res = await this.getUserOptions({ limit: 500, approver: true });
+        return res.data;
+    }
+
+    // ── Maker-checker: aksiyon (bulgu kapsamında) ve takip çalışması işlemleri ──
+    async findingActionOp(findingId: string, actionId: string, op: 'submit' | 'approve' | 'reject' | 'revert' | 'delete-request' | 'delete-approve' | 'delete-reject', reason?: string) {
+        return this.request<any>(`/findings/${findingId}/actions/${actionId}/${op}`, { method: 'POST', body: reason !== undefined ? { reason } : undefined });
+    }
+    async followUpOp(findingId: string, followUpId: string, op: 'revert' | 'delete-request' | 'delete-approve' | 'delete-reject', reason?: string) {
+        return this.request<any>(`/findings/${findingId}/follow-ups/${followUpId}/${op}`, { method: 'POST', body: reason !== undefined ? { reason } : undefined });
     }
 
     // ─── Dosya Yükleme / İndirme ──────────────────────────────────────────────

@@ -54,11 +54,15 @@ model User {
   directorateMemberships        DirectorateMembership[] @relation("DirectorateMembershipUser")
   createdDirectorateMemberships DirectorateMembership[] @relation("DirectorateMembershipCreatedBy")
 
-  updatedAnnualPlanDrafts   AnnualPlanDraft[] @relation("AnnualPlanDraftUpdatedBy")
-  appliedAnnualPlanDrafts   AnnualPlanDraft[] @relation("AnnualPlanDraftAppliedBy")
-  submittedAnnualPlanDrafts AnnualPlanDraft[] @relation("AnnualPlanDraftSubmittedBy")
-  approvedAnnualPlanDrafts  AnnualPlanDraft[] @relation("AnnualPlanDraftApprovedBy")
-  decidedAnnualPlanDrafts   AnnualPlanDraft[] @relation("AnnualPlanDraftDecidedBy")
+  updatedAnnualPlanDrafts    AnnualPlanDraft[] @relation("AnnualPlanDraftUpdatedBy")
+  appliedAnnualPlanDrafts    AnnualPlanDraft[] @relation("AnnualPlanDraftAppliedBy")
+  submittedAnnualPlanDrafts  AnnualPlanDraft[] @relation("AnnualPlanDraftSubmittedBy")
+  approvedAnnualPlanDrafts   AnnualPlanDraft[] @relation("AnnualPlanDraftApprovedBy")
+  decidedAnnualPlanDrafts    AnnualPlanDraft[] @relation("AnnualPlanDraftDecidedBy")
+  findingsAsFirstController  Finding[]         @relation("FindingFirstController")
+  findingsAsSecondController Finding[]         @relation("FindingSecondController")
+  actionsAsFirstController   Action[]          @relation("ActionFirstController")
+  actionsAsSecondController  Action[]          @relation("ActionSecondController")
 }
 
 model Role {
@@ -920,10 +924,17 @@ model Finding {
   gmy         String?
 
   // Assignee
-  assigneeId  String? // User id reference
+  assigneeId         String? // User id reference
+  // Bulgunun birinci / ikinci kontrolcüsü (maker-checker). Varsayılan: kontrol testinin
+  // (Yıllık Plan dönem kontrolü) kontrolcüleri; bulguyu oluşturan değiştirebilir. Aksiyon ve
+  // takip çalışmaları varsayılan olarak bunları devralır.
+  firstController    User?   @relation("FindingFirstController", fields: [firstControllerId], references: [id], onDelete: SetNull)
+  firstControllerId  String?
+  secondController   User?   @relation("FindingSecondController", fields: [secondControllerId], references: [id], onDelete: SetNull)
+  secondControllerId String?
   // Bulguyu oluşturan kullanıcı (sunucu @CurrentUser'dan yazar; istemciden kabul edilmez).
   // Taslak silme yetkisinin (finding:delete:own) dayanağıdır. Eski kayıtlar CREATE denetim izinden doldurulur.
-  createdById String?
+  createdById        String?
 
   // Direktörlük (FK)
   directorateRel Directorate? @relation("FindingDirectorate", fields: [directorateId], references: [id])
@@ -1153,11 +1164,25 @@ model FindingFollowUp {
   sprint                    String?
 
   // Yeni aksiyon
-  newActionRequired Boolean @default(false)
+  newActionRequired Boolean   @default(false)
   newActionId       String?
+  // Onayın yan etkileri (aksiyon/bulgu önceki durumu, oluşan yeni aksiyon / yeni takip) —
+  // ikinci kontrolcü onayı geri alırken bunları geri çevirir.
+  approvalEffects   Json?
+  revertedAt        DateTime?
+  revertedById      String?
+  revertReason      String?   @db.Text
+
+  // Onaylı silme (aksiyondaki gibi).
+  deletionRequestedById   String?
+  deletionRequestedAt     DateTime?
+  deletionReason          String?   @db.Text
+  deletionRejectionReason String?   @db.Text
+  deletedAt               DateTime?
+  deletedById             String?
   // Değerlendirme ile ikinci kontrolcü onayı arasındaki yeni aksiyon taslağı.
   // Kullanıcı/iletişim verisi içerdiğinden yalnız iş akışı servisi üzerinden yazılır.
-  newActionDraft    Json?
+  newActionDraft          Json?
 
   // Attachments
   attachments          FollowUpAttachment[]
@@ -1279,6 +1304,29 @@ model Action {
   // Content
   notes String? @db.Text
 
+  // ── Maker-checker: birinci kontrolcü girer/düzenler, onaya gönderir; ikinci kontrolcü onaylar,
+  // gerekçeyle reddeder veya onayı geri alır. Onayda aksiyonun takip çalışması oluşur.
+  firstController    User?               @relation("ActionFirstController", fields: [firstControllerId], references: [id], onDelete: SetNull)
+  firstControllerId  String?
+  secondController   User?               @relation("ActionSecondController", fields: [secondControllerId], references: [id], onDelete: SetNull)
+  secondControllerId String?
+  approvalState      RecordApprovalState @default(TASLAK)
+  submittedAt        DateTime?
+  approvedById       String?
+  approvedAt         DateTime?
+  rejectionReason    String?             @db.Text
+  revertedAt         DateTime?
+  revertReason       String?             @db.Text
+  approvalEffects    Json? // onayın yan etkileri (oluşan takip) — onay geri alınırken kullanılır
+
+  // ── Onaylı silme: birinci kontrolcü talep eder, ikinci kontrolcü onaylarsa "Silindi" (status=IPTAL).
+  deletionRequestedById   String?
+  deletionRequestedAt     DateTime?
+  deletionReason          String?   @db.Text
+  deletionRejectionReason String?   @db.Text
+  deletedAt               DateTime?
+  deletedById             String?
+
   // Extension tracking
   extensionReason   String? @db.Text
   extensionApproved Boolean @default(false)
@@ -1297,6 +1345,9 @@ model Action {
   updatedAt DateTime @updatedAt
 
   @@index([findingId])
+  @@index([approvalState])
+  @@index([firstControllerId])
+  @@index([secondControllerId])
   @@index([ownerId])
   @@index([directorateId])
   @@index([status])
@@ -1322,6 +1373,14 @@ model EffectivenessReview {
   approvedAt         DateTime?
 
   notes String? @db.Text
+}
+
+// Aksiyon onay durumu (maker-checker).
+enum RecordApprovalState {
+  TASLAK
+  ONAY_BEKLIYOR
+  ONAYLANDI
+  REDDEDILDI
 }
 
 enum ActionStatus {

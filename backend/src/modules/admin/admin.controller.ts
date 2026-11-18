@@ -46,11 +46,13 @@ export class AdminController {
         @Query('search') search?: string,
         @Query('page') page?: string,
         @Query('limit') limit?: string,
+        @Query('approver') approver?: string,
     ) {
         return this.adminService.findUserOptions({
             search: search?.slice(0, 200),
             page: Math.max(1, Number(page) || 1),
             limit: Math.min(500, Math.max(1, Number(limit) || 100)),
+            approver: approver === 'true',
         });
     }
 

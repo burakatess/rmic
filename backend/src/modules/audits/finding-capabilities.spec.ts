@@ -25,7 +25,10 @@ describe('finding-capabilities — arayüz yetenekleri uç kurallarını yansıt
 
     it('aksiyon: sorumlu kendi aksiyonunu tamamlar/uzatır ama düzenleyemez; başkasınınkine dokunamaz', () => {
         const own = actionCapabilities({ status: 'DEVAM_EDIYOR', ownerId: 'u1' }, { id: 'u1', role: 'AUDITEE' }, 'PARTIAL');
-        expect(own).toEqual({ canEdit: false, canComplete: true, canExtend: true, canManageAttachments: false });
+        expect(own).toEqual({
+            canEdit: false, canComplete: true, canExtend: true, canManageAttachments: false,
+            canSubmit: false, canApprove: false, canRevert: false, canRequestDelete: false, canDecideDelete: false,
+        });
         const other = actionCapabilities({ status: 'DEVAM_EDIYOR', ownerId: 'u2' }, { id: 'u1', role: 'AUDITEE' }, 'FULL');
         expect(Object.values(other).every(v => v === false)).toBe(true);
         // PARTIAL erişimli AUDITOR başkasının aksiyonunda işlem yapamaz
@@ -36,7 +39,22 @@ describe('finding-capabilities — arayüz yetenekleri uç kurallarını yansıt
     it('aksiyon: kapatılmış aksiyonda işlem yok; tamamlanmış aksiyon yeniden tamamlanmaz; RCM tamamlama ucuna yetkili değil', () => {
         expect(Object.values(actionCapabilities({ status: 'KAPATILDI', ownerId: 'u1' }, { id: 'u1', role: 'AUDITOR' }, 'FULL')).every(v => v === false)).toBe(true);
         expect(actionCapabilities({ status: 'TAMAMLANDI', ownerId: 'u1' }, { id: 'u1', role: 'AUDITEE' }, 'PARTIAL').canComplete).toBe(false);
-        expect(actionCapabilities({ status: 'DEVAM_EDIYOR', ownerId: 'x' }, { id: 'u1', role: 'RISK_CONTROL_MANAGER' }, 'FULL')).toMatchObject({ canEdit: true, canComplete: false });
+        // Onaylı aksiyon düzenlenemez; taslak düzenlenir (RCM tamamlama ucuna yine yetkili değil).
+        expect(actionCapabilities({ status: 'DEVAM_EDIYOR', ownerId: 'x' }, { id: 'u1', role: 'RISK_CONTROL_MANAGER' }, 'FULL')).toMatchObject({ canEdit: false, canComplete: false });
+        expect(actionCapabilities({ status: 'DEVAM_EDIYOR', ownerId: 'x', approvalState: 'TASLAK' }, { id: 'u1', role: 'RISK_CONTROL_MANAGER' }, 'FULL')).toMatchObject({ canEdit: true, canComplete: false });
+    });
+
+    it('aksiyon maker-checker: birinci kontrolcü düzenler/gönderir/silme talep eder; ikinci kontrolcü onaylar/geri alır/silmeyi sonuçlandırır', () => {
+        const base = { status: 'BEKLIYOR', ownerId: 'o', firstControllerId: 'maker', secondControllerId: 'checker' };
+        const maker = { id: 'maker', role: 'AUDITOR' }, checker = { id: 'checker', role: 'RISK_CONTROL_MANAGER' }, other = { id: 'x', role: 'SYSTEM_ADMIN' };
+        expect(actionCapabilities({ ...base, approvalState: 'TASLAK' }, maker, 'FULL')).toMatchObject({ canEdit: true, canSubmit: true, canRequestDelete: true, canApprove: false });
+        expect(actionCapabilities({ ...base, approvalState: 'TASLAK' }, other, 'FULL')).toMatchObject({ canEdit: false, canSubmit: false });
+        expect(actionCapabilities({ ...base, approvalState: 'ONAY_BEKLIYOR' }, maker, 'FULL')).toMatchObject({ canEdit: false, canSubmit: false, canRequestDelete: false });
+        expect(actionCapabilities({ ...base, approvalState: 'ONAY_BEKLIYOR' }, checker, 'FULL')).toMatchObject({ canApprove: true, canRevert: false });
+        expect(actionCapabilities({ ...base, approvalState: 'ONAY_BEKLIYOR' }, other, 'FULL').canApprove).toBe(false);
+        expect(actionCapabilities({ ...base, approvalState: 'ONAYLANDI' }, checker, 'FULL')).toMatchObject({ canRevert: true, canApprove: false });
+        expect(actionCapabilities({ ...base, approvalState: 'ONAYLANDI', deletionRequestedAt: new Date() }, checker, 'FULL')).toMatchObject({ canDecideDelete: true, canRevert: false });
+        expect(actionCapabilities({ ...base, approvalState: 'ONAYLANDI', deletionRequestedAt: new Date() }, maker, 'FULL')).toMatchObject({ canRequestDelete: false, canEdit: false });
     });
 
     it('withCapabilities her aksiyona bayrak ekler', () => {

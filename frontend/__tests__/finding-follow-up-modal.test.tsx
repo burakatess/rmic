@@ -44,12 +44,27 @@ describe('Bulgu takip değerlendirme formu', () => {
         );
 
         fireEvent.click(screen.getByRole('button', { name: /^Yeterli/ }));
-        fireEvent.click(screen.getByRole('button', { name: 'Güncelle' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Kaydet' }));
 
         await waitFor(() => expect(api.updateFollowUp).toHaveBeenCalledWith(
             'f-1', 'fu-1', expect.objectContaining({ result: 'YETERLI', resolutionOutcome: null }),
         ));
         expect(screen.getByText(/Kapanış kararı elle seçilmez/)).toBeInTheDocument();
+    });
+
+    it('Kaydet onaya göndermez; ayrı düğme TAMAMLANDI ile ikinci kontrolcü onayına gönderir', async () => {
+        render(
+            <FindingFollowUpModal
+                isOpen findingId="f-1" followUp={{ ...followUp, secondControllerId: 'checker' } as any}
+                actions={[]} onClose={jest.fn()} onSuccess={jest.fn()}
+            />,
+        );
+        fireEvent.click(screen.getByRole('button', { name: /^Yeterli/ }));
+        fireEvent.click(screen.getByRole('button', { name: 'Kaydet' }));
+        await waitFor(() => expect(api.updateFollowUp).toHaveBeenCalledWith('f-1', 'fu-1', expect.objectContaining({ status: 'DEVAM_EDIYOR', result: 'YETERLI' })));
+        (api.updateFollowUp as jest.Mock).mockClear();
+        fireEvent.click(screen.getByRole('button', { name: '2. kontrolcü onayına gönder' }));
+        await waitFor(() => expect(api.updateFollowUp).toHaveBeenCalledWith('f-1', 'fu-1', expect.objectContaining({ status: 'TAMAMLANDI', result: 'YETERLI' })));
     });
 
     it('YETERSIZ sonucunda erteleme seçilince yeni takip tarihini gösterir', async () => {
@@ -91,7 +106,7 @@ describe('Bulgu takip değerlendirme formu', () => {
             />,
         );
         fireEvent.click(screen.getByRole('button', { name: /^Yeni Aksiyon Gerekli/ }));
-        fireEvent.click(screen.getByRole('button', { name: 'Güncelle' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Kaydet' }));
         await new Promise(r => setTimeout(r, 0));
         expect(api.updateFollowUp).not.toHaveBeenCalled();
     });
@@ -108,7 +123,7 @@ describe('Bulgu takip değerlendirme formu', () => {
         await waitFor(() => expect(screen.getByRole('option', { name: 'Bilgi Teknolojileri' })).toBeInTheDocument());
         fireEvent.change(screen.getByLabelText('Sorumlu Birim *'), { target: { value: 'dir-1' } });
         fireEvent.change(screen.getByLabelText('Hedef Tarih *'), { target: { value: '2099-12-31' } });
-        fireEvent.click(screen.getByRole('button', { name: 'Güncelle' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Kaydet' }));
 
         await waitFor(() => expect(api.updateFollowUp).toHaveBeenCalledWith(
             'f-1', 'fu-1',
