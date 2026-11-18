@@ -47,6 +47,17 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
         otherAuditeeToken = await login('sec-auditee2@e2e.local');
     });
 
+    /** Maker-checker: aksiyon taslak oluşur; birinci kontrolcü (admin) onaya gönderir, ikinci kontrolcü (manager) onaylar → takip açılır. */
+    async function approveAction(fId: string, actionId: string) {
+        const a = await prisma.action.findUniqueOrThrow({ where: { id: actionId } });
+        if (!a.secondControllerId) {
+            await request(app.getHttpServer()).put(`/findings/${fId}/actions/${actionId}`).set('Authorization', `Bearer ${adminToken}`)
+                .send({ secondControllerId: managerId }).expect(200);
+        }
+        await request(app.getHttpServer()).post(`/findings/${fId}/actions/${actionId}/submit`).set('Authorization', `Bearer ${adminToken}`).expect(201);
+        await request(app.getHttpServer()).post(`/findings/${fId}/actions/${actionId}/approve`).set('Authorization', `Bearer ${managerToken}`).expect(201);
+    }
+
     afterAll(async () => { await app.close(); });
 
     // ─── Madde 1: Merkezi PermissionsGuard ────────────────────────────────
@@ -168,6 +179,7 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
             const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
             const action = (await request(app.getHttpServer()).post(`/findings/${fId}/actions`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ description: 'Kapanış testi aksiyonu yeterince uzun açıklama', ownerId: adminId, dueDate }).expect(201)).body;
+            await approveAction(fId, action.id);
 
             // Aksiyon sorumlusu "tamamla" ucuyla tamamlar (COMPLETED) — onaylı kapanış DEĞİL → kapanış reddedilir.
             // Genel güncelleme ucu TAMAMLANDI/KAPATILDI kabul etmez (DTO).
@@ -223,6 +235,7 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
             const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
             const action = (await request(app.getHttpServer()).post(`/findings/${fId}/actions`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ description: 'Onay akışı aksiyonu yeterince uzun açıklama', ownerId: adminId, dueDate }).expect(201)).body;
+            await approveAction(fId, action.id);
             const fu = (await request(app.getHttpServer()).get(`/findings/${fId}/follow-ups`).set('Authorization', `Bearer ${adminToken}`).expect(200))
                 .body.find((f: any) => f.actionId === action.id);
             // admin: değerlendirme = YETERLI (evaluator=admin)
@@ -290,6 +303,7 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
             const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
             const action = (await request(app.getHttpServer()).post(`/findings/${fId}/actions`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ description: 'Rollback testi aksiyonu yeterince uzun açıklama', ownerId: adminId, dueDate }).expect(201)).body;
+            await approveAction(fId, action.id);
             const fu = (await request(app.getHttpServer()).get(`/findings/${fId}/follow-ups`).set('Authorization', `Bearer ${adminToken}`).expect(200))
                 .body.find((f: any) => f.actionId === action.id);
             const put = (token: string, body: Record<string, unknown>) =>
@@ -336,6 +350,7 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
             const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
             const action = (await request(app.getHttpServer()).post(`/findings/${fId}/actions`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ description: 'Paralel yeni aksiyon aksiyonu yeterince uzun açıklama', ownerId: adminId, dueDate }).expect(201)).body;
+            await approveAction(fId, action.id);
             const fu = (await request(app.getHttpServer()).get(`/findings/${fId}/follow-ups`).set('Authorization', `Bearer ${adminToken}`).expect(200))
                 .body.find((f: any) => f.actionId === action.id);
             const naDir = await createTestDirectorate(prisma);
@@ -436,6 +451,7 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
             const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
             const action = (await request(app.getHttpServer()).post(`/findings/${fId}/actions`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ description: 'SC atama aksiyonu yeterince uzun açıklama', ownerId: adminId, dueDate }).expect(201)).body;
+            await approveAction(fId, action.id);
             const fu = (await request(app.getHttpServer()).get(`/findings/${fId}/follow-ups`).set('Authorization', `Bearer ${adminToken}`).expect(200))
                 .body.find((f: any) => f.actionId === action.id);
             await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
@@ -453,6 +469,7 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
             const pastDue = new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0];
             const action = (await request(app.getHttpServer()).post(`/findings/${fId}/actions`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ description: 'Süresi geçmiş aksiyon yeterince uzun açıklama', ownerId: adminId, dueDate: pastDue }).expect(201)).body;
+            await approveAction(fId, action.id);
             // Auto-oluşan takibi sil ki "açık takip yok" koşulu sağlansın
             const autoFu = (await request(app.getHttpServer()).get(`/findings/${fId}/follow-ups`).set('Authorization', `Bearer ${adminToken}`).expect(200))
                 .body.find((f: any) => f.actionId === action.id);
@@ -504,8 +521,12 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
             const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
             const action = (await request(app.getHttpServer()).post(`/findings/${fId}/actions`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ description: 'İkinci kontrolcüsüz onay aksiyonu yeterince uzun açıklama', ownerId: adminId, dueDate }).expect(201)).body;
+            await approveAction(fId, action.id);
             const fu = (await request(app.getHttpServer()).get(`/findings/${fId}/follow-ups`).set('Authorization', `Bearer ${adminToken}`).expect(200))
                 .body.find((f: any) => f.actionId === action.id);
+            // Takip artık ikinci kontrolcüyü aksiyondan devralır; ikinci kontrolcüsü olmayan (eski) kayıt senaryosu açıkça kurulur.
+            expect(fu.secondControllerId).toBe(managerId);
+            await prisma.findingFollowUp.update({ where: { id: fu.id }, data: { secondControllerId: null } });
             await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ result: 'YETERLI' }).expect(200);
             // Negatif: ikinci kontrolcü olmadan onaya gönderilemez.

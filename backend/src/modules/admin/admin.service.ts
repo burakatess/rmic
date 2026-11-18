@@ -32,11 +32,13 @@ export class AdminService {
         return users.map(({ passwordHash, ...user }) => user);
     }
 
-    async findUserOptions(params: { search?: string; page: number; limit: number }) {
-        const where = params.search ? { OR: [
+    async findUserOptions(params: { search?: string; page: number; limit: number; approver?: boolean }) {
+        const where: Prisma.UserWhereInput = params.search ? { OR: [
             { firstName: { contains: params.search, mode: 'insensitive' as const } },
             { lastName: { contains: params.search, mode: 'insensitive' as const } },
         ] } : {};
+        // approver=true: ikinci kontrolcü olabilecekler (onay yetkili roller, aktif) — rol bilgisi dönmez.
+        if (params.approver) Object.assign(where, { isActive: true, role: { name: { in: ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER'] } } });
         const [data, total] = await Promise.all([
             this.prisma.user.findMany({
                 where, skip: (params.page - 1) * params.limit, take: params.limit,

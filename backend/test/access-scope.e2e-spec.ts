@@ -69,7 +69,7 @@ describe('E2E — Kayıt kapsamı (birim / atama / kurum geneli)', () => {
 
         const due = new Date(Date.now() + 30 * 86400000);
         const mkAction = (code: string, findingId: string, ownerId: string) =>
-            prisma.action.create({ data: { actionId: code, description: `${code} aksiyon`, findingId, ownerId, dueDate: due } });
+            prisma.action.create({ data: { actionId: code, description: `${code} aksiyon`, findingId, ownerId, dueDate: due, approvalState: 'ONAYLANDI' } }); // takibi açılmış (onaylı) aksiyon
         ids.a1 = (await mkAction('SC-A-1', ids.fA, ids.admin)).id;
         ids.b1 = (await mkAction('SC-B-1', ids.fB, ids.assigneeOnly)).id;
         ids.b2 = (await mkAction('SC-B-2', ids.fB, ids.admin)).id;
@@ -155,7 +155,10 @@ describe('E2E — Kayıt kapsamı (birim / atama / kurum geneli)', () => {
         it('kısmi kullanıcı: yetenek bayrakları yalnız kendi aksiyon işlemlerini açar; gizli kayıt kimlikleri yanıtta yok', async () => {
             const res = await http().get(`/findings/${ids.fB}`).set(as('assigneeOnly')).expect(200);
             expect(Object.values(res.body.capabilities).every(v => v === false)).toBe(true);
-            expect(res.body.actions[0].capabilities).toEqual({ canEdit: false, canComplete: true, canExtend: true, canManageAttachments: false });
+            expect(res.body.actions[0].capabilities).toEqual({
+                canEdit: false, canComplete: true, canExtend: true, canManageAttachments: false,
+                canSubmit: false, canApprove: false, canRevert: false, canRequestDelete: false, canDecideDelete: false,
+            });
             const raw = JSON.stringify(res.body);
             for (const hidden of ['SC-B-2', 'SC-T-B-2', ids.b2, ids.fuB2, ids.attB2, ids.findingAttB, 'birim cevabı']) {
                 expect(raw).not.toContain(hidden);
