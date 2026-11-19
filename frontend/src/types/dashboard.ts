@@ -56,7 +56,9 @@ export interface DashboardApprovals {
     total: number;
     byType: {
         controlTest: { count: number; href: string };
+        action: { count: number; href: string };
         followUp: { count: number; href: string };
+        deletion: { count: number; href: string };
         reconciliation: { count: number; href: string };
     };
 }

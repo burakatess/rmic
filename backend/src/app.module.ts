@@ -24,6 +24,7 @@ import { RiskActionsModule } from './modules/risk-actions/risk-actions.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { RiskProposalsModule } from './modules/risk-proposals/risk-proposals.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ApprovalsModule } from './modules/approvals/approvals.module';
 import { AiModule } from './modules/ai/ai.module';
 import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 import { LibraryModule } from './modules/library/library.module';
@@ -57,6 +58,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     ActionsModule,
     ReportsModule,
     NotificationsModule,
+    ApprovalsModule,
     ComplianceModule,
     AdminModule,
     RiskEntryModule,

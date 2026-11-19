@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
 import { ControlDashboardService } from '../controls/control-dashboard.service';
 import { ControlsService } from '../controls/controls.service';
+import { ApprovalsService } from '../approvals/approvals.service';
 import { matchesPermission } from '../../common/util/permission-match';
 import {
     CLOSED_ACTION_STATUSES, OPEN_TEST_STATUSES, OPEN_FOLLOWUP_STATUSES,
@@ -94,6 +95,7 @@ export class DashboardService {
         private scopeService: DirectorateScopeService,
         private controlDashboard: ControlDashboardService,
         private controlsService: ControlsService,
+        private approvals: ApprovalsService,
     ) { }
 
     async getScopeOptions(userId: string, permissions: string[]) {
@@ -146,11 +148,10 @@ export class DashboardService {
         void permissions;
         const isReconciliationApprover = RECONCILIATION_APPROVER_ROLES.has(normalizeRole(userRole));
 
-        const [testApprovals, followUpApprovals, reconciliationCandidates] = await Promise.all([
+        const [testApprovals, workflowPending, reconciliationCandidates] = await Promise.all([
             this.controlsService.getMyPendingApprovals(userId, {}),
-            this.prisma.findingFollowUp.count({
-                where: { secondControllerId: userId, approvalStatus: 'BEKLIYOR', result: { not: null } },
-            }),
+            // Maker-checker iş kutusu (aksiyon onayı, takip onayı, silme talepleri) — Onaylarım ile aynı kaynak.
+            this.approvals.pendingFor(userId),
             // Onaylama yetkisi ROL'e bağlı (audits.controller.ts::mutabakatOnayla
             // @Roles ile AYNI) — yetkisiz kullanıcıya sıfır göster (görüntüleme
             // izni onay yetkisi anlamına gelmez, Madde 8).
@@ -176,11 +177,17 @@ export class DashboardService {
         const reconciliationApprovals = reconciliationCandidates.filter(f => f.statusHistory[0]?.evaluator !== userId).length;
 
         const testCount = testApprovals.data.length;
+        const countKind = (...kinds: string[]) => workflowPending.filter(i => kinds.includes(i.kind)).length;
+        const actionApprovals = countKind('ACTION_APPROVAL');
+        const followUpApprovals = countKind('FOLLOWUP_APPROVAL');
+        const deletionRequests = countKind('ACTION_DELETION', 'FOLLOWUP_DELETION');
         return {
-            total: testCount + followUpApprovals + reconciliationApprovals,
+            total: testCount + actionApprovals + followUpApprovals + deletionRequests + reconciliationApprovals,
             byType: {
-                controlTest: { count: testCount, href: '/approvals' },
-                followUp: { count: followUpApprovals, href: '/follow-ups' },
+                controlTest: { count: testCount, href: '/approvals?tab=tests' },
+                action: { count: actionApprovals, href: '/approvals' },
+                followUp: { count: followUpApprovals, href: '/approvals' },
+                deletion: { count: deletionRequests, href: '/approvals' },
                 reconciliation: { count: reconciliationApprovals, href: '/findings' },
             },
         };

@@ -42,6 +42,28 @@ function buildQuery(params?: object): string {
 /** Backend MAX_PAGE_LIMIT (list-query.ts) ile aynı. */
 const LIST_FETCH_LIMIT = 500;
 
+export interface WorkflowPendingItem {
+    kind: 'ACTION_APPROVAL' | 'ACTION_DELETION' | 'FOLLOWUP_APPROVAL' | 'FOLLOWUP_DELETION';
+    recordId: string;
+    code: string;
+    description: string | null;
+    finding: { id: string; findingId: string; summary: string | null };
+    requestedBy: { id: string; name: string } | null;
+    requestedAt: string;
+    reason: string | null;
+    link: string;
+}
+
+export interface WorkflowDecisionItem {
+    kind: string;
+    recordId: string;
+    code: string;
+    finding: { id: string; findingId: string; summary: string | null };
+    reason: string | null;
+    date: string;
+    link: string;
+}
+
 export interface GmyOption {
     id: string; name: string; code?: string | null; isActive: boolean;
     responsibleUser?: { id: string; firstName: string; lastName: string } | null;
@@ -435,6 +457,15 @@ class ApiClient {
         return this.request(`/controls/tests/${testId}/cancel-final`, { method: 'PATCH', body: { reason } });
     }
 
+    // Maker-checker iş kutusu: onayımı bekleyen aksiyon/takip işleri + kayıtlarım hakkındaki kararlar
+    async getWorkflowApprovals() {
+        return this.request<{ items: WorkflowPendingItem[]; decisions: WorkflowDecisionItem[] }>('/workflow-approvals');
+    }
+
+    async getWorkflowApprovalCount() {
+        return this.request<{ count: number }>('/workflow-approvals/count');
+    }
+
     // Merkezi Onaylar
     async getMyPendingApprovals(params?: Record<string, string>) {
         const query = params ? '?' + new URLSearchParams(params).toString() : '';
@@ -715,8 +746,9 @@ class ApiClient {
         return this.request(`/actions/${id}`);
     }
 
-    async deleteAction(id: string) {
-        return this.request(`/actions/${id}`, { method: 'DELETE' });
+    /** Maker-checker: silme talebi açar (gerekçe zorunlu); ikinci kontrolcü onaylayınca "Silindi" olur. */
+    async deleteAction(id: string, reason: string) {
+        return this.request(`/actions/${id}`, { method: 'DELETE', body: { reason } });
     }
 
     async createStandaloneAction(data: unknown) {

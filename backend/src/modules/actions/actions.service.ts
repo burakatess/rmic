@@ -5,6 +5,7 @@ import { projectActionStatus } from '../../common/workflow/workflow-projection';
 import { parseMultiValue, personFieldWhere } from '../../common/util/person-filter';
 import { parsePaging, safeOrderBy } from '../../common/util/list-query';
 import { Prisma } from '@prisma/client';
+const APPROVAL_STATES = new Set(['TASLAK', 'ONAY_BEKLIYOR', 'ONAYLANDI', 'REDDEDILDI']);
 
 const normalizeRole = (r?: string): string =>
     ({ ADMIN: 'SYSTEM_ADMIN', RISK_MANAGER: 'RISK_CONTROL_MANAGER', CONTROL_OWNER: 'AUDITEE' }[r ?? ''] ?? r ?? '');
@@ -53,6 +54,17 @@ export class ActionsService {
         } else if (/^\d{4}-\d{2}$/.test(dueMonth || '')) {
             const [year, month] = dueMonth.split('-').map(Number);
             where.dueDate = { gte: new Date(year, month - 1, 1), lt: new Date(year, month, 1) };
+        }
+        // Maker-checker: onay durumu beyaz listeyle; "awaitingMe" = ikinci kontrolcüsü olduğum onay bekleyenler.
+        if (query.approvalState) {
+            const states = parseMultiValue(query.approvalState).filter((s: string) => APPROVAL_STATES.has(s));
+            if (states.length) where.approvalState = { in: states };
+        }
+        if (query.awaitingMe === 'true' && currentUserId) {
+            where.AND = [...(where.AND || []), {
+                secondControllerId: currentUserId, deletedAt: null,
+                OR: [{ approvalState: 'ONAY_BEKLIYOR' }, { deletionRequestedAt: { not: null } }],
+            }];
         }
         if (source) where.source = source;
         if (riskId) where.riskId = riskId;
@@ -213,10 +225,10 @@ export class ActionsService {
         }, userId, { progress: true }); // ilerleme notu/durumu onaylı aksiyonda da güncellenir
     }
 
-    async delete(id: string, userId: string) {
+    async delete(id: string, userId: string, reason: string) {
         const action = await this.prisma.action.findUnique({ where: { id } });
         if (!action) throw new NotFoundException('Aksiyon bulunamadı');
-        return this.audits.deleteAction(action.findingId, id, userId);
+        return this.audits.deleteAction(action.findingId, id, userId, reason);
     }
 
     async complete(id: string, data: { evidenceIds?: string[] }, userId: string, role?: string) {

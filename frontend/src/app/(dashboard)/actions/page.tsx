@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
 import {
-    PageShell, PageHeader, DataTable, StatusBadge, Button, ConfirmDialog,
+    PageShell, PageHeader, DataTable, StatusBadge, Button, Modal,
     KpiCard, KpiGrid, QuickFilterBar, AdvancedFilterPanel, ActiveFilterChips, SavedViewMenu,
 } from '@/components/ui';
 import type { ColumnDef, ActiveFilterChip, QuickFilterItem, AdvancedFilterField } from '@/components/ui';
@@ -20,6 +20,9 @@ interface Action {
     description: string;
     source: string;
     status: string;
+    approvalState?: string | null;
+    deletionRequestedAt?: string | null;
+    secondControllerId?: string | null;
     dueDate: string;
     slaInDays: number;
     notes?: string | null;
@@ -61,6 +64,14 @@ const statusLabels: Record<string, { label: string; variant: BadgeVariant }> = {
     COMPLETED: { label: 'Tamamlandı', variant: 'success' },
     CLOSED: { label: 'Kapatıldı', variant: 'neutral' },
     OVERDUE: { label: 'Gecikmiş', variant: 'critical' },
+};
+
+// Maker-checker onay durumu (birinci kontrolcü girer, ikinci kontrolcü onaylar)
+const approvalLabels: Record<string, { label: string; variant: BadgeVariant }> = {
+    TASLAK: { label: 'Taslak', variant: 'neutral' },
+    ONAY_BEKLIYOR: { label: 'Onay bekliyor', variant: 'warning' },
+    ONAYLANDI: { label: 'Onaylandı', variant: 'success' },
+    REDDEDILDI: { label: 'Reddedildi', variant: 'critical' },
 };
 
 const CLOSED_STATUSES = ['TAMAMLANDI', 'KAPATILDI', 'COMPLETED', 'CLOSED'];
@@ -105,6 +116,7 @@ function ActionsContent() {
     const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
     const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [deleteReason, setDeleteReason] = useState('');
 
     // Dashboard linkleri (?status=OVERDUE vb.) mount'ta uygulanır
     useEffect(() => {
@@ -116,10 +128,11 @@ function ActionsContent() {
         }
         const ownerIds = searchParams.get('ownerIds');
         const source = searchParams.get('source');
+        const approvalState = searchParams.get('approvalState');
         const search = searchParams.get('search');
         const quick = searchParams.get('quick');
         const urlPage = Number(searchParams.get('page'));
-        setActiveFilters(p => ({ ...p, ...(ownerIds ? { ownerIds } : {}), ...(source ? { source } : {}) }));
+        setActiveFilters(p => ({ ...p, ...(ownerIds ? { ownerIds } : {}), ...(source ? { source } : {}), ...(approvalState && approvalLabels[approvalState] ? { approvalState } : {}) }));
         if (search) setSearchQuery(search);
         if (quick) setQuickFilter(quick);
         if (Number.isInteger(urlPage) && urlPage > 0) setPage(urlPage);
@@ -147,7 +160,8 @@ function ActionsContent() {
             if (quickFilter === 'buay') quickParams.dueMonth = new Date().toISOString().slice(0, 7);
             if (quickFilter === 'devam') quickParams.status = 'BEKLIYOR,DEVAM_EDIYOR,OPEN,IN_PROGRESS,YETERSIZ';
             if (quickFilter === 'tamamlanan') quickParams.status = 'TAMAMLANDI,COMPLETED,KAPATILDI,CLOSED';
-            const result = await api.getActions({ page, limit: pageSize, ...(searchQuery ? { search: searchQuery } : {}), ...(activeFilters.status ? { status: activeFilters.status } : {}), ...(activeFilters.source ? { source: activeFilters.source } : {}), ...(activeFilters.ownerIds ? { ownerIds: activeFilters.ownerIds } : {}), ...quickParams }) as { data: Action[]; pagination?: { total: number } };
+            if (quickFilter === 'onayim') quickParams.awaitingMe = 'true';
+            const result = await api.getActions({ page, limit: pageSize, ...(searchQuery ? { search: searchQuery } : {}), ...(activeFilters.status ? { status: activeFilters.status } : {}), ...(activeFilters.source ? { source: activeFilters.source } : {}), ...(activeFilters.ownerIds ? { ownerIds: activeFilters.ownerIds } : {}), ...(activeFilters.approvalState ? { approvalState: activeFilters.approvalState } : {}), ...quickParams }) as { data: Action[]; pagination?: { total: number } };
             setActions(result.data || []);
             setTotalCount(result.pagination?.total || 0);
         } catch (error) {
@@ -158,7 +172,7 @@ function ActionsContent() {
             setLoading(false);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeFilters.ownerIds, activeFilters.status, activeFilters.source, searchQuery, quickFilter, page]);
+    }, [activeFilters.ownerIds, activeFilters.status, activeFilters.source, activeFilters.approvalState, searchQuery, quickFilter, page]);
 
     useEffect(() => { loadActions(); }, [loadActions]);
     useEffect(() => { api.getUserOptions({ limit: 500 }).then(r => setUsers(r.data)).catch(() => setUsers([])); }, []);
@@ -170,6 +184,7 @@ function ActionsContent() {
         'buay': (a) => isInCurrentMonth(a),
         'devam': (a) => IN_PROGRESS_STATUSES.includes(a.status),
         'tamamlanan': (a) => CLOSED_STATUSES.includes(a.status),
+        'onayim': (a) => a.secondControllerId === user?.id && (a.approvalState === 'ONAY_BEKLIYOR' || !!a.deletionRequestedAt),
     }), [user?.id]);
 
     const baseFilteredActions = useMemo(() => {
@@ -180,6 +195,7 @@ function ActionsContent() {
             }
             if (activeFilters['status'] && activeFilters['status'] !== 'all' && a.status !== activeFilters['status']) return false;
             if (activeFilters['source'] && activeFilters['source'] !== 'all' && a.source !== activeFilters['source']) return false;
+            if (activeFilters['approvalState'] && (a.approvalState ?? 'ONAYLANDI') !== activeFilters['approvalState']) return false;
             if (quickFilter && quickFilterFns[quickFilter] && !quickFilterFns[quickFilter](a)) return false;
             return true;
         });
@@ -248,6 +264,19 @@ function ActionsContent() {
             },
         },
         {
+            key: 'approvalState', header: 'Onay', defaultWidth: 130,
+            filter: { type: 'select', options: Object.entries(approvalLabels).map(([k, v]) => ({ value: k, label: v.label })), fn: (a: Action, v) => (a.approvalState ?? 'ONAYLANDI') === v },
+            render: (a) => {
+                const c = approvalLabels[a.approvalState ?? 'ONAYLANDI'];
+                return (
+                    <div className="flex flex-col gap-1 items-start">
+                        {c && <StatusBadge variant={c.variant}>{c.label}</StatusBadge>}
+                        {a.deletionRequestedAt && <span className="text-[11px] text-red-600">Silme onayı bekliyor</span>}
+                    </div>
+                );
+            },
+        },
+        {
             key: 'relations', header: 'İlişkiler', defaultWidth: 140,
             render: (a) => (
                 <div className="flex flex-col gap-1">
@@ -312,20 +341,24 @@ function ActionsContent() {
         }
     };
 
+    // Maker-checker: toplu silme her aksiyon için gerekçeli silme talebi açar; ikinci kontrolcü onaylayınca silinir.
     const handleBulkDelete = async () => {
+        const reason = deleteReason.trim();
+        if (!reason) { showError('Gerekçe gerekli', 'Silme talebi için gerekçe yazın.'); return; }
         setDeleting(true);
-        try {
-            for (const id of selectedRows) await api.deleteAction(id);
-            setActions(prev => prev.filter(a => !selectedRows.has(a.id)));
-            setSelectedRows(new Set());
-            setConfirmDeleteOpen(false);
-            success('Başarılı', `${selectedRows.size} aksiyon silindi.`);
-        } catch (err) {
-            console.error('Delete failed:', err);
-            showError('Hata', 'Bazı aksiyonlar silinemedi.');
-        } finally {
-            setDeleting(false);
+        const failed: string[] = [];
+        let sent = 0;
+        for (const id of selectedRows) {
+            try { await api.deleteAction(id, reason); sent++; }
+            catch (err) { failed.push(`${actions.find(a => a.id === id)?.actionId ?? id}: ${(err as Error).message}`); }
         }
+        setDeleting(false);
+        setConfirmDeleteOpen(false);
+        setDeleteReason('');
+        setSelectedRows(new Set());
+        if (sent) success('Silme talebi gönderildi', `${sent} aksiyon için talep 2. kontrolcü onayına gönderildi.`);
+        if (failed.length) showError(`${failed.length} talep gönderilemedi`, failed.slice(0, 3).join(' • '));
+        loadActions();
     };
 
     // ── Quick filter chip'leri (canlı sayaçlarla) ──
@@ -333,11 +366,12 @@ function ActionsContent() {
         { key: 'benim', label: 'Benim Aksiyonlarım', count: actions.filter(quickFilterFns['benim']).length },
         { key: 'geciken', label: 'Gecikenler', count: overdue },
         { key: 'buay', label: 'Bu Ay', count: actions.filter(quickFilterFns['buay']).length },
+        { key: 'onayim', label: 'Onayımı Bekleyenler', count: actions.filter(quickFilterFns['onayim']).length },
     ], [actions, quickFilterFns, overdue]);
 
     const quickFilterLabels: Record<string, string> = {
         'benim': 'Benim Aksiyonlarım', 'geciken': 'Gecikenler', 'buay': 'Bu Ay',
-        'devam': 'Devam Eden', 'tamamlanan': 'Tamamlanan',
+        'devam': 'Devam Eden', 'tamamlanan': 'Tamamlanan', 'onayim': 'Onayımı Bekleyenler',
     };
 
     // ── Gelişmiş filtre alanları ──
@@ -349,6 +383,12 @@ function ActionsContent() {
             options: Object.entries(statusLabels).map(([k, v]) => ({ value: k, label: v.label })),
         },
         {
+            type: 'select', key: 'approvalState', label: 'Onay Durumu',
+            value: activeFilters['approvalState'] || '',
+            onChange: (v) => { setActiveFilters(p => ({ ...p, approvalState: v })); setPage(1); },
+            options: Object.entries(approvalLabels).map(([k, v]) => ({ value: k, label: v.label })),
+        },
+        {
             type: 'select', key: 'source', label: 'Kaynak',
             value: activeFilters['source'] || '',
             onChange: (v) => { setActiveFilters(p => ({ ...p, source: v })); setPage(1); },
@@ -358,10 +398,11 @@ function ActionsContent() {
     ], [activeFilters, users]);
 
     // ── Aktif filtre chip'leri ──
-    const filterLabels: Record<string, string> = { status: 'Durum', source: 'Kaynak' };
+    const filterLabels: Record<string, string> = { status: 'Durum', source: 'Kaynak', approvalState: 'Onay Durumu' };
     const filterValueLabel = (key: string, value: string): string => {
         if (key === 'status') return statusLabels[value]?.label ?? value;
         if (key === 'source') return sourceLabels[value] ?? value;
+        if (key === 'approvalState') return approvalLabels[value]?.label ?? value;
         return value;
     };
     const activeChips: ActiveFilterChip[] = useMemo(() => {
@@ -398,7 +439,7 @@ function ActionsContent() {
                                 onClick={() => setConfirmDeleteOpen(true)}
                                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
                             >
-                                {selectedRows.size} Seçiliyi Sil
+                                {selectedRows.size} Seçili için silme talebi
                             </Button>
                         )}
                         <Link href="/actions/new">
@@ -481,16 +522,22 @@ function ActionsContent() {
                 }
             />
 
-            <ConfirmDialog
-                open={confirmDeleteOpen}
-                onClose={() => setConfirmDeleteOpen(false)}
-                onConfirm={handleBulkDelete}
-                title="Aksiyonlar Silinecek"
-                message={`Seçilen ${selectedRows.size} aksiyon kalıcı olarak silinecektir. Bu işlem geri alınamaz.`}
-                confirmLabel="Evet, Sil"
-                loading={deleting}
-                variant="danger"
-            />
+            <Modal open={confirmDeleteOpen} onClose={() => { if (!deleting) setConfirmDeleteOpen(false); }} size="sm">
+                <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-slate-800">Silme talebi</h3>
+                    <p className="text-sm text-slate-500">
+                        Seçilen {selectedRows.size} aksiyon için silme talebi açılacak. Talep 2. kontrolcü onayına gider; onaylanınca kayıt &quot;Silindi&quot; olarak işaretlenir.
+                        Yalnızca birinci kontrolcüsü olduğunuz aksiyonlar için talep açılabilir.
+                    </p>
+                    <label htmlFor="bulk-delete-reason" className="block text-sm font-medium text-slate-700">Gerekçe *</label>
+                    <textarea id="bulk-delete-reason" value={deleteReason} onChange={e => setDeleteReason(e.target.value)} maxLength={2000} rows={3}
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200" />
+                    <div className="flex justify-end gap-2 pt-1">
+                        <Button variant="outline" onClick={() => setConfirmDeleteOpen(false)} disabled={deleting}>İptal</Button>
+                        <Button variant="danger" onClick={handleBulkDelete} loading={deleting} disabled={!deleteReason.trim()}>Silme talebi gönder</Button>
+                    </div>
+                </div>
+            </Modal>
 
             <ActionEditModal
                 isOpen={!!editAction}
