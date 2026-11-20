@@ -452,7 +452,9 @@ function ApprovalsPanel({ resource }: { resource: ReturnType<typeof useDashboard
                     <>
                         <div className="space-y-1">
                             <ApprovalRow label="Kontrol testi onayı" count={d.byType.controlTest.count} href={d.byType.controlTest.href} />
+                            {d.byType.action && <ApprovalRow label="Aksiyon onayı" count={d.byType.action.count} href={d.byType.action.href} />}
                             <ApprovalRow label="Takip değerlendirmesi" count={d.byType.followUp.count} href={d.byType.followUp.href} />
+                            {d.byType.deletion && <ApprovalRow label="Silme talebi" count={d.byType.deletion.count} href={d.byType.deletion.href} />}
                             <ApprovalRow label="Bulgu mutabakatı" count={d.byType.reconciliation.count} href={d.byType.reconciliation.href} />
                         </div>
                         <Link href="/approvals" className="block text-center mt-3 text-sm font-semibold text-blue-600 hover:underline">Onayları İncele →</Link>

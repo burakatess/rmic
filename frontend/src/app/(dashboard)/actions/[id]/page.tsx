@@ -11,6 +11,7 @@ import {
 import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import { useToast } from '@/components/ui/Toast';
 import ActionEditModal from '@/components/actions/ActionEditModal';
+import { ActionWorkflowPanel } from '@/components/actions/ActionWorkflowPanel';
 
 type BadgeVariant = 'neutral' | 'warning' | 'info' | 'success' | 'critical' | 'primary';
 
@@ -118,6 +119,12 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
                 badges={
                     <>
                         <StatusBadge variant={statusCfg.variant}>{statusCfg.label}</StatusBadge>
+                        {action.deletedAt ? <StatusBadge variant="neutral">Silindi</StatusBadge>
+                            : action.approvalState && action.approvalState !== 'ONAYLANDI' && (
+                                <StatusBadge variant={action.approvalState === 'REDDEDILDI' ? 'critical' : action.approvalState === 'ONAY_BEKLIYOR' ? 'warning' : 'neutral'}>
+                                    {action.approvalState === 'REDDEDILDI' ? 'Reddedildi' : action.approvalState === 'ONAY_BEKLIYOR' ? 'Onay bekliyor' : 'Taslak'}
+                                </StatusBadge>
+                            )}
                         {overdue && <StatusBadge variant="critical">Gecikmiş</StatusBadge>}
                     </>
                 }
@@ -176,10 +183,12 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
                     </div>
                 </DetailSection>
 
+                <ActionWorkflowPanel action={action} onChanged={load} />
+
                 {/* Bağlı bulgu */}
                 {action.finding && (
                     <DetailSection title="Bağlı Bulgu">
-                        <Link href="/findings" className="block -m-5 p-5 rounded-b-xl hover:bg-slate-50 transition-colors">
+                        <Link href={`/findings/${action.finding.id}`} className="block -m-5 p-5 rounded-b-xl hover:bg-slate-50 transition-colors">
                             <div className="flex items-center gap-3 mb-1">
                                 <span className="font-mono text-xs text-blue-600 hover:underline">{action.finding.findingId}</span>
                                 {action.finding.severity && (

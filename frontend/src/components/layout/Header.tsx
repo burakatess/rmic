@@ -8,7 +8,7 @@ import { api } from '@/lib/api';
 
 interface NotificationItem {
     id: string;
-    type: 'OVERDUE_ACTION' | 'UPCOMING_FOLLOWUP' | 'NEW_FINDING';
+    type: 'OVERDUE_ACTION' | 'UPCOMING_FOLLOWUP' | 'NEW_FINDING' | 'APPROVAL_PENDING' | 'APPROVAL_DECISION';
     title: string;
     message: string;
     date: string;
@@ -19,6 +19,8 @@ const NOTIF_STYLE: Record<string, { border: string }> = {
     OVERDUE_ACTION: { border: 'border-red-500' },
     UPCOMING_FOLLOWUP: { border: 'border-yellow-500' },
     NEW_FINDING: { border: 'border-blue-500' },
+    APPROVAL_PENDING: { border: 'border-violet-500' },
+    APPROVAL_DECISION: { border: 'border-emerald-500' },
 };
 
 function timeAgo(dateStr: string): string {

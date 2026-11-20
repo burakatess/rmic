@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
+import { ApprovalsService, DecisionKind, PendingKind } from '../approvals/approvals.service';
 
 export interface NotificationItem {
     id: string;
-    type: 'OVERDUE_ACTION' | 'UPCOMING_FOLLOWUP' | 'NEW_FINDING';
+    type: 'OVERDUE_ACTION' | 'UPCOMING_FOLLOWUP' | 'NEW_FINDING' | 'APPROVAL_PENDING' | 'APPROVAL_DECISION';
     title: string;
     message: string;
     date: Date;
@@ -16,16 +17,36 @@ export interface NotificationItem {
  * istekte gerçek veriden hesaplanıyor. Böylece "okunmadı" durumu asla
  * gerçekle çelişmez (ör. bir aksiyon kapatıldığında bildirim de anında kaybolur).
  */
+const PENDING_TITLE: Record<PendingKind, string> = {
+    ACTION_APPROVAL: 'Onayınızı bekleyen aksiyon',
+    ACTION_DELETION: 'Onayınızı bekleyen aksiyon silme talebi',
+    FOLLOWUP_APPROVAL: 'Onayınızı bekleyen takip çalışması',
+    FOLLOWUP_DELETION: 'Onayınızı bekleyen takip silme talebi',
+};
+
+const DECISION_TITLE: Record<DecisionKind, string> = {
+    ACTION_REJECTED: 'Aksiyonunuz reddedildi',
+    ACTION_APPROVED: 'Aksiyonunuz onaylandı',
+    ACTION_REVERTED: 'Aksiyon onayı geri alındı',
+    ACTION_DELETED: 'Aksiyon silme talebiniz onaylandı',
+    ACTION_DELETE_REJECTED: 'Aksiyon silme talebiniz reddedildi',
+    FOLLOWUP_REJECTED: 'Takip çalışmanız reddedildi',
+    FOLLOWUP_APPROVED: 'Takip çalışmanız onaylandı',
+    FOLLOWUP_REVERTED: 'Takip onayı geri alındı',
+    FOLLOWUP_DELETED: 'Takip silme talebiniz onaylandı',
+    FOLLOWUP_DELETE_REJECTED: 'Takip silme talebiniz reddedildi',
+};
+
 @Injectable()
 export class NotificationsService {
-    constructor(private prisma: PrismaService) { }
+    constructor(private prisma: PrismaService, private approvals: ApprovalsService) { }
 
     async getForUser(userId: string): Promise<NotificationItem[]> {
         const now = new Date();
         const in3Days = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
         const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-        const [overdueActions, upcomingFollowUps, recentFindings] = await Promise.all([
+        const [overdueActions, upcomingFollowUps, recentFindings, pendingApprovals, decisions] = await Promise.all([
             this.prisma.action.findMany({
                 where: {
                     ownerId: userId,
@@ -63,6 +84,8 @@ export class NotificationsService {
                 orderBy: { createdAt: 'desc' },
                 take: 20,
             }),
+            this.approvals.pendingFor(userId),
+            this.approvals.decisionsFor(userId),
         ]);
 
         const items: NotificationItem[] = [
@@ -89,6 +112,22 @@ export class NotificationsService {
                 message: `${f.findingId}: ${f.summary || f.description}`.slice(0, 140),
                 date: f.createdAt,
                 link: `/findings/${f.id}`,
+            })),
+            ...pendingApprovals.slice(0, 30).map((p) => ({
+                id: `approval-${p.kind}-${p.recordId}`,
+                type: 'APPROVAL_PENDING' as const,
+                title: PENDING_TITLE[p.kind],
+                message: `${p.code} — ${p.finding.findingId}${p.requestedBy ? ` (${p.requestedBy.name})` : ''}`.slice(0, 140),
+                date: p.requestedAt,
+                link: p.link,
+            })),
+            ...decisions.slice(0, 30).map((d) => ({
+                id: `decision-${d.kind}-${d.recordId}`,
+                type: 'APPROVAL_DECISION' as const,
+                title: DECISION_TITLE[d.kind],
+                message: `${d.code}${d.reason ? `: ${d.reason}` : ''}`.slice(0, 140),
+                date: d.date,
+                link: d.link,
             })),
         ];
 

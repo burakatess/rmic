@@ -8,6 +8,7 @@ import { CompleteActionDto } from '../../common/dto/attachment.dto';
 import { AccessScopeService, actionWhere } from '../../common/services/access-scope.service';
 import type { AccessActor } from '../../common/services/access-scope.service';
 import { actionCapabilities } from '../audits/finding-capabilities';
+import { WorkflowReasonDto } from '../audits/dto/finding.dto';
 
 @ApiTags('Actions')
 @ApiBearerAuth('JWT-Auth')
@@ -82,11 +83,12 @@ export class ActionsController {
         return this.actionsService.update(id, data, userId, role);
     }
 
+    // Maker-checker: silme doğrudan yapılmaz, gerekçeli silme talebi ikinci kontrolcüye gider.
     @Delete(':id')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async remove(@Param('id') id: string, @CurrentUser('id') userId: string, @CurrentUser() actor: AccessActor) {
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    async remove(@Param('id') id: string, @Body() body: WorkflowReasonDto, @CurrentUser('id') userId: string, @CurrentUser() actor: AccessActor) {
         await this.assertActionScope(actor, id);
-        return this.actionsService.delete(id, userId);
+        return this.actionsService.delete(id, userId, body.reason);
     }
 
     @Post(':id/complete')

@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import api from '@/lib/api';
 
 import { useAuth, PermissionGate } from '../auth';
 
@@ -11,6 +13,8 @@ interface NavItem {
     icon: React.ReactNode;
     children?: { label: string; href: string; permission?: string }[];
     permission?: string;
+    /** Bunlardan herhangi biri yeterli (permission yoksa). */
+    permissions?: string[];
 }
 
 // Outline icons, inherit color via currentColor (hover/active handled by parent classes)
@@ -31,7 +35,8 @@ const navigation: NavItem[] = [
     {
         label: 'Onaylarım',
         href: '/approvals',
-        permission: 'control:view',
+        // İkinci kontrolcüler (ör. Risk Kontrol Yöneticisi) kontrol modülünü görmese de aksiyon/takip onayı verir.
+        permissions: ['control:view', 'finding:view', 'action:view'],
         icon: (
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="9" fill="currentColor" fillOpacity="0.2" />
@@ -189,6 +194,15 @@ const navigation: NavItem[] = [
 
 export default function Sidebar() {
     const pathname = usePathname();
+    const { user } = useAuth();
+    // "Onaylarım" rozeti: ikinci kontrolcü olarak bekleyen aksiyon/takip işleri (sayfa değişiminde tazelenir).
+    const [pendingCount, setPendingCount] = useState(0);
+    useEffect(() => {
+        if (!user) return;
+        let alive = true;
+        api.getWorkflowApprovalCount().then(r => { if (alive) setPendingCount(r?.count || 0); }).catch(() => undefined);
+        return () => { alive = false; };
+    }, [user, pathname]);
 
     return (
         <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-[#0b0f19] text-white shadow-2xl flex flex-col">
@@ -225,8 +239,8 @@ export default function Sidebar() {
             {/* Navigation */}
             <nav className="relative flex-1 overflow-y-auto px-3 py-4 space-y-1 scrollbar-thin scrollbar-thumb-slate-700">
                 {navigation.map((item) => (
-                    <PermissionGate key={item.label} permission={item.permission}>
-                        <NavItemComponent item={item} pathname={pathname} />
+                    <PermissionGate key={item.label} permission={item.permission} permissions={item.permissions}>
+                        <NavItemComponent item={item} pathname={pathname} badge={item.href === '/approvals' ? pendingCount : 0} />
                     </PermissionGate>
                 ))}
             </nav>
@@ -239,7 +253,7 @@ export default function Sidebar() {
     );
 }
 
-function NavItemComponent({ item, pathname }: { item: NavItem; pathname: string }) {
+function NavItemComponent({ item, pathname, badge = 0 }: { item: NavItem; pathname: string; badge?: number }) {
     const isActive = item.href
         ? pathname === item.href
         : item.children?.some((child) => pathname === child.href || (child.href !== '/risks' && pathname.startsWith(child.href)));
@@ -280,7 +294,12 @@ function NavItemComponent({ item, pathname }: { item: NavItem; pathname: string 
             className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] font-medium transition-all duration-200 hover:bg-slate-800 group ${isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-900/20' : 'text-slate-400 hover:text-white'}`}
         >
             <span className={`flex-shrink-0 transition-colors ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-blue-400'}`}>{item.icon}</span>
-            {item.label}
+            <span className="flex-1">{item.label}</span>
+            {badge > 0 && (
+                <span className="min-w-[20px] rounded-full bg-amber-500 px-1.5 py-0.5 text-center text-[11px] font-bold leading-none text-slate-900" aria-label={`${badge} onay bekliyor`}>
+                    {badge > 99 ? '99+' : badge}
+                </span>
+            )}
         </Link>
     );
 }
