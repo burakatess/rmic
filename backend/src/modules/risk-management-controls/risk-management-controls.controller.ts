@@ -1,8 +1,11 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, Request, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { RiskManagementControlsService } from './risk-management-controls.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
-import { Roles } from '../../common/decorators';
+import { Roles, CurrentUser } from '../../common/decorators';
+import {
+    ApplicabilityScoreDto, CreateRiskManagementControlDto, CreateRmControlTestDto, OptionalApplicabilityScoreDto, UpdateRiskManagementControlDto,
+} from './dto/risk-management-control.dto';
 
 @ApiTags('Risk Management Controls')
 @ApiBearerAuth('JWT-Auth')
@@ -26,22 +29,22 @@ export class RiskManagementControlsController {
     // Create new RYK control
     @Post()
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async create(@Body() data: any, @Request() req: any) {
-        return this.service.create(data, req.user.sub);
+    async create(@Body() data: CreateRiskManagementControlDto, @CurrentUser('id') userId: string) {
+        return this.service.create(data, userId);
     }
 
     // Update RYK control
     @Put(':id')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async update(@Param('id') id: string, @Body() data: any, @Request() req: any) {
-        return this.service.update(id, data, req.user.sub);
+    async update(@Param('id') id: string, @Body() data: UpdateRiskManagementControlDto, @CurrentUser('id') userId: string) {
+        return this.service.update(id, data, userId);
     }
 
     // Delete RYK control
     @Delete(':id')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async delete(@Param('id') id: string) {
-        return this.service.delete(id);
+    async delete(@Param('id') id: string, @CurrentUser('id') userId: string) {
+        return this.service.delete(id, userId);
     }
 
     // Map control to risk entry
@@ -50,7 +53,7 @@ export class RiskManagementControlsController {
     async mapToRiskEntry(
         @Param('id') controlId: string,
         @Param('riskEntryId') riskEntryId: string,
-        @Body() body: { applicabilityScore?: number },
+        @Body() body: OptionalApplicabilityScoreDto,
     ) {
         return this.service.mapToRiskEntry(controlId, riskEntryId, body.applicabilityScore);
     }
@@ -71,7 +74,7 @@ export class RiskManagementControlsController {
     async updateApplicabilityScore(
         @Param('id') controlId: string,
         @Param('riskEntryId') riskEntryId: string,
-        @Body() body: { applicabilityScore: number },
+        @Body() body: ApplicabilityScoreDto,
     ) {
         return this.service.updateApplicabilityScore(controlId, riskEntryId, body.applicabilityScore);
     }
@@ -85,7 +88,7 @@ export class RiskManagementControlsController {
     // Create test for a control
     @Post(':id/tests')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async createTest(@Param('id') controlId: string, @Body() data: any, @Request() req: any) {
-        return this.service.createTest(controlId, data, req.user.sub);
+    async createTest(@Param('id') controlId: string, @Body() data: CreateRmControlTestDto, @CurrentUser('id') userId: string) {
+        return this.service.createTest(controlId, data, userId);
     }
 }

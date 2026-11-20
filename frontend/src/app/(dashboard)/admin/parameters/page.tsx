@@ -111,7 +111,10 @@ export default function ParametersPage() {
         e.preventDefault();
         try {
             if (editingOption) {
-                await api.request(`/admin/options/${editingOption.id}`, { method: 'PUT', body: optionForm });
+                // Kategori ve değer oluşturulduktan sonra değişmez (kayıtlar bu değere bağlı) — gönderilmez.
+                const { category: _c, value: _v, ...editable } = optionForm;
+                void _c; void _v;
+                await api.request(`/admin/options/${editingOption.id}`, { method: 'PUT', body: editable });
             } else {
                 await api.request('/admin/options', { method: 'POST', body: optionForm });
             }

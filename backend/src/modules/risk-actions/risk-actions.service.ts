@@ -1,5 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma';
+import { assertAllExist, definedOnly, toDateField } from '../../common/util/dto-mapping';
+import { CreateRiskActionDto, UpdateRiskActionDto } from './dto/risk-action.dto';
 
 @Injectable()
 export class RiskActionsService {
@@ -77,47 +80,59 @@ export class RiskActionsService {
         return ra;
     }
 
-    async create(data: any) {
+    async create(data: CreateRiskActionDto, userId: string) {
         const aksiyonId = await this.generateUniqueAksiyonId();
-        const { riskIds, ...rest } = data;
-
+        const riskIds = await this.validateRefs(data);
         const created = await this.prisma.riskAction.create({
             data: {
-                ...rest,
+                ...this.toData(data),
+                aksiyonTanimi: data.aksiyonTanimi,
                 aksiyonId,
-                risks: riskIds?.length
-                    ? { create: riskIds.map((rId: string) => ({ riskId: rId })) }
-                    : undefined,
-            },
-            include: {
-                risks: { include: { risk: true } },
-                riskControl: true,
-            },
+                risks: riskIds?.length ? { create: riskIds.map(rId => ({ riskId: rId })) } : undefined,
+            } as Prisma.RiskActionUncheckedCreateInput,
+            include: { risks: { include: { risk: true } }, riskControl: true },
         });
+        await this.prisma.auditLog.create({ data: { userId, action: 'CREATE', entityType: 'RiskAction', entityId: created.id, newValue: { aksiyonId, riskIds: riskIds ?? [] } } }).catch(() => undefined);
         return created;
     }
 
-    async update(id: string, data: any) {
-        const { riskIds, ...rest } = data;
-        await this.findOne(id);
-
+    async update(id: string, data: UpdateRiskActionDto, userId: string) {
+        const existing = await this.findOne(id);
+        const riskIds = await this.validateRefs(data);
         const updated = await this.prisma.riskAction.update({
             where: { id },
             data: {
-                ...rest,
-                ...(riskIds !== undefined && {
-                    risks: {
-                        deleteMany: {},
-                        create: riskIds.map((rId: string) => ({ riskId: rId })),
-                    },
-                }),
-            },
-            include: {
-                risks: { include: { risk: true } },
-                riskControl: true,
-            },
+                ...this.toData(data),
+                ...(riskIds !== undefined && { risks: { deleteMany: {}, create: riskIds.map(rId => ({ riskId: rId })) } }),
+            } as Prisma.RiskActionUncheckedUpdateInput,
+            include: { risks: { include: { risk: true } }, riskControl: true },
         });
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'UPDATE', entityType: 'RiskAction', entityId: id, oldValue: { status: existing.status, riskIds: existing.risks.map(r => r.riskId) }, newValue: definedOnly({ ...data }) as Prisma.InputJsonValue },
+        }).catch(() => undefined);
         return updated;
+    }
+
+    /** DTO → Prisma alanları (tarih dönüşümü; undefined alan dokunulmaz). */
+    private toData(d: UpdateRiskActionDto) {
+        return definedOnly({
+            aksiyonTanimi: d.aksiyonTanimi, status: d.status, kayitId: d.kayitId,
+            aksiyonSahibi: d.aksiyonSahibi, aksiyonSorumlusu: d.aksiyonSorumlusu, atanan: d.atanan, ilgiliGmy: d.ilgiliGmy,
+            ozet: d.ozet, potaNo: d.potaNo, bulgReferansNo: d.bulgReferansNo,
+            mutabakatTarihi: toDateField(d.mutabakatTarihi),
+            hedeflenenTamamlanmaTarihi: toDateField(d.hedeflenenTamamlanmaTarihi),
+            tamamlanmaTarihi: toDateField(d.tamamlanmaTarihi),
+            riskControlId: d.riskControlId === undefined ? undefined : (d.riskControlId || null),
+        });
+    }
+
+    /** FK doğrulaması: bağlı kontrol ve riskler var olmalı. */
+    private async validateRefs(d: UpdateRiskActionDto) {
+        if (d.riskControlId) {
+            const rc = await this.prisma.riskControl.findUnique({ where: { id: d.riskControlId }, select: { id: true } });
+            if (!rc) throw new BadRequestException('Geçersiz kontrol: seçilen risk kontrolü bulunamadı');
+        }
+        return assertAllExist(ids => this.prisma.risk.count({ where: { id: { in: ids } } }), d.riskIds, 'risk');
     }
 
     // Bağımlılığı olmayan kayıt fiziksel olarak silinir; bağımlılık varsa 409

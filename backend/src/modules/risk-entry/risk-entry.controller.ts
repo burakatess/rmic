@@ -3,6 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { RiskEntryService } from './risk-entry.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
+import { BulkCreateRiskEntryDto, CreateRiskEntryDto, SyncRiskEntriesDto, UpdateRiskEntryDto } from './dto/risk-entry.dto';
 
 @ApiTags('Risk Entries')
 @ApiBearerAuth('JWT-Auth')
@@ -23,31 +24,31 @@ export class RiskEntryController {
 
     @Post()
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async create(@Body() data: any, @CurrentUser('id') userId: string) {
+    async create(@Body() data: CreateRiskEntryDto, @CurrentUser('id') userId: string) {
         return this.riskEntryService.create(data, userId);
     }
 
     @Put(':id')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async update(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
+    async update(@Param('id') id: string, @Body() data: UpdateRiskEntryDto, @CurrentUser('id') userId: string) {
         return this.riskEntryService.update(id, data, userId);
     }
 
     @Delete(':id')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async delete(@Param('id') id: string) {
-        return this.riskEntryService.delete(id);
+    async delete(@Param('id') id: string, @CurrentUser('id') userId: string) {
+        return this.riskEntryService.delete(id, userId);
     }
 
     @Post('bulk')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async bulkCreate(@Body() data: { entries: any[] }, @CurrentUser('id') userId: string) {
+    async bulkCreate(@Body() data: BulkCreateRiskEntryDto, @CurrentUser('id') userId: string) {
         return this.riskEntryService.bulkCreate(data.entries, userId);
     }
 
     @Post('sync-to-inventory')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async syncToInventory(@Body() data: { ids: string[] }, @CurrentUser('id') userId: string) {
+    async syncToInventory(@Body() data: SyncRiskEntriesDto, @CurrentUser('id') userId: string) {
         return this.riskEntryService.syncToRiskInventory(data.ids, userId);
     }
 }

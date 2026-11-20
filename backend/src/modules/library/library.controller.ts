@@ -17,6 +17,7 @@ import {
     UpdateUnitDto, UpdateVersionDto, UpsertDatasetDto, UpsertEvidenceRuleDto, UpsertProcessCardDto,
     UpsertScenarioDto, UpsertTestCardDto, VerifyCitationsDto, VerifyRightsDto,
 } from './dto';
+import { FlagReReviewDto } from '../../common/dto/misc-bodies.dto';
 
 const WRITE_ROLES = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER'] as const;
 const MAP_ROLES = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR'] as const;
@@ -93,7 +94,7 @@ export class LibraryController {
 
     @Post('versions/:id/flag-re-review')
     @Roles(...MAP_ROLES)
-    flagReReview(@Param('id') id: string, @Body() body: { changedUnitKeys: string[] }, @CurrentUser('id') userId: string) {
+    flagReReview(@Param('id') id: string, @Body() body: FlagReReviewDto, @CurrentUser('id') userId: string) {
         return this.sources.flagReReview(id, body.changedUnitKeys ?? [], userId);
     }
 

@@ -109,10 +109,9 @@ Frontend sayfa/component eklemeden önce:
 
 ## Bilinen Teknik Borç (öncelikli iyileştirmeler)
 
-- Bazı legacy endpoint'lerde hâlâ `@Body() data: any` var (`controls.controller.ts:update`, `audits.controller.ts` bazı route'lar). Bu endpoint'lere dokunulursa DTO'ya geçir.
-- `AuthProvider` demo-fallback (`/auth/me` başarısızsa hardcoded ADMIN kullanıcı) **production'a gitmemeli** — kullanıcıya asla '*' permission verilmemeli.
-- Rate limit `@nestjs/throttler` eklenmedi.
-- CSP header'ları eklenmedi.
+- Kapatıldı (2026-11): `@Body() any` ve satır içi tipli gövdeler (`@Body() body: { ... }`, `@Body('alan')`) DTO'ya geçirildi — satır içi TS tipi de çalışma anında `any` gibidir, YENİ KODDA KULLANMA. `AuthProvider` demo-fallback kaldırıldı; `@nestjs/throttler` (global + auth uçlarında sıkı) ve CSP/güvenlik başlıkları (`next.config.ts`) etkin.
+- Açık: bazı yazma işlemlerinde ana kayıt ile denetim kaydı ayrı adımlarda (atomiklik) — bkz. `docs/production-readiness.md` "Kalan riskler".
+- Açık: `xlsx` (bilinen açık) → ExcelJS'e geçiş planlandı.
 
 ## Agent skills
 

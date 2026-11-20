@@ -118,7 +118,7 @@ export default function UsersPage() {
             loadData();
         } catch (error) {
             console.error('Failed to create user:', error);
-            showError('Hata', 'Kullanıcı oluşturulurken bir hata oluştu');
+            showError('Kullanıcı oluşturulamadı', error instanceof Error ? error.message : 'Bir hata oluştu');
         }
     };
 
@@ -204,7 +204,7 @@ export default function UsersPage() {
             success('Başarılı', 'Şifre başarıyla güncellendi');
         } catch (error) {
             console.error('Failed to reset password:', error);
-            showError('Hata', 'Şifre sıfırlanırken bir hata oluştu');
+            showError('Şifre sıfırlanamadı', error instanceof Error ? error.message : 'Bir hata oluştu');
         }
     };
 
@@ -422,6 +422,8 @@ export default function UsersPage() {
                         <input
                             type="password"
                             required
+                            minLength={8}
+                            maxLength={128}
                             value={formData.password}
                             onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                             className={inputCls}
@@ -565,6 +567,8 @@ export default function UsersPage() {
                         <input
                             type="password"
                             required
+                            minLength={8}
+                            maxLength={128}
                             value={newPassword}
                             onChange={(e) => setNewPassword(e.target.value)}
                             placeholder="Yeni şifreyi girin"
