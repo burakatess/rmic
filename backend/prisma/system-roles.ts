@@ -14,6 +14,9 @@ export const SYSTEM_ROLES: { name: string; description?: string; permissions: st
             'report:view', 'report:export', 'report:org',
             // Kayıt kapsamı (kurum geneli) ve kanıt erişimi — report:org'dan AYRI izinler.
             'scope:org', 'evidence:view',
+            // Risk modülü: oluşturma/düzenleme/değerlendirme (backend risk uçları bu role açık;
+            // arayüz izinle aynı hizada olsun — 2026-11 kararı). risk:sim:* bunu kapsar.
+            'risk:*',
             // Riskin direktörlüğünü değiştirmek erişimi etkiler → ayrı izin + denetim kaydı.
             'risk:directorate:change',
             'ai:view', 'ai:run', 'ai:accept', 'ai:review', 'ai:admin',

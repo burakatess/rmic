@@ -42,10 +42,15 @@ export class ControlScopeController {
         @CurrentUser('permissions') permissions: string[],
         @Query() query: any,
     ) {
-        const resolved = await this.directorateScope.resolveScope(userId, permissions || [], { scope: query.scope, directorateId: query.directorateId });
-        return this.scopeService.listPeriodControls({
+        // directorateId tek değer veya çoklu gelebilir (query string) — diziye normalize edilir.
+        const requestedDirs: string[] = (Array.isArray(query.directorateId) ? query.directorateId : query.directorateId ? String(query.directorateId).split(',') : []).filter(Boolean);
+        const resolved = await this.directorateScope.resolveScope(userId, permissions || [], { scope: query.scope, directorateId: requestedDirs });
+        // ORG kapsamında birim filtresi yalnız daraltır (yetki genişletmez).
+        const directorateIds = resolved.appliedScope === 'UNIT' ? resolved.directorateIds!
+            : resolved.appliedScope === 'ORG' && requestedDirs.length ? requestedDirs : undefined;
+        const result = await this.scopeService.listPeriodControls({
             year: query.year ? parseInt(query.year, 10) : undefined,
-            directorateIds: resolved.appliedScope === 'UNIT' ? resolved.directorateIds! : undefined,
+            directorateIds,
             mineUserId: resolved.appliedScope === 'MINE' ? userId : undefined,
             assigneeId: query.assigneeId, secondControllerId: query.secondControllerId,
             assigneeIds: query.assigneeIds, secondControllerIds: query.secondControllerIds,
@@ -56,6 +61,8 @@ export class ControlScopeController {
             page: query.page ? parseInt(query.page, 10) : undefined,
             pageSize: query.pageSize ? parseInt(query.pageSize, 10) : undefined,
         });
+        // Uygulanan kapsam (istenen yetkisizse MINE'a düşer) — arayüz seçiciyi buna göre gösterir.
+        return { ...result, appliedScope: resolved.appliedScope };
     }
 
     @Get('scope/period-controls/:scopeId')
