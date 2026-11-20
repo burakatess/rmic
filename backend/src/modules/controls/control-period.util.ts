@@ -51,6 +51,30 @@ export function monthNumbersToLabels(months: number[]): string[] {
     return months.map(m => MONTH_LABEL_TR[m - 1]);
 }
 
+/** Referans ayı olmayan periyodik kontrollerin sabit takvim uygulama ayları (dönem sonu ayları). */
+export const FIXED_CALENDAR_MONTHS: Partial<Record<ControlFrequency, number[]>> = {
+    QUARTERLY: [3, 6, 9, 12],
+    SEMI_ANNUAL: [6, 12],
+    ANNUAL: [12],
+};
+
+/**
+ * Dönem kaydına yazılacak uygulama ayları — tek kaynak.
+ * - QUARTERLY/SEMI_ANNUAL/ANNUAL + referenceMonth: referans ay grubu.
+ * - QUARTERLY/SEMI_ANNUAL/ANNUAL, referenceMonth YOK (eski kayıt): sabit test takvimi
+ *   (computeScopePeriods'un ürettiği Q/H/YEAR dönemleriyle aynı aylar). Kontrolün eski
+ *   selectedMonths değeri (ör. Mart/Eylül) KOPYALANMAZ — 2026-11 kararı; aksi halde
+ *   Dönem Kontrolleri ay filtresi üretilen testlerle eşleşmez.
+ * - Diğer sıklıklar (AD_HOC vb.): verilen selectedMonths korunur.
+ */
+export function scopeMonthsFor(frequency: ControlFrequency | string, referenceMonth: number | null | undefined, selectedMonths: string[] | null | undefined): string[] {
+    const f = frequency as ControlFrequency;
+    if (f === 'QUARTERLY' || f === 'SEMI_ANNUAL' || f === 'ANNUAL') {
+        return monthNumbersToLabels(referenceMonth != null ? computeMonthGroup(f, referenceMonth) : FIXED_CALENDAR_MONTHS[f]!);
+    }
+    return selectedMonths ?? [];
+}
+
 /**
  * Referans ay + sıklığa göre aynı yıl içindeki ay grubunu döner (1-12).
  * Her zaman kronolojik sırada. QUARTERLY/SEMI_ANNUAL/ANNUAL için kullanıcı

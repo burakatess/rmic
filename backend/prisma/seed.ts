@@ -99,7 +99,7 @@ async function main() {
     // ── 2. Roller ────────────────────────────────────────────────────────────
     const [adminRole, managerRole, auditorRole, analystRole, auditeeRole, viewerRole] = await Promise.all([
         prisma.role.create({ data: { name: 'SYSTEM_ADMIN',         permissions: ['*'] } }),
-        prisma.role.create({ data: { name: 'RISK_CONTROL_MANAGER', permissions: ['dashboard:view','finding:view','finding:create','finding:update','action:*','control:*','report:view','report:export','report:org','risk:sim:view','risk:sim:create','risk:sim:edit','risk:sim:archive','risk:sim:delete','risk:sim:transfer'] } }),
+        prisma.role.create({ data: { name: 'RISK_CONTROL_MANAGER', permissions: ['dashboard:view','finding:view','finding:create','finding:update','action:*','control:*','report:view','report:export','report:org','risk:*'] } }),
         prisma.role.create({ data: { name: 'AUDITOR',              permissions: ['dashboard:view','finding:view','finding:create','action:view','action:create','control:view','control:test','report:view','report:export'] } }),
         prisma.role.create({ data: { name: 'RISK_ANALYST',         permissions: ['dashboard:view','finding:view','control:view','risk:sim:view','risk:sim:create','risk:sim:edit'] } }),
         prisma.role.create({ data: { name: 'AUDITEE',              permissions: ['dashboard:view','finding:view','action:view','action:update','report:view'] } }),

@@ -5,7 +5,7 @@ import { controllerIneligibility } from '../../common/services/controller-eligib
 import { AccessScopeService } from '../../common/services/access-scope.service';
 import { DirectorateScopeService } from '../../common/services/directorate-scope.service';
 import { ControlScopeService } from './control-scope.service';
-import { computeScopePeriods, computeMonthGroup, monthNumbersToLabels } from './control-period.util';
+import { computeScopePeriods, computeMonthGroup, monthNumbersToLabels, scopeMonthsFor } from './control-period.util';
 import {
     AnnualPlanDraftItemPatchDto, AnnualPlanWorkspaceQueryDto, ApplyPlanDto, BulkDraftActionDto, SaveDraftItemsDto,
     AnnualPlanTransitionDto, AnnualPlanDecisionDto,
@@ -249,11 +249,11 @@ export class AnnualPlanService {
             // varsa backend kendi hesaplar (madde 21). referenceMonth de selectedMonths de
             // bu istekte değişmediyse mevcut selectedMonths korunur (AD_HOC dahil).
             const scheduleTouched = item.frequency !== undefined || item.referenceMonth !== undefined || item.selectedMonths !== undefined;
+            // Periyodik sıklıkta aylar sıklık + referans aydan türetilir; referans ayı yoksa sabit
+            // test takvimi (kontrolün eski selectedMonths'u kopyalanmaz — scopeMonthsFor).
             const selectedMonths = !scheduleTouched
-                ? (existing?.selectedMonths ?? [])
-                : (referenceMonth != null && frequency && ['QUARTERLY', 'SEMI_ANNUAL', 'ANNUAL'].includes(frequency)
-                    ? monthNumbersToLabels(computeMonthGroup(frequency, referenceMonth))
-                    : (item.selectedMonths ?? []));
+                ? (frequency ? scopeMonthsFor(frequency, referenceMonth, existing?.selectedMonths ?? []) : (existing?.selectedMonths ?? []))
+                : (frequency ? scopeMonthsFor(frequency, referenceMonth, item.selectedMonths ?? []) : (item.selectedMonths ?? []));
             const controlDate = item.controlDate !== undefined ? new Date(item.controlDate) : (scheduleTouched ? null : existing?.controlDate ?? null);
             const reason = item.reason !== undefined ? item.reason : existing?.reason ?? null;
 
@@ -530,7 +530,8 @@ export class AnnualPlanService {
             const inScope = draftItem ? draftItem.inScope : !!realScope;
             const effFrequency = (draftItem?.frequency ?? realScope?.frequency ?? c.frequency) as ControlFrequency;
             const effReferenceMonth = draftItem?.referenceMonth ?? realScope?.referenceMonth ?? null;
-            const effMonths = draftItem?.selectedMonths ?? realScope?.selectedMonths ?? c.selectedMonths;
+            // Görüntülenen aylar da üretilecek dönemlerle aynı kaynaktan (eski kontrol ayları değil).
+            const effMonths = scopeMonthsFor(effFrequency, effReferenceMonth, draftItem?.selectedMonths ?? realScope?.selectedMonths ?? c.selectedMonths);
             const effControlDate = draftItem?.controlDate ?? realScope?.controlDate ?? c.controlDate;
             const effAssigneeId = draftItem?.assigneeId ?? realScope?.assigneeId ?? null;
             const effSecondControllerId = draftItem?.secondControllerId ?? realScope?.secondControllerId ?? null;
