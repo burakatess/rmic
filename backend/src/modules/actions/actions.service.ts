@@ -78,6 +78,7 @@ export class ActionsService {
                     owner: { select: { id: true, firstName: true, lastName: true, email: true } },
                     risk: { select: { id: true, riskId: true, name: true } },
                     finding: { select: { id: true, findingId: true, description: true } },
+                    followUps: { where: { deletedAt: null, status: { not: 'IPTAL' } }, select: { id: true, followUpId: true, status: true, approvalStatus: true }, orderBy: { createdAt: 'desc' }, take: 1 },
                     effectivenessReview: true,
                 },
                 skip,
@@ -112,6 +113,17 @@ export class ActionsService {
                 risk: true,
                 finding: { include: { control: true } },
                 effectivenessReview: true,
+                firstController: { select: { id: true, firstName: true, lastName: true } },
+                secondController: { select: { id: true, firstName: true, lastName: true } },
+                // Aksiyonun takip çalışmaları (onaydan sonra oluşur; silinenler dahil, tarihçe için).
+                followUps: {
+                    select: {
+                        id: true, followUpId: true, status: true, approvalStatus: true, result: true, plannedDate: true, testDate: true,
+                        deletedAt: true, deletionRequestedAt: true, createdAt: true,
+                        assigneeId: true, secondControllerId: true,
+                    },
+                    orderBy: { createdAt: 'asc' },
+                },
             },
         });
         if (!action) throw new NotFoundException(`Action with ID ${id} not found`);

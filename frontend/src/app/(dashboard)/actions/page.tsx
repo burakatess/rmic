@@ -23,6 +23,7 @@ interface Action {
     approvalState?: string | null;
     deletionRequestedAt?: string | null;
     secondControllerId?: string | null;
+    followUps?: { id: string; followUpId: string; status: string; approvalStatus?: string | null }[];
     dueDate: string;
     slaInDays: number;
     notes?: string | null;
@@ -274,6 +275,24 @@ function ActionsContent() {
                         {a.deletionRequestedAt && <span className="text-[11px] text-red-600">Silme onayı bekliyor</span>}
                     </div>
                 );
+            },
+        },
+        {
+            // Aksiyon ↔ takip bağı: takip çalışması 2. kontrolcü onayından sonra oluşur.
+            key: 'followUp', header: 'Takip', defaultWidth: 150,
+            render: (a) => {
+                const fu = a.followUps?.[0];
+                if (fu) {
+                    const label = fu.status === 'ONAYLANDI' ? 'Onaylandı' : fu.status === 'TAMAMLANDI' ? 'Onay bekliyor' : fu.status === 'DEVAM_EDIYOR' ? 'Devam ediyor' : 'Bekliyor';
+                    return (
+                        <Link href={a.finding ? `/findings/${a.finding.id}` : '/follow-ups'} className="flex flex-col hover:underline" onClick={e => e.stopPropagation()}>
+                            <span className="font-mono text-[11px] font-bold text-amber-700">{fu.followUpId}</span>
+                            <span className="text-[11px] text-slate-500">{label}</span>
+                        </Link>
+                    );
+                }
+                const st = a.approvalState ?? 'ONAYLANDI';
+                return <span className="text-[11px] text-slate-400">{st === 'ONAYLANDI' ? '—' : 'Onaydan sonra oluşur'}</span>;
             },
         },
         {

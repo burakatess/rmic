@@ -232,6 +232,21 @@ describe('E2E — Kontrolcü zinciri ve maker-checker', () => {
             expect(decided).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'ACTION_DELETED', recordId: a.id })]));
         });
 
+        it('aksiyon detayı kontrolcüleri ve onaydan sonra oluşan takip çalışmasını döndürür; liste son takibi gösterir', async () => {
+            const fId = await newFinding();
+            const a = (await addAction(fId).expect(201)).body;
+            let detail = (await http().get(`/actions/${a.id}`).set(as('maker')).expect(200)).body;
+            expect(detail).toMatchObject({ approvalState: 'TASLAK', followUps: [], firstController: { id: id.maker }, secondController: { id: id.checker } });
+            expect(detail.capabilities).toMatchObject({ canSubmit: true, canApprove: false });
+            await actionOp(fId, a.id, 'submit', 'maker').expect(201);
+            expect((await http().get(`/actions/${a.id}`).set(as('checker')).expect(200)).body.capabilities.canApprove).toBe(true);
+            const ok = (await actionOp(fId, a.id, 'approve', 'checker').expect(201)).body;
+            detail = (await http().get(`/actions/${a.id}`).set(as('maker')).expect(200)).body;
+            expect(detail.followUps).toEqual([expect.objectContaining({ id: ok.createdFollowUp.id, followUpId: ok.createdFollowUp.followUpId, status: 'BEKLIYOR' })]);
+            const list = (await http().get('/actions').query({ findingId: fId }).set(as('maker')).expect(200)).body.data;
+            expect(list.find((x: any) => x.id === a.id).followUps[0].followUpId).toBe(ok.createdFollowUp.followUpId);
+        });
+
         it('aksiyon listesi onay durumu filtresi beyaz listeyle çalışır', async () => {
             const fId = await newFinding();
             const a = (await addAction(fId).expect(201)).body;
