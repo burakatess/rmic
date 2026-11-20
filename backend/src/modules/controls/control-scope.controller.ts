@@ -6,6 +6,7 @@ import { DirectorateScopeService } from '../../common/services/directorate-scope
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
 import { AddScopeDto, ApplyVersionImpactDto, BulkAddScopeDto, ChangePeriodicityDto, CopyScopeDto, RemoveScopeDto } from './dto';
+import { ApplyNewVersionDto } from '../../common/dto/misc-bodies.dto';
 
 // Not: Bu controller literal path'leri (scope-years, dashboard, scope/bulk,
 // scope/copy, scope/period-controls) ControlsController'daki `@Get(':id')`
@@ -153,7 +154,7 @@ export class ControlScopeController {
     async applyNewVersion(
         @Param('id') id: string,
         @Param('year', ParseIntPipe) year: number,
-        @Body() dto: { confirmOngoing?: boolean; dryRun?: boolean },
+        @Body() dto: ApplyNewVersionDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.scopeService.applyNewVersion(id, year, userId, dto || {});

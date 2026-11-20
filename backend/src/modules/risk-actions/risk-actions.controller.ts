@@ -3,6 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { RiskActionsService } from './risk-actions.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
+import { CreateRiskActionDto, UpdateRiskActionDto } from './dto/risk-action.dto';
 
 @ApiTags('Risk Actions')
 @ApiBearerAuth('JWT-Auth')
@@ -23,14 +24,14 @@ export class RiskActionsController {
 
     @Post()
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    create(@Body() body: any) {
-        return this.service.create(body);
+    create(@Body() body: CreateRiskActionDto, @CurrentUser('id') userId: string) {
+        return this.service.create(body, userId);
     }
 
     @Put(':id')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    update(@Param('id') id: string, @Body() body: any) {
-        return this.service.update(id, body);
+    update(@Param('id') id: string, @Body() body: UpdateRiskActionDto, @CurrentUser('id') userId: string) {
+        return this.service.update(id, body, userId);
     }
 
     @Delete(':id')

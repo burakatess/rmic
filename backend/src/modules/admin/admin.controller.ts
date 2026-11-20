@@ -16,6 +16,11 @@ import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
 import { AuditLogExportQueryDto, AuditLogQueryDto } from './dto/audit-log-query.dto';
 import { Roles, CurrentUser } from '../../common/decorators';
 import { RolesGuard } from '../../common/guards';
+import {
+    AdminCreateUserDto, AdminResetPasswordDto, AdminUpdateUserDto, CreateRiskCategoryDto, CreateSystemOptionDto, SetUserDirectoratesDto,
+    UpdateParameterDto, UpdateRiskCategoryDto, UpdateSystemOptionDto,
+} from './dto/admin-user.dto';
+import { SiemConfigDto } from '../../common/dto/misc-bodies.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('JWT-Auth')
@@ -63,14 +68,7 @@ export class AdminController {
 
     @Post('users')
     async createUser(
-        @Body() body: {
-            email: string;
-            password: string;
-            firstName: string;
-            lastName: string;
-            department?: string;
-            roleId: string;
-        },
+        @Body() body: AdminCreateUserDto,
         @CurrentUser() user: { id: string },
     ) {
         return this.adminService.createUser(body, user.id);
@@ -79,13 +77,7 @@ export class AdminController {
     @Put('users/:id')
     async updateUser(
         @Param('id') id: string,
-        @Body() body: {
-            firstName?: string;
-            lastName?: string;
-            department?: string;
-            roleId?: string;
-            isActive?: boolean;
-        },
+        @Body() body: AdminUpdateUserDto,
         @CurrentUser() user: { id: string },
     ) {
         return this.adminService.updateUser(id, body, user.id);
@@ -94,7 +86,7 @@ export class AdminController {
     @Put('users/:id/directorates')
     async setUserDirectorates(
         @Param('id') id: string,
-        @Body() body: { directorateIds: string[] },
+        @Body() body: SetUserDirectoratesDto,
         @CurrentUser() user: { id: string },
     ) {
         return this.adminService.setUserDirectorates(id, body.directorateIds ?? [], user.id);
@@ -103,7 +95,7 @@ export class AdminController {
     @Post('users/:id/reset-password')
     async resetPassword(
         @Param('id') id: string,
-        @Body() body: { newPassword: string },
+        @Body() body: AdminResetPasswordDto,
         @CurrentUser() user: { id: string },
     ) {
         return this.adminService.resetPassword(id, body.newPassword, user.id);
@@ -152,7 +144,7 @@ export class AdminController {
     @Put('parameters/:id')
     async updateParameter(
         @Param('id') id: string,
-        @Body() body: { value: unknown },
+        @Body() body: UpdateParameterDto,
         @CurrentUser() user: { id: string },
     ) {
         return this.adminService.updateParameter(id, body.value, user.id);
@@ -187,10 +179,10 @@ export class AdminController {
 
     @Put('siem-config')
     async updateSiemConfig(
-        @Body() body: Record<string, unknown>,
+        @Body() body: SiemConfigDto,
         @CurrentUser() user: { id: string },
     ) {
-        return this.adminService.updateSiemConfig(body, user.id);
+        return this.adminService.updateSiemConfig({ ...body }, user.id);
     }
 
     // Risk Categories
@@ -201,17 +193,19 @@ export class AdminController {
 
     @Post('risk-categories')
     async createRiskCategory(
-        @Body() body: { name: string; description?: string; color?: string },
+        @Body() body: CreateRiskCategoryDto,
+        @CurrentUser() user: { id: string },
     ) {
-        return this.adminService.createRiskCategory(body);
+        return this.adminService.createRiskCategory(body, user.id);
     }
 
     @Put('risk-categories/:id')
     async updateRiskCategory(
         @Param('id') id: string,
-        @Body() body: { name?: string; description?: string; color?: string },
+        @Body() body: UpdateRiskCategoryDto,
+        @CurrentUser() user: { id: string },
     ) {
-        return this.adminService.updateRiskCategory(id, body);
+        return this.adminService.updateRiskCategory(id, body, user.id);
     }
 
     // System Options (Dynamic Dropdowns)
@@ -238,39 +232,24 @@ export class AdminController {
 
     @Post('options')
     async createSystemOption(
-        @Body() body: {
-            category: string;
-            value: string;
-            label: string;
-            labelEn?: string;
-            color?: string;
-            icon?: string;
-            sortOrder?: number;
-            isDefault?: boolean;
-        },
+        @Body() body: CreateSystemOptionDto,
+        @CurrentUser() user: { id: string },
     ) {
-        return this.adminService.createSystemOption(body);
+        return this.adminService.createSystemOption(body, user.id);
     }
 
     @Put('options/:id')
     async updateSystemOption(
         @Param('id') id: string,
-        @Body() body: {
-            label?: string;
-            labelEn?: string;
-            color?: string;
-            icon?: string;
-            sortOrder?: number;
-            isActive?: boolean;
-            isDefault?: boolean;
-        },
+        @Body() body: UpdateSystemOptionDto,
+        @CurrentUser() user: { id: string },
     ) {
-        return this.adminService.updateSystemOption(id, body);
+        return this.adminService.updateSystemOption(id, body, user.id);
     }
 
     @Delete('options/:id')
-    async deleteSystemOption(@Param('id') id: string) {
-        return this.adminService.deleteSystemOption(id);
+    async deleteSystemOption(@Param('id') id: string, @CurrentUser() user: { id: string }) {
+        return this.adminService.deleteSystemOption(id, user.id);
     }
 
     @Post('options/seed')

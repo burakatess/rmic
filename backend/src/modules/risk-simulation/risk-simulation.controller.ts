@@ -16,6 +16,7 @@ import {
     CreateScenarioActionDto, UpdateScenarioActionDto, ToggleScenarioActionDto, TransferDto, ImportWorkspaceDto, StartSimulationTestDto, OpenLiveWorkspaceDto, SaveWorkspaceDto, DeleteSimulationsDto,
     PublishMethodologyDto, TrialMethodologyDto, TransferPreviewDto, CreateTransferRequestDto, TransferDecisionDto,
 } from './dto';
+import { RefreshApplyDto } from '../../common/dto/misc-bodies.dto';
 
 // Ürün kararı (2026-11-16): Risk Simülasyonu, Risk Yönetimi modülünü (risk:view) gören herkese
 // açıktır — görüntüleme, oluşturma, düzenleme, kaydetme ve silme dahil; kayıtlı simülasyonları
@@ -269,8 +270,8 @@ export class RiskSimulationController {
 
     @Post('scenarios/:sid/refresh-apply')
     @SIM.edit()
-    refreshApply(@Param('sid') sid: string, @Body('acceptFields') acceptFields: string[], @CurrentUser('id') userId: string) {
-        return this.simService.applyRefreshFromInventory(sid, acceptFields ?? [], userId);
+    refreshApply(@Param('sid') sid: string, @Body() body: RefreshApplyDto, @CurrentUser('id') userId: string) {
+        return this.simService.applyRefreshFromInventory(sid, body.acceptFields, userId);
     }
 
     @Post('scenarios/:sid/calculate')

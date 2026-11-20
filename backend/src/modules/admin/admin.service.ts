@@ -445,15 +445,26 @@ export class AdminService {
         });
     }
 
-    async createRiskCategory(data: { name: string; description?: string; color?: string }) {
-        return this.prisma.riskCategory.create({ data });
+    async createRiskCategory(data: { name: string; description?: string; color?: string }, userId?: string) {
+        const created = await this.prisma.riskCategory.create({ data });
+        await this.adminAudit(userId, 'CREATE', 'RiskCategory', created.id, undefined, created);
+        return created;
     }
 
-    async updateRiskCategory(id: string, data: { name?: string; description?: string; color?: string }) {
-        return this.prisma.riskCategory.update({
-            where: { id },
-            data,
-        });
+    async updateRiskCategory(id: string, data: { name?: string; description?: string; color?: string }, userId?: string) {
+        const existing = await this.prisma.riskCategory.findUnique({ where: { id } });
+        if (!existing) throw new NotFoundException('Risk kategorisi bulunamadı');
+        const updated = await this.prisma.riskCategory.update({ where: { id }, data });
+        await this.adminAudit(userId, 'UPDATE', 'RiskCategory', id, existing, updated);
+        return updated;
+    }
+
+    /** Yönetim ekranı ana veri değişiklikleri denetim izine girer; log hatası ana işlemi düşürmez. */
+    private async adminAudit(userId: string | undefined, action: string, entityType: string, entityId: string, oldValue?: unknown, newValue?: unknown) {
+        if (!userId) return;
+        await this.prisma.auditLog.create({
+            data: { userId, action, entityType, entityId, oldValue: oldValue as Prisma.InputJsonValue, newValue: newValue as Prisma.InputJsonValue },
+        }).catch(() => undefined);
     }
 
     // System Options Management (Dynamic Dropdowns)
@@ -486,9 +497,12 @@ export class AdminService {
         color?: string;
         icon?: string;
         sortOrder?: number;
+        isActive?: boolean;
         isDefault?: boolean;
-    }) {
-        return this.prisma.systemOption.create({ data });
+    }, userId?: string) {
+        const created = await this.prisma.systemOption.create({ data });
+        await this.adminAudit(userId, 'CREATE', 'SystemOption', created.id, undefined, created);
+        return created;
     }
 
     async updateSystemOption(
@@ -501,16 +515,22 @@ export class AdminService {
             sortOrder?: number;
             isActive?: boolean;
             isDefault?: boolean;
-        }
+        },
+        userId?: string,
     ) {
-        return this.prisma.systemOption.update({
-            where: { id },
-            data,
-        });
+        const existing = await this.prisma.systemOption.findUnique({ where: { id } });
+        if (!existing) throw new NotFoundException('Seçenek bulunamadı');
+        const updated = await this.prisma.systemOption.update({ where: { id }, data });
+        await this.adminAudit(userId, 'UPDATE', 'SystemOption', id, existing, updated);
+        return updated;
     }
 
-    async deleteSystemOption(id: string) {
-        return this.prisma.systemOption.delete({ where: { id } });
+    async deleteSystemOption(id: string, userId?: string) {
+        const existing = await this.prisma.systemOption.findUnique({ where: { id } });
+        if (!existing) throw new NotFoundException('Seçenek bulunamadı');
+        const deleted = await this.prisma.systemOption.delete({ where: { id } });
+        await this.adminAudit(userId, 'DELETE', 'SystemOption', id, existing);
+        return deleted;
     }
 
     async getOptionCategories() {

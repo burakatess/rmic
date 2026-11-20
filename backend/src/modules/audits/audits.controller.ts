@@ -15,6 +15,8 @@ import {
     AppendStatusNoteDto, CreateActionFollowUpDto, LinkRiskDto,
 } from './dto';
 
+import { CreateAuditExecutionDto, CreateAuditPlanDto, UpdateAuditExecutionDto, UpdateAuditPlanDto } from './dto/audit-plan.dto';
+import { AppendStatusLogDto, IcKontrolOnayinaGonderDto, MutabakatOnaylaDto } from '../../common/dto/misc-bodies.dto';
 @ApiTags('Findings')
 @ApiBearerAuth('JWT-Auth')
 @Controller()
@@ -49,13 +51,13 @@ export class AuditsController {
 
     @Post('audit-plans')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async createPlan(@Body() data: any, @CurrentUser('id') userId: string) {
+    async createPlan(@Body() data: CreateAuditPlanDto, @CurrentUser('id') userId: string) {
         return this.auditsService.createPlan(data, userId);
     }
 
     @Put('audit-plans/:id')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async updatePlan(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
+    async updatePlan(@Param('id') id: string, @Body() data: UpdateAuditPlanDto, @CurrentUser('id') userId: string) {
         return this.auditsService.updatePlan(id, data, userId);
     }
 
@@ -68,13 +70,13 @@ export class AuditsController {
 
     @Post('audit-executions')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async createExecution(@Body() data: any, @CurrentUser('id') userId: string) {
+    async createExecution(@Body() data: CreateAuditExecutionDto, @CurrentUser('id') userId: string) {
         return this.auditsService.createExecution(data, userId);
     }
 
     @Put('audit-executions/:id')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async updateExecution(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
+    async updateExecution(@Param('id') id: string, @Body() data: UpdateAuditExecutionDto, @CurrentUser('id') userId: string) {
         return this.auditsService.updateExecution(id, data, userId);
     }
 
@@ -137,7 +139,7 @@ export class AuditsController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async icKontrolOnayinaGonder(
         @Param('id') id: string,
-        @Body() body: { birimCevabi: string; targetResolutionDate?: string },
+        @Body() body: IcKontrolOnayinaGonderDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.auditsService.icKontrolOnayinaGonder(id, body.birimCevabi, body.targetResolutionDate, userId);
@@ -148,7 +150,7 @@ export class AuditsController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
     async mutabakatOnayla(
         @Param('id') id: string,
-        @Body() body: { internalControlAssessment?: string; resolutionStatus?: string },
+        @Body() body: MutabakatOnaylaDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.auditsService.mutabakatOnayla(id, body, userId);
@@ -478,10 +480,10 @@ export class AuditsController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async appendStatusLog(
         @Param('id') id: string,
-        @Body() body: { text: string; authorName?: string },
+        @Body() body: AppendStatusLogDto,
         @CurrentUser('id') userId: string,
     ) {
-        return this.auditsService.appendStatusLog(id, body.text, userId, body.authorName);
+        return this.auditsService.appendStatusLog(id, body.text, userId);
     }
 
     // ─── Finding Attachments ──────────────────────────────────────────────────

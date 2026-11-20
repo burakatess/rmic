@@ -9,6 +9,7 @@ import { AccessScopeService, actionWhere, controlTestWhere, findingFullWhere, ri
 import type { AccessActor, AccessContext } from '../../common/services/access-scope.service';
 import type { RelatedScopes } from './controls.service';
 import { CompleteControlTestDto, CreateControlDto, CreateControlTestDto, UpdateControlDto, SaveTestDraftDto } from './dto';
+import { MapControlRiskDto, RequiredReasonDto } from '../../common/dto/misc-bodies.dto';
 
 @ApiTags('Controls')
 @ApiBearerAuth('JWT-Auth')
@@ -95,11 +96,11 @@ export class ControlsController {
     @RequirePermissions('control:approve')
     async returnTest(
         @Param('testId') testId: string,
-        @Body('reason') reason: string,
+        @Body() body: RequiredReasonDto,
         @CurrentUser() user: AccessActor,
     ) {
         await this.assertTestAccess(user, testId);
-        return this.controlsService.returnTest(testId, reason, user.id);
+        return this.controlsService.returnTest(testId, body.reason, user.id);
     }
 
     // Repo deseni: "submit-approval" ayrı bir iş kuralı değil, mevcut "complete" ile
@@ -115,10 +116,10 @@ export class ControlsController {
     @Roles('SYSTEM_ADMIN') // final onay iptali yalnız sistem yöneticisi (yetki genişletilmedi)
     async cancelFinal(
         @Param('testId') testId: string,
-        @Body('reason') reason: string,
+        @Body() body: RequiredReasonDto,
         @CurrentUser('id') userId: string,
     ) {
-        return this.controlsService.cancelFinalApproval(testId, reason, userId);
+        return this.controlsService.cancelFinalApproval(testId, body.reason, userId);
     }
 
     @Post('tests/:testId/attachments')
@@ -186,7 +187,7 @@ export class ControlsController {
 
     @Post(':id/map-risk')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async mapRisk(@Param('id') id: string, @Body() body: { riskId: string; mappingType?: string }) {
+    async mapRisk(@Param('id') id: string, @Body() body: MapControlRiskDto) {
         return this.controlsService.mapRisk(id, body.riskId, body.mappingType);
     }
 
