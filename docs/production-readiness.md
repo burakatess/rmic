@@ -108,7 +108,7 @@ Gerçek ortamda sıra (her adım yedek + onay):
 
 ## 6. Kalan riskler
 
-- **Atomiklik:** yüksek riskli geçişler (test yaşam döngüsü, şifre değişikliği, kullanıcı oluşturma, takip oluşturma/silme, risk oluşturma/güncelleme) transaction + koşullu güncellemeye alındı. Kalanlar: `audits.service` `createFinding`/`updateFinding`, `risks.service` `delete`/`approveTreatment`/`assess`/`treat`, `actions` etkinlik değerlendirmesi, `controls` `create`/`update`, risk önerileri, simülasyon ve uyum modülleri. Bunlarda denetim kaydı ile ana yazma ayrı adımlarda; yarış durumunda tutarsızlık ihtimali düşük ama sıfır değil.
+- **Atomiklik (2026-11 kapatıldı):** ana kayıt + denetim kaydı (ve bağlı tarihçe/alt kayıtlar) tüm yazma yollarında tek transaction'dadır; denetim yazılamazsa ana işlem geri alınır (`test/atomic-writes.e2e-spec.ts`). Bilinçli olarak kapsam dışı: salt olay kayıtları (başarısız giriş, AI sorgusu) ve `workspace.saveDraft` içindeki test bitirme adımı (kendi işleminde).
 - `xlsx` kararı (bölüm 2).
 - `@Body() data: any` kalan legacy uçlar (CLAUDE.md teknik borç listesi).
 - `IKS_MANAGER`/`IKS_EMPLOYEE` rol adına bağlı AI ve rapor kuralları (bkz. `docs/access-scope.md`).

@@ -3,6 +3,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ControlsService } from './controls.service';
 import { PrismaService } from '../../prisma';
 
+import { withTx } from '../../common/testing/with-tx';
+
 describe('ControlsService', () => {
     it('should be defined', () => {
         expect(true).toBe(true);
@@ -14,7 +16,7 @@ describe('ControlsService.getAllTests — fiilî görev ataması filtresi', () =
         const prisma = {
             controlTest: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
         };
-        const module = await Test.createTestingModule({ providers: [ControlsService, { provide: PrismaService, useValue: prisma }] }).compile();
+        const module = await Test.createTestingModule({ providers: [ControlsService, { provide: PrismaService, useValue: withTx(prisma) }] }).compile();
         const service = module.get<ControlsService>(ControlsService);
         await service.getAllTests({ assigneeIds: 'u-1,u-2', secondControllerIds: '__UNASSIGNED__', page: '2', limit: '10' }, 'actor');
         const args = prisma.controlTest.findMany.mock.calls[0][0];
@@ -38,7 +40,7 @@ describe('ControlsService.create — mükerrer Kontrol Kodu', () => {
             auditLog: { create: jest.fn() },
         };
         const module: TestingModule = await Test.createTestingModule({
-            providers: [ControlsService, { provide: PrismaService, useValue: prisma }],
+            providers: [ControlsService, { provide: PrismaService, useValue: withTx(prisma) }],
         }).compile();
         const service = module.get<ControlsService>(ControlsService);
 
@@ -73,7 +75,7 @@ describe('ControlsService.create — mükerrer Kontrol Kodu', () => {
             auditLog: { create: jest.fn() },
         };
         const module: TestingModule = await Test.createTestingModule({
-            providers: [ControlsService, { provide: PrismaService, useValue: prisma }],
+            providers: [ControlsService, { provide: PrismaService, useValue: withTx(prisma) }],
         }).compile();
         const service = module.get<ControlsService>(ControlsService);
 
@@ -109,7 +111,7 @@ describe('ControlsService.update — Control.version artışı', () => {
             auditLog: { create: jest.fn().mockResolvedValue({}) },
         };
         const module: TestingModule = await Test.createTestingModule({
-            providers: [ControlsService, { provide: PrismaService, useValue: prisma }],
+            providers: [ControlsService, { provide: PrismaService, useValue: withTx(prisma) }],
         }).compile();
         service = module.get<ControlsService>(ControlsService);
     });

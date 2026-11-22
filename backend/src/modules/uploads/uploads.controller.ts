@@ -136,19 +136,19 @@ export class UploadsController {
       mimeType: file.mimetype,
       sizeBytes: file.size,
     };
-    const ticket = await this.prisma.uploadTicket.create({ data: { ...meta, uploadedById: userId, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) } });
+    // Yükleme bileti + denetim kaydı tek işlemde; başarısızlıkta diske yazılan dosya yetim kalmasın diye silinir.
+    let ticket: { id: string };
     try {
-      await this.prisma.auditLog.create({
-        data: {
-          userId,
-          action: 'UPLOAD',
-          entityType: 'UploadTicket',
-          entityId: ticket.id,
-          newValue: meta,
-        },
+      ticket = await this.prisma.$transaction(async (tx) => {
+        const t = await tx.uploadTicket.create({ data: { ...meta, uploadedById: userId, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) } });
+        await tx.auditLog.create({
+          data: { userId, action: 'UPLOAD', entityType: 'UploadTicket', entityId: t.id, newValue: meta },
+        });
+        return t;
       });
-    } catch {
-      // Denetim izi hatası dosya yükleme akışını kesmemelidir.
+    } catch (e) {
+      if (file.path && existsSync(file.path)) unlinkSync(file.path);
+      throw e;
     }
     return { uploadId: ticket.id, ...meta };
   }

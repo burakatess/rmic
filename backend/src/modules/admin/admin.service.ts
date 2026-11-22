@@ -318,23 +318,25 @@ export class AdminService {
         const param = await this.prisma.parameter.findUnique({ where: { id } });
         if (!param) throw new NotFoundException('Parameter not found');
 
-        const updated = await this.prisma.parameter.update({
-            where: { id },
-            data: { value: value as object },
-        });
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.parameter.update({
+                where: { id },
+                data: { value: value as object },
+            });
 
-        await this.prisma.auditLog.create({
-            data: {
-                userId: updatedBy,
-                action: 'UPDATE',
-                entityType: 'Parameter',
-                entityId: id,
-                oldValue: param.value as object,
-                newValue: value as object,
-            },
-        });
+            await tx.auditLog.create({
+                data: {
+                    userId: updatedBy,
+                    action: 'UPDATE',
+                    entityType: 'Parameter',
+                    entityId: id,
+                    oldValue: param.value as object,
+                    newValue: value as object,
+                },
+            });
 
-        return updated;
+            return updated;
+        });
     }
 
     // Audit Logs
@@ -411,28 +413,30 @@ export class AdminService {
     }
 
     async updateSiemConfig(value: Record<string, unknown>, userId: string) {
-        const updated = await this.prisma.parameter.upsert({
-            where: { key: this.SIEM_CONFIG_KEY },
-            update: { value: value as object },
-            create: {
-                category: 'SIEM',
-                key: this.SIEM_CONFIG_KEY,
-                value: value as object,
-                description: 'SIEM dışa aktarım / syslog yönlendirme yapılandırması',
-            },
-        });
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.parameter.upsert({
+                where: { key: this.SIEM_CONFIG_KEY },
+                update: { value: value as object },
+                create: {
+                    category: 'SIEM',
+                    key: this.SIEM_CONFIG_KEY,
+                    value: value as object,
+                    description: 'SIEM dışa aktarım / syslog yönlendirme yapılandırması',
+                },
+            });
 
-        await this.prisma.auditLog.create({
-            data: {
-                userId,
-                action: 'UPDATE',
-                entityType: 'Parameter',
-                entityId: updated.id,
-                newValue: value as object,
-            },
-        });
+            await tx.auditLog.create({
+                data: {
+                    userId,
+                    action: 'UPDATE',
+                    entityType: 'Parameter',
+                    entityId: updated.id,
+                    newValue: value as object,
+                },
+            });
 
-        return updated.value;
+            return updated.value;
+        });
     }
 
     // Risk Categories Management
@@ -446,25 +450,29 @@ export class AdminService {
     }
 
     async createRiskCategory(data: { name: string; description?: string; color?: string }, userId?: string) {
-        const created = await this.prisma.riskCategory.create({ data });
-        await this.adminAudit(userId, 'CREATE', 'RiskCategory', created.id, undefined, created);
-        return created;
+        return this.prisma.$transaction(async (tx) => {
+            const created = await tx.riskCategory.create({ data });
+            await this.adminAudit(userId, 'CREATE', 'RiskCategory', created.id, undefined, created, tx);
+            return created;
+        });
     }
 
     async updateRiskCategory(id: string, data: { name?: string; description?: string; color?: string }, userId?: string) {
         const existing = await this.prisma.riskCategory.findUnique({ where: { id } });
         if (!existing) throw new NotFoundException('Risk kategorisi bulunamadı');
-        const updated = await this.prisma.riskCategory.update({ where: { id }, data });
-        await this.adminAudit(userId, 'UPDATE', 'RiskCategory', id, existing, updated);
-        return updated;
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.riskCategory.update({ where: { id }, data });
+            await this.adminAudit(userId, 'UPDATE', 'RiskCategory', id, existing, updated, tx);
+            return updated;
+        });
     }
 
-    /** Yönetim ekranı ana veri değişiklikleri denetim izine girer; log hatası ana işlemi düşürmez. */
-    private async adminAudit(userId: string | undefined, action: string, entityType: string, entityId: string, oldValue?: unknown, newValue?: unknown) {
+    /** Yönetim ekranı ana veri değişiklikleri denetim izine girer; ana işlemle AYNI işlemde yazılır (db = işlem istemcisi). */
+    private async adminAudit(userId: string | undefined, action: string, entityType: string, entityId: string, oldValue?: unknown, newValue?: unknown, db: Prisma.TransactionClient | PrismaService = this.prisma) {
         if (!userId) return;
-        await this.prisma.auditLog.create({
+        await db.auditLog.create({
             data: { userId, action, entityType, entityId, oldValue: oldValue as Prisma.InputJsonValue, newValue: newValue as Prisma.InputJsonValue },
-        }).catch(() => undefined);
+        });
     }
 
     // System Options Management (Dynamic Dropdowns)
@@ -500,9 +508,11 @@ export class AdminService {
         isActive?: boolean;
         isDefault?: boolean;
     }, userId?: string) {
-        const created = await this.prisma.systemOption.create({ data });
-        await this.adminAudit(userId, 'CREATE', 'SystemOption', created.id, undefined, created);
-        return created;
+        return this.prisma.$transaction(async (tx) => {
+            const created = await tx.systemOption.create({ data });
+            await this.adminAudit(userId, 'CREATE', 'SystemOption', created.id, undefined, created, tx);
+            return created;
+        });
     }
 
     async updateSystemOption(
@@ -520,17 +530,21 @@ export class AdminService {
     ) {
         const existing = await this.prisma.systemOption.findUnique({ where: { id } });
         if (!existing) throw new NotFoundException('Seçenek bulunamadı');
-        const updated = await this.prisma.systemOption.update({ where: { id }, data });
-        await this.adminAudit(userId, 'UPDATE', 'SystemOption', id, existing, updated);
-        return updated;
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.systemOption.update({ where: { id }, data });
+            await this.adminAudit(userId, 'UPDATE', 'SystemOption', id, existing, updated, tx);
+            return updated;
+        });
     }
 
     async deleteSystemOption(id: string, userId?: string) {
         const existing = await this.prisma.systemOption.findUnique({ where: { id } });
         if (!existing) throw new NotFoundException('Seçenek bulunamadı');
-        const deleted = await this.prisma.systemOption.delete({ where: { id } });
-        await this.adminAudit(userId, 'DELETE', 'SystemOption', id, existing);
-        return deleted;
+        return this.prisma.$transaction(async (tx) => {
+            const deleted = await tx.systemOption.delete({ where: { id } });
+            await this.adminAudit(userId, 'DELETE', 'SystemOption', id, existing, tx);
+            return deleted;
+        });
     }
 
     async getOptionCategories() {

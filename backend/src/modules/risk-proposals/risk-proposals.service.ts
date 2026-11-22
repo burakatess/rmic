@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
 
 @Injectable()
@@ -12,25 +12,27 @@ export class RiskProposalsService {
         if (!dto.riskTanimi || dto.riskTanimi.trim().length < 10) {
             throw new BadRequestException('Risk tanımı en az 10 karakter olmalıdır.');
         }
-        const proposal = await this.prisma.riskProposal.create({
-            data: {
-                findingId: dto.findingId || null,
-                directorateId: dto.directorateId || null,
-                riskTanimi: dto.riskTanimi.trim(),
-                requestedById: userId,
-                status: 'PENDING',
-            },
-            include: {
-                finding: { select: { id: true, findingId: true, summary: true } },
-                directorate: { select: { id: true, name: true } },
-            },
-        });
+        return this.prisma.$transaction(async (tx) => {
+            const proposal = await tx.riskProposal.create({
+                data: {
+                    findingId: dto.findingId || null,
+                    directorateId: dto.directorateId || null,
+                    riskTanimi: dto.riskTanimi.trim(),
+                    requestedById: userId,
+                    status: 'PENDING',
+                },
+                include: {
+                    finding: { select: { id: true, findingId: true, summary: true } },
+                    directorate: { select: { id: true, name: true } },
+                },
+            });
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'CREATE', entityType: 'RiskProposal', entityId: proposal.id, newValue: { riskTanimi: dto.riskTanimi } },
-        });
+            await tx.auditLog.create({
+                data: { userId, action: 'CREATE', entityType: 'RiskProposal', entityId: proposal.id, newValue: { riskTanimi: dto.riskTanimi } },
+            });
 
-        return proposal;
+            return proposal;
+        });
     }
 
     async findAll(status?: string) {
@@ -61,14 +63,18 @@ export class RiskProposalsService {
         if (!proposal) throw new NotFoundException('Talep bulunamadı');
         if (proposal.status !== 'PENDING') throw new BadRequestException('Talep zaten sonuçlandırılmış.');
 
-        const updated = await this.prisma.riskProposal.update({
-            where: { id },
-            data: { status: 'APPROVED', reviewedById: userId, reviewedAt: new Date() },
+        // Karar koşullu yazılır (yalnız PENDING iken) — iki yöneticinin aynı anda kararı yarışamaz.
+        return this.prisma.$transaction(async (tx) => {
+            const claim = await tx.riskProposal.updateMany({
+                where: { id, status: 'PENDING' },
+                data: { status: 'APPROVED', reviewedById: userId, reviewedAt: new Date() },
+            });
+            if (claim.count !== 1) throw new ConflictException('Talep bu sırada sonuçlandırıldı; sayfayı yenileyin.');
+            await tx.auditLog.create({
+                data: { userId, action: 'APPROVE', entityType: 'RiskProposal', entityId: id },
+            });
+            return tx.riskProposal.findUniqueOrThrow({ where: { id } });
         });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'APPROVE', entityType: 'RiskProposal', entityId: id },
-        });
-        return updated;
     }
 
     async reject(id: string, reviewNote: string, userId: string) {
@@ -76,13 +82,16 @@ export class RiskProposalsService {
         if (!proposal) throw new NotFoundException('Talep bulunamadı');
         if (proposal.status !== 'PENDING') throw new BadRequestException('Talep zaten sonuçlandırılmış.');
 
-        const updated = await this.prisma.riskProposal.update({
-            where: { id },
-            data: { status: 'REJECTED', reviewedById: userId, reviewedAt: new Date(), reviewNote: reviewNote || null },
+        return this.prisma.$transaction(async (tx) => {
+            const claim = await tx.riskProposal.updateMany({
+                where: { id, status: 'PENDING' },
+                data: { status: 'REJECTED', reviewedById: userId, reviewedAt: new Date(), reviewNote: reviewNote || null },
+            });
+            if (claim.count !== 1) throw new ConflictException('Talep bu sırada sonuçlandırıldı; sayfayı yenileyin.');
+            await tx.auditLog.create({
+                data: { userId, action: 'REJECT', entityType: 'RiskProposal', entityId: id, newValue: { reviewNote } },
+            });
+            return tx.riskProposal.findUniqueOrThrow({ where: { id } });
         });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'REJECT', entityType: 'RiskProposal', entityId: id, newValue: { reviewNote } },
-        });
-        return updated;
     }
 }

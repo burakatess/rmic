@@ -55,7 +55,7 @@ Bu dosya her oturumda otomatik yüklenir. **Yeni kod yazarken veya mevcut kodu d
 1. **Her yazma işlemi** `prisma.auditLog.create` ile loglanır: `{ userId, action, entityType, entityId, oldValue?, newValue? }`. Yeni bir service metodu yazıyorsan bunu unutma — mevcut deseni takip et (`audits.service.ts`, `controls.service.ts`).
 2. `LOGIN`, `LOGOUT`, `CHANGE_PASSWORD` gibi güvenlik olayları da loglanmalı.
 3. `oldValue`/`newValue`'da **passwordHash, token, kredi kartı** gibi alanları elleme (bcrypt hash zaten güvenli ama gerekmedikçe döngüde tutma).
-4. Log yazımı başarısız olsa bile ana işlem sürmeli — audit-log yazımı `try/catch` içinde olmalı **veya** transaction dışında (fire-and-forget, mevcut desen böyle).
+4. **Ana kayıt ile denetim kaydı AYNI transaction'da yazılır** (`prisma.$transaction(async (tx) => { ...; await tx.auditLog.create(...) })`). Denetim kaydı yazılamazsa ana işlem de geri alınır — denetimsiz iş verisi değişikliği kabul edilmez (SPK/KVKK). Yardımcı fonksiyonlara `db` (işlem istemcisi) parametresi geçir; işlem içinde `this.prisma` kullanma. İstisna: iş verisi yazmayan salt olay kayıtları (başarısız giriş, AI sorgusu) ayrı yazılabilir. Birim testinde sahte Prisma için `withTx(prisma)` (`src/common/testing/with-tx.ts`).
 
 ## Dosya Yükleme
 
@@ -110,7 +110,7 @@ Frontend sayfa/component eklemeden önce:
 ## Bilinen Teknik Borç (öncelikli iyileştirmeler)
 
 - Kapatıldı (2026-11): `@Body() any` ve satır içi tipli gövdeler (`@Body() body: { ... }`, `@Body('alan')`) DTO'ya geçirildi — satır içi TS tipi de çalışma anında `any` gibidir, YENİ KODDA KULLANMA. `AuthProvider` demo-fallback kaldırıldı; `@nestjs/throttler` (global + auth uçlarında sıkı) ve CSP/güvenlik başlıkları (`next.config.ts`) etkin.
-- Açık: bazı yazma işlemlerinde ana kayıt ile denetim kaydı ayrı adımlarda (atomiklik) — bkz. `docs/production-readiness.md` "Kalan riskler".
+- Kapatıldı (2026-11): ana kayıt + denetim kaydı atomikliği (bulgu, risk, kontrol, aksiyon, simülasyon, yönetici, kimlik doğrulama, yükleme…). Test: `backend/test/atomic-writes.e2e-spec.ts`.
 - Açık: `xlsx` (bilinen açık) → ExcelJS'e geçiş planlandı.
 
 ## Agent skills

@@ -131,37 +131,39 @@ export class RiskEntryService {
         const riskId = await this.generateRiskId();
         const calculated = this.calculateFields(data);
 
-        const created = await this.prisma.riskEntry.create({
-            data: {
-                riskId,
-                kayitId: data.kayitId || riskId,
-                kayitTipi: data.kayitTipi || RiskEntryRecordType.RISK,
-                riskStatus: data.riskStatus || RiskEntryStatus.AKTIF,
-                riskSahibi: data.riskSahibi,
-                surec: data.surec,
-                altSurec: data.altSurec,
-                riskTanimi: data.riskTanimi,
-                flagForIT: data.flagForIT || false,
-                finansalEtki: data.finansalEtki,
-                itibarEtkisi: data.itibarEtkisi,
-                regulasyonEtkisi: data.regulasyonEtkisi,
-                musteriEtkisi: data.musteriEtkisi,
-                gizlilikEtkisi: data.gizlilikEtkisi,
-                butunlukEtkisi: data.butunlukEtkisi,
-                erisebilirlikEtkisi: data.erisebilirlikEtkisi,
-                olasilik: data.olasilik,
-                butunlesikKontrolPuani: data.butunlesikKontrolPuani,
-                riskIsleme: data.riskIsleme,
-                mutabakatTarihi: toDateField(data.mutabakatTarihi) ?? null,
-                riskSorumlusu: data.riskSorumlusu,
-                atanan: data.atanan,
-                olusturan: userId,
-                kaydiAcan: userId,
-                ...calculated,
-            },
-        }).catch(e => this.rethrowUnique(e));
-        await this.prisma.auditLog.create({ data: { userId, action: 'CREATE', entityType: 'RiskEntry', entityId: created.id, newValue: { riskId, kayitId: created.kayitId } } }).catch(() => undefined);
-        return created;
+        return this.prisma.$transaction(async (tx) => {
+            const created = await tx.riskEntry.create({
+                data: {
+                    riskId,
+                    kayitId: data.kayitId || riskId,
+                    kayitTipi: data.kayitTipi || RiskEntryRecordType.RISK,
+                    riskStatus: data.riskStatus || RiskEntryStatus.AKTIF,
+                    riskSahibi: data.riskSahibi,
+                    surec: data.surec,
+                    altSurec: data.altSurec,
+                    riskTanimi: data.riskTanimi,
+                    flagForIT: data.flagForIT || false,
+                    finansalEtki: data.finansalEtki,
+                    itibarEtkisi: data.itibarEtkisi,
+                    regulasyonEtkisi: data.regulasyonEtkisi,
+                    musteriEtkisi: data.musteriEtkisi,
+                    gizlilikEtkisi: data.gizlilikEtkisi,
+                    butunlukEtkisi: data.butunlukEtkisi,
+                    erisebilirlikEtkisi: data.erisebilirlikEtkisi,
+                    olasilik: data.olasilik,
+                    butunlesikKontrolPuani: data.butunlesikKontrolPuani,
+                    riskIsleme: data.riskIsleme,
+                    mutabakatTarihi: toDateField(data.mutabakatTarihi) ?? null,
+                    riskSorumlusu: data.riskSorumlusu,
+                    atanan: data.atanan,
+                    olusturan: userId,
+                    kaydiAcan: userId,
+                    ...calculated,
+                },
+            }).catch(e => this.rethrowUnique(e));
+            await tx.auditLog.create({ data: { userId, action: 'CREATE', entityType: 'RiskEntry', entityId: created.id, newValue: { riskId, kayitId: created.kayitId } } });
+            return created;
+        });
     }
 
     /**
@@ -175,22 +177,26 @@ export class RiskEntryService {
         const patch = definedOnly({ ...rest, mutabakatTarihi: toDateField(mutabakatTarihi) });
         const calculated = this.calculateFields({ ...existing, ...patch });
 
-        const updated = await this.prisma.riskEntry.update({
-            where: { id },
-            data: { ...patch, version: { increment: 1 }, ...calculated },
-        }).catch(e => this.rethrowUnique(e));
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'RiskEntry', entityId: id, oldValue: { version: existing.version, dogalRiskPuani: existing.dogalRiskPuani, kalintiRiskPuani: existing.kalintiRiskPuani }, newValue: { ...(patch as object), version: updated.version } as Prisma.InputJsonValue },
-        }).catch(() => undefined);
-        return updated;
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.riskEntry.update({
+                where: { id },
+                data: { ...patch, version: { increment: 1 }, ...calculated },
+            }).catch(e => this.rethrowUnique(e));
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'RiskEntry', entityId: id, oldValue: { version: existing.version, dogalRiskPuani: existing.dogalRiskPuani, kalintiRiskPuani: existing.kalintiRiskPuani }, newValue: { ...(patch as object), version: updated.version } as Prisma.InputJsonValue },
+            });
+            return updated;
+        });
     }
 
     async delete(id: string, userId?: string) {
         const existing = await this.prisma.riskEntry.findUnique({ where: { id } });
         if (!existing) throw new NotFoundException('Risk kaydı bulunamadı');
-        await this.prisma.riskEntry.delete({ where: { id } });
-        if (userId) await this.prisma.auditLog.create({ data: { userId, action: 'DELETE', entityType: 'RiskEntry', entityId: id, oldValue: { riskId: existing.riskId, kayitId: existing.kayitId } } }).catch(() => undefined);
-        return { message: 'Risk kaydı silindi' };
+        return this.prisma.$transaction(async (tx) => {
+            await tx.riskEntry.delete({ where: { id } });
+            if (userId) await tx.auditLog.create({ data: { userId, action: 'DELETE', entityType: 'RiskEntry', entityId: id, oldValue: { riskId: existing.riskId, kayitId: existing.kayitId } } });
+            return { message: 'Risk kaydı silindi' };
+        });
     }
 
     /** kayitId tekil — Prisma P2002 okunur 400 olarak döner. */

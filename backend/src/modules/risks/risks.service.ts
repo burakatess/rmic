@@ -556,79 +556,81 @@ export class RisksService {
             );
         }
 
-        // Create assessment record
-        const assessment = await this.prisma.riskAssessment.create({
-            data: {
-                riskId: id,
-                assessor: userId,
-                probability: assessRiskDto.probability,
-                impact: assessRiskDto.impact,
-                inherentScore,
-                mitigatingControlIds: assessRiskDto.mitigatingControlIds || [],
-                residualProbability: assessRiskDto.residualProbability,
-                residualImpact: assessRiskDto.residualImpact,
-                residualScore,
-                treatmentDecision: assessRiskDto.treatmentDecision,
-                justification: assessRiskDto.justification,
-            },
-        });
+        return this.prisma.$transaction(async (tx) => {
+            // Create assessment record
+            const assessment = await tx.riskAssessment.create({
+                data: {
+                    riskId: id,
+                    assessor: userId,
+                    probability: assessRiskDto.probability,
+                    impact: assessRiskDto.impact,
+                    inherentScore,
+                    mitigatingControlIds: assessRiskDto.mitigatingControlIds || [],
+                    residualProbability: assessRiskDto.residualProbability,
+                    residualImpact: assessRiskDto.residualImpact,
+                    residualScore,
+                    treatmentDecision: assessRiskDto.treatmentDecision,
+                    justification: assessRiskDto.justification,
+                },
+            });
 
-        // Update risk with latest assessment values
-        const isAboveAppetite = risk.riskAppetite
-            ? (residualScore || inherentScore) > risk.riskAppetite
-            : false;
+            // Update risk with latest assessment values
+            const isAboveAppetite = risk.riskAppetite
+                ? (residualScore || inherentScore) > risk.riskAppetite
+                : false;
 
-        const updatedRisk = await this.prisma.risk.update({
-            where: { id },
-            data: {
-                inherentProbability: assessRiskDto.probability,
-                inherentImpact: assessRiskDto.impact,
-                inherentRiskScore: inherentScore,
-                residualProbability: assessRiskDto.residualProbability,
-                residualImpact: assessRiskDto.residualImpact,
-                residualRiskScore: residualScore,
-                isAboveAppetite,
-                treatmentDecision: assessRiskDto.treatmentDecision,
-                status: 'ASSESSED',
-                version: { increment: 1 },
-            },
-            include: {
-                category: true,
-                owner: {
-                    select: {
-                        id: true,
-                        firstName: true,
-                        lastName: true,
-                        email: true,
-                        department: true,
+            const updatedRisk = await tx.risk.update({
+                where: { id },
+                data: {
+                    inherentProbability: assessRiskDto.probability,
+                    inherentImpact: assessRiskDto.impact,
+                    inherentRiskScore: inherentScore,
+                    residualProbability: assessRiskDto.residualProbability,
+                    residualImpact: assessRiskDto.residualImpact,
+                    residualRiskScore: residualScore,
+                    isAboveAppetite,
+                    treatmentDecision: assessRiskDto.treatmentDecision,
+                    status: 'ASSESSED',
+                    version: { increment: 1 },
+                },
+                include: {
+                    category: true,
+                    owner: {
+                        select: {
+                            id: true,
+                            firstName: true,
+                            lastName: true,
+                            email: true,
+                            department: true,
+                        },
                     },
                 },
-            },
-        });
+            });
 
-        // Create history entry
-        await this.prisma.riskHistory.create({
-            data: {
-                riskId: id,
-                version: updatedRisk.version,
-                changeType: 'ASSESSMENT',
-                changeData: assessment,
-                changedBy: userId,
-            },
-        });
+            // Create history entry
+            await tx.riskHistory.create({
+                data: {
+                    riskId: id,
+                    version: updatedRisk.version,
+                    changeType: 'ASSESSMENT',
+                    changeData: assessment,
+                    changedBy: userId,
+                },
+            });
 
-        // Log the action
-        await this.prisma.auditLog.create({
-            data: {
-                userId,
-                action: 'ASSESSMENT',
-                entityType: 'Risk',
-                entityId: id,
-                newValue: assessment,
-            },
-        });
+            // Log the action
+            await tx.auditLog.create({
+                data: {
+                    userId,
+                    action: 'ASSESSMENT',
+                    entityType: 'Risk',
+                    entityId: id,
+                    newValue: assessment,
+                },
+            });
 
-        return { risk: updatedRisk, assessment };
+            return { risk: updatedRisk, assessment };
+        });
     }
 
     async treat(id: string, treatRiskDto: TreatRiskDto, userId: string) {
@@ -638,56 +640,58 @@ export class RisksService {
             throw new BadRequestException('Risk must be assessed before treatment');
         }
 
-        const updatedRisk = await this.prisma.risk.update({
-            where: { id },
-            data: {
-                treatmentDecision: treatRiskDto.treatmentDecision,
-                status: treatRiskDto.treatmentDecision === 'ACCEPT' ? 'ACCEPTED' : 'TREATED',
-                version: { increment: 1 },
-            },
-            include: {
-                category: true,
-                owner: {
-                    select: {
-                        id: true,
-                        firstName: true,
-                        lastName: true,
-                        email: true,
-                        department: true,
+        return this.prisma.$transaction(async (tx) => {
+            const updatedRisk = await tx.risk.update({
+                where: { id },
+                data: {
+                    treatmentDecision: treatRiskDto.treatmentDecision,
+                    status: treatRiskDto.treatmentDecision === 'ACCEPT' ? 'ACCEPTED' : 'TREATED',
+                    version: { increment: 1 },
+                },
+                include: {
+                    category: true,
+                    owner: {
+                        select: {
+                            id: true,
+                            firstName: true,
+                            lastName: true,
+                            email: true,
+                            department: true,
+                        },
                     },
                 },
-            },
-        });
+            });
 
-        // Create history entry
-        await this.prisma.riskHistory.create({
-            data: {
-                riskId: id,
-                version: updatedRisk.version,
-                changeType: 'TREATMENT',
-                changeData: {
-                    decision: treatRiskDto.treatmentDecision,
-                    justification: treatRiskDto.justification,
+            // Create history entry
+            await tx.riskHistory.create({
+                data: {
+                    riskId: id,
+                    version: updatedRisk.version,
+                    changeType: 'TREATMENT',
+                    changeData: {
+                        decision: treatRiskDto.treatmentDecision,
+                        justification: treatRiskDto.justification,
+                    },
+                    changedBy: userId,
                 },
-                changedBy: userId,
-            },
-        });
+            });
 
-        // Log the action
-        await this.prisma.auditLog.create({
-            data: {
-                userId,
-                action: 'TREATMENT',
-                entityType: 'Risk',
-                entityId: id,
-                newValue: {
-                    decision: treatRiskDto.treatmentDecision,
-                    justification: treatRiskDto.justification,
+            // Log the action
+            await tx.auditLog.create({
+                data: {
+                    userId,
+                    action: 'TREATMENT',
+                    entityType: 'Risk',
+                    entityId: id,
+                    newValue: {
+                        decision: treatRiskDto.treatmentDecision,
+                        justification: treatRiskDto.justification,
+                    },
                 },
-            },
-        });
+            });
 
-        return updatedRisk;
+            return updatedRisk;
+        });
     }
 
     async approveTreatment(id: string, userId: string) {
@@ -701,35 +705,37 @@ export class RisksService {
             select: { firstName: true, lastName: true },
         });
 
-        const updatedRisk = await this.prisma.risk.update({
-            where: { id },
-            data: {
-                treatmentApproval: true,
-                treatmentApprovedBy: approver ? `${approver.firstName} ${approver.lastName}` : userId,
-                treatmentApprovedAt: new Date(),
-                version: { increment: 1 },
-            },
-            include: {
-                category: true,
-                owner: { select: { id: true, firstName: true, lastName: true, email: true, department: true } },
-            },
-        });
+        return this.prisma.$transaction(async (tx) => {
+            const updatedRisk = await tx.risk.update({
+                where: { id },
+                data: {
+                    treatmentApproval: true,
+                    treatmentApprovedBy: approver ? `${approver.firstName} ${approver.lastName}` : userId,
+                    treatmentApprovedAt: new Date(),
+                    version: { increment: 1 },
+                },
+                include: {
+                    category: true,
+                    owner: { select: { id: true, firstName: true, lastName: true, email: true, department: true } },
+                },
+            });
 
-        await this.prisma.riskHistory.create({
-            data: {
-                riskId: id,
-                version: updatedRisk.version,
-                changeType: 'TREATMENT_APPROVAL',
-                changeData: { approvedBy: userId },
-                changedBy: userId,
-            },
-        });
+            await tx.riskHistory.create({
+                data: {
+                    riskId: id,
+                    version: updatedRisk.version,
+                    changeType: 'TREATMENT_APPROVAL',
+                    changeData: { approvedBy: userId },
+                    changedBy: userId,
+                },
+            });
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'Risk', entityId: id, newValue: { treatmentApproval: true } },
-        });
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'Risk', entityId: id, newValue: { treatmentApproval: true } },
+            });
 
-        return updatedRisk;
+            return updatedRisk;
+        });
     }
 
     async getHistory(id: string) {
@@ -861,64 +867,66 @@ export class RisksService {
     async delete(id: string, userId: string) {
         const risk = await this.findOne(id);
 
-        // Log the action before deletion
-        await this.prisma.auditLog.create({
-            data: {
-                userId,
-                action: 'DELETE',
-                entityType: 'Risk',
-                entityId: id,
-                oldValue: risk,
-            },
-        });
+        return this.prisma.$transaction(async (tx) => {
+            // Log the action before deletion
+            await tx.auditLog.create({
+                data: {
+                    userId,
+                    action: 'DELETE',
+                    entityType: 'Risk',
+                    entityId: id,
+                    oldValue: risk,
+                },
+            });
 
-        // Delete related records first (cascade)
-        // Delete actions related to this risk
-        await this.prisma.action.deleteMany({
-            where: { riskId: id },
-        });
+            // Delete related records first (cascade)
+            // Delete actions related to this risk
+            await tx.action.deleteMany({
+                where: { riskId: id },
+            });
 
-        // Delete findings related to this risk
-        await this.prisma.finding.deleteMany({
-            where: { riskId: id },
-        });
+            // Delete findings related to this risk
+            await tx.finding.deleteMany({
+                where: { riskId: id },
+            });
 
-        // Delete risk assessments
-        await this.prisma.riskAssessment.deleteMany({
-            where: { riskId: id },
-        });
+            // Delete risk assessments
+            await tx.riskAssessment.deleteMany({
+                where: { riskId: id },
+            });
 
-        // Delete control-risk mappings
-        await this.prisma.controlRiskMapping.deleteMany({
-            where: { riskId: id },
-        });
+            // Delete control-risk mappings
+            await tx.controlRiskMapping.deleteMany({
+                where: { riskId: id },
+            });
 
-        // Delete risk history
-        await this.prisma.riskHistory.deleteMany({
-            where: { riskId: id },
-        });
+            // Delete risk history
+            await tx.riskHistory.deleteMany({
+                where: { riskId: id },
+            });
 
-        // Delete process-risk mappings
-        await this.prisma.processRisk.deleteMany({
-            where: { riskId: id },
-        });
+            // Delete process-risk mappings
+            await tx.processRisk.deleteMany({
+                where: { riskId: id },
+            });
 
-        // Delete system-risk mappings
-        await this.prisma.systemRisk.deleteMany({
-            where: { riskId: id },
-        });
+            // Delete system-risk mappings
+            await tx.systemRisk.deleteMany({
+                where: { riskId: id },
+            });
 
-        // Delete risk-regulation mappings
-        await this.prisma.riskRegulation.deleteMany({
-            where: { riskId: id },
-        });
+            // Delete risk-regulation mappings
+            await tx.riskRegulation.deleteMany({
+                where: { riskId: id },
+            });
 
-        // Hard delete the risk
-        await this.prisma.risk.delete({
-            where: { id },
-        });
+            // Hard delete the risk
+            await tx.risk.delete({
+                where: { id },
+            });
 
-        return { message: 'Risk deleted successfully' };
+            return { message: 'Risk deleted successfully' };
+        }, { timeout: 30000 });
     }
 
     async getCategories() {

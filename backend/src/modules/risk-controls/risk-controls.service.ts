@@ -88,34 +88,38 @@ export class RiskControlsService {
     async create(data: CreateRiskControlDto, userId: string) {
         const kontrolId = await this.generateUniqueKontrolId();
         const riskIds = await assertAllExist(ids => this.prisma.risk.count({ where: { id: { in: ids } } }), data.riskIds, 'risk');
-        const created = await this.prisma.riskControl.create({
-            data: {
-                ...this.toData(data),
-                kontrolTanimi: data.kontrolTanimi,
-                kontrolId,
-                risks: riskIds?.length ? { create: riskIds.map(rId => ({ riskId: rId })) } : undefined,
-            } as Prisma.RiskControlUncheckedCreateInput,
-            include: { risks: { include: { risk: true } }, actions: true },
+        return this.prisma.$transaction(async (tx) => {
+            const created = await tx.riskControl.create({
+                data: {
+                    ...this.toData(data),
+                    kontrolTanimi: data.kontrolTanimi,
+                    kontrolId,
+                    risks: riskIds?.length ? { create: riskIds.map(rId => ({ riskId: rId })) } : undefined,
+                } as Prisma.RiskControlUncheckedCreateInput,
+                include: { risks: { include: { risk: true } }, actions: true },
+            });
+            await tx.auditLog.create({ data: { userId, action: 'CREATE', entityType: 'RiskControl', entityId: created.id, newValue: { kontrolId, riskIds: riskIds ?? [] } } });
+            return created;
         });
-        await this.prisma.auditLog.create({ data: { userId, action: 'CREATE', entityType: 'RiskControl', entityId: created.id, newValue: { kontrolId, riskIds: riskIds ?? [] } } }).catch(() => undefined);
-        return created;
     }
 
     async update(id: string, data: UpdateRiskControlDto, userId: string) {
         const existing = await this.findOne(id);
         const riskIds = await assertAllExist(ids => this.prisma.risk.count({ where: { id: { in: ids } } }), data.riskIds, 'risk');
-        const updated = await this.prisma.riskControl.update({
-            where: { id },
-            data: {
-                ...this.toData(data),
-                ...(riskIds !== undefined && { risks: { deleteMany: {}, create: riskIds.map(rId => ({ riskId: rId })) } }),
-            } as Prisma.RiskControlUncheckedUpdateInput,
-            include: { risks: { include: { risk: true } }, actions: true },
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.riskControl.update({
+                where: { id },
+                data: {
+                    ...this.toData(data),
+                    ...(riskIds !== undefined && { risks: { deleteMany: {}, create: riskIds.map(rId => ({ riskId: rId })) } }),
+                } as Prisma.RiskControlUncheckedUpdateInput,
+                include: { risks: { include: { risk: true } }, actions: true },
+            });
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'RiskControl', entityId: id, oldValue: { status: existing.status, riskIds: existing.risks.map(r => r.riskId) }, newValue: definedOnly({ ...data }) as Prisma.InputJsonValue },
+            });
+            return updated;
         });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'RiskControl', entityId: id, oldValue: { status: existing.status, riskIds: existing.risks.map(r => r.riskId) }, newValue: definedOnly({ ...data }) as Prisma.InputJsonValue },
-        }).catch(() => undefined);
-        return updated;
     }
 
     /** DTO → Prisma alanları (tarih dönüşümü; undefined alan dokunulmaz). */

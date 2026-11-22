@@ -760,16 +760,18 @@ export class ControlScopeService {
             throw new BadRequestException('Yalnızca kapsam dışı bırakılmış tasklar yeniden etkinleştirilebilir');
         }
 
-        const updated = await this.prisma.controlTest.update({
-            where: { id: taskId },
-            data: { status: 'BEKLIYOR', outOfScopeAt: null, outOfScopeById: null, outOfScopeReason: null },
-        });
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.controlTest.update({
+                where: { id: taskId },
+                data: { status: 'BEKLIYOR', outOfScopeAt: null, outOfScopeById: null, outOfScopeReason: null },
+            });
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'REACTIVATE_TASK', entityType: 'ControlTest', entityId: taskId, oldValue: task, newValue: updated },
-        });
+            await tx.auditLog.create({
+                data: { userId, action: 'REACTIVATE_TASK', entityType: 'ControlTest', entityId: taskId, oldValue: task, newValue: updated },
+            });
 
-        return updated;
+            return updated;
+        });
     }
 
     // ─── Kapsam geçmişi ────────────────────────────────────────────────────────

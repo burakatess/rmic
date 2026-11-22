@@ -117,17 +117,19 @@ export class AuditsService {
 
     async createPlan(data: CreateAuditPlanDto, userId: string) {
         const auditCode = `AP-${data.year}-${(await this.nextPlanSequence(data.year)).toString().padStart(3, '0')}`;
-        const plan = await this.prisma.auditPlan.create({
-            data: {
-                ...this.auditPlanData(data),
-                name: data.name, year: data.year, periodType: data.periodType, objectives: data.objectives, scope: data.scope,
-                planId: auditCode,
-            } as Prisma.AuditPlanUncheckedCreateInput,
+        return this.prisma.$transaction(async (tx) => {
+            const plan = await tx.auditPlan.create({
+                data: {
+                    ...this.auditPlanData(data),
+                    name: data.name, year: data.year, periodType: data.periodType, objectives: data.objectives, scope: data.scope,
+                    planId: auditCode,
+                } as Prisma.AuditPlanUncheckedCreateInput,
+            });
+            await tx.auditLog.create({
+                data: { userId, action: 'CREATE', entityType: 'AuditPlan', entityId: plan.id, newValue: plan },
+            });
+            return plan;
         });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'CREATE', entityType: 'AuditPlan', entityId: plan.id, newValue: plan },
-        });
-        return plan;
     }
 
     /** DTO → Prisma (tarih dönüşümü; null/'' temizler, undefined dokunmaz; zorunlu alanlara null yazılmaz). */
@@ -157,11 +159,13 @@ export class AuditsService {
     async updatePlan(id: string, data: UpdateAuditPlanDto, userId: string) {
         const existing = await this.prisma.auditPlan.findUnique({ where: { id } });
         if (!existing) throw new NotFoundException('Denetim planı bulunamadı');
-        const plan = await this.prisma.auditPlan.update({ where: { id }, data: this.auditPlanData(data) as Prisma.AuditPlanUncheckedUpdateInput });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'AuditPlan', entityId: id, oldValue: existing, newValue: plan },
+        return this.prisma.$transaction(async (tx) => {
+            const plan = await tx.auditPlan.update({ where: { id }, data: this.auditPlanData(data) as Prisma.AuditPlanUncheckedUpdateInput });
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'AuditPlan', entityId: id, oldValue: existing, newValue: plan },
+            });
+            return plan;
         });
-        return plan;
     }
 
     // ─── Audit Executions ────────────────────────────────────────────────────
@@ -207,33 +211,37 @@ export class AuditsService {
         const startDate = toDateField(data.startDate)!;
         const year = startDate.getFullYear();
         const executionId = `AE-${year}-${(await this.nextExecutionSequence(year)).toString().padStart(3, '0')}`;
-        const execution = await this.prisma.auditExecution.create({
-            data: {
-                ...this.auditExecutionData(data),
-                auditPlanId: data.auditPlanId, auditor: data.auditor, startDate, executionId,
-            } as Prisma.AuditExecutionUncheckedCreateInput,
+        return this.prisma.$transaction(async (tx) => {
+            const execution = await tx.auditExecution.create({
+                data: {
+                    ...this.auditExecutionData(data),
+                    auditPlanId: data.auditPlanId, auditor: data.auditor, startDate, executionId,
+                } as Prisma.AuditExecutionUncheckedCreateInput,
+            });
+            await tx.auditLog.create({
+                data: { userId, action: 'CREATE', entityType: 'AuditExecution', entityId: execution.id, newValue: execution },
+            });
+            return execution;
         });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'CREATE', entityType: 'AuditExecution', entityId: execution.id, newValue: execution },
-        });
-        return execution;
     }
 
     async updateExecution(id: string, data: UpdateAuditExecutionDto, userId: string) {
         const existing = await this.prisma.auditExecution.findUnique({ where: { id } });
         if (!existing) throw new NotFoundException('Denetim yürütmesi bulunamadı');
-        const execution = await this.prisma.auditExecution.update({
-            where: { id },
-            data: definedOnly({
-                ...this.auditExecutionData(data),
-                auditor: data.auditor ?? undefined,
-                startDate: data.startDate ? toDateField(data.startDate)! : undefined,
-            }) as Prisma.AuditExecutionUncheckedUpdateInput,
+        return this.prisma.$transaction(async (tx) => {
+            const execution = await tx.auditExecution.update({
+                where: { id },
+                data: definedOnly({
+                    ...this.auditExecutionData(data),
+                    auditor: data.auditor ?? undefined,
+                    startDate: data.startDate ? toDateField(data.startDate)! : undefined,
+                }) as Prisma.AuditExecutionUncheckedUpdateInput,
+            });
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'AuditExecution', entityId: id, oldValue: existing, newValue: execution },
+            });
+            return execution;
         });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'AuditExecution', entityId: id, oldValue: existing, newValue: execution },
-        });
-        return execution;
     }
 
     private auditExecutionData(d: UpdateAuditExecutionDto) {
@@ -403,41 +411,43 @@ export class AuditsService {
 
         // İlk tespit yılı testDate'ten, yoksa sunucu zamanından alınır. Sayaç artışı
         // tek SQL deyimidir; eşzamanlı istekler aynı numarayı alamaz.
-        const findingId = await nextFindingNo(this.prisma, findingData.testDate || new Date());
+        return this.prisma.$transaction(async (tx) => {
+            const findingId = await nextFindingNo(tx, findingData.testDate || new Date());
 
-        const finding = await this.prisma.finding.create({
-            // createdById yalnız oturumdan yazılır (DTO'da yok → istemci belirleyemez).
-            data: { ...findingData, findingId, createdById: userId },
-            include: {
-                risk: { select: { id: true, riskId: true, name: true } },
-                control: { select: { id: true, controlId: true, name: true } },
-                linkedRisks: { select: { id: true, riskId: true, name: true } },
+            const finding = await tx.finding.create({
+                // createdById yalnız oturumdan yazılır (DTO'da yok → istemci belirleyemez).
+                data: { ...findingData, findingId, createdById: userId },
+                include: {
+                    risk: { select: { id: true, riskId: true, name: true } },
+                    control: { select: { id: true, controlId: true, name: true } },
+                    linkedRisks: { select: { id: true, riskId: true, name: true } },
 
-                _count: { select: { actions: true, followUps: true } },
-            },
-        });
+                    _count: { select: { actions: true, followUps: true } },
+                },
+            });
 
-        // Create actions through the shared domain path so inline finding actions
-        // receive the same automatic follow-up, target-date and audit behaviour as
-        // actions created later from the action screens.
-        if (actions && Array.isArray(actions) && actions.length > 0) {
-            for (const act of actions) {
-                const createdAction = await this.createAction(finding.id, act, userId, this.prisma);
+            // Create actions through the shared domain path so inline finding actions
+            // receive the same automatic follow-up, target-date and audit behaviour as
+            // actions created later from the action screens.
+            if (actions && Array.isArray(actions) && actions.length > 0) {
+                for (const act of actions) {
+                    const createdAction = await this.createAction(finding.id, act, userId, tx);
 
-                // Aksiyona yüklenen dosya eklerini bağla
-                if (Array.isArray(act.attachments) && act.attachments.length > 0) {
-                    for (const attachment of act.attachments.filter((a: any) => a?.uploadId)) {
-                        await this.addActionAttachment(finding.id, createdAction.id, attachment, userId);
+                    // Aksiyona yüklenen dosya eklerini bağla
+                    if (Array.isArray(act.attachments) && act.attachments.length > 0) {
+                        for (const attachment of act.attachments.filter((a: any) => a?.uploadId)) {
+                            await this.addActionAttachment(finding.id, createdAction.id, attachment, userId, tx);
+                        }
                     }
                 }
             }
-        }
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'CREATE', entityType: 'Finding', entityId: finding.id, newValue: finding },
-        });
+            await tx.auditLog.create({
+                data: { userId, action: 'CREATE', entityType: 'Finding', entityId: finding.id, newValue: finding },
+            });
 
-        return finding;
+            return finding;
+        }, { timeout: 60000 });
     }
 
     async updateFinding(id: string, data: any, userId: string) {
@@ -542,23 +552,25 @@ export class AuditsService {
             findingData.firstControllerId = pair.first;
             findingData.secondControllerId = pair.second;
         }
-        const finding = await this.prisma.finding.update({
-            where: { id },
-            data: findingData,
-            include: {
-                risk: { select: { id: true, riskId: true, name: true } },
-                control: { select: { id: true, controlId: true, name: true } },
-                linkedRisks: { select: { id: true, riskId: true, name: true } },
+        return this.prisma.$transaction(async (tx) => {
+            const finding = await tx.finding.update({
+                where: { id },
+                data: findingData,
+                include: {
+                    risk: { select: { id: true, riskId: true, name: true } },
+                    control: { select: { id: true, controlId: true, name: true } },
+                    linkedRisks: { select: { id: true, riskId: true, name: true } },
                 
-                _count: { select: { actions: true, followUps: true } },
-            },
-        });
+                    _count: { select: { actions: true, followUps: true } },
+                },
+            });
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'Finding', entityId: id, newValue: finding },
-        });
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'Finding', entityId: id, newValue: finding },
+            });
 
-        return finding;
+            return finding;
+        });
     }
 
     async getFinding(id: string) {
@@ -1062,29 +1074,33 @@ export class AuditsService {
         const risk = await this.prisma.risk.findUnique({ where: { id: riskId } });
         if (!risk) throw new NotFoundException(`Risk ${riskId} not found`);
 
-        await this.prisma.finding.update({
-            where: { id: findingId },
-            data: { linkedRisks: { connect: { id: riskId } } },
-        });
+        return this.prisma.$transaction(async (tx) => {
+            await tx.finding.update({
+                where: { id: findingId },
+                data: { linkedRisks: { connect: { id: riskId } } },
+            });
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'Finding', entityId: findingId, newValue: { linkedRiskId: riskId, action: 'link' } },
-        });
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'Finding', entityId: findingId, newValue: { linkedRiskId: riskId, action: 'link' } },
+            });
 
-        return { message: 'Risk linked to finding successfully' };
+            return { message: 'Risk linked to finding successfully' };
+        });
     }
 
     async unlinkRiskFromFinding(findingId: string, riskId: string, userId: string) {
-        await this.prisma.finding.update({
-            where: { id: findingId },
-            data: { linkedRisks: { disconnect: { id: riskId } } },
-        });
+        return this.prisma.$transaction(async (tx) => {
+            await tx.finding.update({
+                where: { id: findingId },
+                data: { linkedRisks: { disconnect: { id: riskId } } },
+            });
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'Finding', entityId: findingId, newValue: { linkedRiskId: riskId, action: 'unlink' } },
-        });
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'Finding', entityId: findingId, newValue: { linkedRiskId: riskId, action: 'unlink' } },
+            });
 
-        return { message: 'Risk unlinked from finding successfully' };
+            return { message: 'Risk unlinked from finding successfully' };
+        });
     }
 
     // ─── Finding Follow-Ups ───────────────────────────────────────────────────
@@ -2201,10 +2217,12 @@ export class AuditsService {
         if (action.approvalState === 'ONAY_BEKLIYOR') throw new ConflictException('Onay bekleyen aksiyon için silme talebi açılamaz.');
         if (action.firstControllerId && action.firstControllerId !== userId) throw new ForbiddenException('Silme talebini yalnızca aksiyonun birinci kontrolcüsü açabilir.');
         if (!action.secondControllerId) throw new BadRequestException('Silme talebi için aksiyonun ikinci kontrolcüsü atanmış olmalıdır.');
-        await this.prisma.action.update({ where: { id: actionId }, data: { deletionRequestedById: userId, deletionRequestedAt: new Date(), deletionReason: reason.trim(), deletionRejectionReason: null } });
-        await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_DELETE_REQUESTED', userId, explanation: `${action.actionId} için silme talebi: ${reason.trim()}` });
-        await this.prisma.auditLog.create({ data: { userId, action: 'ACTION_DELETE_REQUEST', entityType: 'Action', entityId: actionId, newValue: { reason: reason.trim() } } });
-        return this.prisma.action.findUnique({ where: { id: actionId } });
+        return this.prisma.$transaction(async (tx) => {
+            await tx.action.update({ where: { id: actionId }, data: { deletionRequestedById: userId, deletionRequestedAt: new Date(), deletionReason: reason.trim(), deletionRejectionReason: null } });
+            await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_DELETE_REQUESTED', userId, explanation: `${action.actionId} için silme talebi: ${reason.trim()}` }, tx);
+            await tx.auditLog.create({ data: { userId, action: 'ACTION_DELETE_REQUEST', entityType: 'Action', entityId: actionId, newValue: { reason: reason.trim() } } });
+            return tx.action.findUnique({ where: { id: actionId } });
+        });
     }
 
     async decideActionDeletion(findingId: string, actionId: string, approve: boolean, reason: string | undefined, userId: string) {
@@ -2213,10 +2231,12 @@ export class AuditsService {
         this.requireSecondController(action, userId, 'aksiyonun');
         if (!approve) {
             if (!reason?.trim()) throw new BadRequestException('Silme talebini reddetme gerekçesi zorunludur.');
-            await this.prisma.action.update({ where: { id: actionId }, data: { deletionRequestedAt: null, deletionRequestedById: null, deletionRejectionReason: reason.trim() } });
-            await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_DELETE_REJECTED', userId, explanation: `${action.actionId} silme talebi reddedildi: ${reason.trim()}` });
-            await this.prisma.auditLog.create({ data: { userId, action: 'ACTION_DELETE_REJECT', entityType: 'Action', entityId: actionId, newValue: { reason: reason.trim() } } });
-            return this.prisma.action.findUnique({ where: { id: actionId } });
+            return this.prisma.$transaction(async (tx) => {
+                await tx.action.update({ where: { id: actionId }, data: { deletionRequestedAt: null, deletionRequestedById: null, deletionRejectionReason: reason.trim() } });
+                await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_DELETE_REJECTED', userId, explanation: `${action.actionId} silme talebi reddedildi: ${reason.trim()}` }, tx);
+                await tx.auditLog.create({ data: { userId, action: 'ACTION_DELETE_REJECT', entityType: 'Action', entityId: actionId, newValue: { reason: reason.trim() } } });
+                return tx.action.findUnique({ where: { id: actionId } });
+            });
         }
         return this.prisma.$transaction(async (tx) => {
             const now = new Date();
@@ -2342,10 +2362,12 @@ export class AuditsService {
         if (fu.status === 'ONAYLANDI') throw new ConflictException('Onaylanmış takip çalışması silinemez; önce ikinci kontrolcünün onayı geri alması gerekir.');
         if (fu.assigneeId && fu.assigneeId !== userId) throw new ForbiddenException('Silme talebini yalnızca takibin birinci kontrolcüsü açabilir.');
         if (!fu.secondControllerId) throw new BadRequestException('Silme talebi için takibin ikinci kontrolcüsü atanmış olmalıdır.');
-        await this.prisma.findingFollowUp.update({ where: { id: followUpId }, data: { deletionRequestedById: userId, deletionRequestedAt: new Date(), deletionReason: reason.trim(), deletionRejectionReason: null } });
-        await this.recordAuditTrail({ findingId, followUpId, operation: 'FOLLOWUP_DELETE_REQUESTED', userId, explanation: `${fu.followUpId} için silme talebi: ${reason.trim()}` });
-        await this.prisma.auditLog.create({ data: { userId, action: 'FOLLOWUP_DELETE_REQUEST', entityType: 'FindingFollowUp', entityId: followUpId, newValue: { reason: reason.trim() } } });
-        return this.prisma.findingFollowUp.findUnique({ where: { id: followUpId } });
+        return this.prisma.$transaction(async (tx) => {
+            await tx.findingFollowUp.update({ where: { id: followUpId }, data: { deletionRequestedById: userId, deletionRequestedAt: new Date(), deletionReason: reason.trim(), deletionRejectionReason: null } });
+            await this.recordAuditTrail({ findingId, followUpId, operation: 'FOLLOWUP_DELETE_REQUESTED', userId, explanation: `${fu.followUpId} için silme talebi: ${reason.trim()}` }, tx);
+            await tx.auditLog.create({ data: { userId, action: 'FOLLOWUP_DELETE_REQUEST', entityType: 'FindingFollowUp', entityId: followUpId, newValue: { reason: reason.trim() } } });
+            return tx.findingFollowUp.findUnique({ where: { id: followUpId } });
+        });
     }
 
     async decideFollowUpDeletion(findingId: string, followUpId: string, approve: boolean, reason: string | undefined, userId: string) {
@@ -2355,20 +2377,24 @@ export class AuditsService {
         this.requireSecondController(fu, userId, 'takip çalışmasının');
         if (!approve) {
             if (!reason?.trim()) throw new BadRequestException('Silme talebini reddetme gerekçesi zorunludur.');
-            await this.prisma.findingFollowUp.update({ where: { id: followUpId }, data: { deletionRequestedAt: null, deletionRequestedById: null, deletionRejectionReason: reason.trim() } });
-            await this.recordAuditTrail({ findingId, followUpId, operation: 'FOLLOWUP_DELETE_REJECTED', userId, explanation: `${fu.followUpId} silme talebi reddedildi: ${reason.trim()}` });
-            await this.prisma.auditLog.create({ data: { userId, action: 'FOLLOWUP_DELETE_REJECT', entityType: 'FindingFollowUp', entityId: followUpId, newValue: { reason: reason.trim() } } });
-            return this.prisma.findingFollowUp.findUnique({ where: { id: followUpId } });
+            return this.prisma.$transaction(async (tx) => {
+                await tx.findingFollowUp.update({ where: { id: followUpId }, data: { deletionRequestedAt: null, deletionRequestedById: null, deletionRejectionReason: reason.trim() } });
+                await this.recordAuditTrail({ findingId, followUpId, operation: 'FOLLOWUP_DELETE_REJECTED', userId, explanation: `${fu.followUpId} silme talebi reddedildi: ${reason.trim()}` }, tx);
+                await tx.auditLog.create({ data: { userId, action: 'FOLLOWUP_DELETE_REJECT', entityType: 'FindingFollowUp', entityId: followUpId, newValue: { reason: reason.trim() } } });
+                return tx.findingFollowUp.findUnique({ where: { id: followUpId } });
+            });
         }
-        const now = new Date();
-        const claim = await this.prisma.findingFollowUp.updateMany({
-            where: { id: followUpId, deletedAt: null, deletionRequestedAt: { not: null }, status: { notIn: ['ONAYLANDI', 'TAMAMLANDI'] } },
-            data: { status: 'IPTAL', deletedAt: now, deletedById: userId },
+        return this.prisma.$transaction(async (tx) => {
+            const now = new Date();
+            const claim = await tx.findingFollowUp.updateMany({
+                where: { id: followUpId, deletedAt: null, deletionRequestedAt: { not: null }, status: { notIn: ['ONAYLANDI', 'TAMAMLANDI'] } },
+                data: { status: 'IPTAL', deletedAt: now, deletedById: userId },
+            });
+            if (claim.count !== 1) throw new ConflictException('Takip çalışması bu sırada değişti; silinmedi.');
+            await this.recordAuditTrail({ findingId, followUpId, actionId: fu.actionId || undefined, operation: 'FOLLOWUP_DELETED', userId, explanation: `${fu.followUpId} silindi (talep: ${fu.deletionReason ?? '—'})` }, tx);
+            await tx.auditLog.create({ data: { userId, action: 'DELETE', entityType: 'FindingFollowUp', entityId: followUpId, oldValue: fu as any, newValue: { deletedAt: now } } });
+            return tx.findingFollowUp.findUnique({ where: { id: followUpId } });
         });
-        if (claim.count !== 1) throw new ConflictException('Takip çalışması bu sırada değişti; silinmedi.');
-        await this.recordAuditTrail({ findingId, followUpId, actionId: fu.actionId || undefined, operation: 'FOLLOWUP_DELETED', userId, explanation: `${fu.followUpId} silindi (talep: ${fu.deletionReason ?? '—'})` });
-        await this.prisma.auditLog.create({ data: { userId, action: 'DELETE', entityType: 'FindingFollowUp', entityId: followUpId, oldValue: fu as any, newValue: { deletedAt: now } } });
-        return this.prisma.findingFollowUp.findUnique({ where: { id: followUpId } });
     }
 
     async recalculateFindingTargetDate(findingId: string, db: PrismaLike = this.prisma) {
@@ -2459,33 +2485,35 @@ export class AuditsService {
         const followUpId = await this.generateFollowUpId(action.id, action.actionId);
         const assignment = await this.resolveFollowUpAssignment(findingId, action.ownerId);
 
-        const followUp = await this.prisma.findingFollowUp.create({
-            data: {
-                followUpId,
-                findingId,
-                actionId,
-                status: 'BEKLIYOR',
-                plannedDate: action.dueDate,
-                assigneeId: assignment.assigneeId,
-                secondControllerId: assignment.secondControllerId,
-                notes: data.notes || null,
-            }
-        });
-
-        // Tamamlanmış aksiyon doğrulama beklerken geriye "devam ediyor" durumuna
-        // çekilmez. Yalnız henüz tamamlanmamış aksiyonlar başlatılır.
-        if (!['TAMAMLANDI', 'COMPLETED', 'KAPATILDI', 'CLOSED'].includes(action.status)) {
-            await this.prisma.action.update({
-                where: { id: actionId },
-                data: { status: 'DEVAM_EDIYOR' },
+        return this.prisma.$transaction(async (tx) => {
+            const followUp = await tx.findingFollowUp.create({
+                data: {
+                    followUpId,
+                    findingId,
+                    actionId,
+                    status: 'BEKLIYOR',
+                    plannedDate: action.dueDate,
+                    assigneeId: assignment.assigneeId,
+                    secondControllerId: assignment.secondControllerId,
+                    notes: data.notes || null,
+                }
             });
-        }
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'CREATE', entityType: 'FindingFollowUp', entityId: followUp.id, newValue: followUp },
+            // Tamamlanmış aksiyon doğrulama beklerken geriye "devam ediyor" durumuna
+            // çekilmez. Yalnız henüz tamamlanmamış aksiyonlar başlatılır.
+            if (!['TAMAMLANDI', 'COMPLETED', 'KAPATILDI', 'CLOSED'].includes(action.status)) {
+                await tx.action.update({
+                    where: { id: actionId },
+                    data: { status: 'DEVAM_EDIYOR' },
+                });
+            }
+
+            await tx.auditLog.create({
+                data: { userId, action: 'CREATE', entityType: 'FindingFollowUp', entityId: followUp.id, newValue: followUp },
+            });
+
+            return followUp;
         });
-
-        return followUp;
     }
 
     /**
@@ -2701,30 +2729,35 @@ export class AuditsService {
     async removeFindingAttachment(findingId: string, attachmentId: string, userId: string) {
         const att = await this.prisma.findingAttachment.findFirst({ where: { id: attachmentId, findingId } });
         if (!att) throw new NotFoundException(`Attachment ${attachmentId} not found`);
-        await this.prisma.findingAttachment.delete({ where: { id: attachmentId } });
-        await this.recordAuditTrail({ findingId, operation: 'FILE_DELETED', userId, explanation: `Dosya silindi: ${att.originalName}`, oldValue: { fileName: att.originalName } });
-        return { message: 'Dosya silindi' };
+        return this.prisma.$transaction(async (tx) => {
+            await tx.findingAttachment.delete({ where: { id: attachmentId } });
+            await this.recordAuditTrail({ findingId, operation: 'FILE_DELETED', userId, explanation: `Dosya silindi: ${att.originalName}`, oldValue: { fileName: att.originalName } }, tx);
+            return { message: 'Dosya silindi' };
+        });
     }
 
-    async addActionAttachment(findingId: string, actionId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }, userId: string) {
-        const action = await this.prisma.action.findFirst({ where: { id: actionId, findingId } });
-        if (!action) throw new NotFoundException(`Action ${actionId} not found`);
-
-        return this.prisma.$transaction(async tx => {
+    /** `db` verilirse (ör. bulgu oluşturma işlemi) çağıranın işleminde çalışır; verilmezse kendi işlemini açar. */
+    async addActionAttachment(findingId: string, actionId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }, userId: string, db?: Prisma.TransactionClient) {
+        const run = async (tx: PrismaLike) => {
+            const action = await tx.action.findFirst({ where: { id: actionId, findingId } });
+            if (!action) throw new NotFoundException(`Action ${actionId} not found`);
             await this.claimUploadedFile(meta, userId, tx);
             const { uploadId: _uploadId, ...safeMeta } = meta as any;
             const att = await tx.actionAttachment.create({ data: { actionId, ...safeMeta, displayName: safeMeta.displayName?.trim() || meta.originalName, description: safeMeta.description?.trim() || null, uploadedBy: userId, url: null } });
             await this.recordAuditTrail({ findingId, actionId, operation: 'FILE_UPLOADED', userId, explanation: `Aksiyon dosyası yüklendi: ${meta.originalName}` }, tx);
             return att;
-        });
+        };
+        return db ? run(db) : this.prisma.$transaction(run);
     }
 
     async removeActionAttachment(findingId: string, actionId: string, attachmentId: string, userId: string) {
         const att = await this.prisma.actionAttachment.findFirst({ where: { id: attachmentId, actionId } });
         if (!att) throw new NotFoundException(`Attachment ${attachmentId} not found`);
-        await this.prisma.actionAttachment.delete({ where: { id: attachmentId } });
-        await this.recordAuditTrail({ findingId, actionId, operation: 'FILE_DELETED', userId, explanation: `Aksiyon dosyası silindi: ${att.originalName}` });
-        return { message: 'Dosya silindi' };
+        return this.prisma.$transaction(async (tx) => {
+            await tx.actionAttachment.delete({ where: { id: attachmentId } });
+            await this.recordAuditTrail({ findingId, actionId, operation: 'FILE_DELETED', userId, explanation: `Aksiyon dosyası silindi: ${att.originalName}` }, tx);
+            return { message: 'Dosya silindi' };
+        });
     }
 
     async addFollowUpAttachment(findingId: string, followUpId: string, meta: { fileName: string; originalName: string; mimeType: string; sizeBytes: number }, userId: string) {
@@ -2751,15 +2784,18 @@ export class AuditsService {
         }
         const att = await this.prisma.followUpAttachment.findFirst({ where: { id: attachmentId, followUpId } });
         if (!att) throw new NotFoundException(`Attachment ${attachmentId} not found`);
-        await this.prisma.followUpAttachment.delete({ where: { id: attachmentId } });
-        await this.recordAuditTrail({ findingId, followUpId, operation: 'FILE_DELETED', userId, explanation: `Takip dosyası silindi: ${att.originalName}` });
-        return { message: 'Dosya silindi' };
+        return this.prisma.$transaction(async (tx) => {
+            await tx.followUpAttachment.delete({ where: { id: attachmentId } });
+            await this.recordAuditTrail({ findingId, followUpId, operation: 'FILE_DELETED', userId, explanation: `Takip dosyası silindi: ${att.originalName}` }, tx);
+            return { message: 'Dosya silindi' };
+        });
     }
 
     async updateAttachmentMetadata(kind: 'finding' | 'action' | 'follow-up', findingId: string, attachmentId: string, dto: { displayName?: string; description?: string }, userId: string, parentId?: string) {
         const finding = await this.prisma.finding.findUnique({ where: { id: findingId }, select: { id: true } });
         if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
-        const repo: any = kind === 'finding' ? this.prisma.findingAttachment : kind === 'action' ? this.prisma.actionAttachment : this.prisma.followUpAttachment;
+        const repoFor = (db: PrismaLike): any => kind === 'finding' ? db.findingAttachment : kind === 'action' ? db.actionAttachment : db.followUpAttachment;
+        const repo = repoFor(this.prisma);
         const parentField = kind === 'finding' ? 'findingId' : kind === 'action' ? 'actionId' : 'followUpId';
         const parentValue = kind === 'finding' ? findingId : parentId;
         const old = await repo.findFirst({ where: { id: attachmentId, [parentField]: parentValue } });
@@ -2771,12 +2807,14 @@ export class AuditsService {
                 throw new BadRequestException('Onay bekleyen veya onaylanmış takip çalışmasının kanıtları değiştirilemez.');
             }
         }
-        const updated = await repo.update({ where: { id: attachmentId }, data: {
-            displayName: dto.displayName !== undefined ? (dto.displayName.trim() || old.originalName) : undefined,
-            description: dto.description !== undefined ? (dto.description.trim() || null) : undefined,
-        } });
-        await this.recordAuditTrail({ findingId, actionId: kind === 'action' ? parentId : undefined, followUpId: kind === 'follow-up' ? parentId : undefined, operation: 'FILE_METADATA_UPDATED', userId, fieldName: 'attachmentMetadata', oldValue: { displayName: old.displayName, description: old.description }, newValue: { displayName: updated.displayName, description: updated.description } });
-        return updated;
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await repoFor(tx).update({ where: { id: attachmentId }, data: {
+                displayName: dto.displayName !== undefined ? (dto.displayName.trim() || old.originalName) : undefined,
+                description: dto.description !== undefined ? (dto.description.trim() || null) : undefined,
+            } });
+            await this.recordAuditTrail({ findingId, actionId: kind === 'action' ? parentId : undefined, followUpId: kind === 'follow-up' ? parentId : undefined, operation: 'FILE_METADATA_UPDATED', userId, fieldName: 'attachmentMetadata', oldValue: { displayName: old.displayName, description: old.description }, newValue: { displayName: updated.displayName, description: updated.description } }, tx);
+            return updated;
+        });
     }
 
     // ─── Bağımsız Follow-Ups Listesi ─────────────────────────────────────────

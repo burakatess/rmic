@@ -185,17 +185,19 @@ export class WorkspaceTransferService {
         const rows = pv.rows.filter(r => r.hasChanges);
         if (!rows.length) throw new BadRequestException('Seçilen risklerde envantere aktarılacak bir değişiklik yok.');
         const requestNo = formatRecordId('TRQ', await nextCounterValue(this.prisma, 'sim-transfer-request'));
-        const req = await this.prisma.riskSimulationTransferRequest.create({
-            data: {
-                requestNo, simulationId, simulationLabel: `${pv.simulation.simulationId} · ${pv.simulation.name}`,
-                scenarioIds: rows.map(r => r.scenarioId), preview: { rows, skipped: pv.skipped } as unknown as Prisma.InputJsonValue,
-                note: note ?? null, requestedById: userId,
-            },
+        return this.prisma.$transaction(async (tx) => {
+            const req = await tx.riskSimulationTransferRequest.create({
+                data: {
+                    requestNo, simulationId, simulationLabel: `${pv.simulation.simulationId} · ${pv.simulation.name}`,
+                    scenarioIds: rows.map(r => r.scenarioId), preview: { rows, skipped: pv.skipped } as unknown as Prisma.InputJsonValue,
+                    note: note ?? null, requestedById: userId,
+                },
+            });
+            await tx.auditLog.create({
+                data: { userId, action: 'SIM_TRANSFER_REQUEST', entityType: 'RiskSimulationTransferRequest', entityId: req.id, newValue: { requestNo, simulationId, risks: rows.map(r => r.riskId) } },
+            });
+            return req;
         });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'SIM_TRANSFER_REQUEST', entityType: 'RiskSimulationTransferRequest', entityId: req.id, newValue: { requestNo, simulationId, risks: rows.map(r => r.riskId) } },
-        });
-        return req;
     }
 
     async list(status?: string) {
@@ -289,17 +291,21 @@ export class WorkspaceTransferService {
 
     async reject(id: string, note: string | undefined, userId: string) {
         const req = await this.pendingOr404(id);
-        await this.prisma.riskSimulationTransferRequest.update({ where: { id }, data: { status: 'REJECTED', decidedById: userId, decidedAt: new Date(), decisionNote: note ?? null } });
-        await this.prisma.auditLog.create({ data: { userId, action: 'SIM_TRANSFER_REJECT', entityType: 'RiskSimulationTransferRequest', entityId: id, newValue: { requestNo: req.requestNo, note: note ?? null } } });
-        return { status: 'REJECTED' };
+        return this.prisma.$transaction(async (tx) => {
+            await tx.riskSimulationTransferRequest.update({ where: { id }, data: { status: 'REJECTED', decidedById: userId, decidedAt: new Date(), decisionNote: note ?? null } });
+            await tx.auditLog.create({ data: { userId, action: 'SIM_TRANSFER_REJECT', entityType: 'RiskSimulationTransferRequest', entityId: id, newValue: { requestNo: req.requestNo, note: note ?? null } } });
+            return { status: 'REJECTED' };
+        });
     }
 
     async cancel(id: string, userId: string) {
         const req = await this.pendingOr404(id);
         if (req.requestedById !== userId) throw new ForbiddenException('Yalnız talebi oluşturan kişi iptal edebilir.');
-        await this.prisma.riskSimulationTransferRequest.update({ where: { id }, data: { status: 'CANCELLED', decidedAt: new Date() } });
-        await this.prisma.auditLog.create({ data: { userId, action: 'SIM_TRANSFER_CANCEL', entityType: 'RiskSimulationTransferRequest', entityId: id, newValue: { requestNo: req.requestNo } } });
-        return { status: 'CANCELLED' };
+        return this.prisma.$transaction(async (tx) => {
+            await tx.riskSimulationTransferRequest.update({ where: { id }, data: { status: 'CANCELLED', decidedAt: new Date() } });
+            await tx.auditLog.create({ data: { userId, action: 'SIM_TRANSFER_CANCEL', entityType: 'RiskSimulationTransferRequest', entityId: id, newValue: { requestNo: req.requestNo } } });
+            return { status: 'CANCELLED' };
+        });
     }
 
     private async uniqueKontrolId(tx: Prisma.TransactionClient) {
