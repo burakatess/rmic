@@ -74,6 +74,9 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
     { key: 'ai:view', group: 'ai', label: 'Görüntüleme', description: 'Yapay zeka menüsü ve kaynak kataloğu', enforcedIn: ['ui'] },
     { key: 'ai:run', group: 'ai', label: 'Çalıştırma', description: 'Kontrol & kanıt değerlendirme çalıştırma', enforcedIn: ['api', 'ui'] },
     { key: 'ai:admin', group: 'ai', label: 'Yönetim', description: 'Kaynak kütüphanesi ve AI ayarları', enforcedIn: ['ui'] },
+    { key: 'ai:query', group: 'ai', label: 'Doğal dil sorgu', description: 'Salt okunur özet veri üzerinde doğal dil sorgusu (Yapay Zeka sorgu ekranı)', enforcedIn: ['api'] },
+    { key: 'ai:source:restricted', group: 'ai', label: 'Kaynak — KISITLI seviye', description: 'Kaynak Kataloğu aramasında KISITLI gizlilikteki kaynakları görür (varsayılan: genel + dahili)', enforcedIn: ['api'] },
+    { key: 'ai:source:confidential', group: 'ai', label: 'Kaynak — GİZLİ seviye', description: 'Kaynak Kataloğu aramasında GİZLİ dahil tüm gizlilik seviyelerini görür', enforcedIn: ['api'] },
     { key: 'ai:accept', group: 'ai', label: 'Öneri kabul (ayrılmış)', description: 'Henüz hiçbir yerde denetlenmiyor', enforcedIn: [] },
     { key: 'ai:review', group: 'ai', label: 'İnceleme (ayrılmış)', description: 'Henüz hiçbir yerde denetlenmiyor', enforcedIn: [] },
 

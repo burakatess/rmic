@@ -111,7 +111,7 @@ Gerçek ortamda sıra (her adım yedek + onay):
 - **Atomiklik (2026-11 kapatıldı):** ana kayıt + denetim kaydı (ve bağlı tarihçe/alt kayıtlar) tüm yazma yollarında tek transaction'dadır; denetim yazılamazsa ana işlem geri alınır (`test/atomic-writes.e2e-spec.ts`). Bilinçli olarak kapsam dışı: salt olay kayıtları (başarısız giriş, AI sorgusu) ve `workspace.saveDraft` içindeki test bitirme adımı (kendi işleminde).
 - `xlsx` kararı (bölüm 2).
 - `@Body() data: any` kalan legacy uçlar (CLAUDE.md teknik borç listesi).
-- `IKS_MANAGER`/`IKS_EMPLOYEE` rol adına bağlı AI ve rapor kuralları (bkz. `docs/access-scope.md`).
+- **IKS rol adı bağımlılığı (2026-11 kapatıldı):** AI ve rapor kuralları izinle yönetilir (`ai:query`, `ai:run`, `ai:source:restricted|confidential`, `report:view`); mevcut roller eski erişimin birebir karşılığını aldı (canlı rol verisi kopyası üzerinde önce/sonra karşılaştırıldı). Roller hâlâ vardır ve silinmedi; `AI_TEST_ROLES`/`AI_REVIEW_ROLES` (IKS içermeyen sistem-rol listeleri) ayrı bir geçiş konusudur.
 - **Karar gerekli — RCM risk izinleri:** varsayılan katalogda `RISK_CONTROL_MANAGER`'da `risk:*` yok (HEAD'de de yoktu); backend risk oluşturma/düzenlemeyi RCM'ye açıyor, arayüz "Yeni Risk"i ve risk menüsünü gizliyor.
 - **Karar gerekli — eski kontrol ayları:** `referenceMonth` olmayan periyodik kontrollerde Yıllık Plan, kontrolün eski `selectedMonths` değerini (ör. Mart/Eylül) dönem kaydına kopyalıyor; testler ise sabit takvimle (Haz/Ara) üretiliyor. Dönem Kontrolleri ay filtresi bu yüzden yanlış eşleşebilir.
 - Dönem Kontrolleri ekranında kapsam seçici yok (her zaman "İşlerim"); kurum geneli yöneticiler kendilerine atanmamış dönem kontrollerini bu ekranda göremez (HEAD davranışı).

@@ -1,8 +1,8 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
-import { CurrentUser, Roles } from '../../common/decorators';
-import { AI_QUERY_ROLES, AI_REVIEW_ROLES, AI_TEST_ROLES } from './ai.constants';
+import { CurrentUser, RequirePermissions, Roles } from '../../common/decorators';
+import { AI_REVIEW_ROLES, AI_TEST_ROLES } from './ai.constants';
 import { AiProviderService } from './ai-provider.service';
 import { AiAssessmentService } from './ai-assessment.service';
 import { PrepStageService } from './stages/prep.service';
@@ -133,7 +133,7 @@ export class AiController {
 
     /** Faz 3 — Doğal dil sorgu (salt okunur özet veri). */
     @Post('query')
-    @Roles(...AI_QUERY_ROLES)
+    @RequirePermissions('ai:query')
     ask(@Body() dto: AskQueryDto, @CurrentUser('id') userId: string) {
         return this.query.ask(dto.question, userId);
     }

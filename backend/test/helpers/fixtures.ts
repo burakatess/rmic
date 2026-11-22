@@ -26,6 +26,7 @@ export async function seedRoles(prisma: PrismaClient) {
             permissions: [
                 'finding:view', 'finding:create', 'finding:update', 'action:*', 'control:*',
                 'report:view', 'report:export', 'report:org',
+                'ai:run', 'ai:admin', 'ai:query', 'ai:source:restricted', 'ai:source:confidential',
             ],
         },
         {
@@ -33,14 +34,14 @@ export async function seedRoles(prisma: PrismaClient) {
             name: 'AUDITOR',
             permissions: [
                 'finding:view', 'finding:create', 'action:view', 'action:create', 'control:view', 'control:test',
-                'report:view', 'report:export',
+                'report:view', 'report:export', 'ai:run', 'ai:query', 'ai:source:restricted',
             ],
         },
         // İç Kontrol Sistemi Yöneticisi — kapsamlı raporlara erişemez, yalnızca dar
         // kapsamlı (bulgu-takip / my-work) raporları görebilir.
         {
             name: 'IKS_MANAGER',
-            permissions: ['finding:view', 'finding:create', 'finding:update', 'action:create', 'action:update', 'report:view'],
+            permissions: ['finding:view', 'finding:create', 'finding:update', 'action:create', 'action:update', 'report:view', 'ai:run', 'ai:query', 'ai:source:restricted'],
         },
         // Denetlenen birim — yalnızca kendine atanmış kayıtların raporları.
         { name: 'AUDITEE', permissions: ['finding:view', 'action:view', 'action:update', 'report:view'] },

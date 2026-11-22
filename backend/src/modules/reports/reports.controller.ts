@@ -3,21 +3,19 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ReportsService } from './reports.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
-import { CurrentUser, Roles, RequirePermissions } from '../../common/decorators';
+import { CurrentUser, RequirePermissions } from '../../common/decorators';
 import { matchesPermission } from '../../common/util/permission-match';
 import { AccessScopeService, findingFullWhere, followUpWhere } from '../../common/services/access-scope.service';
 import { ReportPeriodQueryDto, RiskTrendsQueryDto } from './dto/report-query.dto';
 
-// Raporlara erişebilen roller — anonim/oturumsuz erişim JwtAuthGuard ile zaten
-// engelli. Bu liste "her oturumlu kullanıcıya açık" durumunu kaldırır. AUDITEE ve
-// IKS_MANAGER yalnızca DAR KAPSAMLI raporları görür (report:org izinleri yok).
-const REPORT_ROLES = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR', 'IKS_MANAGER', 'AUDITEE'] as const;
+// Raporlara erişim İZİNLE verilir (`report:view`, aşağıda); rol adı listesi kaldırıldı — özel roller de
+// `report:view` ile rapor görebilir. Anonim/oturumsuz erişim JwtAuthGuard ile engelli. `report:view`
+// tek başına DAR KAPSAMLI raporlar demektir; kurum geneli raporlar ayrıca `report:org` ister.
 
 @ApiTags('Reports')
 @ApiBearerAuth('JWT-Auth')
 @Controller('reports')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(...REPORT_ROLES)
 @RequirePermissions('report:view')
 export class ReportsController {
     constructor(private reportsService: ReportsService, private scope: AccessScopeService) { }

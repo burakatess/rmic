@@ -1,3 +1,5 @@
+import { matchesPermission } from '../../common/util/permission-match';
+import { allowedConfidentialityLevels } from '../../common/permissions/source-confidentiality';
 import {
     BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException,
 } from '@nestjs/common';
@@ -604,9 +606,10 @@ export class AiEvalService {
      */
     async suggestSources(sessionId: string, userId: string) {
         const session = await this.getSession(sessionId, userId);
-        const role = await this.userRole(userId);
-        const allowedConf = this.confLevelsFor(role);
-        const canManageCatalog = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER'].includes(role);
+        // Gizlilik seviyesi ve katalog yönlendirmesi ROL ADINDAN değil İZİNLERDEN türetilir.
+        const permissions = await this.userPermissions(userId);
+        const allowedConf: string[] = allowedConfidentialityLevels(permissions);
+        const canManageCatalog = matchesPermission(permissions, 'ai:admin');
 
         // Kontrol bağlamı
         let controlName = '';
@@ -725,15 +728,10 @@ export class AiEvalService {
         return { suggestions: capped, reason: null, catalogLink: canManageCatalog ? '/ai/kaynak-katalogu' : null };
     }
 
-    private async userRole(userId: string): Promise<string> {
-        const u = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: { select: { name: true } } } });
-        return u?.role.name ?? '';
-    }
-
-    private confLevelsFor(role: string): string[] {
-        if (role === 'SYSTEM_ADMIN' || role === 'RISK_CONTROL_MANAGER') return ['PUBLIC', 'INTERNAL', 'RESTRICTED', 'CONFIDENTIAL'];
-        if (role === 'AUDITOR' || role === 'IKS_MANAGER') return ['PUBLIC', 'INTERNAL', 'RESTRICTED'];
-        return ['PUBLIC', 'INTERNAL'];
+    private async userPermissions(userId: string): Promise<string[]> {
+        const u = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: { select: { permissions: true } } } });
+        const perms = u?.role.permissions;
+        return Array.isArray(perms) ? perms.filter((p): p is string => typeof p === 'string') : [];
     }
 
     /**

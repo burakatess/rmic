@@ -2,8 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } f
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { KnowledgeDocKind } from '@prisma/client';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
-import { CurrentUser, Roles } from '../../common/decorators';
-import { AI_EVAL_ROLES } from '../ai/ai.constants';
+import { CurrentUser, RequirePermissions, Roles } from '../../common/decorators';
 import { KnowledgeService } from './knowledge.service';
 import { CreateKnowledgeDocDto, UpdateKnowledgeDocDto } from './dto';
 
@@ -17,7 +16,7 @@ export class KnowledgeController {
     constructor(private knowledge: KnowledgeService) {}
 
     @Get()
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     search(
         @Query('q') q?: string,
         @Query('kind') kind?: KnowledgeDocKind,
@@ -33,7 +32,7 @@ export class KnowledgeController {
     }
 
     @Get(':id')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     get(@Param('id') id: string) {
         return this.knowledge.get(id);
     }

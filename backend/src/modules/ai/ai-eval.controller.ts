@@ -1,8 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
-import { CurrentUser, Roles } from '../../common/decorators';
-import { AI_EVAL_ROLES } from './ai.constants';
+import { CurrentUser, RequirePermissions } from '../../common/decorators';
 import { AiEvalService } from './ai-eval.service';
 import {
     BulkEvalDto,
@@ -23,7 +22,7 @@ import {
 @ApiBearerAuth('JWT-Auth')
 @Controller('ai/eval-sessions')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(...AI_EVAL_ROLES)
+@RequirePermissions('ai:run')
 export class AiEvalController {
     constructor(private evalService: AiEvalService) {}
 
