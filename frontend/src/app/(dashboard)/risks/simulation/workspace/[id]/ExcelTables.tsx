@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import api from '@/lib/api';
 import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import { LoadingState, ErrorState } from '@/components/ui';
+import { useToast } from '@/components/ui/Toast';
 import {
     RISK_COLUMNS, CONTROL_COLUMNS, downloadRiskWorkbook, downloadControlWorkbook,
-    downloadBlankRiskTemplate, downloadBlankControlTemplate, type SimCol,
+    downloadBlankRiskTemplate, downloadBlankControlTemplate, runDownload, type SimCol,
 } from '@/lib/sim-excel';
 
 /*
@@ -32,6 +33,7 @@ function display(col: SimCol, v: unknown): string {
 }
 
 export function ExcelTables({ simulationId, onOpenRisk }: { simulationId: string; onOpenRisk: (scenarioId: string) => void }) {
+    const { error: showError } = useToast();
     const [data, setData] = useState<Tables | null>(null);
     const [error, setError] = useState<LoadError | null>(null);
     const [which, setWhich] = useState<'risk' | 'control'>('risk');
@@ -73,11 +75,11 @@ export function ExcelTables({ simulationId, onOpenRisk }: { simulationId: string
                 </div>
                 <span className="text-xs text-slate-500">Kolonlar {cols.length}</span>
                 <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Tabloda ara" className="ml-auto w-52 rounded-lg border border-slate-300 px-3 py-1.5 text-sm" />
-                <button type="button" onClick={() => (which === 'risk' ? downloadRiskWorkbook(data.risks, base) : downloadControlWorkbook(data.controls, base))}
+                <button type="button" onClick={() => runDownload(() => (which === 'risk' ? downloadRiskWorkbook(data.risks, base) : downloadControlWorkbook(data.controls, base)), m => showError('Hata', m))}
                     className="rounded-lg bg-teal-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-teal-800">
                     {which === 'risk' ? 'Risk Excel\'ini indir' : 'Kontrol Excel\'ini indir'}
                 </button>
-                <button type="button" onClick={which === 'risk' ? downloadBlankRiskTemplate : downloadBlankControlTemplate}
+                <button type="button" onClick={() => runDownload(which === 'risk' ? downloadBlankRiskTemplate : downloadBlankControlTemplate, m => showError('Hata', m))}
                     className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Boş şablon</button>
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 pb-3 text-[11px] text-slate-500">

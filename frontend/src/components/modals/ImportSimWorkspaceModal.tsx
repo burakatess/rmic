@@ -5,7 +5,7 @@ import api, { ApiError } from '@/lib/api';
 import { Button, Modal, Input } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import {
-    readWorkbook, parseSheet, downloadBlankRiskTemplate, downloadBlankControlTemplate,
+    readWorkbook, parseSheet, downloadBlankRiskTemplate, downloadBlankControlTemplate, runDownload,
     type ParsedSheet, type ParseIssue,
 } from '@/lib/sim-excel';
 
@@ -150,9 +150,9 @@ export function ImportSimWorkspaceModal({ open, onClose, onCreated }: { open: bo
                 <Input label="Ad" value={name} onChange={e => setName(e.target.value)} placeholder="örn. Kasım 2026 BGD matrisi" />
                 <div className="grid gap-3 md:grid-cols-2">
                     <FilePick label="Risk Excel'i" hint="Zorunlu. GRC Risk dışa aktarımı veya doldurulmuş Risk şablonu."
-                        slot={riskSlot} onPick={f => pick('Risk', f)} onClear={() => { setRiskSlot(null); setReport(null); }} onTemplate={downloadBlankRiskTemplate} />
+                        slot={riskSlot} onPick={f => pick('Risk', f)} onClear={() => { setRiskSlot(null); setReport(null); }} onTemplate={() => runDownload(downloadBlankRiskTemplate, m => showError('Hata', m))} />
                     <FilePick label="Kontrol Excel'i" hint="GRC Kontrol dışa aktarımı veya doldurulmuş Kontrol şablonu. Risk ID'ler Risk Excel'iyle eşleşmeli."
-                        slot={controlSlot} onPick={f => pick('Kontrol', f)} onClear={() => { setControlSlot(null); setReport(null); }} onTemplate={downloadBlankControlTemplate} />
+                        slot={controlSlot} onPick={f => pick('Kontrol', f)} onClear={() => { setControlSlot(null); setReport(null); }} onTemplate={() => runDownload(downloadBlankControlTemplate, m => showError('Hata', m))} />
                 </div>
 
                 {report && (

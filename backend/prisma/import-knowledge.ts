@@ -34,7 +34,7 @@ import { extname, resolve } from 'path';
 import { PrismaClient, KnowledgeDocKind, Prisma } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
-import * as XLSX from 'xlsx';
+import { loadWorkbook, parseCsvObjects, sheetToObjects } from '../src/common/util/xlsx-read';
 
 // ─── CLI ───────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
@@ -84,7 +84,7 @@ interface Parsed {
 }
 
 // ─── Dosya okuma ───────────────────────────────────────────────────────────
-function readRows(path: string): Record<string, unknown>[] {
+async function readRows(path: string): Promise<Record<string, unknown>[]> {
     const abs = resolve(path);
     if (!existsSync(abs)) throw new Error(`Dosya bulunamadı: ${abs}`);
     const ext = extname(abs).toLowerCase();
@@ -100,17 +100,16 @@ function readRows(path: string): Record<string, unknown>[] {
         return arr as Record<string, unknown>[];
     }
     if (ext === '.csv') {
-        // UTF-8 metin olarak oku — buffer modu Türkçe karakterleri bozabiliyor.
-        const wb = XLSX.read(readFileSync(abs, 'utf8'), { type: 'string', raw: true });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        return XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+        // UTF-8 metin olarak oku (BOM temizlenir) — başlık satırı alan adlarıdır.
+        return parseCsvObjects(readFileSync(abs, 'utf8'));
     }
-    if (ext === '.xlsx' || ext === '.xls') {
-        const wb = XLSX.read(readFileSync(abs), { type: 'buffer', cellDates: true });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        return XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+    if (ext === '.xlsx') {
+        const wb = await loadWorkbook(readFileSync(abs));
+        const sheet = wb.worksheets[0];
+        if (!sheet) throw new Error('Excel dosyasında sayfa yok.');
+        return sheetToObjects(sheet);
     }
-    throw new Error(`Desteklenmeyen uzantı: ${ext} (.json / .csv / .xlsx kullanın)`);
+    throw new Error(`Desteklenmeyen uzantı: ${ext} (.json / .csv / .xlsx kullanın; eski .xls desteklenmez)`);
 }
 
 function cellToString(v: unknown): string {
@@ -232,7 +231,7 @@ async function main() {
         process.exit(1);
     }
 
-    const rawRows = readRows(FILE);
+    const rawRows = await readRows(FILE);
     console.log(`${rawRows.length} satır okundu: ${FILE}`);
 
     const parsed: Parsed[] = [];

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
 import { PageShell, PageHeader, Button } from '@/components/ui';
-import * as XLSX from 'xlsx';
+import { addObjectSheet, downloadWorkbook, newWorkbook } from '@/lib/xlsx-io';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -321,46 +321,42 @@ export default function BulgeTakipRaporPage() {
 
     useEffect(() => { fetchReport(); }, []);
 
-    const handleExcel = () => {
+    const handleExcel = async () => {
         if (!report) return;
-        const wb = XLSX.utils.book_new();
+        const wb = await newWorkbook();
 
-        const sheet1 = XLSX.utils.json_to_sheet(report.tespitEdilenBulgular.map(f => ({
+        addObjectSheet(wb, '1-Tespit Edilen Bulgular', report.tespitEdilenBulgular.map(f => ({
             'Bulgu No': f.findingId, 'Özet': f.summary ?? '', 'Önem': SEVERITY_LABELS[f.severity] ?? f.severity,
             'Direktörlük': f.directorate?.name ?? '', 'Hedef Tarih': fmt(f.targetResolutionDate),
             'Çözüm Durumu': STATUS_LABELS[f.resolutionStatus ?? ''] ?? f.resolutionStatus ?? '',
             'Kaynak': SOURCE_LABELS[f.source ?? ''] ?? f.source ?? '', 'Açılış Tarihi': fmt(f.createdAt),
             'Sorumlu': f.responsiblePerson ?? '', 'GMY': f.gmy ?? '',
         })));
-        XLSX.utils.book_append_sheet(wb, sheet1, '1-Tespit Edilen Bulgular');
 
-        const sheet2 = XLSX.utils.json_to_sheet(report.takipCalismalari.map(f => ({
+        addObjectSheet(wb, '2-Takip Çalışmaları', report.takipCalismalari.map(f => ({
             'Takip No': f.followUpId, 'Bağlı Bulgu': f.finding?.findingId ?? '', 'Bulgu Özeti': f.finding?.summary ?? '',
             'Direktörlük': f.directorate?.name ?? '', 'Tarih': fmt(f.createdAt),
             'Durum': STATUS_LABELS[f.status] ?? f.status, 'Sonuç': RESULT_LABELS[f.result ?? ''] ?? f.result ?? '',
             'Onay Durumu': STATUS_LABELS[f.approvalStatus ?? ''] ?? f.approvalStatus ?? '',
         })));
-        XLSX.utils.book_append_sheet(wb, sheet2, '2-Takip Çalışmaları');
 
-        const sheet3 = XLSX.utils.json_to_sheet(report.takipliAcikBulgular.map(f => ({
+        addObjectSheet(wb, '3-Takipli Açık Bulgular', report.takipliAcikBulgular.map(f => ({
             'Bulgu No': f.findingId, 'Özet': f.summary ?? '', 'Önem': SEVERITY_LABELS[f.severity] ?? f.severity,
             'Direktörlük': f.directorate?.name ?? '', 'Hedef Tarih': fmt(f.targetResolutionDate),
             'Son Takip Tarihi': f.sonTakip ? fmt(f.sonTakip.createdAt) : '—',
             'Son Takip Sonucu': RESULT_LABELS[f.sonTakip?.result ?? ''] ?? f.sonTakip?.result ?? '—',
             'Son Takip Durumu': STATUS_LABELS[f.sonTakip?.status ?? ''] ?? f.sonTakip?.status ?? '—',
         })));
-        XLSX.utils.book_append_sheet(wb, sheet3, '3-Takipli Açık Bulgular');
 
-        const sheet4 = XLSX.utils.json_to_sheet(report.takipsizBulgular.map(f => ({
+        addObjectSheet(wb, '4-Takipsiz-Tarihi Belirsiz', report.takipsizBulgular.map(f => ({
             'Bulgu No': f.findingId, 'Özet': f.summary ?? '', 'Önem': SEVERITY_LABELS[f.severity] ?? f.severity,
             'Direktörlük': f.directorate?.name ?? '', 'Açılış Tarihi': fmt(f.createdAt),
             'Hedef Tarih': fmt(f.targetResolutionDate), 'Sorumlu': f.responsiblePerson ?? '',
             'Not': f.neden ?? '', 'Çözüm Durumu': STATUS_LABELS[f.resolutionStatus ?? ''] ?? f.resolutionStatus ?? '',
         })));
-        XLSX.utils.book_append_sheet(wb, sheet4, '4-Takipsiz-Tarihi Belirsiz');
 
         const label = mode === 'month' ? `${year}_${month}` : `${startDate}_${endDate}`;
-        XLSX.writeFile(wb, `Bulgu_Takip_Raporu_${label}.xlsx`);
+        await downloadWorkbook(wb, `Bulgu_Takip_Raporu_${label}.xlsx`);
     };
 
     // ── Table Section Helper ──────────────────────────────────────────────────

@@ -7,7 +7,7 @@ import {
     PieChart, Pie, Cell, BarChart, Bar, LineChart, Line,
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import * as XLSX from 'xlsx';
+import { addAoaSheet, downloadWorkbook, newWorkbook } from '@/lib/xlsx-io';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -217,13 +217,12 @@ export default function MonthlyReportPage() {
         }
     };
 
-    const handleExcel = () => {
+    const handleExcel = async () => {
         if (!report) return;
-        const wb = XLSX.utils.book_new();
+        const wb = await newWorkbook();
 
         const addSheet = (name: string, headers: string[], rows: (string | number)[][]) => {
-            const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-            XLSX.utils.book_append_sheet(wb, ws, name);
+            addAoaSheet(wb, name, [headers, ...rows]);
         };
 
         addSheet('Yeni Bulgular',
@@ -287,7 +286,7 @@ export default function MonthlyReportPage() {
             ])
         );
 
-        XLSX.writeFile(wb, `Aylik_Rapor_${year}${month ? '_' + month : ''}.xlsx`);
+        await downloadWorkbook(wb, `Aylik_Rapor_${year}${month ? '_' + month : ''}.xlsx`);
     };
 
     const pieData = useMemo(() =>

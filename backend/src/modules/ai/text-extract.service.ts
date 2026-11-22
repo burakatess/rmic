@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { readFileSync } from 'fs';
 import { extname, join } from 'path';
 import { UPLOAD_ROOT, resolveUploadPath } from '../uploads/uploads.controller';
+import { loadWorkbook, sheetToCsv } from '../../common/util/xlsx-read';
 
 // pdf-parse v2 — PDFParse sınıfı. (v1'deki fonksiyon API'si kaldırıldı.)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -22,8 +23,6 @@ async function pdfToText(buf: Buffer): Promise<string> {
     }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const XLSX = require('xlsx');
 
 export type ExtractKind = 'text' | 'image' | 'unsupported' | 'error';
 
@@ -44,7 +43,8 @@ export interface ExtractedDoc {
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
 const TEXT_EXT = new Set(['.txt', '.csv']);
-const SHEET_EXT = new Set(['.xlsx', '.xls']);
+// Yalnız OOXML (.xlsx): yükleme politikası .xls'i zaten reddeder; ikili .xls ayrıştırıcısı (SheetJS) kaldırıldı.
+const SHEET_EXT = new Set(['.xlsx']);
 // İlk sürümde yerel ayrıştırıcısı olmayan türler — VISION/OCR veya sonraki faz.
 const DEFERRED_EXT = new Set(['.doc', '.docx', '.ppt', '.pptx', '.eml', '.msg', '.zip', '.rar', '.7z']);
 
@@ -115,11 +115,10 @@ export class TextExtractService {
             }
 
             if (SHEET_EXT.has(ext)) {
-                const wb = XLSX.read(readFileSync(abs), { type: 'buffer' });
+                const wb = await loadWorkbook(readFileSync(abs));
                 const parts: string[] = [];
-                for (const name of wb.SheetNames as string[]) {
-                    const csv = XLSX.utils.sheet_to_csv(wb.Sheets[name]);
-                    parts.push(`### Sayfa: ${name}\n${csv}`);
+                for (const ws of wb.worksheets) {
+                    parts.push(`### Sayfa: ${ws.name}\n${sheetToCsv(ws)}`);
                 }
                 return { ...base, kind: 'text', text: this.clip(parts.join('\n\n')) };
             }
