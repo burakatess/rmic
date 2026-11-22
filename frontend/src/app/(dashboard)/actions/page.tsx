@@ -176,7 +176,7 @@ function ActionsContent() {
     }, [activeFilters.ownerIds, activeFilters.status, activeFilters.source, activeFilters.approvalState, searchQuery, quickFilter, page]);
 
     useEffect(() => { loadActions(); }, [loadActions]);
-    useEffect(() => { api.getUserOptions({ limit: 500 }).then(r => setUsers(r.data)).catch(() => setUsers([])); }, []);
+    useEffect(() => { api.getAllUserOptions().then(r => setUsers(r.data)).catch(() => setUsers([])); }, []);
 
     // ── Quick filter predicate'leri ──
     const quickFilterFns: Record<string, (a: Action) => boolean> = useMemo(() => ({

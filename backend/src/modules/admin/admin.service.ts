@@ -44,7 +44,7 @@ export class AdminService {
                 where, skip: (params.page - 1) * params.limit, take: params.limit,
                 // Seçim listeleri için asgari alan seti: e-posta, rol/izin, üyelik ve oturum bilgisi dönmez.
                 select: { id: true, firstName: true, lastName: true, department: true, isActive: true },
-                orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+                orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }, { id: 'asc' }], // id: sayfalar arasında kararlı sıra
             }),
             this.prisma.user.count({ where }),
         ]);

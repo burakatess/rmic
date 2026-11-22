@@ -21,8 +21,13 @@ describe('safeOrderBy', () => {
     const fields = { id: 'id', createdAt: 'createdAt', dueDate: 'dueDate' };
 
     it('izinli alan ve yönü döner, varsayılanı uygular', () => {
-        expect(safeOrderBy('dueDate', 'ASC', fields, 'createdAt', 'desc')).toEqual({ dueDate: 'asc' });
-        expect(safeOrderBy(undefined, undefined, fields, 'createdAt', 'desc')).toEqual({ createdAt: 'desc' });
+        expect(safeOrderBy('dueDate', 'ASC', fields, 'createdAt', 'desc')).toEqual([{ dueDate: 'asc' }, { id: 'asc' }]);
+        expect(safeOrderBy(undefined, undefined, fields, 'createdAt', 'desc')).toEqual([{ createdAt: 'desc' }, { id: 'asc' }]);
+    });
+
+    it('id sıralamasında ikincil anahtar eklenmez; diğerlerinde kararlı sıra için id eklenir', () => {
+        expect(safeOrderBy('id', 'desc', fields, 'createdAt', 'desc')).toEqual([{ id: 'desc' }]);
+        expect(safeOrderBy('createdAt', 'asc', fields, 'createdAt', 'desc').at(-1)).toEqual({ id: 'asc' });
     });
 
     it('bilinmeyen veya ilişki alanını reddeder', () => {

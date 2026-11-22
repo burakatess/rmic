@@ -216,7 +216,7 @@ export default function PeriodControlsPage() {
     useEffect(() => {
         api.getScopeYears().then(r => setYears(r.years)).catch(() => { });
         api.getDashboardScopeOptions().then(o => setScopeOptions(o)).catch(() => setScopeOptions(null));
-        api.getUserOptions({ limit: 500 }).then(r => setUsers(r.data)).catch(() => { });
+        api.getAllUserOptions().then(r => setUsers(r.data)).catch(() => { });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         api.getDirectorates({ isActive: 'true' }).then((r: any) => setDirectorates(Array.isArray(r) ? r : [])).catch(() => { });
     }, []);
@@ -305,7 +305,7 @@ export default function PeriodControlsPage() {
         if (showAllYear) setShowAllYearTests(prev => new Set(prev).add(row.scopeId));
         if (!isOpen && !testsByScope.has(row.scopeId)) {
             setTestsLoading(prev => new Set(prev).add(row.scopeId));
-            api.getAllControlTests({ controlId: row.controlId, year: filters.year, limit: 100, includeOutOfScope: 'true' } as any)
+            api.getAllControlTests({ controlId: row.controlId, year: filters.year, includeOutOfScope: 'true' } as any)
                 .then((r: any) => {
                     setTestsByScope(prev => new Map(prev).set(row.scopeId, r?.data || []));
                 })

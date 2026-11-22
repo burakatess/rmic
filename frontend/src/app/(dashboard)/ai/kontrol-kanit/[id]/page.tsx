@@ -170,7 +170,7 @@ export default function AiEvalSessionPage() {
             loadedIdRef.current = id;
             if (id !== liveId) load();
         }
-        api.getControls({ limit: 500 })
+        api.getControls()
             .then((r) => {
                 const list = Array.isArray(r) ? r : (r as { data?: ControlOpt[] })?.data || [];
                 setControls(list as ControlOpt[]);

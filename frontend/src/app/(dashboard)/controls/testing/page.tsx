@@ -167,7 +167,7 @@ function ControlTestingPageContent() {
     }, [activeFilters, searchQuery, selectedMonth, page]);
 
     useEffect(() => { load(); }, [load]);
-    useEffect(() => { api.getUserOptions({ limit: 500 }).then(r => setUsers(r.data)).catch(() => setUsers([])); }, []);
+    useEffect(() => { api.getAllUserOptions().then(r => setUsers(r.data)).catch(() => setUsers([])); }, []);
 
     const monthFiltered = useMemo(() => {
         if (selectedMonth === null) return tests;

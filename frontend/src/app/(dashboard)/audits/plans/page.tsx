@@ -114,7 +114,7 @@ export default function AuditPlanPage() {
         setLoading(true);
         setError(null);
         try {
-            const res: any = await api.getAuditPlans({ limit: 500 });
+            const res: any = await api.getAuditPlans();
             setAudits((res.data || []).map(mapPlan));
         } catch {
             setError('Denetim planları yüklenemedi.');

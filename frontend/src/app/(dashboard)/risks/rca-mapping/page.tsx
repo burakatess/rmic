@@ -200,8 +200,8 @@ export default function RcaMappingPage() {
         try {
             const [rRes, cRes, aRes] = await Promise.all([
                 api.getRisks() as Promise<any>,
-                api.getRiskControls({ limit: '500' }) as Promise<any>,
-                api.getRiskActions({ limit: '500' }) as Promise<any>,
+                api.getRiskControls() as Promise<any>,
+                api.getRiskActions() as Promise<any>,
             ]);
             setRisks(Array.isArray(rRes) ? rRes : (rRes.data || rRes.risks || []));
             setControls(Array.isArray(cRes) ? cRes : (cRes.data || []));

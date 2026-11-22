@@ -167,7 +167,8 @@ export class DashboardService {
                             select: { evaluator: true },
                         },
                     },
-                    take: 500,
+                    // Sınır YOK: bu kuyruk gerçek iş listesidir; üst sınır sayacı sessizce eksik gösterirdi
+                    // (workflowStatus indeksli, yalnız onay bekleyen bulgular — küçük küme).
                 })
                 : Promise.resolve([] as { id: string; statusHistory: { evaluator: string | null }[] }[]),
         ]);

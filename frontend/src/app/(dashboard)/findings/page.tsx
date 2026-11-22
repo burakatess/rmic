@@ -256,7 +256,7 @@ function FindingsContent() {
     }, [activeFilters, searchQuery, page]);
 
     useEffect(() => { loadFindings(); }, [loadFindings]);
-    useEffect(() => { api.getUserOptions({ limit: 500 }).then(r => setUsers(r.data)).catch(() => setUsers([])); }, []);
+    useEffect(() => { api.getAllUserOptions().then(r => setUsers(r.data)).catch(() => setUsers([])); }, []);
 
     // ── Saved View activation ──────────────────────────────────────────────────
 

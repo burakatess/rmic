@@ -29,7 +29,7 @@ export function safeOrderBy(
     allowedFields: Record<string, string> | readonly string[],
     fallbackField: string,
     fallbackOrder: 'asc' | 'desc',
-): Record<string, 'asc' | 'desc'> {
+): Record<string, 'asc' | 'desc'>[] {
     const allowed = new Set(Array.isArray(allowedFields) ? allowedFields : Object.values(allowedFields));
     const field = sortBy === undefined || sortBy === null || sortBy === '' ? fallbackField : String(sortBy);
     if (!allowed.has(field)) {
@@ -43,5 +43,7 @@ export function safeOrderBy(
         }
         order = normalized;
     }
-    return { [field]: order };
+    // Sayfalı listede kararlı sıra: eşit değerlerde (ör. aynı termin) sayfa geçişinde kayıt tekrarlanır/atlanır.
+    // `id` ikincil anahtar olarak her zaman eklenir.
+    return field === 'id' ? [{ id: order }] : [{ [field]: order }, { id: 'asc' }];
 }

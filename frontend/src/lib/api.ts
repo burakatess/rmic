@@ -1,3 +1,4 @@
+import { fetchAllPages, wantsAll, type ListAllResult } from '@/lib/list-all';
 import type {
     AiAssessment, AiStatus, AiUsage, AiCockpit, AiQueryResult,
     AiEvalSession, AiEvalListResponse, AiEvalListParams, AiEvalOutcome, BulkEvalResult,
@@ -39,8 +40,7 @@ function buildQuery(params?: object): string {
     return qs ? `?${qs}` : '';
 }
 
-/** Backend MAX_PAGE_LIMIT (list-query.ts) ile aynı. */
-const LIST_FETCH_LIMIT = 500;
+
 
 export interface WorkflowPendingItem {
     kind: 'ACTION_APPROVAL' | 'ACTION_DELETION' | 'FOLLOWUP_APPROVAL' | 'FOLLOWUP_DELETION';
@@ -295,14 +295,17 @@ class ApiClient {
      * Yönetim ekranı dışında `/admin/users` (e-posta, rol, izin içerir) çağrılmaz.
      */
     async getUserChoices(): Promise<UserOption[]> {
-        const res = await this.getUserOptions({ limit: 500 });
-        return res.data;
+        return (await this.getAllUserOptions()).data;
+    }
+
+    /** Tüm kullanıcı seçenekleri (sayfalar birleştirilir; 500 kullanıcıdan sonrası düşmez). */
+    async getAllUserOptions(params?: { search?: string; approver?: boolean }): Promise<ListAllResult<UserOption>> {
+        return fetchAllPages<UserOption>((page, limit) => this.getUserOptions({ ...params, page, limit }));
     }
 
     /** İkinci kontrolcü olabilecek (onay yetkili, aktif) kullanıcılar. */
     async getApproverChoices(): Promise<UserOption[]> {
-        const res = await this.getUserOptions({ limit: 500, approver: true });
-        return res.data;
+        return (await this.getAllUserOptions({ approver: true })).data;
     }
 
     // ── Maker-checker: aksiyon (bulgu kapsamında) ve takip çalışması işlemleri ──
@@ -410,8 +413,7 @@ class ApiClient {
 
     // ControlTest endpoints
     async getAllControlTests(params?: Record<string, string | number>) {
-        const query = params ? '?' + new URLSearchParams(params as any).toString() : '';
-        return this.request(`/controls/tests${query}`);
+        return this.listEndpoint('/controls/tests', params);
     }
 
     async getControlTests(controlId: string) {
@@ -495,11 +497,20 @@ class ApiClient {
     }
 
     // Risks
+    /**
+     * Liste uçları: `limit` verilmemiş veya sunucu tavanındaysa TÜM sayfalar getirilir (envanter ve
+     * seçim listeleri yanıtı tam liste varsayar); küçük `limit` açıkça tek sayfa ister.
+     */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private async listEndpoint(path: string, params?: Record<string, string | number>): Promise<any> {
+        if (!wantsAll(params?.limit)) return this.request(`${path}${buildQuery(params)}`);
+        const { limit: _l, page: _p, ...rest } = params ?? {};
+        void _l; void _p;
+        return fetchAllPages((page, limit) => this.request(`${path}${buildQuery({ ...rest, page, limit })}`));
+    }
+
     async getRisks(params?: Record<string, string | number>) {
-        // Çağıranların çoğu yanıtı TAM liste olarak kullanır (seçim listeleri, envanter);
-        // sunucu varsayılanı 20 kayıttır. limit verilmemişse sunucu üst sınırı (500) istenir.
-        const merged = { limit: String(LIST_FETCH_LIMIT), ...(params as Record<string, string> | undefined) };
-        return this.request(`/risks?${new URLSearchParams(merged).toString()}`);
+        return this.listEndpoint('/risks', params);
     }
 
     async getRisk(id: string) {
@@ -536,10 +547,7 @@ class ApiClient {
 
     // Controls
     async getControls(params?: Record<string, string | number>) {
-        // Çağıranların çoğu yanıtı TAM liste olarak kullanır (seçim listeleri, envanter);
-        // sunucu varsayılanı 20 kayıttır. limit verilmemişse sunucu üst sınırı (500) istenir.
-        const merged = { limit: String(LIST_FETCH_LIMIT), ...(params as Record<string, string> | undefined) };
-        return this.request(`/controls?${new URLSearchParams(merged).toString()}`);
+        return this.listEndpoint('/controls', params);
     }
 
     async getControl(id: string) {
@@ -716,8 +724,7 @@ class ApiClient {
 
     // Findings
     async getFindings(params?: Record<string, string | number>) {
-        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
-        return this.request(`/findings${query}`);
+        return this.listEndpoint('/findings', params);
     }
 
     async getFinding(id: string) {
@@ -786,8 +793,7 @@ class ApiClient {
 
     // ── Risk Controls (RYK Kontrol Alanı) ───────────────────────────────────────
     async getRiskControls(params?: Record<string, string | number>) {
-        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
-        return this.request(`/risk-controls${query}`);
+        return this.listEndpoint('/risk-controls', params);
     }
 
     async getRiskControl(id: string) {
@@ -808,8 +814,7 @@ class ApiClient {
 
     // ── Risk Actions (RYK Aksiyon Tablosu) ──────────────────────────────────────
     async getRiskActions(params?: Record<string, string | number>) {
-        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
-        return this.request(`/risk-actions${query}`);
+        return this.listEndpoint('/risk-actions', params);
     }
 
     async getRiskAction(id: string) {
@@ -830,8 +835,7 @@ class ApiClient {
 
     // Audit Plans & Executions
     async getAuditPlans(params?: Record<string, string | number>) {
-        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
-        return this.request<any>(`/audit-plans${query}`);
+        return this.listEndpoint('/audit-plans', params);
     }
 
     async getAuditPlan(id: string) {
@@ -847,8 +851,7 @@ class ApiClient {
     }
 
     async getAuditExecutions(params?: Record<string, string | number>) {
-        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
-        return this.request<any>(`/audit-executions${query}`);
+        return this.listEndpoint('/audit-executions', params);
     }
 
     async createAuditExecution(data: unknown) {
@@ -1136,8 +1139,7 @@ class ApiClient {
     // ── Bağımsız Follow-Ups Listesi ───────────────────────────────────────────
 
     async getAllFollowUps(params?: Record<string, string | number>) {
-        const query = params ? '?' + new URLSearchParams(params as any).toString() : '';
-        return this.request(`/follow-ups${query}`);
+        return this.listEndpoint('/follow-ups', params);
     }
 
     // ── Mutabakat Workflow Geçişleri ─────────────────────────────────────────

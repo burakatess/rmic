@@ -60,7 +60,7 @@ export class RiskActionsService {
                     },
                     _count: { select: { risks: true } },
                 },
-                orderBy: { createdAt: 'desc' },
+                orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
             }),
             this.prisma.riskAction.count({ where }),
         ]);
