@@ -9,6 +9,7 @@ import {
     LoadingState, EmptyState, ErrorState, Modal,
 } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
+import { AnnualPlanStepper, PlanDecisionDialog, PlanDecisionHistory } from '@/components/controls/AnnualPlanLifecycle';
 import { AnnualPlanAssignmentDecisions, hasUnresolvedPlanConflicts } from '@/components/controls/AnnualPlanAssignmentDecisions';
 import { PermissionGate } from '@/components/auth';
 import { useToast } from '@/components/ui/Toast';
@@ -395,6 +396,9 @@ function AnnualPlanPageContent() {
         }
     };
 
+    // Karar notu penceresi (onay / değişiklik iste / onayı geri aç) — window.prompt yerine.
+    const [decisionMode, setDecisionMode] = useState<'approve' | 'request-changes' | 'reopen' | null>(null);
+
     const submitForApproval = async () => {
         if (!workspace || pendingEdits.size > 0) {
             toastError('Önce kaydedin', 'Planı onaya göndermeden önce taslak değişikliklerini kaydedin.');
@@ -411,26 +415,26 @@ function AnnualPlanPageContent() {
         } finally { setTransitioning(false); }
     };
 
-    const approvePlan = async () => {
+    const approvePlan = async (note?: string) => {
         if (!workspace) return;
         setTransitioning(true);
         try {
-            await api.approveAnnualPlan(year, workspace.draftRevision);
+            await api.approveAnnualPlan(year, workspace.draftRevision, note || undefined);
             toastSuccess('Plan onaylandı', 'Onaylanan revision artık uygulanabilir.');
+            setDecisionMode(null);
             loadWorkspace();
         } catch (err) {
             toastError('Onaylanamadı', err instanceof Error ? err.message : 'Plan onaylanamadı.');
         } finally { setTransitioning(false); }
     };
 
-    const requestChanges = async () => {
-        if (!workspace) return;
-        const note = window.prompt('Değişiklik talebi gerekçesini yazın:')?.trim();
-        if (!note) return;
+    const requestChanges = async (note: string) => {
+        if (!workspace || !note) return;
         setTransitioning(true);
         try {
             await api.requestAnnualPlanChanges(year, workspace.draftRevision, note);
             toastSuccess('Değişiklik istendi', 'Plan yeniden düzenlemeye açıldı.');
+            setDecisionMode(null);
             loadWorkspace();
         } catch (err) {
             toastError('İşlem başarısız', err instanceof Error ? err.message : 'Değişiklik talebi kaydedilemedi.');
@@ -662,14 +666,14 @@ function AnnualPlanPageContent() {
                     <div className="ml-auto flex items-center gap-2">
                         {workspace.draftStatus === 'PENDING_APPROVAL' && (
                             <>
-                                {workspace.capabilities?.canRequestChanges && <Button size="sm" variant="outline" onClick={requestChanges} disabled={transitioning}>Değişiklik İste</Button>}
+                                {workspace.capabilities?.canRequestChanges && <Button size="sm" variant="outline" onClick={() => setDecisionMode('request-changes')} disabled={transitioning}>Değişiklik İste</Button>}
                                 {workspace.capabilities?.canApprove
-                                    ? <Button size="sm" variant="primary" onClick={approvePlan} disabled={transitioning}>Onayla</Button>
+                                    ? <Button size="sm" variant="primary" onClick={() => setDecisionMode('approve')} disabled={transitioning}>Onayla</Button>
                                     : <span className="text-xs text-slate-500">Onay başka bir yöneticide (gönderen kendi planını onaylayamaz)</span>}
                             </>
                         )}
                         {workspace.draftStatus === 'APPROVED' && (
-                            <Button size="sm" variant="outline" onClick={requestChanges} disabled={transitioning}>Onayı Geri Aç</Button>
+                            <Button size="sm" variant="outline" onClick={() => setDecisionMode('reopen')} disabled={transitioning}>Onayı Geri Aç</Button>
                         )}
                     </div>
                 )}
@@ -685,6 +689,20 @@ function AnnualPlanPageContent() {
                         ))}
                 </div>
             </div>
+
+            {workspace && (
+                <div className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                    <AnnualPlanStepper status={workspace.draftStatus} />
+                    {workspace.decisionNote && (workspace.draftStatus === 'CHANGES_REQUESTED' || workspace.draftStatus === 'APPROVED' || workspace.draftStatus === 'PENDING_APPROVAL') && (
+                        <p className="text-xs text-slate-600"><span className="font-semibold">Son karar notu:</span> {workspace.decisionNote}</p>
+                    )}
+                </div>
+            )}
+            {workspace && <PlanDecisionHistory year={year} refreshKey={`${workspace.draftStatus}:${workspace.draftRevision}:${workspace.draftLastAppliedAt ?? ''}`} />}
+            <PlanDecisionDialog
+                mode={decisionMode} busy={transitioning} onCancel={() => setDecisionMode(null)}
+                onSubmit={(note) => (decisionMode === 'approve' ? approvePlan(note) : requestChanges(note))}
+            />
 
             {/* Görünüm sekmesi — aynı taslak, iki çalışma görünümü (madde 4) */}
             <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden mb-5 w-fit">
