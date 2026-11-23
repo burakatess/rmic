@@ -16,7 +16,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
             <div className={focusMode ? 'hidden' : ''}><Sidebar /></div>
             <div className={focusMode ? 'hidden' : ''}><Header /></div>
             <main className={focusMode ? 'min-h-screen' : 'ml-64 pt-16 min-h-screen'}>
-                <div className={focusMode ? 'w-full max-w-full animate-fadeIn' : 'p-6 xl:p-8 2xl:p-10 w-full max-w-full animate-fadeIn'}>
+                {/* Yatay boşluk tek yerde (kabuklar ayrıca eklemez). Geniş/2K+ ekranda içerik ~1920px'te
+                    ortalanır (rem: kök yazı büyüdükçe sınır da büyür), satırlar aşırı uzamaz. */}
+                <div className={focusMode ? 'w-full max-w-full animate-fadeIn' : 'px-4 py-5 lg:px-6 lg:py-6 2xl:px-8 w-full max-w-[120rem] mx-auto animate-fadeIn'}>
                     {children}
                 </div>
             </main>

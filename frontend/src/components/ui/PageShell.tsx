@@ -17,7 +17,7 @@ interface PageShellProps {
 export function PageShell({ children, fullHeight = false, className = '' }: PageShellProps) {
   return (
     <div
-      className={`flex flex-col bg-slate-50/50 px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-12
+      className={`flex flex-col pb-8
         ${fullHeight ? 'h-full overflow-hidden pb-0' : 'min-h-full'}
         ${className}`}
     >

@@ -83,7 +83,7 @@ test('bulgu detayında kalıcı durum geçmişi kullanıcıya gösterilir', asyn
     await login(page);
     await page.goto('/findings');
     await page.getByRole('link', { name: /2026\.BT\.PW01/ }).click();
-    await page.getByRole('button', { name: /Tarihçe/ }).click();
+    await page.getByRole('tab', { name: /Tarihçe/ }).click();
 
     await expect(page.getByText('Bulgu Güncellendi')).toBeVisible();
     await expect(page.getByText('Playwright geçmiş kaydı ekranda korunuyor.')).toBeVisible();
@@ -93,11 +93,11 @@ test('risk ve kontrol ilişkisi iki detay ekranında da görünür', async ({ pa
     await login(page);
     await page.goto('/controls');
     await page.getByRole('row').filter({ hasText: 'E2E Test Kontrolü' }).getByRole('link', { name: /E2E-CTRL-/ }).click();
-    await page.getByRole('button', { name: /Eşleşen Riskler/ }).click();
+    await page.getByRole('tab', { name: /Eşleşen Riskler/ }).click();
     await expect(page.getByRole('link', { name: /R-PW-001/ })).toContainText('Playwright ilişkili risk');
 
     await page.getByRole('link', { name: /R-PW-001/ }).click();
-    await page.getByRole('button', { name: /İç Kontrol Çalışmaları/ }).click();
+    await page.getByRole('tab', { name: /İç Kontrol Çalışmaları/ }).click();
     await expect(page.getByRole('link', { name: /E2E Test Kontrolü/ })).toBeVisible();
 });
 
@@ -111,7 +111,7 @@ test('tek kontrol testine bağlı birden fazla bulgu kontrol detayında birlikte
     const findingSummary = page.getByText(/Hata\/Bulgu:/);
     await expect(findingSummary).toContainText('2026.BT.PW01');
     await expect(findingSummary).toContainText('2026.BT.PW02');
-    await page.getByRole('button', { name: /Bulgular & Aksiyonlar/ }).click();
+    await page.getByRole('tab', { name: /Bulgular & Aksiyonlar/ }).click();
     await expect(page.getByText('2026.BT.PW01', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('2026.BT.PW02', { exact: true }).first()).toBeVisible();
 });
@@ -237,7 +237,7 @@ test('ikinci kontrolcü değişiklik gerekçesi bulgu tarihçesinde görünür',
     await login(page);
     await page.goto('/findings');
     await page.getByRole('link', { name: /2026\.BT\.PW01/ }).click();
-    await page.getByRole('button', { name: /Tarihçe/ }).click();
+    await page.getByRole('tab', { name: /Tarihçe/ }).click();
 
     await expect(page.getByText('FOLLOWUP_SECOND_CONTROLLER_CHANGED')).toBeVisible();
     await expect(page.getByText('İkinci kontrolcü gerekçeli olarak değiştirildi.')).toBeVisible();

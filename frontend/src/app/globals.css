@@ -129,6 +129,11 @@ html {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Büyük / yüksek çözünürlüklü ekranlar (2K+ ölçeklemesiz): rem tabanlı yazı ve boşluklar orantılı büyür. */
+@media (min-width: 2200px) { html { font-size: 17px; } }
+@media (min-width: 2800px) { html { font-size: 18px; } }
+@media (min-width: 3400px) { html { font-size: 20px; } }
+
 body {
   color: var(--color-neutral-800);
   background: var(--color-neutral-50);

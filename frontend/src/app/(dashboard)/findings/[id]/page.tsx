@@ -654,11 +654,11 @@ export default function FindingDetailPage() {
                             )}
                         </DetailSection>
 
-                        <div className="grid grid-cols-3 gap-5">
-                            <div className="col-span-2 space-y-5">
+                        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+                            <div className="xl:col-span-2 space-y-5">
                                 {/* Kimlik Bilgileri */}
                                 <DetailSection title="Kimlik & Sınıflandırma">
-                                    <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 2xl:gap-x-8 gap-y-4">
                                         <InfoRow label="Bulgu No" value={<span className="font-mono font-bold text-blue-700">{finding.findingId}</span>} />
                                         <InfoRow label="Bulgu Türü" value={typeCfg ? <StatusBadge variant={typeCfg.variant}>{typeCfg.label}</StatusBadge> : finding.findingType} />
                                         <InfoRow label="Önem Derecesi" value={
@@ -673,7 +673,7 @@ export default function FindingDetailPage() {
 
                                 {/* Sorumluluk */}
                                 <DetailSection title="Sorumluluk & Organizasyon">
-                                    <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 2xl:gap-x-8 gap-y-4">
                                         <InfoRow label="İlgili Direktörlük" value={finding.relatedDepartment} />
                                         <InfoRow label="İlgili GMY" value={finding.gmy} />
                                         <InfoRow label="İletişim Kişisi" value={finding.iletisimKisisi} />
@@ -690,7 +690,7 @@ export default function FindingDetailPage() {
 
                                 {/* Tarihler */}
                                 <DetailSection title="Tarihler">
-                                    <div className="grid grid-cols-3 gap-x-8 gap-y-4">
+                                    <div className="grid grid-cols-2 2xl:grid-cols-3 gap-x-6 2xl:gap-x-8 gap-y-4">
                                         <InfoRow label="Bulgu Test Tarihi" value={fmt(finding.testDate)} />
                                         <InfoRow label="Hedef Tamamlanma" value={
                                             <span className={isOverdue ? 'text-red-600 font-semibold' : isApproaching ? 'text-amber-600 font-semibold' : ''}>
@@ -789,15 +789,12 @@ export default function FindingDetailPage() {
                 {/* ═══════ AKSİYONLAR TAB ═══════ */}
                 {activeTab === 'aksiyonlar' && (
                     <div className="space-y-4">
-                        <div className="flex items-start justify-between">
-                            <div>
-                                <h2 className="text-sm font-semibold text-slate-700">Düzeltici Aksiyonlar</h2>
-                                <p className="text-xs text-slate-500 mt-0.5">Aksiyonu birinci kontrolcü girer ve 2. kontrolcü onayına gönderir; ikinci kontrolcü onaylayınca hedef tarihte Takip Çalışması oluşur. Bulgunun hedef tarihi, en ileri aksiyona göre hesaplanır.</p>
-                                <p className="text-xs text-slate-600 mt-1">Bulgu kontrolcüleri: <b>1.</b> {personName(finding.firstController)} · <b>2.</b> {personName(finding.secondController)}</p>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0 max-w-3xl">
+                                <h2 className="text-lg font-bold text-slate-900">Düzeltici Aksiyonlar</h2>
+                                <p className="text-sm text-slate-500 mt-0.5">Aksiyonu 1. kontrolcü girer, 2. kontrolcü onaylar. Onaydan sonra hedef tarihte takip çalışması oluşur; bulgunun hedef tarihi en ileri aksiyona göre hesaplanır.</p>
                             </div>
-                            {caps.canCreateAction && <Button variant="primary" size="sm" onClick={() => setAddActionOpen(true)}
-                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}
-                            >Yeni Aksiyon</Button>}
+                            {caps.canCreateAction && <Button variant="primary" size="md" onClick={() => setAddActionOpen(true)}>+ Aksiyon Ekle</Button>}
                         </div>
 
                         {finding.actions.length === 0 ? (
@@ -811,7 +808,7 @@ export default function FindingDetailPage() {
                                 />
                             </div>
                         ) : (
-                            <div className="space-y-3">
+                            <div className="space-y-4" data-testid="finding-actions">
                                 {finding.actions.map(action => {
                                     const sCfg = actionStatusConfig[action.status] || { label: action.status, variant: 'neutral' as BV };
                                     const aOverdue = action.status !== 'KAPATILDI' && getDaysLeft(action.dueDate) !== null && getDaysLeft(action.dueDate)! < 0;
@@ -822,58 +819,69 @@ export default function FindingDetailPage() {
                                     const apCfg = approvalStateConfig[action.approvalState ?? 'ONAYLANDI'];
                                     const op = (o: Parameters<typeof api.findingActionOp>[2], okTitle: string, okText: string, reason?: string) =>
                                         runOp(() => api.findingActionOp(finding.id, action.id, o, reason), okTitle, okText);
+                                    // Sol şerit rengi durumu tek bakışta verir.
+                                    const accent = isDeleted ? 'border-l-slate-300' : aOverdue ? 'border-l-red-500'
+                                        : action.status === 'KAPATILDI' ? 'border-l-emerald-500'
+                                        : action.status === 'TAMAMLANDI' ? 'border-l-blue-500'
+                                        : action.status === 'DEVAM_EDIYOR' ? 'border-l-amber-400'
+                                        : action.status === 'YETERSIZ' ? 'border-l-orange-500' : 'border-l-slate-300';
+                                    const fields: Array<[string, React.ReactNode]> = [
+                                        ['Sorumlu', action.owner ? `${action.owner.firstName} ${action.owner.lastName}` : '—'],
+                                        ['Birim', action.responsibleDepartment || '—'],
+                                        ['Hedef tarih', <span key="d" className={aOverdue ? 'text-red-600' : ''}>{fmt(action.dueDate)}{action.completedAt && <span className="block text-xs font-medium text-emerald-600">Kapandı: {fmt(action.completedAt)}</span>}</span>],
+                                        ['Kontrolcüler', action.firstController || action.secondController
+                                            ? `${personName(action.firstController)} · ${personName(action.secondController)}`
+                                            : <span key="k" className="text-amber-700">Atanmamış</span>],
+                                    ];
                                     return (
-                                        <div key={action.id} className={`bg-white border rounded-xl shadow-sm overflow-hidden ${isDeleted ? 'border-slate-200 opacity-60' : 'border-slate-200'}`}>
-                                            <div className="flex items-start gap-4 p-5">
-                                                <div className="flex-shrink-0 w-10 h-10 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-center">
-                                                    <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                                                    </svg>
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                                        <article key={action.id} className={`bg-white border border-slate-200 border-l-4 ${accent} rounded-xl shadow-sm overflow-hidden ${isDeleted ? 'opacity-60' : ''}`}>
+                                            <div className="p-4 lg:p-5">
+                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                                    <div className="min-w-0">
                                                         <div className="flex items-center gap-2 flex-wrap">
-                                                            <Link href={`/actions/${action.id}`} className="font-mono text-xs text-orange-600 font-semibold hover:underline">{action.actionId}</Link>
+                                                            <Link href={`/actions/${action.id}`} className="font-mono text-sm text-orange-600 font-semibold hover:underline">{action.actionId}</Link>
                                                             {isDeleted ? <StatusBadge variant="neutral">Silindi</StatusBadge> : <StatusBadge variant={sCfg.variant}>{sCfg.label}</StatusBadge>}
                                                             {!isDeleted && apCfg && <StatusBadge variant={apCfg.variant} dot>{apCfg.label}</StatusBadge>}
                                                             {deletionPending && <StatusBadge variant="critical" dot>Silme onayı bekliyor</StatusBadge>}
                                                             {aOverdue && !isDeleted && <StatusBadge variant="critical" dot>Gecikmiş</StatusBadge>}
                                                         </div>
-                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                        <h3 className="mt-2 text-base font-semibold text-slate-900 leading-snug break-words">{action.description}</h3>
+                                                    </div>
+                                                        <div className="flex items-center gap-2 flex-wrap sm:justify-end">
                                                         {aCaps.canSubmit && (
-                                                            <Button variant="primary" size="xs" onClick={() => op('submit', 'Onaya gönderildi', `${action.actionId} ikinci kontrolcünün onayına gönderildi.`).catch(() => {})}>
+                                                            <Button variant="primary" size="sm" onClick={() => op('submit', 'Onaya gönderildi', `${action.actionId} ikinci kontrolcünün onayına gönderildi.`).catch(() => {})}>
                                                                 2. kontrolcü onayına gönder
                                                             </Button>
                                                         )}
                                                         {aCaps.canApprove && (
-                                                            <Button variant="success" size="xs" onClick={() => op('approve', 'Onaylandı', `${action.actionId} onaylandı; takip çalışması oluşturuldu.`).catch(() => {})}>Onayla</Button>
+                                                            <Button variant="success" size="sm" onClick={() => op('approve', 'Onaylandı', `${action.actionId} onaylandı; takip çalışması oluşturuldu.`).catch(() => {})}>Onayla</Button>
                                                         )}
                                                         {aCaps.canApprove && (
-                                                            <Button variant="danger" size="xs" onClick={() => askReason({ title: `${action.actionId} — reddet`, label: 'Ret gerekçesi', confirm: 'Reddet', danger: true,
+                                                            <Button variant="danger" size="sm" onClick={() => askReason({ title: `${action.actionId} — reddet`, label: 'Ret gerekçesi', confirm: 'Reddet', danger: true,
                                                                 onSubmit: (r) => op('reject', 'Reddedildi', 'Aksiyon birinci kontrolcüye düzeltme için döndü.', r) })}>Reddet</Button>
                                                         )}
                                                         {aCaps.canRevert && (
-                                                            <Button variant="secondary" size="xs" onClick={() => askReason({ title: `${action.actionId} — onayı geri al`, label: 'Onayı geri alma gerekçesi', confirm: 'Onayı geri al', danger: true,
+                                                            <Button variant="secondary" size="sm" onClick={() => askReason({ title: `${action.actionId} — onayı geri al`, label: 'Onayı geri alma gerekçesi', confirm: 'Onayı geri al', danger: true,
                                                                 onSubmit: (r) => op('revert', 'Onay geri alındı', 'Aksiyon taslağa döndü; başlamamış takip çalışması iptal edildi.', r) })}>Onayı geri al</Button>
                                                         )}
                                                         {aCaps.canDecideDelete && (
-                                                            <Button variant="danger" size="xs" onClick={() => op('delete-approve', 'Silindi', `${action.actionId} ve bağlı takip çalışmaları silindi.`).catch(() => {})}>Silmeyi onayla</Button>
+                                                            <Button variant="danger" size="sm" onClick={() => op('delete-approve', 'Silindi', `${action.actionId} ve bağlı takip çalışmaları silindi.`).catch(() => {})}>Silmeyi onayla</Button>
                                                         )}
                                                         {aCaps.canDecideDelete && (
-                                                            <Button variant="secondary" size="xs" onClick={() => askReason({ title: `${action.actionId} — silme talebini reddet`, label: 'Ret gerekçesi', confirm: 'Silme talebini reddet',
+                                                            <Button variant="secondary" size="sm" onClick={() => askReason({ title: `${action.actionId} — silme talebini reddet`, label: 'Ret gerekçesi', confirm: 'Silme talebini reddet',
                                                                 onSubmit: (r) => op('delete-reject', 'Silme reddedildi', 'Aksiyon korunuyor.', r) })}>Silmeyi reddet</Button>
                                                         )}
                                                         {aCaps.canRequestDelete && (
-                                                            <Button variant="ghost" size="xs" onClick={() => askReason({ title: `${action.actionId} — silme talebi`, label: 'Silme gerekçesi (ikinci kontrolcü onayına gider)', confirm: 'Silme talebi gönder', danger: true,
+                                                            <Button variant="ghost" size="sm" onClick={() => askReason({ title: `${action.actionId} — silme talebi`, label: 'Silme gerekçesi (ikinci kontrolcü onayına gider)', confirm: 'Silme talebi gönder', danger: true,
                                                                 onSubmit: (r) => op('delete-request', 'Silme talebi gönderildi', 'İkinci kontrolcü onaylayınca aksiyon silinecek.', r) })}>Sil</Button>
                                                         )}
                                                         {!aCaps.canEdit && aCaps.canComplete && (
-                                                            <Button variant="success" size="xs" onClick={() => completeOwnAction(action)}>
+                                                            <Button variant="success" size="sm" onClick={() => completeOwnAction(action)}>
                                                                 Tamamlandı Olarak Bildir
                                                             </Button>
                                                         )}
                                                         {aCaps.canEdit && (
-                                                            <Button variant="secondary" size="xs"
+                                                            <Button variant="secondary" size="sm"
                                                                 onClick={() => {
                                                                     setEditAction(action);
                                                                     setAddActionOpen(true);
@@ -883,29 +891,31 @@ export default function FindingDetailPage() {
                                                                 Düzenle
                                                             </Button>
                                                         )}
+                                                    </div>
+                                                </div>
+
+                                                <dl className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-3 max-w-6xl">
+                                                    {fields.map(([k, v]) => (
+                                                        <div key={k} className="min-w-0">
+                                                            <dt className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{k}</dt>
+                                                            <dd className="mt-0.5 text-sm font-semibold text-slate-900 break-words">{v}</dd>
                                                         </div>
-                                                    </div>
-                                                    <p className="text-sm text-slate-800 leading-relaxed mb-3">{action.description}</p>
-                                                    <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">
-                                                        {action.owner && <span>Sorumlu: {action.owner.firstName} {action.owner.lastName}</span>}
-                                                        {action.responsibleDepartment && <span>Birim: {action.responsibleDepartment}</span>}
-                                                        <span className={aOverdue ? 'text-red-600 font-semibold' : ''}>Hedef: {fmt(action.dueDate)}</span>
-                                                        {action.completedAt && <span className="text-emerald-600">Kapandı: {fmt(action.completedAt)}</span>}
-                                                    </div>
-                                                    <p className="mt-1.5 text-xs text-slate-500">Kontrolcüler: <b>1.</b> {personName(action.firstController)} · <b>2.</b> {personName(action.secondController)}</p>
-                                                    {action.notes && <p className="text-xs text-slate-500 mt-2 bg-slate-50 rounded-lg p-2 border border-slate-100">{action.notes}</p>}
-                                                    <div className="mt-2 space-y-2">
+                                                    ))}
+                                                </dl>
+                                                {action.notes && <p className="text-sm text-slate-700 mt-4 bg-slate-50 rounded-lg px-3 py-2.5 border border-slate-100 whitespace-pre-wrap">{action.notes}</p>}
+                                                {(action.rejectionReason || action.revertReason || action.deletionReason || action.deletionRejectionReason) && (
+                                                    <div className="mt-3 space-y-2">
                                                         {action.approvalState === 'REDDEDILDI' && action.rejectionReason && <ReasonBox tone="red" title="Ret gerekçesi" text={action.rejectionReason} />}
                                                         {action.approvalState === 'TASLAK' && action.revertedAt && action.revertReason && <ReasonBox tone="amber" title="Onay geri alındı" text={action.revertReason} />}
                                                         {(deletionPending || isDeleted) && action.deletionReason && <ReasonBox tone="slate" title={isDeleted ? 'Silme gerekçesi' : 'Silme talebi'} text={action.deletionReason} />}
                                                         {!deletionPending && !isDeleted && action.deletionRejectionReason && <ReasonBox tone="slate" title="Silme talebi reddedildi" text={action.deletionRejectionReason} />}
                                                     </div>
-                                                </div>
+                                                )}
                                             </div>
-                                            {/* Action attachments */}
-                                            <div className="px-5 pb-4 border-t border-slate-100 pt-3">
+                                            {/* Alt şerit: ekler + bağlı takip çalışmaları */}
+                                            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 lg:px-5 py-3 bg-slate-50/70 border-t border-slate-100">
                                                 <FileUpload
-                                                    compact
+                                                    inline
                                                     attachmentKind="action"
                                                     attachments={(action.attachments || []).map(toAttachmentMeta)}
                                                     disabled={!aCaps.canManageAttachments}
@@ -913,27 +923,23 @@ export default function FindingDetailPage() {
                                                     onUpdate={(att, patch) => { if (att.id) return updateActionAttachment(action.id, att.id, patch); }}
                                                     onRemove={(att) => { if (att.id) removeActionAttachment(action.id, att.id); }}
                                                 />
-                                            </div>
-                                            {/* Linked follow-ups */}
-                                            {relFU.length > 0 && (
-                                                <div className="px-5 pb-4 border-t border-slate-100 pt-3">
-                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Bu Aksiyona Bağlı Takip Çalışmaları</p>
-                                                    <div className="flex gap-2 flex-wrap">
-                                                        {relFU.map(fu => {
-                                                            const fuCfg = followUpStatusConfig[fu.status] || { label: fu.status, variant: 'neutral' as BV };
-                                                            return (
-                                                                <button key={fu.id}
-                                                                    onClick={() => { setSelectedFollowUp(fu); setFollowUpOpen(true); setActiveTab('takip'); }}
-                                                                    className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-lg text-xs transition-all">
-                                                                    <span className="font-mono text-blue-700 font-semibold">{fu.followUpId}</span>
-                                                                    <StatusBadge variant={fuCfg.variant}>{fuCfg.label}</StatusBadge>
-                                                                </button>
-                                                            );
-                                                        })}
-                                                    </div>
+                                                <span className="hidden sm:block h-6 w-px bg-slate-200" aria-hidden />
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Takip çalışmaları</span>
+                                                    {relFU.length === 0 ? <span className="text-xs text-slate-400">Henüz yok</span> : relFU.map(fu => {
+                                                        const fuCfg = followUpStatusConfig[fu.status] || { label: fu.status, variant: 'neutral' as BV };
+                                                        return (
+                                                            <button key={fu.id} type="button"
+                                                                onClick={() => { setSelectedFollowUp(fu); setFollowUpOpen(true); setActiveTab('takip'); }}
+                                                                className="flex items-center gap-1.5 h-8 px-2.5 bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-lg text-xs transition-colors">
+                                                                <span className="font-mono text-blue-700 font-semibold">{fu.followUpId}</span>
+                                                                <span className="text-slate-600">{fuCfg.label}</span>
+                                                            </button>
+                                                        );
+                                                    })}
                                                 </div>
-                                            )}
-                                        </div>
+                                            </div>
+                                        </article>
                                     );
                                 })}
                             </div>
