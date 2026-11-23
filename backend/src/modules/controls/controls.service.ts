@@ -4,7 +4,7 @@ import { getLastBusinessDay, getFridaysInYear, TURKISH_MONTH_INDEX } from './con
 import { generateControlCode } from './control-code.util';
 import { nextTestCode } from './test-code.util';
 import { projectControlStatus, projectTestStatus } from '../../common/workflow/workflow-projection';
-import { overdueTestWhere } from '../../common/util/metric-definitions';
+import { overdueTestWhere, isTestOverdue, ACTIVE_TEST_STATUSES, OPEN_TEST_STATUSES } from '../../common/util/metric-definitions';
 import { personFieldWhere } from '../../common/util/person-filter';
 import { CompleteControlTestDto, CreateControlTestDto } from './dto';
 import { parsePaging, safeOrderBy } from '../../common/util/list-query';
@@ -82,12 +82,55 @@ export class ControlsService {
         ]);
 
         const currentYear = new Date().getFullYear();
+        const summaries = await this.listSummaries(controls.map((c: any) => c.id), currentYear, sc);
         const data = controls.map((c: any) => {
             const scopeYears = c.yearScopes.map((s: any) => s.year);
-            return { ...c, scopeYears, ...projectControlStatus(scopeYears.includes(currentYear), currentYear) };
+            return {
+                ...c, scopeYears, ...projectControlStatus(scopeYears.includes(currentYear), currentYear),
+                ...(summaries.get(c.id) ?? { testSummary: { year: currentYear, planned: 0, completed: 0, overdue: 0, nextPlannedDate: null }, openFindingCount: 0 }),
+            };
         });
 
         return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+    }
+
+    /**
+     * Envanter listesi özeti (tek sorguda sayfadaki tüm kontroller için): bu yılın test uyumu,
+     * sıradaki açık test ve açık bulgu sayısı. Gecikme kuralı tek kaynaktan (metric-definitions).
+     */
+    private async listSummaries(ids: string[], year: number, sc: RelatedScopes) {
+        const out = new Map<string, { testSummary: { year: number; planned: number; completed: number; overdue: number; nextPlannedDate: Date | null }; openFindingCount: number }>();
+        if (ids.length === 0) return out;
+        const from = new Date(Date.UTC(year, 0, 1) - 3 * 3600000); // İstanbul yılbaşı
+        const to = new Date(Date.UTC(year + 1, 0, 1) - 3 * 3600000);
+        const [tests, findings] = await Promise.all([
+            this.prisma.controlTest.findMany({
+                where: { AND: [{ controlId: { in: ids }, status: { in: [...ACTIVE_TEST_STATUSES] }, plannedDate: { gte: from, lt: to } }, sc.test ?? {}] },
+                select: { controlId: true, status: true, plannedDate: true },
+            }),
+            this.prisma.finding.groupBy({
+                by: ['controlId'],
+                where: { AND: [{ controlId: { in: ids }, resolutionStatus: { not: 'KAPATILDI' }, workflowStatus: { not: 'IPTAL' }, status: { not: 'CLOSED' } }, sc.finding ?? {}] },
+                _count: { _all: true },
+            }),
+        ]);
+        const get = (id: string) => {
+            let e = out.get(id);
+            if (!e) { e = { testSummary: { year, planned: 0, completed: 0, overdue: 0, nextPlannedDate: null }, openFindingCount: 0 }; out.set(id, e); }
+            return e;
+        };
+        const now = new Date();
+        for (const t of tests) {
+            const ts = get(t.controlId).testSummary;
+            ts.planned++;
+            if (t.status === 'TAMAMLANDI' || t.status === 'ONAYLANDI') ts.completed++;
+            if ((OPEN_TEST_STATUSES as readonly string[]).includes(t.status)) {
+                if (isTestOverdue(t, now)) ts.overdue++;
+                if (!ts.nextPlannedDate || t.plannedDate < ts.nextPlannedDate) ts.nextPlannedDate = t.plannedDate;
+            }
+        }
+        for (const f of findings) if (f.controlId) get(f.controlId).openFindingCount = f._count._all;
+        return out;
     }
 
     async findOne(id: string, sc: RelatedScopes = {}) {
