@@ -13,8 +13,8 @@ import { useToast } from '@/components/ui/Toast';
 import { PermissionGate, useAuth } from '@/components/auth';
 import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import AddActionModal from '@/components/modals/AddActionModal';
-import { PendingApprovalNotice } from '@/components/approvals/PendingApprovalNotice';
 import { FindingFollowUpModal } from '@/components/modals/FindingFollowUpModal';
+import { WorkflowBar } from '@/components/workflow/WorkflowBar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -84,6 +84,7 @@ interface Finding {
     capabilities?: FindingCapabilities;
     controlTest?: { id: string; testNo: string; periodLabel?: string | null; plannedDate?: string | null } | null;
     referencingTests?: Array<{ id: string; testNo: string; periodLabel?: string | null; plannedDate?: string | null; status: string; referenceReason?: string | null }>;
+    testLinks?: Array<{ id: string; linkedAt: string; controlTest: { id: string; testNo: string; periodLabel?: string | null; status: string; control: { id: string; controlId: string; name: string } } }>;
     currentStatusSummary: {
         status: string; workflowStatus: string; resolutionStatus: string; systemSummary: string;
         latestApproved: null | { id: string; followUpId: string; result?: string | null; evaluatedAt?: string | null; approvedAt?: string | null; explanation?: string | null; evaluatorName?: string | null; approverName?: string | null };
@@ -616,6 +617,9 @@ export default function FindingDetailPage() {
                 }
             />
 
+            {/* ── İş akışı (Jira tarzı) ─────────────────────────────────────────── */}
+            <div className="mb-5"><WorkflowBar type="FINDING" id={finding.id} onChanged={() => load()} refreshKey={finding.workflowStatus} /></div>
+
             {/* ── Tabs ───────────────────────────────────────────────────────── */}
             <Tabs
                 tabs={tabs}
@@ -754,10 +758,11 @@ export default function FindingDetailPage() {
                                     </div>
                                 </DetailSection>
 
-                                {(finding.controlTest || (finding.referencingTests?.length ?? 0) > 0) && (
+                                {(finding.controlTest || (finding.referencingTests?.length ?? 0) > 0 || (finding.testLinks?.length ?? 0) > 0) && (
                                     <DetailSection title="İlişkili Kontrol Testleri">
                                         <div className="space-y-2 text-xs">
                                             {finding.controlTest && <Link href={`/controls/testing/${finding.controlTest.id}`} className="block rounded-lg border border-blue-200 bg-blue-50 p-2 hover:border-blue-400"><strong>İlk tespit testi:</strong> {finding.controlTest.testNo} {finding.controlTest.periodLabel ? `· ${finding.controlTest.periodLabel}` : ''}</Link>}
+                                            {(finding.testLinks ?? []).filter(l => !(finding.referencingTests ?? []).some(r => r.id === l.controlTest.id)).map(l => <Link key={l.id} href={`/controls/testing/${l.controlTest.id}`} className="block rounded-lg border border-violet-200 bg-violet-50 p-2 hover:border-violet-400" data-testid="finding-test-link"><strong>İlişkilendiren kontrol testi:</strong> {l.controlTest.testNo} {l.controlTest.periodLabel ? `· ${l.controlTest.periodLabel}` : ''}<span className="block mt-1 text-slate-600">Kontrol: {l.controlTest.control.controlId} — {l.controlTest.control.name}</span></Link>)}
                                             {(finding.referencingTests ?? []).map(test => <Link key={test.id} href={`/controls/testing/${test.id}`} className="block rounded-lg border border-amber-200 bg-amber-50 p-2 hover:border-amber-400"><strong>Devam eden sorun referansı:</strong> {test.testNo} {test.periodLabel ? `· ${test.periodLabel}` : ''}{test.referenceReason ? <span className="block mt-1 text-slate-600">{test.referenceReason}</span> : null}</Link>)}
                                         </div>
                                     </DetailSection>
@@ -1002,14 +1007,9 @@ export default function FindingDetailPage() {
                                                         {fu.newFollowUpDate && <span className="text-amber-600">Yeni: {fmt(fu.newFollowUpDate)}</span>}
                                                         <span>{fmtDatetime(fu.createdAt)}</span>
                                                     </div>
-                                                    {(isPendingApproval || fuDeletionPending) && !fuDeleted && (
-                                                        <div className="mt-2.5 max-w-xl">
-                                                            <PendingApprovalNotice
-                                                                testId={fuDeletionPending ? 'pending-deletion' : 'pending-approval'}
-                                                                title={fuDeletionPending ? 'Silme talebi onay bekliyor' : 'Takip değerlendirmesi onay bekliyor'}
-                                                                waitingFor={fu.secondController ? [{ name: personName(fu.secondController), role: '2. kontrolcü' }] : []}
-                                                                sentAt={(fuDeletionPending ? fu.deletionRequestedAt : fu.evaluatedAt) ?? null}
-                                                            />
+                                                    {!fuDeleted && fu.status !== 'IPTAL' && (
+                                                        <div className="mt-2.5">
+                                                            <WorkflowBar type="FOLLOW_UP" id={fu.id} compact onChanged={() => load()} refreshKey={`${fu.status}:${fu.approvalStatus}:${fu.deletionRequestedAt ?? ''}`} />
                                                         </div>
                                                     )}
                                                 </div>

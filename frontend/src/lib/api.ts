@@ -17,6 +17,7 @@ import type {
     DashboardScopeParams, DashboardScopeOptions, DashboardSummary, DashboardWorkItemsResponse,
     DashboardApprovals, DashboardCriticalIssue, DashboardAnnualPlan, DashboardUpcoming,
 } from '@/types/dashboard';
+import type { WorkflowEntityType, WorkflowState, WorkflowActionKey, BoardResponse, WorkflowStage, DeletionRequestRow } from '@/types/workflow';
 import type {
     AnnualPlanWorkspace, AnnualPlanDraftItem, AnnualPlanPreview, AnnualPlanApplyResult, AnnualPlanAssignmentDecision,
     EligibleController, WorkloadByAssignee,
@@ -700,12 +701,36 @@ class ApiClient {
         return this.request<any>(`/controls/${controlId}/version-impact/apply`, { method: 'POST', body: { expectedControlVersion, decisions } });
     }
 
-    async getWorkflowHealthSummary(params?: Record<string, unknown>) {
-        return this.request<any>(`/workflow-health/summary${buildQuery(params)}`);
+    // ── Ortak iş akışı / İşlem Durumları (Kanban) / onaylı silme ──
+    async getWorkflowState(type: WorkflowEntityType, id: string) {
+        return this.request<WorkflowState>(`/workflow/${type}/${id}`);
     }
-
-    async getWorkflowHealthItems(params?: Record<string, unknown>) {
-        return this.request<any>(`/workflow-health/items${buildQuery(params)}`);
+    async workflowTransition(type: WorkflowEntityType, id: string, action: WorkflowActionKey, reason?: string) {
+        return this.request<unknown>(`/workflow/${type}/${id}/transition`, { method: 'POST', body: { action, ...(reason ? { reason } : {}) } });
+    }
+    async getWorkflowBoard(params?: Record<string, unknown>) {
+        return this.request<BoardResponse>(`/workflow/board${buildQuery(params)}`);
+    }
+    async moveWorkflowCard(entityType: WorkflowEntityType, entityId: string, toStage: WorkflowStage, reason?: string) {
+        return this.request<{ action?: string; unchanged?: boolean }>(`/workflow/board/move`, { method: 'POST', body: { entityType, entityId, toStage, ...(reason ? { reason } : {}) } });
+    }
+    async getDeletionRequests() {
+        return this.request<DeletionRequestRow[]>(`/deletion-requests`);
+    }
+    async requestDeletion(entityType: 'CONTROL_TEST' | 'PERIOD_CONTROL', entityId: string, reason: string) {
+        return this.request<{ requested: boolean; message: string }>(`/deletion-requests`, { method: 'POST', body: { entityType, entityId, reason } });
+    }
+    async decideDeletion(entityType: 'CONTROL_TEST' | 'PERIOD_CONTROL', entityId: string, approve: boolean, reason?: string) {
+        return this.request<unknown>(`/deletion-requests/${entityType}/${entityId}/${approve ? 'approve' : 'reject'}`, { method: 'POST', body: approve ? {} : { reason } });
+    }
+    async getTestFindingCandidates(testId: string, search?: string) {
+        return this.request<any[]>(`/controls/tests/${testId}/finding-candidates${buildQuery(search ? { search } : {})}`);
+    }
+    async getTestFindingLinks(testId: string) {
+        return this.request<any[]>(`/controls/tests/${testId}/finding-links`);
+    }
+    async setTestFindingLinks(testId: string, findingIds: string[]) {
+        return this.request<{ findingIds: string[] }>(`/controls/tests/${testId}/finding-links`, { method: 'PUT', body: { findingIds } });
     }
 
     async mapControlRisk(controlId: string, riskId: string, mappingType?: string) {

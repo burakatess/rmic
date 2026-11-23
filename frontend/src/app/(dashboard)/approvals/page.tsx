@@ -12,6 +12,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/components/auth';
 import { useSearchParams } from 'next/navigation';
 import { WorkflowApprovalsPanel } from '@/components/approvals/WorkflowApprovalsPanel';
+import { DeletionRequestsPanel } from '@/components/approvals/DeletionRequestsPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -240,7 +241,8 @@ function ApprovalsContent() {
     const [loading, setLoading] = useState(true);
     const [detailId, setDetailId] = useState<string | null>(null);
     const searchParams = useSearchParams();
-    const [tab, setTab] = useState<'workflow' | 'tests'>(searchParams.get('tab') === 'tests' ? 'tests' : 'workflow');
+    const [tab, setTab] = useState<'workflow' | 'tests' | 'deletions'>(searchParams.get('tab') === 'tests' ? 'tests' : searchParams.get('tab') === 'deletions' ? 'deletions' : 'workflow');
+    const [deletionCount, setDeletionCount] = useState<number | null>(null);
     const [workflowCount, setWorkflowCount] = useState<number | null>(null);
 
     const [searchQuery, setSearchQuery] = useState('');
@@ -373,9 +375,9 @@ function ApprovalsContent() {
             />
 
             <div role="tablist" aria-label="Onay türü" className="flex gap-1 border-b border-slate-200">
-                {([['workflow', 'Aksiyon & Takip', workflowCount], ['tests', 'Kontrol Testleri', loading ? null : items.length]] as const).map(([key, label, count]) => (
+                {([['workflow', 'Aksiyon & Takip', workflowCount], ['tests', 'Kontrol Testleri', loading ? null : items.length], ['deletions', 'Silme Talepleri', deletionCount]] as const).map(([key, label, count]) => (
                     <button key={key} role="tab" type="button" aria-selected={tab === key}
-                        onClick={() => { setTab(key); window.history.replaceState(null, '', key === 'tests' ? '?tab=tests' : window.location.pathname); }}
+                        onClick={() => { setTab(key); window.history.replaceState(null, '', key === 'workflow' ? window.location.pathname : `?tab=${key}`); }}
                         className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px ${tab === key ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
                         {label}{count !== null ? ` (${count})` : ''}
                     </button>
@@ -383,6 +385,7 @@ function ApprovalsContent() {
             </div>
 
             {tab === 'workflow' && <WorkflowApprovalsPanel onCountChange={setWorkflowCount} />}
+            {tab === 'deletions' && <DeletionRequestsPanel onCountChange={setDeletionCount} />}
 
             {tab === 'tests' && (<>
 

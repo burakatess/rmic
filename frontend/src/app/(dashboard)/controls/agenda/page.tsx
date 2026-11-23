@@ -8,6 +8,9 @@ import {
     BarChart, Bar, PieChart, Pie, Cell,
     XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
+import { DeletionRequestButton } from '@/components/workflow/DeletionRequestButton';
+
+const STAGE_TEXT: Record<string, string> = { BEKLIYOR: 'Bekliyor', DEVAM_EDIYOR: 'Devam Ediyor', TAMAMLANDI: 'Tamamlandı', ONAYLANDI: 'Onaylandı', IPTAL: 'İptal' };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -47,6 +50,8 @@ interface PeriodControlRow {
     overdueCount: number;
     findingsCount: number;
     nextTestDate: string | null;
+    stage?: string;
+    deletionRequestedAt?: string | null;
 }
 
 interface TaskRow {
@@ -60,6 +65,7 @@ interface TaskRow {
     control: { id: string; controlId: string; name: string; frequency: string };
     assigneeId?: string | null;
     secondControllerId?: string | null;
+    deletionRequestedAt?: string | null;
 }
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -513,6 +519,7 @@ export default function PeriodControlsPage() {
                                         onToggle={() => toggleExpand(row)}
                                         onShowAllYear={() => toggleExpand(row, true)}
                                         userLabel={userLabel}
+                                        onChanged={() => { setTestsByScope(prev => { const n = new Map(prev); n.delete(row.scopeId); return n; }); setExpanded(prev => { const n = new Set(prev); n.delete(row.scopeId); return n; }); loadRows(); }}
                                     />
                                 );
                             })}
@@ -533,9 +540,9 @@ export default function PeriodControlsPage() {
 }
 
 // ─── Satır grubu: Dönem Kontrolü + genişleyince testleri ──────────────────────
-function RowGroup({ row, isOpen, tests, isTestsLoading, monthFiltered, onToggle, onShowAllYear, userLabel }: {
+function RowGroup({ row, isOpen, tests, isTestsLoading, monthFiltered, onToggle, onShowAllYear, userLabel, onChanged }: {
     row: PeriodControlRow; isOpen: boolean; tests: TaskRow[]; isTestsLoading: boolean; monthFiltered: boolean;
-    onToggle: () => void; onShowAllYear: () => void; userLabel: (id?: string | null) => string;
+    onToggle: () => void; onShowAllYear: () => void; userLabel: (id?: string | null) => string; onChanged: () => void;
 }) {
     return (
         <>
@@ -559,7 +566,13 @@ function RowGroup({ row, isOpen, tests, isTestsLoading, monthFiltered, onToggle,
                 <td className="px-4 py-3 text-xs font-semibold">{row.completedTaskCount}/{row.totalTaskCount} onaylandı{row.pendingApprovalCount > 0 && <span className="block text-blue-600 font-normal">{row.pendingApprovalCount} onay bekliyor</span>}{row.findingsCount > 0 && <span className="block text-rose-600 font-normal">{row.findingsCount} bulgu</span>}</td>
                 <td className="px-4 py-3">{row.overdueCount > 0 ? <StatusBadge variant="critical">{row.overdueCount} gecikmiş</StatusBadge> : <span className="text-slate-300">—</span>}</td>
                 <td className="px-4 py-3 text-xs text-slate-600">{fmt(row.nextTestDate)}</td>
-                <td className="px-4 py-3"><Link href={`/controls/agenda/${row.scopeId}`} target="_blank" className="text-xs font-bold text-emerald-700 hover:underline">Detay →</Link></td>
+                <td className="px-4 py-3">
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                        {row.stage && <span className="text-[10.5px] font-semibold text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">{STAGE_TEXT[row.stage] ?? row.stage}</span>}
+                        <Link href={`/controls/agenda/${row.scopeId}`} target="_blank" className="text-xs font-bold text-emerald-700 hover:underline">Detay →</Link>
+                        <DeletionRequestButton type="PERIOD_CONTROL" id={row.scopeId} code={row.code} pending={!!row.deletionRequestedAt} onDone={onChanged} size="xs" variant="ghost" />
+                    </div>
+                </td>
             </tr>
             {isOpen && (
                 <tr className="bg-slate-50/50">
@@ -597,7 +610,12 @@ function RowGroup({ row, isOpen, tests, isTestsLoading, monthFiltered, onToggle,
                                                     <td className="py-1.5 pr-3 text-slate-600">{userLabel(t.secondControllerId)}</td>
                                                     <td className="py-1.5 pr-3">{statusInfo ? <StatusBadge variant={statusInfo.variant} size="sm">{statusInfo.label}</StatusBadge> : t.status}</td>
                                                     <td className="py-1.5 pr-3">{resultInfo ? <StatusBadge variant={resultInfo.variant} size="sm">{resultInfo.label}</StatusBadge> : <span className="text-slate-300">—</span>}</td>
-                                                    <td className="py-1.5 pr-3"><Link href={`/controls/testing/${t.id}`} target="_blank" className="font-bold text-emerald-700 hover:underline">Testi Aç →</Link></td>
+                                                    <td className="py-1.5 pr-3">
+                                                        <div className="flex items-center gap-2 whitespace-nowrap">
+                                                            <Link href={`/controls/testing/${t.id}`} target="_blank" className="font-bold text-emerald-700 hover:underline">Testi Aç →</Link>
+                                                            <DeletionRequestButton type="CONTROL_TEST" id={t.id} code={t.testNo} pending={!!t.deletionRequestedAt} onDone={onChanged} size="xs" variant="ghost" />
+                                                        </div>
+                                                    </td>
                                                 </tr>
                                             );
                                         })}

@@ -333,7 +333,7 @@ export class WorkflowService {
         if (types.includes('CONTROL_TEST')) {
             const tw = controlTestWhere(ctx);
             const rows = await this.prisma.controlTest.findMany({
-                where: { AND: [{ deletedAt: null, year }, tw ?? {}, mine ? { OR: [{ assigneeId: me }, { secondControllerId: me }] } : {}] },
+                where: { AND: [{ deletedAt: null, OR: [{ year }, { year: null, plannedDate: { gte: new Date(Date.UTC(year, 0, 1) - 3 * 3600000), lt: new Date(Date.UTC(year + 1, 0, 1) - 3 * 3600000) } }] }, tw ?? {}, mine ? { OR: [{ assigneeId: me }, { secondControllerId: me }] } : {}] },
                 include: { control: { select: { name: true } } }, orderBy: { plannedDate: 'asc' }, take: 2000,
             });
             const people = await this.peopleMap(rows.flatMap(r => [r.assigneeId, r.secondControllerId]));

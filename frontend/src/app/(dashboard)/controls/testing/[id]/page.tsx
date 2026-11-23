@@ -15,8 +15,9 @@ import { RichTextArea, MarkdownLiteView } from '@/components/controls/RichTextAr
 import { ResizableSplit } from '@/components/controls/ResizableSplit';
 import { EvidenceList, type EvidenceItem } from '@/components/controls/EvidenceList';
 import { frequencyText } from '@/lib/control-labels';
-import { PendingApprovalNotice } from '@/components/approvals/PendingApprovalNotice';
+import { WorkflowBar } from '@/components/workflow/WorkflowBar';
 import { EvidencePreview } from '@/components/controls/EvidencePreview';
+import { TestFindingLinks, buildFindingReferenceText, textReferencesAll, type LinkedFinding } from '@/components/controls/TestFindingLinks';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -102,6 +103,12 @@ export default function ControlTestDetailPage() {
     const [notFound, setNotFound] = useState(false);
 
     const [form, setForm] = useState({ resultText: '', evidenceSummary: '', findingStatus: null as string | null });
+    const [findingLinks, setFindingLinks] = useState<LinkedFinding[]>([]);
+    const appendToResult = useCallback((text: string) => {
+        if (!text) return;
+        userEditedRef.current = true;
+        setForm(p => ({ ...p, resultText: p.resultText.trim() ? `${p.resultText.trimEnd()}\n\n${text}` : text }));
+    }, []);
     const [stepObservations, setStepObservations] = useState<string[]>([]);
     const [selectedAttachment, setSelectedAttachment] = useState<EvidenceItem | null>(null);
     const [mobileTab, setMobileTab] = useState<'evidence' | 'evaluation'>('evaluation');
@@ -299,9 +306,13 @@ export default function ControlTestDetailPage() {
                 showError('Kayıt Başarısız', 'Değerlendirmeniz kaydedilemedi — onaya gönderilmedi. Lütfen tekrar deneyin.');
                 return;
             }
+            // Eşleştirilen bulgular sonuç metninde referans gösterilmemişse otomatik eklenir (kullanıcı önceden düzenleyebilir).
+            const resultText = findingLinks.length > 0 && !textReferencesAll(form.resultText, findingLinks)
+                ? (form.resultText.trim() ? `${form.resultText.trimEnd()}\n\n${buildFindingReferenceText(findingLinks)}` : buildFindingReferenceText(findingLinks))
+                : form.resultText;
             await api.completeControlTest(test.id, {
                 findingStatus: form.findingStatus,
-                resultText: form.resultText,
+                resultText,
                 evidenceSummary: form.evidenceSummary,
             });
             success('Tamamlandı', 'Test sonucu kaydedildi, 2. kontrolcü onayına gönderildi.');
@@ -560,6 +571,8 @@ export default function ControlTestDetailPage() {
                 />
             </div>
 
+            <TestFindingLinks testId={test.id} editable={canEditContent} onLinksChange={setFindingLinks} onInsertText={appendToResult} />
+
             {(inProgress || isDone || isPendingApproval) && (
                 <div className="bg-white rounded-2xl border border-slate-200 p-5">
                     <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Kontrol Sonucu</p>
@@ -764,17 +777,9 @@ export default function ControlTestDetailPage() {
                     </div>
                 </div>
 
-                {test.status === 'TAMAMLANDI' && (
-                    <div className="mt-3">
-                        <PendingApprovalNotice
-                            title="Test onay bekliyor"
-                            waitingFor={test.secondController ? [{ name: personLabel(test.secondController), role: '2. kontrolcü' }] : []}
-                            sentBy={test.assignee ? personLabel(test.assignee) : null}
-                            sentAt={test.completedAt}
-                            hint="Onay verilene kadar test içeriği değiştirilemez; onaycı gerekirse gerekçeyle geri gönderir."
-                        />
-                    </div>
-                )}
+                <div className="mt-3">
+                    <WorkflowBar type="CONTROL_TEST" id={test.id} onChanged={() => load(true)} refreshKey={test.status} compact />
+                </div>
             </div>
 
             {/* Gövde */}
