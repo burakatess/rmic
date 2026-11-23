@@ -12,12 +12,25 @@ const YEAR = new Date().getFullYear() + 1; // Akış Sağlığı yıl seçicisi 
 const CONTROL_NAME = 'E2E Plan Akışı Kontrolü';
 
 async function login(page: Page, email: string): Promise<string> {
-    await page.goto('/login');
-    await page.getByPlaceholder('ornek@sirket.com').fill(email);
-    await page.getByPlaceholder('••••••••').fill(PASSWORD);
-    await page.getByRole('button', { name: 'Giriş Yap' }).click();
-    await expect.poll(() => page.evaluate(() => Boolean(localStorage.getItem('accessToken'))), { timeout: 30_000 }).toBe(true);
-    return (await page.evaluate(() => localStorage.getItem('accessToken')))!;
+    // Dev sunucusu sayfaları ilk istekte derler; boş sayfa / sıfırlanan alan olursa birkaç kez denenir.
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            await page.goto('/login', { waitUntil: 'domcontentloaded', timeout: 60_000 });
+            await page.waitForLoadState('networkidle'); // hidrasyondan önce doldurulan alanlar sıfırlanmasın
+            await page.getByPlaceholder('ornek@sirket.com').fill(email);
+            await page.getByPlaceholder('••••••••').fill(PASSWORD);
+            await page.getByRole('button', { name: 'Giriş Yap' }).click();
+            // Giriş sonrası yönlendirme çalıştırma bağlamını yok edebilir; waitForFunction buna dayanıklıdır.
+            await page.waitForFunction(() => Boolean(localStorage.getItem('accessToken')), undefined, { timeout: 20_000 });
+            for (let i = 0; i < 20; i++) {
+                const token = await page.evaluate(() => localStorage.getItem('accessToken')).catch(() => null);
+                if (token) return token;
+                await page.waitForTimeout(250);
+            }
+        } catch (e) { lastError = e; }
+    }
+    throw lastError ?? new Error(`oturum açılamadı: ${email}`);
 }
 
 /** Dev sunucusu sayfayı ilk derlerken gezinti iptal edilebilir (ERR_ABORTED); kısa süre yeniden denenir. */
