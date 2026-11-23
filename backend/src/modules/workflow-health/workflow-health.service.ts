@@ -27,10 +27,15 @@ export class WorkflowHealthService {
 
         const findingWhere: any = {};
         if (directorateFilter) findingWhere.directorateId = directorateFilter;
-        if (resolved.appliedScope === 'MINE') findingWhere.OR = [{ assigneeId: userId }, { actions: { some: { ownerId: userId } } }];
+        // "İşlerim": atandığım/sahibi olduğum kayıtlar VE birinci/ikinci kontrolcüsü olduğum kayıtlar (maker-checker zinciri).
+        if (resolved.appliedScope === 'MINE') findingWhere.OR = [
+            { assigneeId: userId }, { firstControllerId: userId }, { secondControllerId: userId }, { actions: { some: { ownerId: userId } } },
+        ];
         const actionWhere: any = {};
         if (directorateFilter) actionWhere.directorateId = directorateFilter;
-        if (resolved.appliedScope === 'MINE') actionWhere.ownerId = userId;
+        if (resolved.appliedScope === 'MINE') actionWhere.OR = [{ ownerId: userId }, { firstControllerId: userId }, { secondControllerId: userId }];
+        // Onaysız (taslak/onay bekleyen/reddedilmiş) veya silinmiş aksiyon iş yürütmüyor: gecikme ve takip sinyali üretmez.
+        const liveActionWhere = { approvalState: 'ONAYLANDI' as const, deletedAt: null };
         const hasPermission = (permission: string) => {
             const [domain] = permission.split(':');
             return permissions.some(p => p === '*' || p === permission || p === `${domain}:*`);
@@ -38,7 +43,7 @@ export class WorkflowHealthService {
         const canViewFindings = hasPermission('finding:view');
         const canViewActions = hasPermission('action:view') || canViewFindings;
 
-        const [draft, scopes, findings, overdueActions, completedActions, pendingFollowUps] = await Promise.all([
+        const [draft, scopes, findings, overdueActions, completedActions, pendingFollowUps, pendingActions] = await Promise.all([
             this.prisma.annualPlanDraft.findUnique({ where: { year } }),
             this.prisma.controlYearScope.findMany({
                 where: scopeWhere,
@@ -49,23 +54,29 @@ export class WorkflowHealthService {
             }),
             canViewFindings ? this.prisma.finding.findMany({
                 where: { ...findingWhere, workflowStatus: 'MUTABAKAT_YAPILDI', resolutionStatus: { not: 'KAPATILDI' } },
-                select: { id: true, findingId: true, summary: true, directorateId: true, actions: { select: { id: true } } },
+                select: { id: true, findingId: true, summary: true, directorateId: true, actions: { where: { deletedAt: null, status: { not: 'IPTAL' as any } }, select: { id: true } } },
             }) : Promise.resolve([]),
             canViewActions ? this.prisma.action.findMany({
-                where: { ...actionWhere, status: { in: OPEN_ACTIONS as any }, dueDate: { lt: new Date() } },
+                where: { ...actionWhere, ...liveActionWhere, status: { in: OPEN_ACTIONS as any }, dueDate: { lt: new Date() } },
                 select: { id: true, actionId: true, description: true, dueDate: true, directorateId: true },
             }) : Promise.resolve([]),
             canViewActions ? this.prisma.action.findMany({
-                where: { ...actionWhere, status: { in: ['TAMAMLANDI', 'COMPLETED'] as any }, followUps: { none: {} } },
+                where: { ...actionWhere, ...liveActionWhere, status: { in: ['TAMAMLANDI', 'COMPLETED'] as any }, followUps: { none: {} } },
                 select: { id: true, actionId: true, description: true, directorateId: true },
             }) : Promise.resolve([]),
             canViewFindings ? this.prisma.findingFollowUp.findMany({
                 where: {
                     status: 'TAMAMLANDI', approvalStatus: { not: 'ONAYLANDI' },
                     ...(directorateFilter ? { directorateId: directorateFilter } : {}),
-                    ...(resolved.appliedScope === 'MINE' ? { OR: [{ evaluatorId: userId }, { secondControllerId: userId }] } : {}),
+                    deletedAt: null,
+                    ...(resolved.appliedScope === 'MINE' ? { OR: [{ evaluatorId: userId }, { assigneeId: userId }, { secondControllerId: userId }] } : {}),
                 },
                 select: { id: true, followUpId: true, directorateId: true },
+            }) : Promise.resolve([]),
+            // Maker-checker: ikinci kontrolcü onayı bekleyen aksiyonlar (takip çalışması onaydan sonra açılır).
+            canViewActions ? this.prisma.action.findMany({
+                where: { ...actionWhere, approvalState: 'ONAY_BEKLIYOR', deletedAt: null },
+                select: { id: true, actionId: true, directorateId: true },
             }) : Promise.resolve([]),
         ]);
 
@@ -113,6 +124,10 @@ export class WorkflowHealthService {
         for (const action of completedActions) items.push({
             code: 'ACTION_COMPLETED_NO_FOLLOWUP', severity: 'WARNING', entityType: 'ACTION', entityId: action.id,
             title: action.actionId, message: 'Tamamlanan aksiyon için Bulgu Takip Çalışması oluşturulmamış.', nextAction: 'TAKIP_OLUSTUR', href: `/actions/${action.id}`, directorateId: action.directorateId,
+        });
+        for (const action of pendingActions) items.push({
+            code: 'ACTION_APPROVAL_PENDING', severity: 'WARNING', entityType: 'ACTION', entityId: action.id,
+            title: action.actionId, message: 'Aksiyon ikinci kontrolcü onayı bekliyor; onaylanınca takip çalışması açılır.', nextAction: 'AKSIYONU_ONAYLA', href: `/actions/${action.id}`, directorateId: action.directorateId,
         });
         for (const followUp of pendingFollowUps) items.push({
             code: 'FOLLOWUP_APPROVAL_PENDING', severity: 'WARNING', entityType: 'FOLLOW_UP', entityId: followUp.id,
