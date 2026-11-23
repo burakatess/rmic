@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { PendingApprovalNotice } from '@/components/approvals/PendingApprovalNotice';
 import api from '@/lib/api';
 import { Button, DetailSection, Modal, StatusBadge } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
@@ -148,6 +149,21 @@ export function ActionWorkflowPanel({ action, onChanged }: { action: ActionWorkf
                         <span className="text-xs text-slate-500">2. kontrolcü: <b className="text-slate-700">{name(action.secondController)}</b></span>
                     </div>
 
+                    {!deleted && action.secondController && state === 'ONAY_BEKLIYOR' && (
+                        <PendingApprovalNotice
+                            title="Aksiyon onay bekliyor"
+                            waitingFor={[{ name: name(action.secondController), role: '2. kontrolcü' }]}
+                            sentBy={name(action.firstController)} sentAt={action.submittedAt}
+                        />
+                    )}
+                    {!deleted && action.secondController && action.deletionRequestedAt && (
+                        <PendingApprovalNotice
+                            testId="pending-deletion"
+                            title="Silme talebi onay bekliyor"
+                            waitingFor={[{ name: name(action.secondController), role: '2. kontrolcü' }]}
+                            sentAt={action.deletionRequestedAt}
+                        />
+                    )}
                     <p className="text-sm text-slate-600 bg-slate-50 rounded-lg px-3 py-2">{nextHint}</p>
 
                     {state === 'REDDEDILDI' && action.rejectionReason && (

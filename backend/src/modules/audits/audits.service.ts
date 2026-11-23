@@ -612,13 +612,19 @@ export class AuditsService {
         });
         if (!finding) throw new NotFoundException(`Finding with ID ${id} not found`);
         const currentStatusSummary = await this.buildFindingCurrentStatusSummary(finding);
+        // Takip çalışmasının ikinci kontrolcüsü düz kimlik (ilişki yok): "kimin onaylayacağı" için ad bilgisi eklenir.
+        const checkerIds = [...new Set(finding.followUps.map(f => f.secondControllerId).filter((x): x is string => !!x))];
+        const checkers = checkerIds.length
+            ? await this.prisma.user.findMany({ where: { id: { in: checkerIds } }, select: { id: true, firstName: true, lastName: true } })
+            : [];
+        const checkerById = new Map(checkers.map(u => [u.id, u]));
         return {
             ...finding,
             currentStatusSummary,
             ...projectFindingStatus(finding.workflowStatus, finding.resolutionStatus, finding.actions),
             ...projectFindingTiming(finding),
             actions: finding.actions.map(action => ({ ...action, ...projectActionStatus(action.status, action.dueDate, new Date(), action.approvalState) })),
-            followUps: finding.followUps.map(followUp => ({ ...followUp, ...projectFollowUpStatus(followUp.status, followUp.approvalStatus, followUp.plannedDate, new Date(), followUp.deletedAt) })),
+            followUps: finding.followUps.map(followUp => ({ ...followUp, secondController: (followUp.secondControllerId && checkerById.get(followUp.secondControllerId)) || null, ...projectFollowUpStatus(followUp.status, followUp.approvalStatus, followUp.plannedDate, new Date(), followUp.deletedAt) })),
         };
     }
 

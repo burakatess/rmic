@@ -71,6 +71,8 @@ export interface AnnualPlanWorkspace {
     approvedById?: string | null;
     approvedRevision?: number | null;
     decisionNote?: string | null;
+    /** Onay bekleyen planda: gönderen ve onaylayabilecek yöneticiler */
+    pendingApproval?: { submittedAt: string | null; submittedBy: { id: string; name: string } | null; approvers: Array<{ id: string; name: string }> } | null;
     scope: {
         applied: AnnualPlanScope;
         directorateIds: string[] | null;

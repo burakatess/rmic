@@ -215,6 +215,31 @@ export class AnnualPlanService {
      * Karar geçmişi: gönderme / onay / değişiklik talebi / uygulama olayları, denetim izinden okunur
      * (ayrı tablo yok — kalıcı kayıt zaten AuditLog). Yeniden eskiye sıralı.
      */
+    /**
+     * Onay bekleyen plan için "kimin onaylayacağı": onay uç noktasının kurallarıyla aynı —
+     * SYSTEM_ADMIN / RISK_CONTROL_MANAGER rolü + control:* izni, aktif ve gönderen kişi hariç.
+     */
+    private async pendingApprovalInfo(draft: { status: string; submittedAt: Date | null; submittedById: string | null }) {
+        if (draft.status !== 'PENDING_APPROVAL') return null;
+        const [submitter, candidates] = await Promise.all([
+            draft.submittedById
+                ? this.prisma.user.findUnique({ where: { id: draft.submittedById }, select: { id: true, firstName: true, lastName: true } })
+                : Promise.resolve(null),
+            this.prisma.user.findMany({
+                where: { isActive: true, role: { name: { in: ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER'] } }, ...(draft.submittedById ? { id: { not: draft.submittedById } } : {}) },
+                select: { id: true, firstName: true, lastName: true, role: { select: { permissions: true } } },
+                orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }, { id: 'asc' }],
+            }),
+        ]);
+        const nm = (u: { firstName: string | null; lastName: string | null }) => `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || '—';
+        const canApprove = (perms: unknown) => Array.isArray(perms) && perms.some(p => p === '*' || p === 'control:*');
+        return {
+            submittedAt: draft.submittedAt,
+            submittedBy: submitter ? { id: submitter.id, name: nm(submitter) } : null,
+            approvers: candidates.filter(u => canApprove(u.role.permissions)).map(u => ({ id: u.id, name: nm(u) })),
+        };
+    }
+
     async getDecisionHistory(year: number) {
         const draft = await this.prisma.annualPlanDraft.findUnique({ where: { year }, select: { id: true } });
         if (!draft) return [];
@@ -644,6 +669,7 @@ export class AnnualPlanService {
             submittedAt: draft.submittedAt, submittedById: draft.submittedById,
             approvedAt: draft.approvedAt, approvedById: draft.approvedById,
             approvedRevision: draft.approvedRevision, decisionNote: draft.decisionNote,
+            pendingApproval: await this.pendingApprovalInfo(draft),
             // Arayüz yetenekleri approve() kurallarıyla aynı: gönderen kendi planını onaylayamaz.
             capabilities: {
                 canApprove: draft.status === 'PENDING_APPROVAL' && draft.submittedById !== userId,

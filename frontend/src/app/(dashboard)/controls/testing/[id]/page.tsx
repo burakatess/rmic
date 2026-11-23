@@ -15,6 +15,7 @@ import { RichTextArea, MarkdownLiteView } from '@/components/controls/RichTextAr
 import { ResizableSplit } from '@/components/controls/ResizableSplit';
 import { EvidenceList, type EvidenceItem } from '@/components/controls/EvidenceList';
 import { frequencyText } from '@/lib/control-labels';
+import { PendingApprovalNotice } from '@/components/approvals/PendingApprovalNotice';
 import { EvidencePreview } from '@/components/controls/EvidencePreview';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -411,21 +412,36 @@ export default function ControlTestDetailPage() {
     }
 
     const stCfg = statusConfig[test.status] || { label: test.status, variant: 'neutral' as BV };
+    const personLabel = (u?: { firstName: string; lastName: string } | null) => (u ? `${u.firstName} ${u.lastName}` : 'Atanmamış');
+    const targetOverdue = test.timingStatus === 'GECIKMIS';
+    const targetRel = (() => {
+        if (!test.plannedDate) return null;
+        const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+        const d = new Date(test.plannedDate); d.setHours(0, 0, 0, 0);
+        const n = Math.round((d.getTime() - t0.getTime()) / 86400000);
+        return n < 0 ? `${Math.abs(n)} gün gecikmiş` : n === 0 ? 'bugün' : `${n} gün sonra`;
+    })();
     const control = test.control;
     const testSteps: string[] = (control.testSteps || '').split('\n').filter((s: string) => s.trim());
 
     // ── Bölüm A: Kontrol ─────────────────────────────────────────────────────
     const sectionA = (
-        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-            <button onClick={() => setControlOpen(p => !p)} className="w-full flex items-center justify-between px-5 py-3.5 bg-slate-50/60 border-b border-slate-100 text-left">
-                <span className="text-xs font-black text-slate-500 uppercase tracking-widest">A. Kontrol</span>
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <button onClick={() => setControlOpen(p => !p)} className="w-full flex items-center justify-between px-5 py-3 border-b border-slate-100 text-left">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Kontrol bilgileri</span>
                 <span className="text-slate-400 text-xs font-bold">{controlOpen ? 'Daralt −' : 'Genişlet +'}</span>
             </button>
             {controlOpen && (
                 <div className="p-5 space-y-4 text-sm">
-                    <div>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Açıklama / Amaç</p>
-                        <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">{control.description || '—'}</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="border border-slate-200 rounded-xl p-4">
+                            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Açıklama / amaç</p>
+                            <p className="text-slate-800 whitespace-pre-wrap leading-relaxed">{control.description || '—'}</p>
+                        </div>
+                        <div className="border border-slate-200 rounded-xl p-4">
+                            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Mehaz</p>
+                            <p className="text-slate-800 whitespace-pre-wrap leading-relaxed">{control.mehaz || <span className="text-slate-400">Mehaz referansı tanımlanmamış.</span>}</p>
+                        </div>
                     </div>
                     {control.risks?.length > 0 && (
                         <div>
@@ -473,16 +489,6 @@ export default function ControlTestDetailPage() {
                             </div>
                         </div>
                     )}
-                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
-                        <div>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Yıl / Dönem</p>
-                            <p className="text-slate-700 font-semibold">{test.periodLabel || (test.year ? `${test.year}` : '—')}</p>
-                        </div>
-                        <div>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Periyodiklik</p>
-                            <p className="text-slate-700 font-semibold">{frequencyText(control.frequency)}</p>
-                        </div>
-                    </div>
                 </div>
             )}
         </div>
@@ -695,12 +701,13 @@ export default function ControlTestDetailPage() {
 
     return (
         <div className={`flex flex-col min-h-screen bg-slate-50/50 ${focusMode ? '' : ''}`}>
-            {/* Üst kimlik şeridi */}
-            <div className={`bg-white border-b border-slate-200 px-5 py-4 ${focusMode ? '' : ''}`}>
-                <div className="flex items-start justify-between gap-4 mb-2">
-                    <button onClick={goToList} className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 shrink-0">
-                        <IconBack /> Test Listesine Dön
-                    </button>
+            {/* Üst kimlik kartı — kontrol envanteri/detay ile aynı dil */}
+            <div className="bg-white border-b border-slate-200 px-5 pt-4 pb-4">
+                <div className="flex items-start justify-between gap-4 mb-3">
+                    <div className="text-xs text-slate-500 flex items-center gap-1.5 flex-wrap">
+                        <button onClick={goToList} className="inline-flex items-center gap-1 font-semibold text-slate-500 hover:text-slate-800"><IconBack /> Kontrol Testi</button>
+                        <span>/</span><span className="text-slate-900 font-medium font-mono">{test.testNo}</span>
+                    </div>
                     <div className="flex items-center gap-2 shrink-0">
                         {completeBlockedReason && canComplete && <span className="text-[11px] text-amber-600 hidden md:inline">{completeBlockedReason}</span>}
                         <button onClick={toggleFocusMode} aria-pressed={focusMode}
@@ -711,8 +718,9 @@ export default function ControlTestDetailPage() {
                     </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                <div className="flex flex-wrap items-center gap-2.5">
                     <span className="font-mono text-xs font-semibold text-slate-600 bg-slate-100 border border-slate-200 rounded px-2 py-0.5">{test.testNo}</span>
+                    <h1 className="text-xl font-bold text-slate-900 leading-snug">{control.name}</h1>
                     <StatusBadge variant={stCfg.variant}>{stCfg.label}</StatusBadge>
                     {form.findingStatus && (
                         <StatusBadge variant={findingStatusConfig[form.findingStatus]?.variant || 'neutral'}>
@@ -720,10 +728,7 @@ export default function ControlTestDetailPage() {
                         </StatusBadge>
                     )}
                 </div>
-                <p className="text-lg font-bold text-slate-800 leading-snug">
-                    {control.name}
-                </p>
-                <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                <div className="flex flex-wrap items-center gap-2 mt-2">
                     <Link href={`/controls/${control.id}`} target="_blank" className="text-[11px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded px-2 py-0.5 hover:underline">
                         Ana Kontrol: {control.controlId}
                     </Link>
@@ -732,13 +737,44 @@ export default function ControlTestDetailPage() {
                             Dönem Kontrolü: {test.scope.code}
                         </Link>
                     )}
+                    {test.directorate?.name && <span className="text-[11px] text-slate-500 inline-flex items-center gap-1"><IconPin />{test.directorate.name}</span>}
+                    <span className="text-[11px] text-slate-500">Sıklık: {frequencyText(control.frequency)}</span>
                 </div>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 mt-1.5">
-                    <span className="inline-flex items-center gap-1"><IconCalendar />{test.periodLabel || (test.year ? `${test.year}` : '—')}</span>
-                    {test.directorate?.name && <span className="inline-flex items-center gap-1"><IconPin />{test.directorate.name}</span>}
-                    <span className="inline-flex items-center gap-1"><IconUser />{test.assignee ? `${test.assignee.firstName} ${test.assignee.lastName}` : 'Atanmamış'}</span>
-                    <span className="inline-flex items-center gap-1"><IconCalendar />Hedef: {fmt(test.plannedDate)}</span>
+
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+                    <div className="border border-slate-200 rounded-xl px-4 py-3">
+                        <div className="flex items-center gap-2 text-[11.5px] font-medium text-slate-500"><span className="w-2 h-2 rounded-sm bg-blue-600" />Test dönemi</div>
+                        <p className="text-lg font-bold text-slate-900 mt-1">{test.periodLabel || (test.year ? `${test.year}` : '—')}</p>
+                        <p className="text-[11.5px] text-slate-500">{test.year ? `${test.year} test dönemi` : ' '}</p>
+                    </div>
+                    <div className="border border-slate-200 rounded-xl px-4 py-3">
+                        <div className="flex items-center gap-2 text-[11.5px] font-medium text-slate-500"><span className={`w-2 h-2 rounded-sm ${targetOverdue ? 'bg-red-600' : 'bg-slate-500'}`} />Hedef tarih</div>
+                        <p className={`text-lg font-bold mt-1 ${targetOverdue ? 'text-red-600' : 'text-slate-900'}`}>{fmt(test.plannedDate)}</p>
+                        <p className={`text-[11.5px] ${targetOverdue ? 'text-red-500' : 'text-slate-500'}`}>{targetRel ?? ' '}</p>
+                    </div>
+                    <div className="border border-slate-200 rounded-xl px-4 py-3">
+                        <div className="flex items-center gap-2 text-[11.5px] font-medium text-slate-500"><span className="w-2 h-2 rounded-sm bg-violet-600" />Kontrolcüler</div>
+                        <p className="text-sm mt-1.5 text-slate-900"><span className="text-slate-500">Test eden:</span> <b>{personLabel(test.assignee)}</b></p>
+                        <p className="text-sm text-slate-900"><span className="text-slate-500">Onaycı:</span> <b>{personLabel(test.secondController)}</b></p>
+                    </div>
+                    <div className="border border-slate-200 rounded-xl px-4 py-3">
+                        <div className="flex items-center gap-2 text-[11.5px] font-medium text-slate-500"><span className="w-2 h-2 rounded-sm bg-emerald-600" />Kanıt</div>
+                        <p className="text-lg font-bold text-slate-900 mt-1">{(test.attachments || []).length} dosya</p>
+                        <p className="text-[11.5px] text-slate-500">{form.findingStatus ? (findingStatusConfig[form.findingStatus]?.label || form.findingStatus) : 'Henüz değerlendirilmedi'}</p>
+                    </div>
                 </div>
+
+                {test.status === 'TAMAMLANDI' && (
+                    <div className="mt-3">
+                        <PendingApprovalNotice
+                            title="Test onay bekliyor"
+                            waitingFor={test.secondController ? [{ name: personLabel(test.secondController), role: '2. kontrolcü' }] : []}
+                            sentBy={test.assignee ? personLabel(test.assignee) : null}
+                            sentAt={test.completedAt}
+                            hint="Onay verilene kadar test içeriği değiştirilemez; onaycı gerekirse gerekçeyle geri gönderir."
+                        />
+                    </div>
+                )}
             </div>
 
             {/* Gövde */}
@@ -746,7 +782,7 @@ export default function ControlTestDetailPage() {
                 {sectionA}
 
                 <div className="bg-transparent">
-                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2 px-1">B. Test Değerlendirmesi</p>
+                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2 px-1">Test değerlendirmesi</p>
                     {isWide ? (
                         <div className="flex min-h-[560px]">
                             <ResizableSplit storageKey="control-test-eval" left={evidencePane} right={<div className="pl-4">{evaluationPane}</div>} />

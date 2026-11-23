@@ -82,6 +82,10 @@ test('yıllık plan: hazırla → gönder → başka yönetici onaylar → uygul
     await admin.getByRole('button', { name: 'Onaya Gönder' }).click();
     await expect(admin.getByTestId('plan-stepper').locator('li[aria-current="step"]')).toContainText('Onay Bekliyor');
     await expect(admin.getByText('gönderen kendi planını onaylayamaz')).toBeVisible();
+    // Kimin onaylayacağı açıkça yazar (gönderen hariç yetkili yönetici).
+    await expect(admin.getByTestId('pending-approval')).toContainText('Onaylayacak');
+    await expect(admin.getByTestId('pending-approval')).toContainText('Playwright Yönetici');
+    await expect(admin.getByTestId('pending-approval')).toContainText('Gönderen: Playwright Admin');
     await expect(admin.getByRole('button', { name: 'Onayla', exact: true })).toHaveCount(0);
 
     // ── 3) Başka yönetici: gerekçesiz "Değişiklik İste" kapalı; notla onay ──────────────

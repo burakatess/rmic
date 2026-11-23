@@ -43,6 +43,9 @@ describe('E2E — Yıllık plan yaşam döngüsü ve karar geçmişi', () => {
         w = await ws('planner');
         expect(w.draftStatus).toBe('PENDING_APPROVAL');
         expect(w.capabilities.canApprove).toBe(false);
+        // Kimin onaylayacağı açık: gönderen hariç yetkili yöneticiler (burada yalnız Ayşe).
+        expect(w.pendingApproval.submittedBy.name).toBe('Kemal Yönetici');
+        expect(w.pendingApproval.approvers.map((u: { name: string }) => u.name)).toEqual(['Ayşe Yönetici']);
 
         await http().post(`/controls/annual-plan/${YEAR}/approve`).set(as('planner')).send({ expectedRevision: w.draftRevision }).expect(403);
         await http().post(`/controls/annual-plan/${YEAR}/request-changes`).set(as('approver')).send({ expectedRevision: w.draftRevision, note: '   ' }).expect(400);
@@ -54,7 +57,9 @@ describe('E2E — Yıllık plan yaşam döngüsü ve karar geçmişi', () => {
         w = await ws('approver');
         expect(w.capabilities.canApprove).toBe(true);
         await http().post(`/controls/annual-plan/${YEAR}/approve`).set(as('approver')).send({ expectedRevision: w.draftRevision, note: 'Uygun' }).expect(201);
-        expect((await ws('approver')).draftStatus).toBe('APPROVED');
+        const approved = await ws('approver');
+        expect(approved.draftStatus).toBe('APPROVED');
+        expect(approved.pendingApproval).toBeNull(); // onaylanınca bekleyen yok
 
         const hist = (await http().get(`/controls/annual-plan/${YEAR}/history`).set(as('planner')).expect(200)).body as Array<{ action: string; note: string | null; by: { name: string } | null }>;
         expect(hist.map(h => h.action)).toEqual(['ANNUAL_PLAN_APPROVE', 'ANNUAL_PLAN_SUBMIT', 'ANNUAL_PLAN_REQUEST_CHANGES', 'ANNUAL_PLAN_SUBMIT']);
