@@ -36,6 +36,7 @@ interface FollowUp {
     newActionRequired?: boolean;
     createdAt: string;
     updatedAt?: string;
+    // Manuel aksiyon planının takibinde bulgu yoktur.
     finding: {
         id: string;
         findingId: string;
@@ -44,16 +45,20 @@ interface FollowUp {
         severity: string;
         relatedDepartment?: string | null;
         resolutionStatus: string;
-    };
+    } | null;
     action?: {
         id: string;
         actionId: string;
+        title?: string | null;
         description: string;
         dueDate: string;
         owner?: { id: string; firstName: string; lastName: string; department?: string };
     } | null;
     attachments?: { id: string; originalName: string }[];
 }
+
+/** Özet: bulgu özeti; manuel takipte aksiyon başlığı/açıklaması. */
+const summaryOf = (f: FollowUp) => f.finding ? (f.finding.summary || f.finding.description) : (f.action?.title || f.action?.description || '—');
 
 // ─── Config Maps ──────────────────────────────────────────────────────────────
 
@@ -219,15 +224,15 @@ export default function FollowUpsPage() {
         return followUps.filter(f => {
             if (searchQuery) {
                 const q = searchQuery.toLowerCase();
-                const text = [f.followUpId, f.finding.findingId, f.finding.summary, f.finding.relatedDepartment, f.action?.actionId, f.action?.owner?.firstName, f.action?.owner?.lastName]
+                const text = [f.followUpId, f.finding?.findingId, f.finding?.summary, f.finding?.relatedDepartment, f.action?.actionId, f.action?.title, f.action?.owner?.firstName, f.action?.owner?.lastName]
                     .filter(Boolean).join(' ').toLowerCase();
                 if (!text.includes(q)) return false;
             }
             if (activeFilters.status && activeFilters.status !== 'all' && f.status !== activeFilters.status) return false;
             if (activeFilters.resolutionOutcome && f.resolutionOutcome !== activeFilters.resolutionOutcome) return false;
-            if (activeFilters.severity && f.finding.severity !== activeFilters.severity) return false;
+            if (activeFilters.severity && f.finding?.severity !== activeFilters.severity) return false;
             if (activeFilters.relatedDepartment) {
-                if (!f.finding.relatedDepartment?.toLowerCase().includes(activeFilters.relatedDepartment.toLowerCase())) return false;
+                if (!f.finding?.relatedDepartment?.toLowerCase().includes(activeFilters.relatedDepartment.toLowerCase())) return false;
             }
             if (activeFilters.month && f.plannedDate) {
                 if (new Date(f.plannedDate).getMonth() + 1 !== parseInt(activeFilters.month)) return false;
@@ -292,7 +297,7 @@ export default function FollowUpsPage() {
             defaultWidth: 160,
             filter: { type: 'text', placeholder: 'Takip No...', fn: (f: FollowUp, v) => f.followUpId.toLowerCase().includes(v.toLowerCase()) },
             render: (f) => (
-                <Link href={`/findings/${f.finding.id}?tab=takip&followUpId=${f.id}`}
+                <Link href={`/follow-ups/${f.id}`}
                     className="font-mono text-xs font-bold text-violet-700 hover:text-violet-900 hover:underline">
                     {f.followUpId}
                 </Link>
@@ -303,21 +308,21 @@ export default function FollowUpsPage() {
             header: 'Bulgu No',
             sortable: true,
             defaultWidth: 140,
-            filter: { type: 'text', placeholder: 'Bulgu No...', fn: (f: FollowUp, v) => f.finding.findingId.toLowerCase().includes(v.toLowerCase()) },
-            render: (f) => (
+            filter: { type: 'text', placeholder: 'Bulgu No...', fn: (f: FollowUp, v) => (f.finding?.findingId ?? 'manuel').toLowerCase().includes(v.toLowerCase()) },
+            render: (f) => f.finding ? (
                 <Link href={`/findings/${f.finding.id}`} className="font-mono text-xs font-bold text-violet-600 hover:text-violet-900 hover:underline">
                     {f.finding.findingId}
                 </Link>
-            ),
+            ) : <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 rounded px-1.5 py-0.5">Manuel aksiyon</span>,
         },
         {
             key: 'summary',
             header: 'Bulgu Özeti',
             defaultWidth: 220,
-            filter: { type: 'text', placeholder: 'Özet ara...', fn: (f: FollowUp, v) => (f.finding.summary || f.finding.description).toLowerCase().includes(v.toLowerCase()) },
+            filter: { type: 'text', placeholder: 'Özet ara...', fn: (f: FollowUp, v) => summaryOf(f).toLowerCase().includes(v.toLowerCase()) },
             render: (f) => (
-                <p className="text-xs text-slate-700 truncate max-w-[200px]" title={f.finding.summary || f.finding.description}>
-                    {f.finding.summary || f.finding.description}
+                <p className="text-xs text-slate-700 truncate max-w-[200px]" title={summaryOf(f)}>
+                    {summaryOf(f)}
                 </p>
             ),
         },
@@ -326,9 +331,9 @@ export default function FollowUpsPage() {
             header: 'İlgili Direktörlük',
             sortable: true,
             defaultWidth: 160,
-            filter: { type: 'text', placeholder: 'Direktörlük...', fn: (f: FollowUp, v) => (f.finding.relatedDepartment || '').toLowerCase().includes(v.toLowerCase()) },
+            filter: { type: 'text', placeholder: 'Direktörlük...', fn: (f: FollowUp, v) => (f.finding?.relatedDepartment || '').toLowerCase().includes(v.toLowerCase()) },
             render: (f) => (
-                <span className="text-xs text-slate-600 truncate block max-w-[150px]">{f.finding.relatedDepartment || '—'}</span>
+                <span className="text-xs text-slate-600 truncate block max-w-[150px]">{f.finding?.relatedDepartment || '—'}</span>
             ),
         },
         {
@@ -385,7 +390,7 @@ export default function FollowUpsPage() {
             sortable: true,
             defaultWidth: 80,
             render: (f) => {
-                const sv = severityConfig[f.finding.severity];
+                const sv = f.finding ? severityConfig[f.finding.severity] : undefined;
                 return sv ? <StatusBadge variant={sv.variant}>{sv.label}</StatusBadge> : <span className="text-slate-300 text-xs">—</span>;
             },
         },
@@ -401,9 +406,9 @@ export default function FollowUpsPage() {
             header: 'İşlemler',
             defaultWidth: 80,
             render: (f) => (
-                <Link href={`/findings/${f.finding.id}?tab=takip&followUpId=${f.id}`}
+                <Link href={`/follow-ups/${f.id}`}
                     className="p-1.5 rounded text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors inline-block"
-                    title="Bulguya Git">
+                    title="Takip detayına git">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                     </svg>
@@ -447,7 +452,8 @@ export default function FollowUpsPage() {
         try {
             for (const id of selectedRows) {
                 const f = followUps.find(fu => fu.id === id);
-                if (f) await api.deleteFollowUp(f.finding.id, f.id);
+                if (f?.finding) await api.deleteFollowUp(f.finding.id, f.id);
+                else if (f) await api.requestDeletion('FOLLOW_UP', f.id, 'Takip listesinden toplu silme talebi');
             }
             setFollowUps(prev => prev.filter(f => !selectedRows.has(f.id)));
             setSelectedRows(new Set());

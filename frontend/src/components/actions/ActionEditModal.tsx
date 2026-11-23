@@ -14,13 +14,14 @@ interface ActionEditModalProps {
     action: {
         id: string;
         actionId: string;
+        title?: string | null;
         description: string;
         status: string;
         dueDate: string;
         notes?: string | null;
         responsibleDepartment?: string | null;
         owner?: { id: string; firstName: string; lastName: string };
-        finding?: { id: string; findingId: string };
+        finding?: { id: string; findingId: string } | null;
         firstControllerId?: string | null;
         secondControllerId?: string | null;
     } | null;
@@ -43,7 +44,9 @@ export default function ActionEditModal({ isOpen, onClose, onSuccess, action }: 
     const [users, setUsers] = useState<UserOption[]>([]);
     const [approvers, setApprovers] = useState<UserOption[]>([]);
 
+    const manual = !!action && !action.finding; // manuel aksiyon planı (bulgusuz)
     const [form, setForm] = useState({
+        title: '',
         description: '',
         ownerId: '',
         responsibleDepartment: '',
@@ -60,6 +63,7 @@ export default function ActionEditModal({ isOpen, onClose, onSuccess, action }: 
         api.getApproverChoices().then(u => setApprovers(u || [])).catch(() => setApprovers([]));
 
         setForm({
+            title: action.title || '',
             description: action.description || '',
             ownerId: action.owner?.id || '',
             responsibleDepartment: action.responsibleDepartment || '',
@@ -72,11 +76,12 @@ export default function ActionEditModal({ isOpen, onClose, onSuccess, action }: 
 
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!action?.finding?.id) {
-            toastError('Hata', 'Aksiyonun bağlı olduğu bulgu bulunamadı.');
+        if (!action) return;
+        if (manual && !form.title.trim()) {
+            toastError('Hata', 'Manuel aksiyon planının başlığı zorunludur.');
             return;
         }
-        if (!form.description.trim() || form.description.length < 30) {
+        if (!form.description.trim() || (!manual && form.description.length < 30)) {
             toastError('Hata', 'Aksiyon açıklaması en az 30 karakter olmalıdır.');
             return;
         }
@@ -91,7 +96,7 @@ export default function ActionEditModal({ isOpen, onClose, onSuccess, action }: 
 
         setLoading(true);
         try {
-            await api.updateFindingAction(action.finding.id, action.id, {
+            const common = {
                 description: form.description.trim(),
                 ownerId: form.ownerId,
                 responsibleDepartment: form.responsibleDepartment.trim() || null,
@@ -100,7 +105,9 @@ export default function ActionEditModal({ isOpen, onClose, onSuccess, action }: 
                 notes: form.notes.trim() || null,
                 // Maker-checker: ikinci kontrolcü taslak aşamasında değiştirilebilir (birinci kontrolcüyle aynı olamaz — backend).
                 ...(form.secondControllerId && form.secondControllerId !== (action.secondControllerId || '') ? { secondControllerId: form.secondControllerId } : {}),
-            });
+            };
+            if (action.finding) await api.updateFindingAction(action.finding.id, action.id, common);
+            else await api.updateManualAction(action.id, { ...common, title: form.title.trim(), status: ['BEKLIYOR', 'DEVAM_EDIYOR'].includes(form.status) ? form.status : undefined, responsibleDepartment: form.responsibleDepartment.trim() || undefined, notes: form.notes.trim() || undefined });
             toastSuccess('Başarılı', `${action.actionId} numaralı aksiyon güncellendi.`);
             onSuccess();
             onClose();
@@ -118,12 +125,18 @@ export default function ActionEditModal({ isOpen, onClose, onSuccess, action }: 
             open={isOpen}
             onClose={onClose}
             title="Aksiyon Düzenle"
-            description={`${action.actionId}${action.finding ? ` · Bağlı Bulgu: ${action.finding.findingId}` : ''}`}
+            description={`${action.actionId}${action.finding ? ` · Bağlı Bulgu: ${action.finding.findingId}` : ' · Manuel aksiyon planı'}`}
             size="lg"
         >
             <form onSubmit={handleSave} className="space-y-4">
+                {manual && (
+                    <div>
+                        <label className={labelCls}>Başlık *</label>
+                        <input required value={form.title} maxLength={300} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className={inputCls} />
+                    </div>
+                )}
                 <div>
-                    <label className={labelCls}>Aksiyon Açıklaması * <span className="text-xs text-slate-400">(en az 30 karakter)</span></label>
+                    <label className={labelCls}>Aksiyon Açıklaması * {!manual && <span className="text-xs text-slate-400">(en az 30 karakter)</span>}</label>
                     <textarea required rows={3} value={form.description}
                         onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                         className={`${inputCls} resize-none`} />

@@ -19,6 +19,37 @@ export class CreateStandaloneActionDto {
     @IsOptional() @IsString() source?: string;
 }
 
+/**
+ * Manuel aksiyon planı (bulgudan bağımsız). Kontrolcülerin ikisi de zorunlu ve farklı kişi;
+ * kod (AM-YYYY-NNNN) sunucuda üretilir. Onay sonrası takip çalışması otomatik oluşur.
+ */
+export class CreateManualActionDto {
+    @IsString() @IsNotEmpty() @MaxLength(300) title: string;
+    @IsString() @IsNotEmpty() @MaxLength(5000) description: string;
+    @IsString() @IsNotEmpty() ownerId: string;
+    @IsDateString() dueDate: string;
+    @IsOptional() @IsIn(['BEKLIYOR', 'DEVAM_EDIYOR']) status?: 'BEKLIYOR' | 'DEVAM_EDIYOR';
+    @IsString() @IsNotEmpty() firstControllerId: string;
+    @IsString() @IsNotEmpty() secondControllerId: string;
+    @IsOptional() @IsString() directorateId?: string;
+    @IsOptional() @IsString() @MaxLength(500) responsibleDepartment?: string;
+    @IsOptional() @IsString() @MaxLength(5000) notes?: string;
+    @IsOptional() @IsString() riskId?: string;
+    @IsOptional() @IsString() controlId?: string;
+}
+
+/** Manuel aksiyon planı taslak düzenleme (1. kontrolcü, taslak/reddedilmiş iken; maker-checker kuralları serviste). */
+export class UpdateManualActionDto {
+    @IsOptional() @IsString() @IsNotEmpty() @MaxLength(300) title?: string;
+    @IsOptional() @IsString() @IsNotEmpty() @MaxLength(5000) description?: string;
+    @IsOptional() @IsString() ownerId?: string;
+    @IsOptional() @EmptyToUndefined() @IsDateString() dueDate?: string;
+    @IsOptional() @IsIn(['BEKLIYOR', 'DEVAM_EDIYOR']) status?: 'BEKLIYOR' | 'DEVAM_EDIYOR';
+    @IsOptional() @IsString() @MaxLength(500) responsibleDepartment?: string;
+    @IsOptional() @IsString() @MaxLength(5000) notes?: string;
+    @IsOptional() @IsString() secondControllerId?: string;
+}
+
 // update'te findingId/riskId/controlId KASITLI OLARAK yok — bir aksiyonun bağlı olduğu
 // kaynak (finding/risk/control) update ile değiştirilemez (iş kuralı + mass-assignment koruması).
 export class UpdateStandaloneActionDto {

@@ -117,7 +117,7 @@ export class NotificationsService {
                 id: `approval-${p.kind}-${p.recordId}`,
                 type: 'APPROVAL_PENDING' as const,
                 title: PENDING_TITLE[p.kind],
-                message: `${p.code} — ${p.finding.findingId}${p.requestedBy ? ` (${p.requestedBy.name})` : ''}`.slice(0, 140),
+                message: `${p.code} — ${p.finding?.findingId ?? "Manuel aksiyon planı"}${p.requestedBy ? ` (${p.requestedBy.name})` : ''}`.slice(0, 140),
                 date: p.requestedAt,
                 link: p.link,
             })),

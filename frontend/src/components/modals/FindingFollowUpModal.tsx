@@ -27,7 +27,8 @@ interface FindingFollowUpModalProps {
     isOpen: boolean;
     onClose: () => void;
     onSuccess: () => void;
-    findingId: string;
+    /** Manuel aksiyon planının takibinde null — genel takip uçları kullanılır. */
+    findingId: string | null;
     followUp?: FollowUp | null;
     actions?: Action[];
     readOnly?: boolean;
@@ -78,7 +79,7 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
     const isEdit = !!followUp;
     const { user: currentUser } = useAuth();
     // Yeniden atama yalnız takip onaylayabilen yöneticiye açık (backend aynı kuralı denetler).
-    const canReassign = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER'].includes(currentUser?.role?.name ?? '');
+    const canReassign = !!findingId && ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER'].includes(currentUser?.role?.name ?? '');
     const fuState = followUp as unknown as { assigneeId?: string | null; approvalStatus?: string | null; status?: string } | undefined;
     const reassignBlocked = fuState?.status === 'ONAYLANDI' || fuState?.approvalStatus === 'ONAYLANDI'
         ? 'Onaylanmış takip tarihsel kayıttır; atanan kişi değiştirilemez.'
@@ -90,6 +91,7 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
     const [reassignCandidates, setReassignCandidates] = useState<{ id: string; firstName: string; lastName: string }[]>([]);
     useEffect(() => {
         if (!isOpen || !canReassign || !followUp?.id) { setReassignCandidates([]); return; }
+        if (!findingId) return;
         api.getFollowUpAssigneeCandidates(findingId, followUp.id).then(setReassignCandidates).catch(() => setReassignCandidates([]));
     }, [isOpen, canReassign, findingId, followUp?.id]);
     const [reassigning, setReassigning] = useState(false);
@@ -100,6 +102,7 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
         }
         setReassigning(true);
         try {
+            if (!findingId) return;
             await api.reassignFollowUpAssignee(findingId, followUp.id, { assigneeId: reassign.assigneeId, reason: reassign.reason.trim() });
             success('Yeniden atandı', 'Birinci kontrolcü değiştirildi; değerlendirme yeni atanan kişi tarafından yapılacak.');
             setReassign({ assigneeId: '', reason: '' });
@@ -284,6 +287,7 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                         ? 'Takip ikinci kontrolcünün onayına gönderildi; artık düzenlenemez.'
                         : 'Takip çalışması kaydedildi. Hazır olduğunuzda 2. kontrolcü onayına gönderin.');
             } else {
+                if (!findingId) throw new Error('Manuel takip yalnız aksiyon onayıyla oluşur.');
                 await api.createFollowUp(findingId, payload);
                 success('Oluşturuldu', 'Takip çalışması oluşturuldu.');
             }

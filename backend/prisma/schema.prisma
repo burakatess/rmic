@@ -1166,8 +1166,9 @@ enum FindingType {
 model FindingFollowUp {
   id         String  @id @default(cuid())
   followUpId String  @unique // Immutable business identifier: T-2026-0001-01-01
-  finding    Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
-  findingId  String
+  // Manuel aksiyon planından türeyen takipte boştur (ilişki aksiyon üzerinden kurulur).
+  finding    Finding? @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  findingId  String?
 
   // Linked corrective action (which action triggered this follow-up)
   action   Action? @relation(fields: [actionId], references: [id])
@@ -1281,8 +1282,8 @@ enum FollowUpApprovalStatus {
 model FindingStatusHistory {
   id String @id @default(cuid())
 
-  finding   Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
-  findingId String
+  finding   Finding? @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  findingId String? // manuel aksiyon/takip geçmişinde boş (actionId/followUpId dolu)
 
   followUp   FindingFollowUp? @relation(fields: [followUpId], references: [id])
   followUpId String?
@@ -1335,8 +1336,11 @@ model Action {
   description String @db.Text
 
   // Action always belongs to a Finding (iş kuralı)
-  finding   Finding @relation(fields: [findingId], references: [id])
-  findingId String
+  // Bulgu kaynaklı aksiyonlarda dolu; MANUEL aksiyon planında (bulgudan bağımsız) boştur.
+  // Manuel ve bulgu kaynaklı aksiyonlar aynı onay, takip ve durum altyapısını kullanır.
+  finding   Finding? @relation(fields: [findingId], references: [id])
+  findingId String?
+  title     String? // Manuel aksiyon planı başlığı (bulgu kaynaklı eski kayıtlarda boş olabilir)
 
   // Optional: inherited context from Finding
   control   Control? @relation(fields: [controlId], references: [id])
@@ -1575,8 +1579,8 @@ model ControlTestAttachment {
 // Bulgunun güncel durum log'u — append-only, üzerine yazılmaz
 model FindingStatusLog {
   id         String   @id @default(cuid())
-  finding    Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
-  findingId  String
+  finding    Finding? @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  findingId  String?
   entryDate  DateTime @default(now())
   text       String   @db.Text // "Aksiyon tamamlandı ancak kanıt yetersiz bulundu."
   authorId   String? // userId — kim yazdı

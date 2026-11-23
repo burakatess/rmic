@@ -3,7 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ActionsService } from './actions.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
-import { CreateStandaloneActionDto, UpdateStandaloneActionDto, ExtendActionDto, CreateEffectivenessReviewDto } from './dto';
+import { CreateStandaloneActionDto, CreateManualActionDto, UpdateManualActionDto, UpdateStandaloneActionDto, ExtendActionDto, CreateEffectivenessReviewDto } from './dto';
 import { CompleteActionDto } from '../../common/dto/attachment.dto';
 import { AccessScopeService, actionWhere } from '../../common/services/access-scope.service';
 import type { AccessActor } from '../../common/services/access-scope.service';
@@ -62,6 +62,20 @@ export class ActionsController {
     @Get(':id')
     async findOne(@Param('id') id: string, @CurrentUser() user: AccessActor) {
         return this.scopedAction(user, id, () => this.actionsService.findOne(id));
+    }
+
+    // Manuel aksiyon planı: bulgu gerekmez; taslak oluşur, onay iş akışı ve takip aynı altyapıdan.
+    @Post('manual')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    async createManual(@Body() data: CreateManualActionDto, @CurrentUser('id') userId: string) {
+        return this.actionsService.createManual(data, userId);
+    }
+
+    @Put(':id/manual')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    async updateManual(@Param('id') id: string, @Body() data: UpdateManualActionDto, @CurrentUser('id') userId: string, @CurrentUser() user: AccessActor) {
+        await this.assertActionScope(user, id);
+        return this.actionsService.updateManual(id, data, userId);
     }
 
     @Post()
