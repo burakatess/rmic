@@ -52,6 +52,8 @@ interface Finding {
     controlId?: string;
     controlName?: string;
     actionsCount: number;
+    /** Bulgu ekranından doğrudan eşleştirilmiş (çoktan çoğa) — kontrol üzerinden gelmez. */
+    directLink?: boolean;
 }
 
 interface Action {
@@ -218,18 +220,30 @@ export default function RiskDetailPage() {
                         setActions(allActions);
                     }
 
-                    // Fallback: also check direct findings/actions for backward compatibility
-                    if (data.findings?.length && findings.length === 0) {
-                        setFindings(data.findings.map((f: any) => ({
-                            id: String(f.id || ''),
-                            findingId: String(f.findingId || ''),
-                            description: String(f.description || ''),
-                            severity: String(f.severity || 'MEDIUM'),
-                            status: String(f.status || 'OPEN'),
-                            controlId: String(f.control?.controlId || ''),
-                            controlName: String(f.control?.name || ''),
-                            actionsCount: f.actions?.length || 0,
-                        })));
+                    // Kontrol zinciri dışındaki bulgular: tekil risk alanı (eski) ve bulgu ekranından
+                    // yapılan doğrudan eşleştirmeler. Tekrarlar kimliğe göre ayıklanır (iki yönlü görünüm).
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const toRow = (f: any, directLink = false): Finding => ({
+                        id: String(f.id || ''),
+                        findingId: String(f.findingId || ''),
+                        description: String(f.summary || f.description || ''),
+                        severity: String(f.severity || 'MEDIUM'),
+                        status: String(f.status || 'OPEN'),
+                        controlId: String(f.control?.controlId || ''),
+                        controlName: String(f.control?.name || ''),
+                        actionsCount: f.actions?.length || 0,
+                        directLink,
+                    });
+                    const extra: Finding[] = [...(data.findings ?? []).map((f: unknown) => toRow(f)), ...(data.linkedFindings ?? []).map((f: unknown) => toRow(f, true))];
+                    if (extra.length) {
+                        setFindings(prev => {
+                            const byId = new Map(prev.map(f => [f.id, f]));
+                            for (const f of extra) {
+                                const cur = byId.get(f.id);
+                                byId.set(f.id, cur ? { ...cur, directLink: cur.directLink || f.directLink } : f);
+                            }
+                            return [...byId.values()];
+                        });
                     }
 
                     if (data.riskActions?.length) {
@@ -674,10 +688,11 @@ export default function RiskDetailPage() {
                                                                 <span className="text-sm font-mono text-slate-500 group-hover:text-blue-600">{finding.findingId}</span>
                                                                 <StatusBadge variant={severity.variant}>{severity.label}</StatusBadge>
                                                                 <StatusBadge variant={status.variant}>{status.label}</StatusBadge>
+                                                                {finding.directLink && <span className="text-[11px] font-semibold text-violet-700 bg-violet-50 rounded px-1.5 py-0.5">Doğrudan eşleştirme</span>}
                                                             </div>
                                                             <p className="text-sm text-slate-800 mb-2">{finding.description}</p>
                                                             <div className="flex items-center gap-4 text-xs text-slate-500">
-                                                                <span>{finding.controlId} - {finding.controlName}</span>
+                                                                {finding.controlId && <span>{finding.controlId} - {finding.controlName}</span>}
                                                                 <span>{finding.actionsCount} aksiyon</span>
                                                             </div>
                                                         </div>

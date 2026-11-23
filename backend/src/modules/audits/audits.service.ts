@@ -585,7 +585,7 @@ export class AuditsService {
                 testLinks: { where: { controlTest: { deletedAt: null } }, include: { controlTest: { select: { id: true, testNo: true, periodLabel: true, plannedDate: true, status: true, control: { select: { id: true, controlId: true, name: true } } } } }, orderBy: { linkedAt: 'asc' } },
                 linkedRisks: {
                     select: {
-                        id: true, riskId: true, name: true, status: true,
+                        id: true, riskId: true, name: true, description: true, status: true,
                         residualRiskScore: true, inherentRiskScore: true,
                         owner: { select: { id: true, firstName: true, lastName: true } },
                     }
@@ -1124,38 +1124,40 @@ export class AuditsService {
 
     // ─── Risk ↔ Finding Linking ───────────────────────────────────────────────
 
+    // Bulgu ↔ risk eşleştirmesi (çoktan çoğa, mevcut Risk Envanteri kayıtları). Yeni risk oluşturulmaz;
+    // aynı risk aynı bulguya ikinci kez eşleştirilemez. Eşleştirme ve kaldırma denetim izine risk koduyla yazılır.
     async linkRiskToFinding(findingId: string, riskId: string, userId: string) {
-        const finding = await this.prisma.finding.findUnique({ where: { id: findingId } });
-        if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
-        const risk = await this.prisma.risk.findUnique({ where: { id: riskId } });
-        if (!risk) throw new NotFoundException(`Risk ${riskId} not found`);
+        const finding = await this.prisma.finding.findUnique({ where: { id: findingId }, select: { id: true, findingId: true, linkedRisks: { where: { id: riskId }, select: { id: true } } } });
+        if (!finding) throw new NotFoundException('Bulgu bulunamadı');
+        const risk = await this.prisma.risk.findUnique({ where: { id: riskId }, select: { id: true, riskId: true, name: true } });
+        if (!risk) throw new BadRequestException('Geçersiz risk: seçilen risk Risk Envanteri\'nde bulunamadı');
+        if (finding.linkedRisks.length) throw new ConflictException(`${risk.riskId} zaten bu bulguyla eşleştirilmiş.`);
 
         return this.prisma.$transaction(async (tx) => {
-            await tx.finding.update({
-                where: { id: findingId },
-                data: { linkedRisks: { connect: { id: riskId } } },
-            });
-
+            await tx.finding.update({ where: { id: findingId }, data: { linkedRisks: { connect: { id: riskId } } } });
+            await this.appendStatusHistory(findingId, { explanation: `Risk eşleştirildi: ${risk.riskId} — ${risk.name}`, operation: 'RISK_LINKED' }, userId, tx);
             await tx.auditLog.create({
-                data: { userId, action: 'UPDATE', entityType: 'Finding', entityId: findingId, newValue: { linkedRiskId: riskId, action: 'link' } },
+                data: { userId, action: 'FINDING_RISK_LINK', entityType: 'Finding', entityId: findingId, newValue: { riskId: risk.id, riskCode: risk.riskId, riskName: risk.name } },
             });
-
-            return { message: 'Risk linked to finding successfully' };
+            return { message: 'Risk bulguyla eşleştirildi', risk };
         });
     }
 
     async unlinkRiskFromFinding(findingId: string, riskId: string, userId: string) {
+        const finding = await this.prisma.finding.findUnique({
+            where: { id: findingId },
+            select: { id: true, linkedRisks: { where: { id: riskId }, select: { id: true, riskId: true, name: true } } },
+        });
+        if (!finding) throw new NotFoundException('Bulgu bulunamadı');
+        const risk = finding.linkedRisks[0];
+        if (!risk) throw new NotFoundException('Bu risk bu bulguyla eşleştirilmemiş.');
         return this.prisma.$transaction(async (tx) => {
-            await tx.finding.update({
-                where: { id: findingId },
-                data: { linkedRisks: { disconnect: { id: riskId } } },
-            });
-
+            await tx.finding.update({ where: { id: findingId }, data: { linkedRisks: { disconnect: { id: riskId } } } });
+            await this.appendStatusHistory(findingId, { explanation: `Risk eşleştirmesi kaldırıldı: ${risk.riskId} — ${risk.name}`, operation: 'RISK_UNLINKED' }, userId, tx);
             await tx.auditLog.create({
-                data: { userId, action: 'UPDATE', entityType: 'Finding', entityId: findingId, newValue: { linkedRiskId: riskId, action: 'unlink' } },
+                data: { userId, action: 'FINDING_RISK_UNLINK', entityType: 'Finding', entityId: findingId, oldValue: { riskId: risk.id, riskCode: risk.riskId, riskName: risk.name } },
             });
-
-            return { message: 'Risk unlinked from finding successfully' };
+            return { message: 'Risk eşleştirmesi kaldırıldı' };
         });
     }
 
