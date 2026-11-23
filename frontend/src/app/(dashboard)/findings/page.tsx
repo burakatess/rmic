@@ -29,6 +29,7 @@ interface LinkedRisk { id: string; riskId: string; name: string; residualRiskSco
 interface LinkedControl { id: string; controlId: string; name: string }
 
 interface Finding {
+    timingStatus?: string;
     id: string;
     findingId: string;
     findingType: string;
@@ -136,14 +137,9 @@ const formatDate = (d: string | null | undefined): string => {
     return `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`;
 };
 
-const getDelayStatus = (targetDate: string | null, closedDate: string | null, status: string): 'ON_TIME' | 'APPROACHING' | 'OVERDUE' => {
-    if (status === 'CLOSED' || status === 'VERIFIED') return 'ON_TIME';
-    if (!targetDate) return 'ON_TIME';
-    const diffDays = Math.ceil((new Date(targetDate).getTime() - Date.now()) / 86400000);
-    if (diffDays < 0) return 'OVERDUE';
-    if (diffDays <= 7) return 'APPROACHING';
-    return 'ON_TIME';
-};
+// Gecikme/yaklaşma kararı sunucudadır (tek kaynak: metric-definitions) — burada yalnız eşlenir.
+const getDelayStatus = (f: { timingStatus?: string }): 'ON_TIME' | 'APPROACHING' | 'OVERDUE' =>
+    f.timingStatus === 'GECIKMIS' ? 'OVERDUE' : f.timingStatus === 'YAKLASIYOR' ? 'APPROACHING' : 'ON_TIME';
 
 const isThisMonth = (d: string | null) => {
     if (!d) return false;
@@ -186,6 +182,7 @@ function FindingsContent() {
 
     const [findings, setFindings] = useState<Finding[]>([]);
     const [totalCount, setTotalCount] = useState(0);
+    const [overdueTotal, setOverdueTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [users, setUsers] = useState<Array<{ id: string; firstName: string; lastName: string; isActive?: boolean }>>([]);
     const [isCreateFindingOpen, setIsCreateFindingOpen] = useState(false);
@@ -242,13 +239,14 @@ function FindingsContent() {
             const query: Record<string, string | number> = { page, limit: pageSize };
             if (searchQuery) query.search = searchQuery;
             ['assigneeIds', 'status', 'severity', 'findingType', 'workflowStatus', 'resolutionStatus', 'delayStatus', 'thisMonth'].forEach(key => { if (activeFilters[key] && activeFilters[key] !== 'all') query[key] = activeFilters[key]; });
-            const result = await api.getFindings(query) as { data: Finding[]; pagination?: { total: number } };
+            const result = await api.getFindings(query) as { data: Finding[]; pagination?: { total: number }; summary?: { overdueCount?: number } };
             setFindings(result.data || []);
             setTotalCount(result.pagination?.total || 0);
+            setOverdueTotal(result.summary?.overdueCount ?? 0);
         } catch (err) {
             console.error('Failed to load findings:', err);
             showError('Hata', 'Bulgular yüklenemedi.');
-            setFindings([]); setTotalCount(0);
+            setFindings([]); setTotalCount(0); setOverdueTotal(0);
         } finally {
             setLoading(false);
         }
@@ -290,7 +288,7 @@ function FindingsContent() {
 
             const delayFilter = activeFilters.delayStatus;
             if (delayFilter && delayFilter !== 'all') {
-                if (getDelayStatus(f.targetResolutionDate, f.closedDate, f.resolutionStatus || f.status) !== delayFilter) return false;
+                if (getDelayStatus(f) !== delayFilter) return false;
             }
 
             return true;
@@ -305,11 +303,11 @@ function FindingsContent() {
         const mutabakatta = findings.filter(f =>
             f.workflowStatus === 'MUTABAKATA_GONDERILDI' || f.workflowStatus === 'IC_KONTROL_ONAYINA_GONDERILDI'
         ).length;
-        const overdue = findings.filter(f => getDelayStatus(f.targetResolutionDate, f.closedDate, f.resolutionStatus || f.status) === 'OVERDUE').length;
+        const overdue = overdueTotal;
         const closed = findings.filter(f => f.resolutionStatus === 'KAPATILDI' || f.status === 'CLOSED').length;
         const ertelendi = findings.filter(f => f.resolutionStatus === 'ERTELENDI').length;
         return { total, taslak, mutabakatta, overdue, closed, ertelendi };
-    }, [findings]);
+    }, [findings, overdueTotal]);
 
     // ── Row Selection ─────────────────────────────────────────────────────────
 
@@ -520,7 +518,7 @@ function FindingsContent() {
             sortable: true,
             defaultWidth: 150,
             render: (f) => {
-                const delay = getDelayStatus(f.targetResolutionDate, f.closedDate, f.status);
+                const delay = getDelayStatus(f);
                 return (
                     <span className={`inline-flex items-center gap-1 text-sm font-medium ${delay === 'OVERDUE' ? 'text-red-600' : delay === 'APPROACHING' ? 'text-amber-600' : 'text-slate-700'}`}>
                         {formatDate(f.targetResolutionDate)}
@@ -545,7 +543,7 @@ function FindingsContent() {
             header: 'Durum',
             defaultWidth: 120,
             render: (f) => {
-                const delay = getDelayStatus(f.targetResolutionDate, f.closedDate, f.status);
+                const delay = getDelayStatus(f);
                 if (f.status === 'CLOSED') return <StatusBadge variant="success" dot>Kapatıldı</StatusBadge>;
                 if (delay === 'OVERDUE') return <StatusBadge variant="critical" dot>Gecikmiş</StatusBadge>;
                 if (delay === 'APPROACHING') return <StatusBadge variant="warning" dot>Yaklaşıyor</StatusBadge>;

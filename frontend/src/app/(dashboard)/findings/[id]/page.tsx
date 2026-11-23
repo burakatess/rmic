@@ -68,6 +68,7 @@ interface AuditEntry {
     previousWorkflowStatus?: string | null; resolutionStatus?: string | null; result?: string | null; userId?: string | null;
 }
 interface Finding {
+    timingStatus?: string;
     id: string; findingId: string; findingType: string | null; description: string; summary: string | null;
     gmy: string | null; relatedDepartment: string | null; iletisimKisisi: string | null;
     responsiblePerson: string | null; assigneeId: string | null;
@@ -456,8 +457,8 @@ export default function FindingDetailPage() {
     const resCfg = resolutionConfig[finding.resolutionStatus] || resolutionConfig['DEVAM_EDIYOR'];
     const wfCfg = workflowConfig[finding.workflowStatus] || workflowConfig['TASLAK'];
     const daysLeft = getDaysLeft(finding.targetResolutionDate);
-    const isOverdue = finding.resolutionStatus !== 'KAPATILDI' && daysLeft !== null && daysLeft < 0;
-    const isApproaching = finding.resolutionStatus !== 'KAPATILDI' && daysLeft !== null && daysLeft >= 0 && daysLeft <= 14;
+    const isOverdue = finding.timingStatus === 'GECIKMIS'; // sunucu kararı (tek kaynak)
+    const isApproaching = finding.timingStatus === 'YAKLASIYOR';
 
     const tabs = [
         { key: 'detay',      label: 'Bulgu Detayı' },
@@ -533,7 +534,7 @@ export default function FindingDetailPage() {
                         {typeCfg && <StatusBadge variant={typeCfg.variant}>{typeCfg.label}</StatusBadge>}
                         <StatusBadge variant={wfCfg.variant} dot>{wfCfg.label}</StatusBadge>
                         <StatusBadge variant={resCfg.variant} dot>{resCfg.label}</StatusBadge>
-                        {isOverdue && <StatusBadge variant="critical" dot>{Math.abs(daysLeft!)} gün gecikmiş</StatusBadge>}
+                        {isOverdue && <StatusBadge variant="critical" dot>{Math.max(1, Math.abs(daysLeft ?? 1))} gün gecikmiş</StatusBadge>}
                         {isApproaching && <StatusBadge variant="warning" dot>{daysLeft} gün kaldı</StatusBadge>}
                     </>
                 }

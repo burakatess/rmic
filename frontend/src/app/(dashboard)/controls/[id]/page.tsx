@@ -197,7 +197,7 @@ export default function ControlDetailPage() {
                         })),
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     linkedTestRecords: (data.tests || []).map((t: any) => {
-                        const isOverdue = ['BEKLIYOR', 'DEVAM_EDIYOR'].includes(t.status) && new Date(t.plannedDate) < new Date();
+                        const isOverdue = t.timingStatus === 'GECIKMIS'; // sunucu kararı (tek kaynak)
 
                         let status = 'PENDING';
                         if (isOverdue) {

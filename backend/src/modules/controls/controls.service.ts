@@ -3,7 +3,8 @@ import { PrismaService } from '../../prisma';
 import { getLastBusinessDay, getFridaysInYear, TURKISH_MONTH_INDEX } from './control-period.util';
 import { generateControlCode } from './control-code.util';
 import { nextTestCode } from './test-code.util';
-import { projectControlStatus } from '../../common/workflow/workflow-projection';
+import { projectControlStatus, projectTestStatus } from '../../common/workflow/workflow-projection';
+import { overdueTestWhere } from '../../common/util/metric-definitions';
 import { personFieldWhere } from '../../common/util/person-filter';
 import { CompleteControlTestDto, CreateControlTestDto } from './dto';
 import { parsePaging, safeOrderBy } from '../../common/util/list-query';
@@ -127,7 +128,9 @@ export class ControlsService {
         if (!control) throw new NotFoundException(`Control with ID ${id} not found`);
         const scopeYears = control.yearScopes.filter(s => s.status === 'ACTIVE').map(s => s.year);
         const currentYear = new Date().getFullYear();
-        return { ...control, scopeYears, ...projectControlStatus(scopeYears.includes(currentYear), currentYear) };
+        const now = new Date();
+        const tests = (control.tests ?? []).map(t => ({ ...t, ...projectTestStatus(t.status, t.plannedDate, now) }));
+        return { ...control, tests, scopeYears, ...projectControlStatus(scopeYears.includes(currentYear), currentYear) };
     }
 
     async create(data: any, userId: string) {
@@ -394,12 +397,12 @@ export class ControlsService {
             where.status = { notIn: ['IPTAL', 'KAPSAM_DISI'] };
         }
         if (overdue === 'true') {
-            where.status = { in: ['BEKLIYOR', 'DEVAM_EDIYOR', 'GERI_GONDERILDI'] };
-            where.plannedDate = { lt: new Date() };
+            // Gecikme kuralı tek kaynaktan (metric-definitions.ts); `status` süzgeciyle birlikte AND ile kesişir.
+            where.AND = [...(where.AND || []), overdueTestWhere()];
         }
         if (testScope) where.AND = [...(where.AND || []), testScope];
 
-        const [tests, total] = await Promise.all([
+        const [tests, total, overdueCount] = await Promise.all([
             this.prisma.controlTest.findMany({
                 where,
                 include: {
@@ -413,13 +416,21 @@ export class ControlsService {
                 orderBy: safeOrderBy(sortBy, sortOrder, Prisma.ControlTestScalarFieldEnum, 'plannedDate', 'asc'),
             }),
             this.prisma.controlTest.count({ where }),
+            // KPI "Gecikmiş": mevcut süzgeçler altında TÜM sonuçtaki gecikmiş sayısı (yalnız açık sayfa değil).
+            this.prisma.controlTest.count({ where: { AND: [where, overdueTestWhere()] } }),
         ]);
 
-        return { data: tests, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+        const now = new Date();
+        return {
+            data: tests.map(t => ({ ...t, ...projectTestStatus(t.status, t.plannedDate, now) })),
+            pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+            summary: { overdueCount },
+        };
     }
 
     async getTests(controlId: string, sc: RelatedScopes = {}) {
-        return this.prisma.controlTest.findMany({
+        const now = new Date();
+        const tests = await this.prisma.controlTest.findMany({
             where: sc.test ? { AND: [{ controlId }, sc.test] } : { controlId },
             include: {
                 findings: { where: sc.finding ?? undefined, select: { id: true, findingId: true, severity: true, resolutionStatus: true } },
@@ -428,6 +439,7 @@ export class ControlsService {
             },
             orderBy: { plannedDate: 'desc' },
         });
+        return tests.map(t => ({ ...t, ...projectTestStatus(t.status, t.plannedDate, now) }));
     }
 
     /** Kontrol Testi çalışma sayfası için tekil, tam detaylı test kaydı (Bölüm A + B). */
@@ -468,6 +480,7 @@ export class ControlsService {
 
         return {
             ...test,
+            ...projectTestStatus(test.status, test.plannedDate),
             assignee,
             secondController,
             attachments: test.attachments.map(a => ({ ...a, uploader: a.uploadedBy ? uploaderMap.get(a.uploadedBy) || null : null })),
