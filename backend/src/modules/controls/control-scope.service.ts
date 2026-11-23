@@ -7,6 +7,7 @@ import { AddScopeDto, BulkAddScopeDto, ChangePeriodicityDto, CopyScopeDto, Remov
 import { nextTestCode } from './test-code.util';
 import { computePeriodCode } from './period-code.util';
 import { personFieldWhere } from '../../common/util/person-filter';
+import { periodControlStage } from '../../common/workflow/workflow-stages';
 import { isTestOverdue } from '../../common/util/metric-definitions';
 
 const LIVE_TASK_STATUSES_FREE = ['BEKLIYOR'];
@@ -335,6 +336,29 @@ export class ControlScopeService {
         });
         const decidedIds = new Set(decisions.map(d => d.taskId));
         return ongoing.filter((t: { id: string }) => !decidedIds.has(t.id));
+    }
+
+    /**
+     * Dönem kontrolü silme TALEBİ: kayıt silinmez, yönetici onayına gider (onay/ret:
+     * DeletionRequestsService). Onaya kadar kapsam ve testler mevcut haliyle kalır.
+     */
+    async requestScopeDeletionFor(controlId: string, year: number, reason: string, userId: string) {
+        const scope = await this.prisma.controlYearScope.findUnique({ where: { controlId_year: { controlId, year } }, select: { id: true } });
+        if (!scope) throw new NotFoundException('Bu kontrol için belirtilen yılda kapsam kaydı bulunamadı');
+        return this.requestScopeDeletion(scope.id, reason, userId);
+    }
+
+    async requestScopeDeletion(scopeId: string, reason: string, userId: string) {
+        if (!reason?.trim()) throw new BadRequestException('Silme gerekçesi zorunludur.');
+        return this.prisma.$transaction(async (tx) => {
+            const res = await tx.controlYearScope.updateMany({
+                where: { id: scopeId, status: 'ACTIVE', deletionRequestedAt: null },
+                data: { deletionRequestedById: userId, deletionRequestedAt: new Date(), deletionReason: reason.trim(), deletionRejectionReason: null, deletionDecidedById: null, deletionDecidedAt: null },
+            });
+            if (res.count !== 1) throw new ConflictException('Bu dönem kontrolü için zaten bekleyen bir silme talebi var veya kapsam aktif değil.');
+            await tx.auditLog.create({ data: { userId, action: 'DELETE_REQUEST', entityType: 'ControlYearScope', entityId: scopeId, newValue: { reason: reason.trim() } } });
+            return { requested: true, message: 'Silme talebi yönetici onayına gönderildi; onaylanana kadar dönem kontrolü mevcut haliyle kalır.' };
+        });
     }
 
     // ─── Kapsamdan çıkarma (gerekçe zorunlu, devam eden tasklar için karar) ───
@@ -718,8 +742,8 @@ export class ControlScopeService {
         const scopeIds = scopes.map(s => s.id);
         const tasks = scopeIds.length > 0
             ? await this.prisma.controlTest.findMany({
-                where: { scopeId: { in: scopeIds } },
-                select: { id: true, scopeId: true, status: true, plannedDate: true, findingStatus: true },
+                where: { scopeId: { in: scopeIds }, deletedAt: null },
+                select: { id: true, scopeId: true, status: true, plannedDate: true, findingStatus: true, deletedAt: true },
             })
             : [];
         const tasksByScope = new Map<string, typeof tasks>();
@@ -747,6 +771,8 @@ export class ControlScopeService {
                 totalTaskCount: active.length, completedTaskCount: completed.length, pendingApprovalCount: pendingApproval.length,
                 overdueCount: overdue.length, findingsCount: withFindings.length,
                 nextTestDate: nextTest?.plannedDate ?? null,
+                stage: periodControlStage(s, scopeTasks),
+                deletionRequestedAt: s.deletionRequestedAt, deletionReason: s.deletionReason,
             };
         });
 
@@ -804,7 +830,7 @@ export class ControlScopeService {
         if (!scope) throw new NotFoundException('Dönem kontrolü bulunamadı');
 
         const tests = await this.prisma.controlTest.findMany({
-            where: { scopeId },
+            where: { scopeId, deletedAt: null },
             include: { findings: { select: { id: true, findingId: true, severity: true, resolutionStatus: true, status: true } } },
             orderBy: { plannedDate: 'asc' },
         });
@@ -828,6 +854,8 @@ export class ControlScopeService {
             control: scope.control,
             assignee: scope.assignee, secondController: scope.secondController,
             removedAt: scope.removedAt, removalReason: scope.removalReason,
+            stage: periodControlStage(scope, tests),
+            deletionRequestedAt: scope.deletionRequestedAt, deletionReason: scope.deletionReason, deletionRejectionReason: scope.deletionRejectionReason,
             tests, history,
         };
     }

@@ -6,6 +6,7 @@ describe('ControlsService control test finding reference', () => {
         controlTest: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
         finding: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn() },
         auditLog: { create: jest.fn() },
+        workflowTransition: { create: jest.fn() },
     };
     db.$transaction = jest.fn((fn: any) => fn(db));
     let written: any = {};

@@ -116,15 +116,16 @@ export class ControlScopeController {
         return this.scopeService.addScope(id, dto, userId);
     }
 
+    // Doğrudan kaldırma YOK: yönetici onaylı silme talebi oluşturur (onay: /deletion-requests).
     @Delete(':id/scope/:year')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async removeScope(
         @Param('id') id: string,
         @Param('year', ParseIntPipe) year: number,
         @Body() dto: RemoveScopeDto,
         @CurrentUser('id') userId: string,
     ) {
-        return this.scopeService.removeScope(id, year, dto, userId);
+        return this.scopeService.requestScopeDeletionFor(id, year, dto.reason, userId);
     }
 
     @Patch(':id/scope/:year')

@@ -18,6 +18,7 @@ describe('AuditsService — kritik iş kuralları', () => {
             findingStatusHistory: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null), updateMany: jest.fn() },
             findingStatusLog: { create: jest.fn() },
             auditLog: { create: jest.fn() },
+            workflowTransition: { create: jest.fn() },
             action: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn(), updateMany: jest.fn() },
             findingFollowUp: {
                 findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]),

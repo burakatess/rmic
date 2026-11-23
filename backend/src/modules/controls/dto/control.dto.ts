@@ -104,3 +104,8 @@ export class CreateControlTestDto {
     @IsOptional() @EmptyToUndefined() @IsString() directorateId?: string;
     @IsOptional() @IsString() @MaxLength(100) sprint?: string;
 }
+
+/** Kontrol testine bağlı bulgu kümesi (tamamı gönderilir; eklenen/çıkarılan sunucuda hesaplanır). */
+export class SetFindingLinksDto {
+    @IsArray() @ArrayMaxSize(50) @IsString({ each: true }) @MaxLength(64, { each: true }) findingIds: string[];
+}
