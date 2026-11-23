@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import api, { type FollowUpDetail } from '@/lib/api';
 import { classifyLoadError, type LoadError } from '@/lib/load-error';
-import { DetailShell, DetailHeader, DetailSection, StatusBadge, Button, LoadingState, EmptyState } from '@/components/ui';
+import { DetailShell, DetailHeader, DetailSection, StatusBadge, Button, LoadingState, EmptyState, Field, FieldGrid, HistoryList } from '@/components/ui';
 import { WorkflowBar } from '@/components/workflow/WorkflowBar';
 import { FindingFollowUpModal } from '@/components/modals/FindingFollowUpModal';
 
@@ -29,15 +29,6 @@ const APPROVAL: Record<string, string> = { TASLAK: 'Taslak', ONAY_BEKLIYOR: '2. 
 const fmt = (d?: string | null) => (d ? new Date(d).toLocaleDateString('tr-TR') : '—');
 const fmtDt = (d: string) => new Date(d).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' });
 const pname = (u?: { firstName: string; lastName: string } | null) => (u ? `${u.firstName} ${u.lastName}` : '—');
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-    return (
-        <div className="min-w-0">
-            <dt className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{label}</dt>
-            <dd className="mt-0.5 text-sm font-medium text-slate-900 break-words">{children}</dd>
-        </div>
-    );
-}
 
 /** Takip çalışması detayı: kaynak aksiyon planı bu ekranda okunur; aksiyon ↔ takip iki yönlü bağlantılı. */
 export default function FollowUpDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -106,23 +97,23 @@ export default function FollowUpDetailPage({ params }: { params: Promise<{ id: s
                                 </div>
                                 {a.title && <h3 className="text-base font-semibold text-slate-900">{a.title}</h3>}
                                 <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap" data-testid="related-action-description">{a.description}</p>
-                                <dl className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3 pt-4 border-t border-slate-100">
+                                <FieldGrid className="pt-4 border-t border-slate-100">
                                     <Field label="Sorumlu">{pname(a.owner)}</Field>
                                     <Field label="Hedef tarih">{fmt(a.dueDate)}</Field>
                                     <Field label="Birim">{a.responsibleDepartment || '—'}</Field>
                                     <Field label="Kontrolcüler">{pname(a.firstController)} · {pname(a.secondController)}</Field>
-                                </dl>
+                                </FieldGrid>
                             </div>
                         ) : <p className="text-sm text-slate-500">Bu takip bir aksiyon planına bağlı değil (eski kayıt).</p>}
                     </DetailSection>
 
                     <DetailSection title="Değerlendirme">
-                        <dl className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3">
+                        <FieldGrid>
                             <Field label="Sonuç">{fu.result ? RESULT[fu.result] ?? fu.result : 'Değerlendirilmedi'}</Field>
                             <Field label="Bulgu çözüm durumu">{fu.resolutionOutcome ? OUTCOME[fu.resolutionOutcome] ?? fu.resolutionOutcome : '—'}</Field>
                             <Field label="Değerlendiren">{fu.evaluator?.name ?? '—'}{fu.evaluatedAt && <span className="block text-xs text-slate-500">{fmtDt(fu.evaluatedAt)}</span>}</Field>
                             <Field label="Onaylayan">{fu.approver?.name ?? '—'}{fu.approvedAt && <span className="block text-xs text-slate-500">{fmtDt(fu.approvedAt)}</span>}</Field>
-                        </dl>
+                        </FieldGrid>
                         {[['Mevcut durum', fu.currentStatusDetail], ['Açıklama', fu.explanation], ['Birim cevabı', fu.birimCevabi], ['İç kontrol değerlendirmesi', fu.internalControlAssessment]]
                             .filter(([, v]) => !!v).map(([k, v]) => (
                                 <div key={k as string} className="mt-4">
@@ -135,17 +126,8 @@ export default function FollowUpDetailPage({ params }: { params: Promise<{ id: s
                         {fu.deletionReason && fu.deletionRequestedAt && <p className="mt-3 text-sm text-red-700 bg-red-50 rounded-lg px-3 py-2"><b>Silme gerekçesi:</b> {fu.deletionReason}</p>}
                     </DetailSection>
 
-                    <DetailSection title={`İşlem geçmişi (${fu.history.length})`}>
-                        {fu.history.length === 0 ? <p className="text-sm text-slate-400">Kayıtlı işlem yok.</p> : (
-                            <ul className="divide-y divide-slate-100 -my-2">
-                                {fu.history.map(h => (
-                                    <li key={h.id} className="py-2 text-sm flex flex-wrap gap-x-2">
-                                        <span className="text-slate-800">{h.explanation || h.operation || '—'}</span>
-                                        <span className="ml-auto text-xs text-slate-400">{fmtDt(h.at)} · {h.by ?? 'Sistem'}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
+                    <DetailSection title="İşlem geçmişi" count={fu.history.length}>
+                        <HistoryList items={fu.history.map(h => ({ id: h.id, text: h.explanation || h.operation || '—', at: h.at, by: h.by }))} />
                     </DetailSection>
                 </div>
 
@@ -167,7 +149,7 @@ export default function FollowUpDetailPage({ params }: { params: Promise<{ id: s
                         </dl>
                     </DetailSection>
 
-                    <DetailSection title={`Ekler (${fu.attachments.length})`}>
+                    <DetailSection title="Ekler" count={fu.attachments.length}>
                         {fu.attachments.length === 0 ? <p className="text-sm text-slate-400">Ek yok.</p> : (
                             <ul className="space-y-1.5 text-sm">
                                 {fu.attachments.map(f => <li key={f.id} className="truncate text-slate-700" title={f.originalName}>{f.displayName || f.originalName}</li>)}

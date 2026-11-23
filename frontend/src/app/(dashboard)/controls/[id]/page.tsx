@@ -7,7 +7,7 @@ import api from '@/lib/api';
 import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import {
     EmptyState, LoadingState, DetailShell, DetailHeader,
-    Tabs, StatusBadge, Button, Modal,
+    Tabs, StatusBadge, Button, Modal, RecordCard, Field, FieldGrid,
 } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/components/auth';
@@ -676,29 +676,25 @@ export default function ControlDetailPage() {
                                         const res = findingResolutionConfig[finding.resolutionStatus];
                                         const open = isFindingOpen(finding);
                                         return (
-                                            <div key={finding.id} className={`border rounded-xl p-5 bg-white shadow-sm ${open ? 'border-slate-200' : 'border-slate-100 opacity-80'}`}>
-                                                <div className="flex items-start justify-between flex-wrap gap-2">
-                                                    <div className="min-w-0">
-                                                        <div className="flex items-center gap-2 flex-wrap">
-                                                            <Link href={`/findings/${finding.id}`} className="font-mono text-xs font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-100 hover:underline">
-                                                                {finding.findingId}
-                                                            </Link>
-                                                            {severityConfig[finding.severity] && <StatusBadge variant={severityConfig[finding.severity].variant}>{severityConfig[finding.severity].label}</StatusBadge>}
-                                                            {res && <StatusBadge variant={res.variant}>{res.label}</StatusBadge>}
-                                                            <span className="text-[11px] text-slate-500">{findingWorkflowLabel[finding.workflowStatus] ?? finding.workflowStatus}</span>
-                                                        </div>
-                                                        <p className="text-sm font-bold text-slate-800 mt-2">{finding.summary || finding.description}</p>
-                                                        {finding.summary && finding.description && <p className="text-[13px] text-slate-600 mt-1 line-clamp-2">{finding.description}</p>}
-                                                        <p className="text-[11px] text-slate-400 mt-1">Hedef çözüm tarihi: {formatDate(finding.targetResolutionDate)}</p>
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <Link href={`/findings/${finding.id}`} className="text-xs font-semibold text-blue-600 hover:underline">Detay</Link>
-                                                        {open && (
-                                                            <Button variant="outline" size="sm" onClick={() => { setEditFindingContext(finding); setIsEditFindingOpen(true); }}>Düzenle</Button>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                <div className="mt-3 border-t border-slate-100 pt-3">
+                                            <RecordCard key={finding.id} code={finding.findingId} href={`/findings/${finding.id}`} codeTone="danger" muted={!open}
+                                                tone={!open ? 'neutral' : finding.resolutionStatus === 'KISMEN_KAPATILDI' ? 'info' : finding.severity === 'CRITICAL' ? 'danger' : 'warning'}
+                                                badges={<>
+                                                    {severityConfig[finding.severity] && <StatusBadge variant={severityConfig[finding.severity].variant}>{severityConfig[finding.severity].label}</StatusBadge>}
+                                                    {res && <StatusBadge variant={res.variant}>{res.label}</StatusBadge>}
+                                                    <span className="text-[11px] text-slate-500">Mutabakat: {findingWorkflowLabel[finding.workflowStatus] ?? finding.workflowStatus}</span>
+                                                </>}
+                                                title={finding.summary || finding.description}
+                                                description={finding.summary && finding.description ? <span className="line-clamp-2">{finding.description}</span> : undefined}
+                                                actions={<>
+                                                    <Link href={`/findings/${finding.id}`} className="text-xs font-semibold text-blue-600 hover:underline">Detay</Link>
+                                                    {open && <Button variant="outline" size="sm" onClick={() => { setEditFindingContext(finding); setIsEditFindingOpen(true); }}>Düzenle</Button>}
+                                                </>}
+                                                fields={<FieldGrid cols={3}>
+                                                    <Field label="Hedef çözüm tarihi">{formatDate(finding.targetResolutionDate)}</Field>
+                                                    <Field label="Aksiyon">{finding.actions?.length ?? 0}</Field>
+                                                    <Field label="Açık aksiyon">{(finding.actions ?? []).filter(a => a.status !== 'KAPATILDI' && a.status !== 'IPTAL').length}</Field>
+                                                </FieldGrid>}>
+                                                <div className="mt-4">
                                                     <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Aksiyonlar ({finding.actions?.length ?? 0})</p>
                                                     {(finding.actions ?? []).length === 0 ? (
                                                         <p className="text-[13px] text-slate-400">Aksiyon planı yok.</p>
@@ -719,7 +715,7 @@ export default function ControlDetailPage() {
                                                         </ul>
                                                     )}
                                                 </div>
-                                            </div>
+                                            </RecordCard>
                                         );
                                     })}
                                 </div>

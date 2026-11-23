@@ -15,6 +15,8 @@ export { Tabs } from './Tabs';
 export { FilterBar } from './FilterBar';
 export type { FilterConfig, FilterOption } from './FilterBar';
 export { DetailShell, DetailHeader, DetailSection } from './DetailShell';
+export { Field, FieldGrid, RecordCard, HistoryList } from './DetailCards';
+export type { RecordTone, HistoryEntry } from './DetailCards';
 
 // KPI
 export { KpiCard, KpiGrid } from './KpiCard';

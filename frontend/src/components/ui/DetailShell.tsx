@@ -102,24 +102,43 @@ export function DetailShell({ children, className = '' }: DetailShellProps) {
 /** Detay sayfası section kartı — tek kart dili */
 export function DetailSection({
   title,
+  count,
+  description,
   actions,
   children,
   className = '',
+  bodyClassName = 'p-5',
+  testId,
 }: {
   title?: string;
+  /** Başlık yanında sayı rozeti (ör. ilişkili kayıt sayısı). */
+  count?: number;
+  /** Başlık altında kısa açıklama. */
+  description?: React.ReactNode;
   actions?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  /** Gövde dolgusu (liste/tablo kartlarında 'p-0'). */
+  bodyClassName?: string;
+  testId?: string;
 }) {
   return (
-    <section className={`bg-white rounded-xl border border-slate-200 shadow-sm ${className}`}>
+    <section className={`bg-white rounded-xl border border-slate-200 shadow-sm ${className}`} data-testid={testId}>
       {(title || actions) && (
-        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-100">
-          {title && <h2 className="text-sm font-semibold text-slate-700">{title}</h2>}
-          {actions && <div className="flex items-center gap-2">{actions}</div>}
+        <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-3.5 border-b border-slate-100">
+          <div className="min-w-0">
+            {title && (
+              <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                {title}
+                {count !== undefined && <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">{count}</span>}
+              </h2>
+            )}
+            {description && <p className="text-xs text-slate-500 mt-0.5">{description}</p>}
+          </div>
+          {actions && <div className="flex items-center gap-2 flex-wrap">{actions}</div>}
         </div>
       )}
-      <div className="p-5">{children}</div>
+      <div className={bodyClassName}>{children}</div>
     </section>
   );
 }

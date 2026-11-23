@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { PendingApprovalNotice } from '@/components/approvals/PendingApprovalNotice';
 import api from '@/lib/api';
-import { Button, DetailSection, Modal, StatusBadge } from '@/components/ui';
+import { Button, DetailSection, Field, FieldGrid, Modal, RecordCard, StatusBadge } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 
 /**
@@ -194,29 +194,34 @@ export function ActionWorkflowPanel({ action, onChanged }: { action: ActionWorkf
                 </div>
             </DetailSection>
 
-            <DetailSection title={`Takip Çalışmaları (${followUps.filter(f => !f.deletedAt).length})`}>
+            <DetailSection title="Takip çalışmaları" count={followUps.filter(f => !f.deletedAt).length}
+                description="Aksiyon 2. kontrolcü tarafından onaylanınca hedef tarihte oluşur; kod takip detayına götürür.">
                 {followUps.length === 0 ? (
                     <p className="text-sm text-slate-500">
                         Henüz takip çalışması yok. {state === 'ONAYLANDI' ? '' : 'Takip çalışması, aksiyon 2. kontrolcü tarafından onaylanınca hedef tarihte otomatik oluşur.'}
                     </p>
                 ) : (
-                    <ul className="divide-y divide-slate-100 -my-2">
+                    <div className="space-y-3">
                         {followUps.map(f => {
                             const st = f.deletedAt ? { label: 'Silindi', variant: 'neutral' as BV } : FU_STATUS[f.status] ?? { label: f.status, variant: 'neutral' as BV };
+                            const tone = f.deletedAt || f.status === 'IPTAL' ? 'neutral' : f.status === 'ONAYLANDI' ? 'success' : f.status === 'TAMAMLANDI' ? 'info' : f.status === 'DEVAM_EDIYOR' ? 'progress' : 'neutral';
                             return (
-                                <li key={f.id} className={`flex flex-wrap items-center gap-3 py-2.5 ${f.deletedAt || f.status === 'IPTAL' ? 'opacity-60' : ''}`}>
-                                    <Link href={`/follow-ups/${f.id}`} className="font-mono text-xs font-bold text-blue-700 hover:underline" data-testid="followup-link">{f.followUpId}</Link>
-                                    <StatusBadge variant={st.variant}>{st.label}</StatusBadge>
-                                    {f.result && <span className="text-xs text-slate-600">Sonuç: {RESULT[f.result] ?? f.result}</span>}
-                                    {f.deletionRequestedAt && !f.deletedAt && <span className="text-xs text-red-600">Silme onayı bekliyor</span>}
-                                    <span className="text-xs text-slate-500">Planlanan: {fmt(f.plannedDate)}</span>
-                                    <Link href={`/follow-ups/${f.id}`} className="ml-auto text-xs font-semibold text-blue-600 hover:underline">
-                                        Takip detayı →
-                                    </Link>
-                                </li>
+                                <RecordCard key={f.id} code={<span data-testid="followup-link">{f.followUpId}</span>} href={`/follow-ups/${f.id}`} tone={tone} codeTone="info"
+                                    muted={!!f.deletedAt || f.status === 'IPTAL'}
+                                    badges={<>
+                                        <StatusBadge variant={st.variant}>{st.label}</StatusBadge>
+                                        {f.deletionRequestedAt && !f.deletedAt && <StatusBadge variant="critical" dot>Silme onayı bekliyor</StatusBadge>}
+                                    </>}
+                                    actions={<Link href={`/follow-ups/${f.id}`} className="text-xs font-semibold text-blue-600 hover:underline">Takip detayı →</Link>}
+                                    fields={<FieldGrid cols={3}>
+                                        <Field label="Planlanan">{fmt(f.plannedDate)}</Field>
+                                        <Field label="Test tarihi">{fmt(f.testDate)}</Field>
+                                        <Field label="Sonuç">{f.result ? RESULT[f.result] ?? f.result : 'Değerlendirilmedi'}</Field>
+                                    </FieldGrid>}
+                                />
                             );
                         })}
-                    </ul>
+                    </div>
                 )}
             </DetailSection>
 
