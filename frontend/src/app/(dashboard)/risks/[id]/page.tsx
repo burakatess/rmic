@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { classifyLoadError, type LoadError } from '@/lib/load-error';
-import { frequencyText } from '@/lib/control-labels';
 import {
     EmptyState, LoadingState, DetailShell, DetailHeader, DetailSection,
     Tabs, StatusBadge, Button,
@@ -535,7 +534,7 @@ export default function RiskDetailPage() {
                                                     </div>
                                                     <div className="text-center px-2 py-1 bg-white rounded border border-slate-100">
                                                         <p className="text-slate-400">Sıklık</p>
-                                                        <p className="font-medium">{frequencyText(control.frequency)}</p>
+                                                        <p className="font-medium">{control.frequency}</p>
                                                     </div>
                                                     <div className="text-center px-2 py-1 bg-white rounded border border-slate-100">
                                                         <p className="text-slate-400">Otomasyon</p>
