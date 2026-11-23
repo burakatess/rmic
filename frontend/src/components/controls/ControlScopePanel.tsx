@@ -26,7 +26,11 @@ interface YearScope {
     removedAt?: string | null;
     removalReason?: string | null;
     _count?: { tasks: number };
+    assignee?: { firstName: string; lastName: string } | null;
+    secondController?: { firstName: string; lastName: string } | null;
+    deletionRequestedAt?: string | null;
 }
+const personName = (u?: { firstName: string; lastName: string } | null) => (u ? `${u.firstName} ${u.lastName}` : 'Atanmamış');
 
 interface OngoingTask { id: string; testNo: string; periodLabel: string }
 
@@ -152,8 +156,16 @@ export default function ControlScopePanel({ controlId, yearScopes, onChanged }: 
                                 )}
                                 <StatusBadge variant={s.status === 'ACTIVE' ? 'success' : 'neutral'}>{s.status === 'ACTIVE' ? 'Kapsamda' : 'Kapsam Dışı'}</StatusBadge>
                                 <span className="text-xs font-bold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded">{frequencyLabel[s.frequency] || s.frequency}</span>
-                                <span className="text-xs text-slate-400">{s._count?.tasks ?? 0} task</span>
+                                <span className="text-xs text-slate-400">{s._count?.tasks ?? 0} dönem testi</span>
+                                {s.deletionRequestedAt && <StatusBadge variant="critical">Silme talebi onayda</StatusBadge>}
                             </div>
+                            {s.status === 'ACTIVE' && (
+                                <p className="text-xs text-slate-600 mt-1.5">
+                                    Sorumlu (1. kontrolcü): <b className={s.assignee ? 'text-slate-800' : 'text-amber-700'}>{personName(s.assignee)}</b>
+                                    <span className="mx-2 text-slate-300">·</span>
+                                    2. kontrolcü: <b className={s.secondController ? 'text-slate-800' : 'text-amber-700'}>{personName(s.secondController)}</b>
+                                </p>
+                            )}
                             <p className="text-[11px] text-slate-400 mt-1">
                                 {s.status === 'ACTIVE'
                                     ? <>{s.addedBy ? `${s.addedBy.firstName} ${s.addedBy.lastName}` : '—'} tarafından eklendi{s.addedAt ? `, ${new Date(s.addedAt).toLocaleDateString('tr-TR')}` : ''}</>
@@ -165,7 +177,7 @@ export default function ControlScopePanel({ controlId, yearScopes, onChanged }: 
                                 {s.status === 'ACTIVE' ? (
                                     <>
                                         <Button variant="outline" size="sm" onClick={() => openPeriodicity(s)}>Periyodikliği Değiştir</Button>
-                                        <Button variant="danger" size="sm" onClick={() => openRemove(s)}>Kapsamdan Çıkarma Talebi</Button>
+                                        <Button variant="danger" size="sm" onClick={() => openRemove(s)} disabled={!!s.deletionRequestedAt} title={s.deletionRequestedAt ? 'Bekleyen bir silme talebi var' : undefined}>Kapsamdan Çıkarma Talebi</Button>
                                     </>
                                 ) : (
                                     <Button variant="outline" size="sm" onClick={() => handleReactivate(s)} disabled={busy}>Yeniden Etkinleştir</Button>

@@ -65,6 +65,18 @@ export interface WorkflowDecisionItem {
     link: string;
 }
 
+/** Kontrol değişiklik geçmişi satırı (GET /controls/:id/history). */
+export interface ControlHistoryEntry {
+    id: string;
+    action: string;
+    entityType: 'Control' | 'ControlYearScope' | 'ControlRiskMapping' | string;
+    year: number | null;
+    at: string;
+    by: string | null;
+    changes: Array<{ field: string; label: string; from: string | null; to: string | null }>;
+    detail: string | null;
+}
+
 export interface GmyOption {
     id: string; name: string; code?: string | null; isActive: boolean;
     responsibleUser?: { id: string; firstName: string; lastName: string } | null;
@@ -622,6 +634,10 @@ class ApiClient {
 
     async reactivateControlTask(taskId: string) {
         return this.request<any>(`/controls/tests/${taskId}/reactivate`, { method: 'POST' });
+    }
+
+    async getControlHistory(controlId: string) {
+        return this.request<ControlHistoryEntry[]>(`/controls/${controlId}/history`);
     }
 
     async getControlScopeHistory(controlId: string) {

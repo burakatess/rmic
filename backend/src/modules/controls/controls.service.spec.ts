@@ -109,6 +109,9 @@ describe('ControlsService.update — Control.version artışı', () => {
             },
             directorate: { findUnique: jest.fn() },
             auditLog: { create: jest.fn().mockResolvedValue({}) },
+            // update() sonunda findOne çağrılır: test kişileri + testlere bağlı bulgular
+            user: { findMany: jest.fn().mockResolvedValue([]) },
+            controlTestFindingLink: { findMany: jest.fn().mockResolvedValue([]) },
         };
         const module: TestingModule = await Test.createTestingModule({
             providers: [ControlsService, { provide: PrismaService, useValue: withTx(prisma) }],

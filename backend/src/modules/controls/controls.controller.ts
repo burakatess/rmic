@@ -175,6 +175,11 @@ export class ControlsController {
         return this.controlsService.getRelations(id, this.related(await this.poolContext(user)));
     }
 
+    @Get(':id/history')
+    async getHistory(@Param('id') id: string) {
+        return this.controlsService.getHistory(id);
+    }
+
     @Get(':id')
     async findOne(@Param('id') id: string, @CurrentUser() user: AccessActor) {
         return this.controlsService.findOne(id, this.related(await this.poolContext(user)));
@@ -209,14 +214,14 @@ export class ControlsController {
 
     @Post(':id/map-risk')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async mapRisk(@Param('id') id: string, @Body() body: MapControlRiskDto) {
-        return this.controlsService.mapRisk(id, body.riskId, body.mappingType);
+    async mapRisk(@Param('id') id: string, @Body() body: MapControlRiskDto, @CurrentUser('id') userId: string) {
+        return this.controlsService.mapRisk(id, body.riskId, body.mappingType, userId);
     }
 
     @Delete(':id/unmap-risk/:riskId')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async unmapRisk(@Param('id') id: string, @Param('riskId') riskId: string) {
-        return this.controlsService.unmapRisk(id, riskId);
+    async unmapRisk(@Param('id') id: string, @Param('riskId') riskId: string, @CurrentUser('id') userId: string) {
+        return this.controlsService.unmapRisk(id, riskId, userId);
     }
 
     // ─── ControlTests (Per-Control) ───────────────────────────────────────────

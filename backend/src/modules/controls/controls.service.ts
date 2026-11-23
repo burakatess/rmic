@@ -148,6 +148,8 @@ export class ControlsService {
                     include: {
                         addedBy: { select: { id: true, firstName: true, lastName: true } },
                         removedBy: { select: { id: true, firstName: true, lastName: true } },
+                        assignee: { select: { id: true, firstName: true, lastName: true, department: true } },
+                        secondController: { select: { id: true, firstName: true, lastName: true, department: true } },
                         _count: { select: { tasks: true } },
                     },
                 },
@@ -156,14 +158,22 @@ export class ControlsService {
                     orderBy: { plannedDate: 'asc' },
                     include: {
                         findings: { where: sc.finding ?? undefined, select: { id: true, findingId: true, severity: true, resolutionStatus: true } },
+                        _count: { select: { findingLinks: true } },
                     },
                 },
+                // Tüm bulgular (önceden ilk 10 ile sessizce kesiliyordu). Kontrol başına bulgu sayısı küçüktür.
                 findings: {
                     where: sc.finding ?? undefined,
                     orderBy: { createdAt: 'desc' },
-                    take: 10,
                     include: {
-                        actions: { where: sc.action ?? undefined, include: { owner: { select: { firstName: true, lastName: true } } } },
+                        actions: {
+                            where: sc.action ?? undefined,
+                            orderBy: { dueDate: 'asc' },
+                            select: {
+                                id: true, actionId: true, description: true, status: true, approvalState: true, dueDate: true, completedAt: true,
+                                owner: { select: { firstName: true, lastName: true } },
+                            },
+                        },
                     },
                 },
                 regulations: { include: { article: { include: { regulation: true } } } },
@@ -173,8 +183,80 @@ export class ControlsService {
         const scopeYears = control.yearScopes.filter(s => s.status === 'ACTIVE').map(s => s.year);
         const currentYear = new Date().getFullYear();
         const now = new Date();
-        const tests = (control.tests ?? []).map(t => ({ ...t, ...projectTestStatus(t.status, t.plannedDate, now) }));
-        return { ...control, tests, scopeYears, ...projectControlStatus(scopeYears.includes(currentYear), currentYear) };
+        // Test sorumlusu / 2. kontrolcü yalnız id olarak tutuluyor (ilişki yok) — adlar tek sorguda çözülür.
+        const personIds = [...new Set((control.tests ?? []).flatMap(t => [t.assigneeId, t.secondControllerId]).filter((x): x is string => !!x))];
+        const people = personIds.length
+            ? await this.prisma.user.findMany({ where: { id: { in: personIds } }, select: { id: true, firstName: true, lastName: true } })
+            : [];
+        const person = new Map(people.map(p => [p.id, p]));
+        const tests = (control.tests ?? []).map(t => ({
+            ...t,
+            assignee: t.assigneeId ? person.get(t.assigneeId) ?? null : null,
+            secondController: t.secondControllerId ? person.get(t.secondControllerId) ?? null : null,
+            ...projectTestStatus(t.status, t.plannedDate, now),
+        }));
+        // Bu kontrolün testlerine "mevcut bulgu" olarak bağlanmış, BAŞKA kontrole ait bulgular (iki yönlü ilişki).
+        const ownFindingIds = new Set((control.findings ?? []).map(f => f.id));
+        const links = await this.prisma.controlTestFindingLink.findMany({
+            where: {
+                controlTest: { controlId: id, deletedAt: null },
+                ...(sc.finding ? { finding: sc.finding } : {}),
+            },
+            orderBy: { linkedAt: 'asc' },
+            select: {
+                controlTest: { select: { id: true, testNo: true } },
+                finding: {
+                    select: {
+                        id: true, findingId: true, summary: true, severity: true, workflowStatus: true, resolutionStatus: true,
+                        control: { select: { id: true, controlId: true, name: true } },
+                    },
+                },
+            },
+        });
+        const linkedMap = new Map<string, { finding: (typeof links)[number]['finding']; tests: Array<{ id: string; testNo: string }> }>();
+        for (const l of links) {
+            if (ownFindingIds.has(l.finding.id)) continue;
+            const e = linkedMap.get(l.finding.id) ?? { finding: l.finding, tests: [] };
+            e.tests.push(l.controlTest);
+            linkedMap.set(l.finding.id, e);
+        }
+        const linkedFindings = [...linkedMap.values()].map(e => ({ ...e.finding, viaTests: e.tests }));
+        return { ...control, tests, linkedFindings, scopeYears, ...projectControlStatus(scopeYears.includes(currentYear), currentYear) };
+    }
+
+    /**
+     * Kontrolün değişiklik geçmişi (denetim izinden): ana kayıt, yıllık kapsamlar ve risk eşleştirmeleri.
+     * Güncellemelerde yalnız iş açısından anlamlı alanların farkı döner (ham JSON dökülmez).
+     */
+    async getHistory(id: string) {
+        const control = await this.prisma.control.findUnique({ where: { id }, select: { id: true, yearScopes: { select: { id: true, year: true } } } });
+        if (!control) throw new NotFoundException('Kontrol bulunamadı');
+        const scopeYear = new Map(control.yearScopes.map(s => [s.id, s.year]));
+        const logs = await this.prisma.auditLog.findMany({
+            where: {
+                OR: [
+                    { entityType: 'Control', entityId: id },
+                    { entityType: 'ControlRiskMapping', entityId: id },
+                    ...(scopeYear.size ? [{ entityType: 'ControlYearScope', entityId: { in: [...scopeYear.keys()] } }] : []),
+                ],
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 200,
+            select: {
+                id: true, action: true, entityType: true, entityId: true, oldValue: true, newValue: true, createdAt: true,
+                user: { select: { firstName: true, lastName: true } },
+            },
+        });
+        return logs.map(l => ({
+            id: l.id,
+            action: l.action,
+            entityType: l.entityType,
+            year: l.entityType === 'ControlYearScope' ? scopeYear.get(l.entityId) ?? null : null,
+            at: l.createdAt,
+            by: l.user ? `${l.user.firstName} ${l.user.lastName}` : null,
+            changes: l.action === 'UPDATE' && l.entityType === 'Control' ? diffControlFields(l.oldValue, l.newValue) : [],
+            detail: l.entityType === 'ControlRiskMapping' ? historyRiskDetail(l.newValue ?? l.oldValue) : historyReason(l.newValue),
+        }));
     }
 
     async create(data: any, userId: string) {
@@ -323,7 +405,15 @@ export class ControlsService {
         });
     }
 
+    private async assertControlExists(id: string) {
+        const c = await this.prisma.control.findUnique({ where: { id }, select: { id: true, status: true } });
+        if (!c) throw new NotFoundException('Kontrol bulunamadı');
+        return c;
+    }
+
     async activate(id: string, userId: string) {
+        const current = await this.assertControlExists(id);
+        if (current.status === 'ACTIVE') throw new BadRequestException('Kontrol zaten aktif');
         return this.prisma.$transaction(async (tx) => {
             const control = await tx.control.update({
                 where: { id },
@@ -337,6 +427,8 @@ export class ControlsService {
     }
 
     async passivate(id: string, userId: string) {
+        const current = await this.assertControlExists(id);
+        if (current.status === 'PASSIVE') throw new BadRequestException('Kontrol zaten pasif');
         return this.prisma.$transaction(async (tx) => {
             const control = await tx.control.update({
                 where: { id },
@@ -349,17 +441,49 @@ export class ControlsService {
         });
     }
 
-    async mapRisk(controlId: string, riskId: string, mappingType = 'PRIMARY') {
-        return this.prisma.controlRiskMapping.upsert({
-            where: { controlId_riskId: { controlId, riskId } },
-            update: { mappingType },
-            create: { controlId, riskId, mappingType },
-            include: { control: true, risk: true },
+    // Risk eşleştirme: FK doğrulaması + kayıt ve denetim izi aynı işlemde (önceden denetimsizdi).
+    // Denetim kaydı entityId = kontrol id, böylece kontrolün değişiklik geçmişinde görünür.
+    async mapRisk(controlId: string, riskId: string, mappingType = 'PRIMARY', userId?: string) {
+        await this.assertControlExists(controlId);
+        const risk = await this.prisma.risk.findUnique({ where: { id: riskId }, select: { id: true, riskId: true, name: true } });
+        if (!risk) throw new BadRequestException('Geçersiz risk: seçilen risk bulunamadı');
+        return this.prisma.$transaction(async (tx) => {
+            const existing = await tx.controlRiskMapping.findUnique({ where: { controlId_riskId: { controlId, riskId } }, select: { mappingType: true } });
+            const mapping = await tx.controlRiskMapping.upsert({
+                where: { controlId_riskId: { controlId, riskId } },
+                update: { mappingType },
+                create: { controlId, riskId, mappingType },
+                include: { control: true, risk: true },
+            });
+            await tx.auditLog.create({
+                data: {
+                    userId: userId ?? null, action: existing ? 'UPDATE_RISK_MAPPING' : 'MAP_RISK', entityType: 'ControlRiskMapping', entityId: controlId,
+                    oldValue: existing ? { riskId: risk.id, riskCode: risk.riskId, riskName: risk.name, mappingType: existing.mappingType } : undefined,
+                    newValue: { riskId: risk.id, riskCode: risk.riskId, riskName: risk.name, mappingType },
+                },
+            });
+            return mapping;
         });
     }
 
-    async unmapRisk(controlId: string, riskId: string) {
-        return this.prisma.controlRiskMapping.deleteMany({ where: { controlId, riskId } });
+    async unmapRisk(controlId: string, riskId: string, userId?: string) {
+        await this.assertControlExists(controlId);
+        return this.prisma.$transaction(async (tx) => {
+            const existing = await tx.controlRiskMapping.findUnique({
+                where: { controlId_riskId: { controlId, riskId } },
+                select: { mappingType: true, risk: { select: { id: true, riskId: true, name: true } } },
+            });
+            const res = await tx.controlRiskMapping.deleteMany({ where: { controlId, riskId } });
+            if (existing) {
+                await tx.auditLog.create({
+                    data: {
+                        userId: userId ?? null, action: 'UNMAP_RISK', entityType: 'ControlRiskMapping', entityId: controlId,
+                        oldValue: { riskId: existing.risk.id, riskCode: existing.risk.riskId, riskName: existing.risk.name, mappingType: existing.mappingType },
+                    },
+                });
+            }
+            return res;
+        });
     }
 
     // Kalıcı silme kaldırıldı: Control ana envanterdir, hard-delete API'den ve
@@ -1128,4 +1252,46 @@ export interface RelatedScopes {
     finding?: Prisma.FindingWhereInput | null;
     action?: Prisma.ActionWhereInput | null;
     risk?: Prisma.RiskWhereInput | null;
+}
+
+// ─── Değişiklik geçmişi yardımcıları ─────────────────────────────────────────
+
+/** Geçmişte farkı gösterilen kontrol alanları ve Türkçe adları (sıra = görüntü sırası). */
+const CONTROL_HISTORY_FIELDS: Array<[string, string]> = [
+    ['controlId', 'Kontrol kodu'], ['name', 'Kontrol adı'], ['description', 'Tanım'], ['mehaz', 'Mehaz'],
+    ['testSteps', 'Test adımları'], ['frequency', 'Sıklık'], ['selectedMonths', 'Seçili aylar'], ['type', 'Tür'],
+    ['nature', 'Nitelik'], ['automation', 'Otomasyon'], ['directorate', 'Direktörlük'], ['directorateId', 'Direktörlük (kayıt)'],
+    ['gmy', 'GMY'], ['notes', 'Notlar'], ['controlPeriod', 'Dönem'], ['controlDate', 'Kontrol tarihi'], ['status', 'Envanter durumu'],
+];
+const HISTORY_TEXT_MAX = 300;
+
+const historyValue = (v: unknown): string | null => {
+    if (v === null || v === undefined || v === '') return null;
+    const s = Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : String(v);
+    return s.length > HISTORY_TEXT_MAX ? `${s.slice(0, HISTORY_TEXT_MAX)}…` : s;
+};
+
+export function diffControlFields(oldValue: unknown, newValue: unknown): Array<{ field: string; label: string; from: string | null; to: string | null }> {
+    if (!oldValue || !newValue || typeof oldValue !== 'object' || typeof newValue !== 'object') return [];
+    const o = oldValue as Record<string, unknown>;
+    const n = newValue as Record<string, unknown>;
+    const out: Array<{ field: string; label: string; from: string | null; to: string | null }> = [];
+    for (const [field, label] of CONTROL_HISTORY_FIELDS) {
+        const from = historyValue(o[field]);
+        const to = historyValue(n[field]);
+        if (from !== to) out.push({ field, label, from, to });
+    }
+    return out;
+}
+
+function historyRiskDetail(v: unknown): string | null {
+    if (!v || typeof v !== 'object') return null;
+    const r = v as Record<string, unknown>;
+    return [r.riskCode, r.riskName].filter(Boolean).join(' · ') || null;
+}
+
+function historyReason(v: unknown): string | null {
+    if (!v || typeof v !== 'object') return null;
+    const r = (v as Record<string, unknown>).reason ?? (v as Record<string, unknown>).removalReason;
+    return typeof r === 'string' && r.trim() ? r.trim() : null;
 }
