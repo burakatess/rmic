@@ -126,6 +126,10 @@ export default function NewFindingPage() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!formData.severity) {
+            alert('Ciddiyet seçilmelidir (KZ veya KD).');
+            return;
+        }
         setLoading(true);
 
         try {

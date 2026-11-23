@@ -81,7 +81,8 @@ export class CreateFindingDto {
     @IsOptional() @IsString() directorateId?: string;
     @IsOptional() @IsString() responsiblePerson?: string;
     @IsOptional() @IsIn(SELECTABLE_STATUSES) status?: string;
-    @IsOptional() @IsIn(CREATABLE_SEVERITIES) severity?: string;
+    // Önem derecesi zorunlu: seçilmeden bulgu açılamaz (veritabanında da zorunlu — eksikse 500 yerine 400).
+    @IsIn(CREATABLE_SEVERITIES, { message: 'Önem derecesi seçilmelidir (KZ veya KD).' }) severity: string;
     @IsOptional() @IsString() internalControlAssessment?: string;
     @IsOptional() @IsString() currentStatusDetail?: string;
     @IsOptional() @IsString() birimCevabi?: string;
