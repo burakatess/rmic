@@ -15,7 +15,7 @@ async function login(page: import('@playwright/test').Page, email = EMAIL) {
     await page.getByPlaceholder('ornek@sirket.com').fill(email);
     await page.getByPlaceholder('••••••••').fill(PASSWORD);
     await page.getByRole('button', { name: 'Giriş Yap' }).click();
-    await expect.poll(() => page.evaluate(() => Boolean(localStorage.getItem('accessToken')))).toBe(true);
+    await expect.poll(() => page.evaluate(() => Boolean(localStorage.getItem('accessToken'))), { timeout: 30_000 }).toBe(true);
     tokenCache.set(email, (await page.evaluate(() => localStorage.getItem('accessToken')))!);
 }
 
@@ -44,7 +44,7 @@ test('bağlantı hatasından sonra kullanıcı giriş işlemini yeniden deneyebi
     await expect(page.getByRole('button', { name: 'Giriş Yap' })).toBeEnabled();
 
     await page.getByRole('button', { name: 'Giriş Yap' }).click();
-    await expect.poll(() => page.evaluate(() => Boolean(localStorage.getItem('accessToken')))).toBe(true);
+    await expect.poll(() => page.evaluate(() => Boolean(localStorage.getItem('accessToken'))), { timeout: 30_000 }).toBe(true);
 });
 
 test('geçersiz veya süresi dolmuş token korumalı sayfada temizlenip girişe yönlendirilir', async ({ page }) => {

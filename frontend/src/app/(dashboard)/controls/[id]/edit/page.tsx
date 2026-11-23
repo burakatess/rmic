@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import api from '@/lib/api';
 import { ErrorState } from '@/components/ui';
@@ -71,8 +71,22 @@ export default function ControlEditPage() {
     const [scopeYears, setScopeYears] = useState<number[]>([]);
     const [displayStatus, setDisplayStatus] = useState<'AKTIF' | 'PASIF'>('PASIF');
     const [versionImpact, setVersionImpact] = useState<any>(null);
+    // Akış Sağlığı bağlantısı (?versionImpact=1): etki analizi penceresi doğrudan açılır.
+    const openImpactOnLoad = useSearchParams().get('versionImpact') === '1';
     const [versionDecisions, setVersionDecisions] = useState<Record<number, string>>({});
     const [applyingVersion, setApplyingVersion] = useState(false);
+
+    useEffect(() => {
+        if (!openImpactOnLoad) return;
+        let alive = true;
+        api.previewControlVersionImpact(params.id as string).then((impact: any) => {
+            if (!alive || !impact || impact.outdatedPeriodCount <= 0) return;
+            setVersionImpact(impact);
+            setVersionDecisions(Object.fromEntries(impact.periods.filter((p: any) => p.outdated).map((p: any) => [p.year, p.recommendedAction])));
+        }).catch(() => toastError('Etki analizi alınamadı', 'Sürüm etki analizi yüklenemedi; Dönem Kontrolü ekranından devam edebilirsiniz.'));
+        return () => { alive = false; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [openImpactOnLoad, params.id]);
 
     useEffect(() => {
         const loadInitialData = async () => {
