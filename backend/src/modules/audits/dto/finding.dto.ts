@@ -86,7 +86,8 @@ export class CreateFindingDto {
     @IsOptional() @IsString() currentStatusDetail?: string;
     @IsOptional() @IsString() birimCevabi?: string;
     @IsOptional() @EmptyToUndefined() @IsDateString() targetResolutionDate?: string;
-    @IsOptional() @EmptyToUndefined() @IsDateString() closedDate?: string;
+    // closedDate / workflowStatus / resolutionStatus: oluşturmada KABUL EDİLMEZ (forbidNonWhitelisted → 400).
+    // Yeni bulgu her zaman TASLAK / DEVAM_EDIYOR başlar; kapanış tarihi yalnız kapatma geçişinde sunucuda yazılır.
     @IsOptional() @EmptyToUndefined() @IsDateString() testDate?: string;
     // Legacy/dead alan — Finding modelinde skaler karşılığı yok, backend yok sayar.
     @IsOptional() @IsString() attachment?: string;
@@ -104,8 +105,6 @@ export class CreateFindingDto {
     @IsOptional() @IsString() recommendation?: string;
     @IsOptional() @IsString() managementResponse?: string;
     @IsOptional() @IsString() iletisimKisisi?: string;
-    @IsOptional() @IsEnum(FindingWorkflowStatus) workflowStatus?: FindingWorkflowStatus;
-    @IsOptional() @IsEnum(FindingResolutionStatus) resolutionStatus?: FindingResolutionStatus;
     @IsOptional() @IsArray() @ArrayMinSize(0) @ValidateNested({ each: true }) @Type(() => NestedActionDto) actions?: NestedActionDto[];
 }
 

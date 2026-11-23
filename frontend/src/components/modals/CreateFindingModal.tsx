@@ -323,6 +323,8 @@ export function CreateFindingModal({
                 ...formData,
                 controlId: resolvedControlId,
             };
+            // Kapanış tarihi ve durum alanları sunucu tarafından türetilir; istemciden gönderilmez.
+            delete payload.closedDate;
             // Yeni bulguda boş kontrolcü gönderilmez (backend kontrol noktasındakini kullanır).
             if (!editContext) {
                 if (!payload.firstControllerId) delete payload.firstControllerId;
@@ -595,16 +597,14 @@ export function CreateFindingModal({
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">
-                                Bulgu Kapanma Tarihi {formData.status === 'CLOSED' ? '(Otomatik)' : ''}
+                                Bulgu Kapanma Tarihi (Otomatik)
                             </label>
                             <input
                                 type="date"
                                 value={formData.closedDate}
-                                readOnly={formData.status === 'CLOSED' && !!editContext?.closedDate}
-                                onChange={e => setFormData({ ...formData, closedDate: e.target.value })}
-                                className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none bg-white ${
-                                    formData.status === 'CLOSED' ? 'bg-slate-50 text-slate-500' : ''
-                                }`}
+                                readOnly
+                                disabled
+                                className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none bg-white bg-slate-50 text-slate-500`}
                             />
                         </div>
                     </div>

@@ -92,4 +92,14 @@ describe('E2E — DTO doğrulaması (eski serbest gövdeli uçlar)', () => {
         expect(t.tester).toBe(id.aud);
         await http().put(`/risk-management-controls/${c.id}/map-risk/x/applicability`).set(as('mgr')).send({ applicabilityScore: 9 }).expect(400);
     });
+    it('bulgu oluşturma: closedDate / workflowStatus / resolutionStatus istemciden kabul edilmez (400); yeni bulgu TASLAK ve açık başlar', async () => {
+        const base = { description: 'DTO sınırı için bulgu açıklaması', severity: 'HIGH' };
+        for (const extra of [{ closedDate: '2026-01-01' }, { workflowStatus: 'IPTAL' }, { resolutionStatus: 'KAPATILDI' }]) {
+            await http().post('/findings').set(as('admin')).send({ ...base, ...extra }).expect(400);
+        }
+        const res = await http().post('/findings').set(as('admin')).send(base);
+        expect(res.status).toBeLessThan(300);
+        const f = await prisma.finding.findUniqueOrThrow({ where: { id: res.body.id } });
+        expect(f).toMatchObject({ workflowStatus: 'TASLAK', resolutionStatus: 'DEVAM_EDIYOR', closedDate: null });
+    });
 });

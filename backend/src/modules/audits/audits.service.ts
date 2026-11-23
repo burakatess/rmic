@@ -318,10 +318,12 @@ export class AuditsService {
         const {
             risk, control, riskId, controlId, testRecordId, controlTestId, directorateId,
             source, affectedSystem, recommendation, managementResponse,
-            targetResolutionDate, closedDate, relatedDepartment, responsiblePerson,
+            targetResolutionDate, relatedDepartment, responsiblePerson,
             findingType, summary, gmy, internalControlAssessment, currentStatusDetail,
             testDate, attachment, sendEmail, birimCevabi, assigneeId, actions,
-            iletisimKisisi, workflowStatus, resolutionStatus, firstControllerId, secondControllerId,
+            iletisimKisisi, firstControllerId, secondControllerId,
+            // İstemci yazamaz (DTO reddeder); savunma amaçlı rest'e sızmasın:
+            closedDate: _cd, workflowStatus: _ws, resolutionStatus: _rs,
             ...rest
         } = data;
         // controlTestId doğrulaması (varsa)
@@ -385,7 +387,7 @@ export class AuditsService {
             // targetResolutionDate İSTEMCİDEN yazılmaz — aksiyonlar eklendikten sonra
             // recalculateFindingTargetDate() ile hesaplanır (Madde 4).
             targetResolutionDate: null,
-            closedDate: closedDate ? new Date(closedDate) : null,
+            closedDate: null,
             relatedDepartment: resolvedRelatedDepartment,
             responsiblePerson: responsiblePerson || null,
             riskId: riskId || null,
@@ -402,18 +404,9 @@ export class AuditsService {
             firstControllerId: controllers.first,
             secondControllerId: controllers.second,
             iletisimKisisi: iletisimKisisi || null,
-            workflowStatus: workflowStatus || 'TASLAK',
-            resolutionStatus: resolutionStatus || 'DEVAM_EDIYOR',
+            workflowStatus: 'TASLAK',
+            resolutionStatus: 'DEVAM_EDIYOR',
         };
-
-        // Auto-set closedDate when resolution is KAPATILDI
-        if (findingData.resolutionStatus === 'KAPATILDI' && !findingData.closedDate) {
-            findingData.closedDate = new Date();
-        }
-        // Legacy compat
-        if (findingData.status === 'CLOSED' && !findingData.closedDate) {
-            findingData.closedDate = new Date();
-        }
 
         // İlk tespit yılı testDate'ten, yoksa sunucu zamanından alınır. Sayaç artışı
         // tek SQL deyimidir; eşzamanlı istekler aynı numarayı alamaz.
