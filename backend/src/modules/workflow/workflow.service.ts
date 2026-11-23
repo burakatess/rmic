@@ -7,22 +7,23 @@ import { isFollowUpOverdue, isTestOverdue } from '../../common/util/metric-defin
 import { ControlsService } from '../controls/controls.service';
 import { AuditsService } from '../audits/audits.service';
 import {
-    ACTION_LABELS, STAGES, STAGE_LABELS, actionForMove, findingStage, followUpStage, logTransition, nextStage,
-    periodControlReady, periodControlStage, testStage,
+    ACTION_LABELS, STAGES, STAGE_DEFS, STAGE_LABELS, actionForMove, actionLabelFor, actionStage, findingStage, followUpStage, logTransition,
+    nextStageFor, periodControlReady, periodControlStage, stageLabelFor, testStage,
     type Stage, type WorkflowAction, type WorkflowEntityType,
 } from '../../common/workflow/workflow-stages';
 
-export const MANAGER_ROLES = new Set(['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER']);
-const EXEC_ROLES = new Set(['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR']);
-const ENTITY_TYPES: WorkflowEntityType[] = ['CONTROL_TEST', 'FOLLOW_UP', 'FINDING', 'PERIOD_CONTROL'];
+import { EXEC_ROLES, MANAGER_ROLES } from './workflow-roles';
+import { DeletionRequestsService } from './deletion-requests.service';
+export { MANAGER_ROLES } from './workflow-roles';
+const ENTITY_TYPES: WorkflowEntityType[] = ['CONTROL_TEST', 'FOLLOW_UP', 'FINDING', 'PERIOD_CONTROL', 'ACTION'];
 export const ENTITY_LABELS: Record<WorkflowEntityType, string> = {
-    CONTROL_TEST: 'Kontrol Testi', FOLLOW_UP: 'Takip Çalışması', FINDING: 'Bulgu', PERIOD_CONTROL: 'Dönem Kontrolü',
+    CONTROL_TEST: 'Kontrol Testi', FOLLOW_UP: 'Takip Çalışması', FINDING: 'Bulgu', PERIOD_CONTROL: 'Dönem Kontrolü', ACTION: 'Aksiyon Planı',
 };
 
 type Person = { id: string; name: string } | null;
 export interface WorkflowSnapshot {
     entityType: WorkflowEntityType; entityId: string; code: string; title: string; href: string;
-    stage: Stage; rawStatus: string; assignee: Person; checker: Person; submittedBy: Person;
+    stage: Stage; stageLabel?: string; rawStatus: string; assignee: Person; checker: Person; submittedBy: Person;
     plannedDate: Date | null; updatedAt: Date;
     /** Kart rozetleri (eski Akış Sağlığı sinyalleri): gecikme, yeni kontrol sürümü, silme talebi. */
     flags?: Array<'GECIKMIS' | 'YENI_SURUM' | 'SILME_TALEBI'>;
@@ -45,6 +46,7 @@ export class WorkflowService {
         private scope: AccessScopeService,
         private controls: ControlsService,
         private audits: AuditsService,
+        private deletions: DeletionRequestsService,
     ) { }
 
     private role(actor: AccessActor) { return String(actor.role ?? ''); }
@@ -52,9 +54,13 @@ export class WorkflowService {
     private requireRole(actor: AccessActor, roles: Set<string>, msg: string) {
         if (!roles.has(this.role(actor))) throw new ForbiddenException(msg);
     }
-    private requireReason(action: WorkflowAction, reason?: string) {
-        if (['RETURN', 'REVERT', 'CANCEL'].includes(action) && !reason?.trim()) {
-            throw new BadRequestException(`${ACTION_LABELS[action]} için gerekçe zorunludur.`);
+    /** Gerekçe zorunlu eylemler; bulgunun kapanışa gönderilmesi de değerlendirme notu ister. */
+    private needsReason(type: WorkflowEntityType, action: WorkflowAction) {
+        return ['RETURN', 'REVERT', 'CANCEL'].includes(action) || (type === 'FINDING' && action === 'COMPLETE');
+    }
+    private requireReason(type: WorkflowEntityType, action: WorkflowAction, reason?: string) {
+        if (this.needsReason(type, action) && !reason?.trim()) {
+            throw new BadRequestException(`${actionLabelFor(type, action)} için gerekçe zorunludur.`);
         }
     }
 
@@ -88,11 +94,22 @@ export class WorkflowService {
                 const fw = findingFullWhere(ctx);
                 const f = await this.prisma.finding.findFirst({ where: { AND: [{ id }, fw ?? {}] } });
                 if (!f) throw new NotFoundException('Bulgu bulunamadı');
-                const [a, c] = await this.users([f.firstControllerId ?? f.assigneeId, f.secondControllerId]);
+                const [a, c, sb] = await this.users([f.firstControllerId ?? f.assigneeId ?? f.createdById, f.secondControllerId, f.closureSubmittedById]);
                 return {
                     entityType: type, entityId: id, code: f.findingId, title: f.summary || f.description.slice(0, 120), href: `/findings/${id}`,
-                    stage: findingStage(f.workflowStatus), rawStatus: f.workflowStatus, assignee: a, checker: c, submittedBy: null,
+                    stage: findingStage(f), rawStatus: f.status, assignee: a, checker: c, submittedBy: f.status === 'PENDING_REVIEW' ? sb : null,
                     plannedDate: f.targetResolutionDate, updatedAt: f.updatedAt, extra: f,
+                };
+            }
+            case 'ACTION': {
+                const a = await this.prisma.action.findUnique({ where: { id } });
+                if (!a) throw new NotFoundException('Aksiyon bulunamadı');
+                if (a.findingId && (await this.scope.findingAccess(ctx, a.findingId)) === null && a.ownerId !== ctx.userId) throw new NotFoundException('Aksiyon bulunamadı');
+                const [fc, sc] = await this.users([a.firstControllerId, a.secondControllerId]);
+                return {
+                    entityType: type, entityId: id, code: a.actionId, title: a.description.slice(0, 120), href: `/actions/${id}`,
+                    stage: actionStage(a), rawStatus: a.approvalState, assignee: fc, checker: sc, submittedBy: a.approvalState === 'ONAY_BEKLIYOR' ? fc : null,
+                    plannedDate: a.dueDate, updatedAt: a.updatedAt, extra: a,
                 };
             }
             case 'PERIOD_CONTROL': {
@@ -131,7 +148,7 @@ export class WorkflowService {
         const isChecker = s.checker?.id === actor.id;
         const out: ActionHint[] = [];
         const add = (action: WorkflowAction, formHref?: string) => {
-            if (nextStage(action, s.stage)) out.push({ action, label: ACTION_LABELS[action], needsReason: ['RETURN', 'REVERT', 'CANCEL'].includes(action), formHref });
+            if (nextStageFor(s.entityType, action, s.stage)) out.push({ action, label: actionLabelFor(s.entityType, action), needsReason: this.needsReason(s.entityType, action), formHref });
         };
         switch (s.entityType) {
             case 'CONTROL_TEST': {
@@ -151,8 +168,24 @@ export class WorkflowService {
                 break;
             }
             case 'FINDING': {
-                if (EXEC_ROLES.has(role)) { add('START'); add('COMPLETE', s.href); }
-                if (manager) { add('APPROVE'); add('RETURN'); add('CANCEL'); }
+                // Açık kalmak onay istemez. Kapanış: 1. kontrolcü (veya yönetici) gönderir; 2. kontrolcü/yönetici değerlendirir.
+                const f = s.extra;
+                const pendingDeletion = !!f.deletionRequestedAt;
+                if (EXEC_ROLES.has(role) && !isChecker && (isAssignee || manager) && !pendingDeletion) add('COMPLETE');
+                if ((isChecker || manager) && f.closureSubmittedById !== actor.id) { add('APPROVE'); add('RETURN'); }
+                if (manager) add('REVERT');
+                if (EXEC_ROLES.has(role) && !pendingDeletion && s.stage === 'DEVAM_EDIYOR') add('CANCEL');
+                break;
+            }
+            case 'ACTION': {
+                // Aksiyon planı onayı bulgudan bağımsızdır: 1. kontrolcü gönderir, 2. kontrolcü onaylar/iade eder.
+                const a = s.extra;
+                const pendingDeletion = !!a.deletionRequestedAt;
+                const isFirst = !a.firstControllerId || a.firstControllerId === actor.id;
+                if (EXEC_ROLES.has(role) && isFirst && !isChecker && !pendingDeletion && a.secondControllerId) add('COMPLETE');
+                if (manager && isChecker) { add('APPROVE'); add('RETURN'); }
+                if (manager && isChecker && s.stage === 'ONAYLANDI' && !pendingDeletion) add('REVERT');
+                if (EXEC_ROLES.has(role) && isFirst && !pendingDeletion && s.stage !== 'TAMAMLANDI') add('CANCEL');
                 break;
             }
             case 'PERIOD_CONTROL': {
@@ -175,13 +208,13 @@ export class WorkflowService {
         const { extra, ...rest } = snap;
         return {
             ...rest,
-            stageLabel: STAGE_LABELS[snap.stage],
-            stages: STAGES.map(st => ({ key: st, label: STAGE_LABELS[st] })),
+            stageLabel: stageLabelFor(type, snap.stage),
+            stages: STAGE_DEFS[type].map(d => ({ key: d.key, label: d.label, hint: d.hint })),
             actions: this.hints(snap, actor, ctx),
             deletion: extra?.deletionRequestedAt ? { requestedAt: extra.deletionRequestedAt, reason: extra.deletionReason, requestedBy: (await this.users([extra.deletionRequestedById]))[0] } : null,
             history: history.map((h, i) => ({
-                id: h.id, action: h.action, actionLabel: ACTION_LABELS[h.action as WorkflowAction] ?? h.action,
-                from: h.fromStage, to: h.toStage, fromLabel: STAGE_LABELS[h.fromStage as Stage] ?? h.fromStage, toLabel: STAGE_LABELS[h.toStage as Stage] ?? h.toStage,
+                id: h.id, action: h.action, actionLabel: actionLabelFor(type, h.action as WorkflowAction) ?? h.action,
+                from: h.fromStage, to: h.toStage, fromLabel: stageLabelFor(type, h.fromStage as Stage), toLabel: stageLabelFor(type, h.toStage as Stage),
                 reason: h.reason, at: h.createdAt, by: people[i],
             })),
         };
@@ -197,11 +230,11 @@ export class WorkflowService {
         this.assertType(type);
         const ctx = await this.scope.context(actor);
         const snap = await this.loadOne(type, id, ctx);
-        const target = nextStage(action, snap.stage);
+        const target = nextStageFor(type, action, snap.stage);
         if (!target) {
-            throw new ConflictException(`'${ACTION_LABELS[action]}' bu aşamada yapılamaz (mevcut: ${STAGE_LABELS[snap.stage]}). Aşamalar atlanamaz.`);
+            throw new ConflictException(`'${actionLabelFor(type, action)}' bu aşamada yapılamaz (mevcut: ${stageLabelFor(type, snap.stage)}). Aşamalar atlanamaz.`);
         }
-        this.requireReason(action, reason);
+        this.requireReason(type, action, reason);
         const r = reason?.trim();
 
         switch (type) {
@@ -209,6 +242,7 @@ export class WorkflowService {
             case 'FOLLOW_UP': return this.followUpTransition(snap, action, r, actor);
             case 'FINDING': return this.findingTransition(snap, action, r, actor, ctx);
             case 'PERIOD_CONTROL': return this.periodTransition(snap, action, r, actor);
+            case 'ACTION': return this.actionTransition(snap, action, r, actor, ctx);
         }
     }
 
@@ -219,8 +253,8 @@ export class WorkflowService {
         const snap = await this.loadOne(type, id, ctx);
         if (snap.stage === toStage) return { unchanged: true };
         const action = actionForMove(snap.stage, toStage);
-        if (!action) {
-            throw new ConflictException(`${STAGE_LABELS[snap.stage]} → ${STAGE_LABELS[toStage]} geçişi yapılamaz: aşamalar sırayla ilerler, 2. kontrolcü onayı atlanamaz.`);
+        if (!action || !nextStageFor(type, action, snap.stage)) {
+            throw new ConflictException(`${stageLabelFor(type, snap.stage)} → ${stageLabelFor(type, toStage)} geçişi yapılamaz: aşamalar sırayla ilerler, onay atlanamaz.`);
         }
         return { action, result: await this.transition(type, id, action, reason, actor) };
     }
@@ -264,16 +298,37 @@ export class WorkflowService {
         }
     }
 
+    /** Bulgu: Açık → Kapanış Değerlendirmesinde → Kapatıldı. Silme (CANCEL) yönetici onaylı talep açar. */
     private async findingTransition(snap: WorkflowSnapshot, action: WorkflowAction, reason: string | undefined, actor: AccessActor, ctx: AccessContext) {
         if ((await this.scope.findingAccess(ctx, snap.entityId)) !== 'FULL') throw new ForbiddenException('Bu bulgu üzerinde işlem yetkiniz yok.');
+        const manager = MANAGER_ROLES.has(this.role(actor));
         switch (action) {
-            case 'START': this.requireRole(actor, EXEC_ROLES, 'Bulguyu mutabakata gönderme yetkiniz yok.'); return this.audits.mutabakataGonder(snap.entityId, actor.id);
-            case 'COMPLETE': return this.formRequired(snap, 'Bulgu, birim cevabı ile');
-            case 'APPROVE': this.requireRole(actor, MANAGER_ROLES, 'Bulgu onayı yalnız yönetici rolündedir.'); return this.audits.mutabakatOnayla(snap.entityId, {}, actor.id);
-            case 'RETURN': this.requireRole(actor, MANAGER_ROLES, 'Bulgu iadesi yalnız yönetici rolündedir.'); return this.audits.mutabakatGeriGonder(snap.entityId, reason!, actor.id);
-            case 'CANCEL': this.requireRole(actor, MANAGER_ROLES, 'Bulgu iptali yalnız yönetici rolündedir.'); return this.audits.iptalEt(snap.entityId, reason!, actor.id);
-            default: throw new ConflictException('Bulguda bu eylem desteklenmiyor (onaylı bulgu kapatma/yeniden açma ile yönetilir).');
+            case 'COMPLETE': this.requireRole(actor, EXEC_ROLES, 'Bulguyu kapanışa gönderme yetkiniz yok.'); return this.audits.submitFindingClosure(snap.entityId, reason!, actor.id, manager);
+            case 'APPROVE': return this.audits.approveFindingClosure(snap.entityId, actor.id, manager);
+            case 'RETURN': return this.audits.returnFindingClosure(snap.entityId, reason!, actor.id, manager);
+            case 'REVERT': this.requireRole(actor, MANAGER_ROLES, 'Geri alma yalnız yönetici rolündedir.'); return this.audits.revertFindingStage(snap.entityId, reason!, actor.id);
+            case 'CANCEL': return { deletionRequested: true, result: await this.deletionRequest('FINDING', snap.entityId, reason!, actor) };
+            default: throw new ConflictException('Bulguda bu eylem desteklenmiyor.');
         }
+    }
+
+    /** Aksiyon planı onay hattı: mevcut maker-checker işlemlerine devreder (bulgu yaşam döngüsünden bağımsız). */
+    private async actionTransition(snap: WorkflowSnapshot & { extra: any }, action: WorkflowAction, reason: string | undefined, actor: AccessActor, ctx: AccessContext) {
+        const a = snap.extra;
+        if (a.findingId && (await this.scope.findingAccess(ctx, a.findingId)) !== 'FULL') throw new ForbiddenException('Bu aksiyon üzerinde işlem yetkiniz yok.');
+        switch (action) {
+            case 'COMPLETE': this.requireRole(actor, EXEC_ROLES, 'Aksiyonu onaya gönderme yetkiniz yok.'); return this.audits.submitAction(a.findingId, a.id, actor.id);
+            case 'APPROVE': this.requireRole(actor, MANAGER_ROLES, 'Aksiyon onayı yönetici rolündeki 2. kontrolcüdedir.'); return this.audits.approveAction(a.findingId, a.id, actor.id);
+            case 'RETURN': this.requireRole(actor, MANAGER_ROLES, 'Aksiyon iadesi yönetici rolündeki 2. kontrolcüdedir.'); return this.audits.rejectAction(a.findingId, a.id, reason!, actor.id);
+            case 'REVERT': this.requireRole(actor, MANAGER_ROLES, 'Onayı geri alma yönetici rolündeki 2. kontrolcüdedir.'); return this.audits.revertAction(a.findingId, a.id, reason!, actor.id);
+            case 'CANCEL': return { deletionRequested: true, result: await this.audits.requestActionDeletion(a.findingId, a.id, reason!, actor.id) };
+            default: throw new ConflictException('Aksiyon planında bu eylem desteklenmiyor.');
+        }
+    }
+
+    /** Bulgu silme talebi (yönetici onaylı) — DeletionRequestsService kurallarıyla. */
+    private deletionRequest(type: 'FINDING', id: string, reason: string, actor: AccessActor) {
+        return this.deletions.request(type, id, reason, actor);
     }
 
     /** Dönem Kontrolü onay akışı (yeni). Bekliyor/Devam Ediyor testlerden türetilir. */
@@ -359,13 +414,31 @@ export class WorkflowService {
         if (types.includes('FINDING')) {
             const fw = findingFullWhere(ctx);
             const rows = await this.prisma.finding.findMany({
-                where: { AND: [fw ?? {}, mine ? { OR: [{ assigneeId: me }, { firstControllerId: me }, { secondControllerId: me }] } : {}] },
+                where: { AND: [{ deletedAt: null, workflowStatus: { not: 'IPTAL' } }, fw ?? {}, mine ? { OR: [{ assigneeId: me }, { firstControllerId: me }, { secondControllerId: me }] } : {}] },
                 orderBy: { createdAt: 'desc' }, take: 2000,
             });
-            const people = await this.peopleMap(rows.flatMap(r => [r.firstControllerId ?? r.assigneeId, r.secondControllerId]));
+            const people = await this.peopleMap(rows.flatMap(r => [r.firstControllerId ?? r.assigneeId ?? r.createdById, r.secondControllerId]));
             for (const r of rows) items.push({
                 entityType: 'FINDING', entityId: r.id, code: r.findingId, title: r.summary || r.description.slice(0, 120), href: `/findings/${r.id}`,
-                stage: findingStage(r.workflowStatus), rawStatus: r.workflowStatus, assignee: people(r.firstControllerId ?? r.assigneeId), checker: people(r.secondControllerId), submittedBy: null, plannedDate: r.targetResolutionDate, updatedAt: r.updatedAt,
+                stage: findingStage(r), rawStatus: r.status, assignee: people(r.firstControllerId ?? r.assigneeId ?? r.createdById), checker: people(r.secondControllerId), submittedBy: null, plannedDate: r.targetResolutionDate, updatedAt: r.updatedAt,
+                flags: r.deletionRequestedAt ? ['SILME_TALEBI'] : [],
+            });
+        }
+        if (types.includes('ACTION')) {
+            const rows = await this.prisma.action.findMany({
+                where: { AND: [{ deletedAt: null, status: { not: 'IPTAL' } }, mine ? { OR: [{ firstControllerId: me }, { secondControllerId: me }, { ownerId: me }] } : {}] },
+                orderBy: { dueDate: 'asc' }, take: 2000,
+            });
+            // Kayıt kapsamı: erişilebilir bulgulara ait aksiyonlar (bulgusuz manuel aksiyonlar kontrolcü/sorumlu ile sınırlı).
+            const fw = findingFullWhere(ctx);
+            const allowed = fw ? new Set((await this.prisma.finding.findMany({ where: { AND: [{ id: { in: [...new Set(rows.map(r => r.findingId).filter((x): x is string => !!x))] } }, fw] }, select: { id: true } })).map(f => f.id)) : null;
+            const visible = rows.filter(r => !allowed || (r.findingId ? allowed.has(r.findingId) : [r.firstControllerId, r.secondControllerId, r.ownerId].includes(me)));
+            const people = await this.peopleMap(visible.flatMap(r => [r.firstControllerId, r.secondControllerId]));
+            const now = new Date();
+            for (const r of visible) items.push({
+                entityType: 'ACTION', entityId: r.id, code: r.actionId, title: r.description.slice(0, 120), href: `/actions/${r.id}`,
+                stage: actionStage(r), rawStatus: r.approvalState, assignee: people(r.firstControllerId), checker: people(r.secondControllerId), submittedBy: null, plannedDate: r.dueDate, updatedAt: r.updatedAt,
+                flags: [...(r.status !== 'KAPATILDI' && r.dueDate < now ? ['GECIKMIS' as const] : []), ...(r.deletionRequestedAt ? ['SILME_TALEBI' as const] : [])],
             });
         }
         if (types.includes('PERIOD_CONTROL')) {
@@ -381,6 +454,7 @@ export class WorkflowService {
             });
         }
 
+        for (const i of items) i.stageLabel = stageLabelFor(i.entityType, i.stage);
         const filtered = items.filter(i => i.stage !== 'IPTAL'
             && (!q.assigneeId || i.assignee?.id === q.assigneeId || i.checker?.id === q.assigneeId)
             && (!q.stage || i.stage === q.stage)

@@ -202,13 +202,22 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
             await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${managerToken}`)
                 .send({ status: 'ONAYLANDI' }).expect(200);
 
-            // Tüm aksiyonlar KAPATILDI → bulgu onay transaction'ında kapanır, closedDate sunucuda üretilir.
+            // Tüm aksiyonlar KAPATILDI → bulgu OTOMATİK KAPANMAZ; kapat ucu kapanış değerlendirmesine gönderir,
+            // gönderen dışındaki yönetici/2. kontrolcü onaylayınca kapanır (closedDate sunucuda üretilir).
+            expect((await prisma.finding.findUnique({ where: { id: fId } }))?.status).toBe('PARTIALLY_CLOSED');
+            await request(app.getHttpServer()).post(`/findings/${fId}/workflow/kapat`).set('Authorization', `Bearer ${managerToken}`)
+                .send({ reason: 'Tüm aksiyonlar kapatıldı' }).expect(201);
+            expect((await prisma.finding.findUnique({ where: { id: fId } }))?.status).toBe('PENDING_REVIEW');
+            await request(app.getHttpServer()).post(`/workflow/FINDING/${fId}/transition`).set('Authorization', `Bearer ${managerToken}`)
+                .send({ action: 'APPROVE' }).expect(403); // gönderen kendi kapanışını onaylayamaz
+            await request(app.getHttpServer()).post(`/workflow/FINDING/${fId}/transition`).set('Authorization', `Bearer ${adminToken}`)
+                .send({ action: 'APPROVE' }).expect(201);
             const closed = await prisma.finding.findUnique({ where: { id: fId } });
             expect(closed?.status).toBe('CLOSED');
             expect(closed?.closedDate).toBeTruthy();
             // Zaten kapalı bulguya ikinci kapanış reddedilir.
             await request(app.getHttpServer()).post(`/findings/${fId}/workflow/kapat`).set('Authorization', `Bearer ${managerToken}`)
-                .send({ reason: 'tekrar' }).expect(400);
+                .send({ reason: 'tekrar' }).expect(409);
         });
 
         it('sıfır aksiyonlu bulgu kapatılamaz', async () => {

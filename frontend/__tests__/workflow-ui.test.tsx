@@ -25,6 +25,26 @@ const baseState = {
 describe('WorkflowBar', () => {
     beforeEach(() => jest.clearAllMocks());
 
+    it('bulgu: türe özel aşamalar (Açık → Kapanış Değerlendirmesinde → Kapatıldı); kapanışa gönderme değerlendirme notu ister', async () => {
+        (api.getWorkflowState as jest.Mock).mockResolvedValue({
+            ...baseState, entityType: 'FINDING', entityId: 'f1', code: 'B-1', stage: 'DEVAM_EDIYOR', stageLabel: 'Açık',
+            stages: [{ key: 'DEVAM_EDIYOR', label: 'Açık' }, { key: 'TAMAMLANDI', label: 'Kapanış Değerlendirmesinde' }, { key: 'ONAYLANDI', label: 'Kapatıldı' }],
+            actions: [{ action: 'COMPLETE', label: 'Kapanış değerlendirmesine gönder', needsReason: true }, { action: 'CANCEL', label: 'Silme talebi', needsReason: true }],
+            history: [],
+        });
+        (api.workflowTransition as jest.Mock).mockResolvedValue({});
+        render(<WorkflowBar type="FINDING" id="f1" />);
+        const bar = await screen.findByTestId('workflow-bar');
+        const steps = bar.querySelectorAll('ol[aria-label="Aşamalar"] > li');
+        expect([...steps].map(li => li.textContent?.replace(/^\s*\d\s*/, '').replace('›', '').trim())).toEqual(['Açık', 'Kapanış Değerlendirmesinde', 'Kapatıldı']);
+        expect(screen.queryByText('Bekliyor')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Kapanış değerlendirmesine gönder' }));
+        expect(await screen.findByLabelText('Kapanış değerlendirmesi *')).toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText('Kapanış değerlendirmesi *'), { target: { value: 'Tüm aksiyonlar kapatıldı' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Onayla' }));
+        await waitFor(() => expect(api.workflowTransition).toHaveBeenCalledWith('FINDING', 'f1', 'COMPLETE', 'Tüm aksiyonlar kapatıldı'));
+    });
+
     it('mevcut aşamayı, onaycıyı ve geçmişi gösterir; onay gerekçesiz, iade gerekçeli çalışır', async () => {
         (api.getWorkflowState as jest.Mock).mockResolvedValue(baseState);
         (api.workflowTransition as jest.Mock).mockResolvedValue({});

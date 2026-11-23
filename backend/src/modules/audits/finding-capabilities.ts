@@ -70,7 +70,7 @@ export function actionCapabilities(
     action: {
         status?: string | null; ownerId?: string | null; approvalState?: string | null;
         firstControllerId?: string | null; secondControllerId?: string | null;
-        deletionRequestedAt?: Date | string | null; deletedAt?: Date | string | null;
+        deletionRequestedAt?: Date | string | null; deletedAt?: Date | string | null; deletionRequestedById?: string | null;
     },
     actor: { id: string; role?: string | null },
     level: FindingAccessLevel,
@@ -98,8 +98,9 @@ export function actionCapabilities(
         canSubmit: writer && open && draft && !deletionPending && !deleted && isFirst && !!action.secondControllerId,
         canApprove: approver && isSecond && state === 'ONAY_BEKLIYOR' && !deleted,
         canRevert: approver && isSecond && state === 'ONAYLANDI' && !deleted && !deletionPending,
-        canRequestDelete: writer && !deleted && !deletionPending && state !== 'ONAY_BEKLIYOR' && isFirst && !!action.secondControllerId,
-        canDecideDelete: approver && isSecond && deletionPending,
+        canRequestDelete: writer && open && !deleted && !deletionPending && state !== 'ONAY_BEKLIYOR' && isFirst,
+        // Silme kararı yönetici rolündedir; talep eden kendi talebine karar veremez.
+        canDecideDelete: approver && deletionPending && action.deletionRequestedById !== actor.id,
     };
 }
 

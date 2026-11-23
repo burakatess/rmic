@@ -7,9 +7,11 @@ import { Button, Modal } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import type { DeletionRequestRow } from '@/types/workflow';
 
-const TYPE_LABEL = { CONTROL_TEST: 'Kontrol Testi', PERIOD_CONTROL: 'Dönem Kontrolü' } as const;
+const TYPE_LABEL: Record<DeletionRequestRow['type'], string> = {
+    CONTROL_TEST: 'Kontrol Testi', PERIOD_CONTROL: 'Dönem Kontrolü', FINDING: 'Bulgu', ACTION: 'Aksiyon Planı', FOLLOW_UP: 'Takip Çalışması',
+};
 
-/** Yönetici onayı bekleyen silme talepleri (kontrol testi, dönem kontrolü). Talep eden kendi talebine karar veremez. */
+/** Yönetici onayı bekleyen silme talepleri (bulgu, aksiyon planı, takip, kontrol testi, dönem kontrolü). Talep eden kendi talebine karar veremez. */
 export function DeletionRequestsPanel({ onCountChange }: { onCountChange?: (n: number) => void }) {
     const { success, error: showError } = useToast();
     const [rows, setRows] = useState<DeletionRequestRow[] | null>(null);

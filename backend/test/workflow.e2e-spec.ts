@@ -118,6 +118,24 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
         return res.body.find((f: any) => f.actionId === actionId);
     }
 
+    /** Bulgu kapanışı artık otomatik değil: 1. kontrolcü (admin) kapanış değerlendirmesine gönderir, 2. kontrolcü (manager) onaylar. */
+    async function closeViaReview(findingId: string) {
+        await request(app.getHttpServer()).post(`/workflow/FINDING/${findingId}/transition`)
+            .set('Authorization', `Bearer ${adminToken}`).send({ action: 'COMPLETE', reason: 'Tüm aksiyonlar ve takipler tamamlandı.' }).expect(201);
+        await request(app.getHttpServer()).post(`/workflow/FINDING/${findingId}/transition`)
+            .set('Authorization', `Bearer ${managerToken}`).send({ action: 'APPROVE' }).expect(201);
+    }
+    /** Bulgu iptali artık yönetici onaylı silme talebidir: admin talep eder, manager onaylar. */
+    async function cancelViaDeletion(findingId: string, reason: string) {
+        const req = await request(app.getHttpServer()).post(`/findings/${findingId}/workflow/iptal-et`)
+            .set('Authorization', `Bearer ${adminToken}`).send({ reason }).expect(201);
+        expect(req.body.requested).toBe(true);
+        expect((await prisma.finding.findUniqueOrThrow({ where: { id: findingId } })).workflowStatus).not.toBe('IPTAL');
+        await request(app.getHttpServer()).post(`/deletion-requests/FINDING/${findingId}/approve`)
+            .set('Authorization', `Bearer ${managerToken}`).expect(201);
+        return prisma.finding.findUniqueOrThrow({ where: { id: findingId } });
+    }
+
     async function getFinding(findingId: string) {
         const res = await request(app.getHttpServer())
             .get(`/findings/${findingId}`)
@@ -408,6 +426,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 currentStatusDetail: 'İkinci doğrulamada düzeltme yeterli.',
                 result: 'YETERLI',
             });
+            await closeViaReview(fId);
             const finding = await getFinding(fId);
             expect(finding.status).toBe('CLOSED');
             expect(finding.actions.find((item: any) => item.id === aId).status).toBe('KAPATILDI');
@@ -452,6 +471,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 result: 'YETERLI',
             });
 
+            await closeViaReview(fId);
             finding = await getFinding(fId);
             expect(finding.status).toBe('CLOSED');
             expect(finding.actions.find((item: any) => item.id === aId).status).toBe('KAPATILDI');
@@ -521,7 +541,10 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
 
             const afterApproval = await getFinding(fId);
             expect(afterApproval.actions.find((a: any) => a.id === aId).status).toBe('KAPATILDI');
-            expect(afterApproval.status).toBe('CLOSED');
+            // Takip onayı bulguyu kapatmaz; kapanış değerlendirmesiyle kapanır.
+            expect(afterApproval.status).toBe('PARTIALLY_CLOSED');
+            await closeViaReview(fId);
+            expect((await getFinding(fId)).status).toBe('CLOSED');
         });
 
         it('değerlendirme sonucu olmadan bulgu kapanış sonucu kaydedilemez', async () => {
@@ -755,6 +778,9 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 result: 'YETERLI',
             });
 
+            // Takip onayı bulguyu kapatmaz; bulgu açık kalır ve kapanış değerlendirmesiyle kapanır.
+            expect((await getFinding(findingId)).status).toBe('PARTIALLY_CLOSED');
+            await closeViaReview(findingId);
             const finding = await getFinding(findingId);
             expect(finding.status).toBe('CLOSED');
             expect(finding.resolutionStatus).toBe('KAPATILDI');
@@ -801,7 +827,9 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 result: 'YETERLI',
             });
 
-            // Şimdi TÜM aksiyonlar kapandığı için bulgu kapanabilmeli
+            // TÜM aksiyonlar kapandı: bulgu yine açık; kapanış değerlendirmesiyle kapanır.
+            expect((await getFinding(findingId)).status).not.toBe('CLOSED');
+            await closeViaReview(findingId);
             finding = await getFinding(findingId);
             expect(finding.status).toBe('CLOSED');
             expect(finding.closedDate).not.toBeNull();
@@ -839,17 +867,23 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             await recordAndApprove(findingId, firstFollowUp.id, {
                 currentStatusDetail: 'İlk yaşam döngüsü tamamlandı.', result: 'YETERLI',
             });
+            await closeViaReview(findingId);
             expect((await getFinding(findingId)).status).toBe('CLOSED');
 
+            // Yeniden açma bir aşama geri alır (kapanış değerlendirmesine); iade ile bulgu açık olur.
             await request(app.getHttpServer()).post(`/findings/${findingId}/workflow/yeniden-ac`)
                 .set('Authorization', `Bearer ${adminToken}`)
                 .send({ reason: 'Yeni kanıt yeni bir düzeltici çalışma gerektiriyor.' }).expect(201);
+            expect((await getFinding(findingId)).status).toBe('PENDING_REVIEW');
+            await request(app.getHttpServer()).post(`/workflow/FINDING/${findingId}/transition`)
+                .set('Authorization', `Bearer ${managerToken}`).send({ action: 'RETURN', reason: 'Yeni aksiyon gerekiyor' }).expect(201);
             const secondAction = await addAction(findingId, { description: 'İkinci yaşam döngüsü aksiyonu açıklaması' });
             const secondFollowUp = await getFollowUpForAction(findingId, secondAction.id);
             await recordAndApprove(findingId, secondFollowUp.id, {
                 currentStatusDetail: 'İkinci yaşam döngüsü tamamlandı.', result: 'YETERLI',
             });
 
+            await closeViaReview(findingId);
             const finding = await getFinding(findingId);
             expect(finding.status).toBe('CLOSED');
             expect(finding.resolutionStatus).toBe('KAPATILDI');
@@ -865,13 +899,9 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             });
             const followUp = await getFollowUpForAction(findingId, action.id);
 
-            const cancel = await request(app.getHttpServer())
-                .post(`/findings/${findingId}/workflow/iptal-et`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ reason: 'Kontrol kapsamı değiştiği için bulgu iptal edildi.' });
-
-            expect(cancel.status).toBe(201);
-            expect(cancel.body.workflowStatus).toBe('IPTAL');
+            const cancelled = await cancelViaDeletion(findingId, 'Kontrol kapsamı değiştiği için bulgu iptal edildi.');
+            expect(cancelled.workflowStatus).toBe('IPTAL');
+            expect(cancelled.deletedAt).not.toBeNull();
 
             const cancelledAction = await prisma.action.findUnique({ where: { id: action.id } });
             const cancelledFollowUp = await prisma.findingFollowUp.findUnique({ where: { id: followUp.id } });
@@ -882,21 +912,15 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 where: { entityType: 'Finding', entityId: findingId, action: 'CANCEL' },
                 orderBy: { createdAt: 'desc' },
             });
-            expect(findingAudit?.newValue).toMatchObject({
-                workflowStatus: 'IPTAL',
-                reason: 'Kontrol kapsamı değiştiği için bulgu iptal edildi.',
-            });
+            expect(findingAudit?.newValue).toMatchObject({ workflowStatus: 'IPTAL' });
+            expect(String((findingAudit?.newValue as any).reason)).toContain('Kontrol kapsamı değiştiği için bulgu iptal edildi.');
         });
 
         it('iptal edilmiş bulguya yeni aksiyon veya takip eklenemez', async () => {
             const { findingId } = await setupFinding();
             // Takip çalışması aksiyona bağlı olmak zorunda — iptal öncesi mevcut bir aksiyon.
             const existingAction = await addAction(findingId);
-            await request(app.getHttpServer())
-                .post(`/findings/${findingId}/workflow/iptal-et`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ reason: 'Yeni iş üretimini engelleme testi.' })
-                .expect(201);
+            await cancelViaDeletion(findingId, 'Yeni iş üretimini engelleme testi.');
 
             const dueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             const actionResult = await request(app.getHttpServer())
@@ -929,11 +953,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 currentStatusDetail: 'Bu aksiyon iptal öncesinde yeterli bulundu.',
                 result: 'YETERLI',
             });
-            await request(app.getHttpServer())
-                .post(`/findings/${findingId}/workflow/iptal-et`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ reason: 'Kalan çalışma kapsamdan çıkarıldı.' })
-                .expect(201);
+            await cancelViaDeletion(findingId, 'Kalan çalışma kapsamdan çıkarıldı.');
 
             expect((await prisma.action.findUnique({ where: { id: closedAction.id } }))?.status).toBe('KAPATILDI');
             expect((await prisma.findingFollowUp.findUnique({ where: { id: approvedFollowUp.id } }))?.status).toBe('ONAYLANDI');

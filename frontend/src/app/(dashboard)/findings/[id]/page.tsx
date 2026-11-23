@@ -94,6 +94,7 @@ interface Finding {
     } | null; // PARTIAL erişimde (yalnız kendi aksiyonu) backend özet göndermez
     accessLevel?: 'PARTIAL';
     createdAt: string; updatedAt: string;
+    deletionRequestedAt?: string | null; closureNote?: string | null; closureReturnReason?: string | null;
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -534,8 +535,12 @@ export default function FindingDetailPage() {
                     <>
                         <StatusBadge variant={sevCfg.variant}>{sevCfg.label}</StatusBadge>
                         {typeCfg && <StatusBadge variant={typeCfg.variant}>{typeCfg.label}</StatusBadge>}
-                        <StatusBadge variant={wfCfg.variant} dot>{wfCfg.label}</StatusBadge>
-                        <StatusBadge variant={resCfg.variant} dot>{resCfg.label}</StatusBadge>
+                        {/* Mutabakat bilgi alanıdır; bulgunun açık/kapalı aşaması iş akışı çubuğundadır. */}
+                        <StatusBadge variant="neutral">Mutabakat: {wfCfg.label}</StatusBadge>
+                        {finding.status === 'PENDING_REVIEW'
+                            ? <StatusBadge variant="warning" dot>Kapanış değerlendirmesinde</StatusBadge>
+                            : <StatusBadge variant={resCfg.variant} dot>{resCfg.label}</StatusBadge>}
+                        {finding.deletionRequestedAt && <StatusBadge variant="critical" dot>Silme talebi onayda</StatusBadge>}
                         {isOverdue && <StatusBadge variant="critical" dot>{Math.max(1, Math.abs(daysLeft ?? 1))} gün gecikmiş</StatusBadge>}
                         {isApproaching && <StatusBadge variant="warning" dot>{daysLeft} gün kaldı</StatusBadge>}
                     </>
@@ -554,58 +559,6 @@ export default function FindingDetailPage() {
                 }
                 actions={
                     <>
-                        {caps.canAdvanceWorkflow && finding.workflowStatus === 'TASLAK' && (
-                            <Button variant="primary" size="sm" onClick={() => setWorkflowAction('mutabakata-gonder')}
-                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>}
-                            >
-                                Mutabakata Gönder
-                            </Button>
-                        )}
-                        {caps.canAdvanceWorkflow && finding.workflowStatus === 'MUTABAKATA_GONDERILDI' && (
-                            <Button variant="primary" size="sm" onClick={() => setWorkflowAction('ic-kontrol-onayina-gonder')}
-                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
-                            >
-                                İKS Onayına Gönder
-                            </Button>
-                        )}
-                        {caps.canApproveWorkflow && finding.workflowStatus === 'IC_KONTROL_ONAYINA_GONDERILDI' && (
-                            <>
-                                <Button variant="success" size="sm" onClick={() => setWorkflowAction('mutabakat-onayla')}
-                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
-                                >
-                                    Mutabakatı Onayla
-                                </Button>
-                                <Button variant="outline" size="sm" onClick={() => setWorkflowAction('mutabakat-geri-gonder')}
-                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>}
-                                >
-                                    Birime Geri Gönder
-                                </Button>
-                            </>
-                        )}
-                        {caps.canApproveWorkflow && finding.workflowStatus !== 'IPTAL' && finding.workflowStatus !== 'MUTABAKAT_YAPILDI' && (
-                            <Button variant="ghost" size="sm" onClick={() => setWorkflowAction('iptal-et')} className="text-red-500 hover:bg-red-50">
-                                İptal Et
-                            </Button>
-                        )}
-                        {caps.canApproveWorkflow && finding.workflowStatus === 'MUTABAKAT_YAPILDI' && (
-                            <Button variant="ghost" size="sm" onClick={() => setWorkflowAction('iptal-et')} className="text-red-500 hover:bg-red-50">
-                                İptal Et
-                            </Button>
-                        )}
-                        {caps.canApproveWorkflow && finding.status !== 'CLOSED' && (
-                            <Button variant="success" size="sm" onClick={() => setWorkflowAction('kapat')}
-                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
-                            >
-                                Bulguyu Kapat
-                            </Button>
-                        )}
-                        {caps.canApproveWorkflow && finding.status === 'CLOSED' && (
-                            <PermissionGate permission="finding:update">
-                                <Button variant="outline" size="sm" onClick={() => setWorkflowAction('yeniden-ac')}>
-                                    Yeniden Aç
-                                </Button>
-                            </PermissionGate>
-                        )}
                         {caps.canEditFinding && <Link href={`/findings/${id}/edit`}>
                             <Button variant="secondary" size="sm"
                                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>}
@@ -618,7 +571,7 @@ export default function FindingDetailPage() {
             />
 
             {/* ── İş akışı (Jira tarzı) ─────────────────────────────────────────── */}
-            <div className="mb-5"><WorkflowBar type="FINDING" id={finding.id} onChanged={() => load()} refreshKey={finding.workflowStatus} /></div>
+            <div className="mb-5"><WorkflowBar type="FINDING" id={finding.id} onChanged={() => load()} refreshKey={`${finding.status}:${finding.workflowStatus}`} /></div>
 
             {/* ── Tabs ───────────────────────────────────────────────────────── */}
             <Tabs
@@ -634,6 +587,45 @@ export default function FindingDetailPage() {
                 {/* ═══════ DETAY TAB ═══════ */}
                 {activeTab === 'detay' && (
                     <div className="space-y-5">
+                        {/* Birim mutabakatı: bilgi kaydıdır — bulgunun açık/kapalı olmasını ve iş akışını etkilemez. */}
+                        <DetailSection title="Birim mutabakatı (bilgi)">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <p className="text-sm text-slate-600">
+                                    Mutabakat durumu: <b className="text-slate-900">{wfCfg.label}</b>
+                                    <span className="block text-xs text-slate-500 mt-0.5">Birim cevabı ve iç kontrol değerlendirmesi kaydı. Onay mekanizması değildir; bulgu açık kalır ve kapanış değerlendirmesiyle kapanır.</span>
+                                </p>
+                                <div className="flex flex-wrap items-center gap-2">
+                        {caps.canAdvanceWorkflow && finding.workflowStatus === 'TASLAK' && (
+                            <Button variant="outline" size="sm" onClick={() => setWorkflowAction('mutabakata-gonder')}
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>}
+                            >
+                                Mutabakata Gönder
+                            </Button>
+                        )}
+                        {caps.canAdvanceWorkflow && finding.workflowStatus === 'MUTABAKATA_GONDERILDI' && (
+                            <Button variant="outline" size="sm" onClick={() => setWorkflowAction('ic-kontrol-onayina-gonder')}
+                                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+                            >
+                                İKS Onayına Gönder
+                            </Button>
+                        )}
+                        {caps.canApproveWorkflow && finding.workflowStatus === 'IC_KONTROL_ONAYINA_GONDERILDI' && (
+                            <>
+                                <Button variant="outline" size="sm" onClick={() => setWorkflowAction('mutabakat-onayla')}
+                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                                >
+                                    Mutabakatı Onayla
+                                </Button>
+                                <Button variant="outline" size="sm" onClick={() => setWorkflowAction('mutabakat-geri-gonder')}
+                                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>}
+                                >
+                                    Birime Geri Gönder
+                                </Button>
+                            </>
+                        )}
+                                </div>
+                            </div>
+                        </DetailSection>
                         {/* Bulgu Metni / Özeti */}
                         <DetailSection title="Bulgu Özeti & Metni">
                             {finding.summary && (
@@ -872,8 +864,8 @@ export default function FindingDetailPage() {
                                                                 onSubmit: (r) => op('delete-reject', 'Silme reddedildi', 'Aksiyon korunuyor.', r) })}>Silmeyi reddet</Button>
                                                         )}
                                                         {aCaps.canRequestDelete && (
-                                                            <Button variant="ghost" size="sm" onClick={() => askReason({ title: `${action.actionId} — silme talebi`, label: 'Silme gerekçesi (ikinci kontrolcü onayına gider)', confirm: 'Silme talebi gönder', danger: true,
-                                                                onSubmit: (r) => op('delete-request', 'Silme talebi gönderildi', 'İkinci kontrolcü onaylayınca aksiyon silinecek.', r) })}>Sil</Button>
+                                                            <Button variant="ghost" size="sm" onClick={() => askReason({ title: `${action.actionId} — silme talebi`, label: 'Silme gerekçesi (yönetici onayına gider)', confirm: 'Silme talebi gönder', danger: true,
+                                                                onSubmit: (r) => op('delete-request', 'Silme talebi gönderildi', 'Yönetici onaylayınca aksiyon silinecek.', r) })}>Sil</Button>
                                                         )}
                                                         {!aCaps.canEdit && aCaps.canComplete && (
                                                             <Button variant="success" size="sm" onClick={() => completeOwnAction(action)}>
@@ -1038,8 +1030,8 @@ export default function FindingDetailPage() {
                                                             onSubmit: (r) => fuOp('delete-reject', 'Silme reddedildi', 'Takip çalışması korunuyor.', r) })}>Silmeyi reddet</Button>
                                                     )}
                                                     {canEditFollowUp && !!fu.secondControllerId && (
-                                                        <Button variant="ghost" size="sm" onClick={() => askReason({ title: `${fu.followUpId} — silme talebi`, label: 'Silme gerekçesi (ikinci kontrolcü onayına gider)', confirm: 'Silme talebi gönder', danger: true,
-                                                            onSubmit: (r) => fuOp('delete-request', 'Silme talebi gönderildi', 'İkinci kontrolcü onaylayınca takip silinecek.', r) })}>Sil</Button>
+                                                        <Button variant="ghost" size="sm" onClick={() => askReason({ title: `${fu.followUpId} — silme talebi`, label: 'Silme gerekçesi (yönetici onayına gider)', confirm: 'Silme talebi gönder', danger: true,
+                                                            onSubmit: (r) => fuOp('delete-request', 'Silme talebi gönderildi', 'Yönetici onaylayınca takip silinecek.', r) })}>Sil</Button>
                                                     )}
                                                     <Button variant="secondary" size="sm" onClick={() => { setSelectedFollowUp(fu); setFollowUpOpen(true); }}>
                                                         {canEditFollowUp ? 'Düzenle' : 'Görüntüle'}

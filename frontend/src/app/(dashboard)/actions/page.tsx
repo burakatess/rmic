@@ -364,7 +364,7 @@ function ActionsContent() {
         }
     };
 
-    // Maker-checker: toplu silme her aksiyon için gerekçeli silme talebi açar; ikinci kontrolcü onaylayınca silinir.
+    // Maker-checker: toplu silme her aksiyon için gerekçeli silme talebi açar; yönetici (talep eden hariç) onaylayınca silinir.
     const handleBulkDelete = async () => {
         const reason = deleteReason.trim();
         if (!reason) { showError('Gerekçe gerekli', 'Silme talebi için gerekçe yazın.'); return; }

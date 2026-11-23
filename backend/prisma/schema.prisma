@@ -1019,6 +1019,27 @@ model Finding {
   referencingTests ControlTest[]            @relation("ControlTestFindingReference")
   testLinks        ControlTestFindingLink[]
 
+  // ── Kapanış değerlendirmesi (bulgu yaşam döngüsü): Açık → Kapanış Değerlendirmesinde (status=PENDING_REVIEW)
+  // → Kapatıldı (CLOSED). 1. kontrolcü gönderir; 2. kontrolcü veya yönetici onaylar / gerekçeyle iade eder.
+  // Bulgunun açık kalması onay gerektirmez; aksiyon onayı bulguyu kapatmaz.
+  closureSubmittedAt   DateTime?
+  closureSubmittedById String?
+  closureNote          String?   @db.Text
+  closureDecidedAt     DateTime?
+  closureDecidedById   String?
+  closureReturnReason  String?   @db.Text
+
+  // ── Yönetici onaylı silme: talep kaydı silmez; yönetici (talep eden hariç) onaylayınca
+  // bulgu iptal edilir (workflowStatus=IPTAL + deletedAt), kayıt korunur.
+  deletionRequestedById   String?
+  deletionRequestedAt     DateTime?
+  deletionReason          String?   @db.Text
+  deletionRejectionReason String?   @db.Text
+  deletionDecidedById     String?
+  deletionDecidedAt       DateTime?
+  deletedAt               DateTime?
+  deletedById             String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1210,6 +1231,8 @@ model FindingFollowUp {
   deletionRequestedAt     DateTime?
   deletionReason          String?   @db.Text
   deletionRejectionReason String?   @db.Text
+  deletionDecidedById     String? // silme talebine karar veren yönetici
+  deletionDecidedAt       DateTime?
   deletedAt               DateTime?
   deletedById             String?
   // Değerlendirme ile ikinci kontrolcü onayı arasındaki yeni aksiyon taslağı.
@@ -1356,6 +1379,8 @@ model Action {
   deletionRequestedAt     DateTime?
   deletionReason          String?   @db.Text
   deletionRejectionReason String?   @db.Text
+  deletionDecidedById     String? // silme talebine karar veren yönetici
+  deletionDecidedAt       DateTime?
   deletedAt               DateTime?
   deletedById             String?
 

@@ -98,7 +98,7 @@ const statusConfig: Record<string, { label: string; variant: BV }> = {
     OPEN:             { label: 'Açık',             variant: 'warning' },
     IN_PROGRESS:      { label: 'Devam Ediyor',     variant: 'warning' },
     PARTIALLY_CLOSED: { label: 'Kısmen Kapatıldı', variant: 'info' },
-    PENDING_REVIEW:   { label: 'İnceleme Bekliyor', variant: 'neutral' },
+    PENDING_REVIEW:   { label: 'Kapanış Değerlendirmesinde', variant: 'warning' },
     CLOSED:           { label: 'Kapatıldı',        variant: 'success' },
     VERIFIED:         { label: 'Doğrulandı',       variant: 'low' },
 };

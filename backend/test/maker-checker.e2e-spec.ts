@@ -138,7 +138,8 @@ describe('E2E — Kontrolcü zinciri ve maker-checker', () => {
             const { actionId, followUpId } = await approvedAction(fId);
             await approveFu(fId, followUpId, { result: 'YETERLI' });
             expect((await prisma.action.findUniqueOrThrow({ where: { id: actionId } })).status).toBe('KAPATILDI');
-            expect((await prisma.finding.findUniqueOrThrow({ where: { id: fId } })).status).toBe('CLOSED');
+            // Bulgu otomatik kapanmaz (kapanış değerlendirmesi gerekir); açık ama kısmen kapatılmış.
+            expect((await prisma.finding.findUniqueOrThrow({ where: { id: fId } })).status).toBe('PARTIALLY_CLOSED');
 
             await http().post(`/findings/${fId}/follow-ups/${followUpId}/revert`).set(as('maker')).send({ reason: 'x' }).expect(403);
             const rev = (await http().post(`/findings/${fId}/follow-ups/${followUpId}/revert`).set(as('checker')).send({ reason: 'Kanıt eksik' }).expect(201)).body;

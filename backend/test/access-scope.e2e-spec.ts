@@ -254,22 +254,38 @@ describe('E2E — Kayıt kapsamı (birim / atama / kurum geneli)', () => {
         });
     });
 
-    describe('Taslak bulgu silme (finding:delete:own)', () => {
-        it('AUDITOR kendi oluşturduğu taslağı siler; başkasının taslağı 403', async () => {
+    describe('Bulgu silme: talep + yönetici onayı (onaysız silme yok)', () => {
+        it('silme isteği gerekçesiz 400; gerekçeyle talep açar, kayıt silinmez; talep eden onaylayamaz; yönetici onayıyla iptal edilir', async () => {
             const own = await prisma.finding.create({
                 data: { findingId: 'SC-OWN', description: 'kendi taslağı', impact: 'e', severity: 'LOW', workflowStatus: 'TASLAK', createdById: ids.auditor },
             });
-            await http().delete(`/findings/${own.id}`).set(as('auditor')).expect(200);
-            expect(await prisma.finding.count({ where: { id: own.id } })).toBe(0);
-            await http().delete(`/findings/${ids.fADraft}`).set(as('auditor')).expect(403);
+            await http().delete(`/findings/${own.id}`).set(as('auditor')).send({}).expect(400);
+            const r = await http().delete(`/findings/${own.id}`).set(as('auditor')).send({ reason: 'Mükerrer açıldı' }).expect(200);
+            expect(r.body.requested).toBe(true);
+            const pending = await prisma.finding.findUniqueOrThrow({ where: { id: own.id } });
+            expect(pending).toMatchObject({ deletionRequestedById: ids.auditor, deletedAt: null, workflowStatus: 'TASLAK' });
+            await http().delete(`/findings/${own.id}`).set(as('auditor')).send({ reason: 'tekrar' }).expect(409);
+            await http().post(`/deletion-requests/FINDING/${own.id}/approve`).set(as('auditor')).expect(403);
+            await http().post(`/deletion-requests/FINDING/${own.id}/approve`).set(as('manager')).expect(201);
+            const done = await prisma.finding.findUniqueOrThrow({ where: { id: own.id } });
+            expect(done.workflowStatus).toBe('IPTAL');
+            expect(done.deletedAt).not.toBeNull();
+            expect(done.deletionDecidedById).toBe(ids.manager);
         });
 
-        it('RCM her taslağı silebilir ama süreç başlamış bulgu 409', async () => {
-            await http().delete(`/findings/${ids.fA}`).set(as('manager')).expect(409);
+        it('süreç başlamış bulgu için de yalnız talep açılır (doğrudan silinmez)', async () => {
+            await http().delete(`/findings/${ids.fA}`).set(as('manager')).send({ reason: 'Kapsam dışı' }).expect(200);
+            const f = await prisma.finding.findUniqueOrThrow({ where: { id: ids.fA } });
+            expect(f.deletedAt).toBeNull();
+            expect(f.deletionRequestedAt).not.toBeNull();
+            // Talebi reddet (sonraki testler bulguyu kullanabilsin); kendi talebini reddedemez.
+            await http().post(`/deletion-requests/FINDING/${ids.fA}/reject`).set(as('manager')).send({ reason: 'x' }).expect(403);
+            await http().post(`/deletion-requests/FINDING/${ids.fA}/reject`).set(as('admin')).send({ reason: 'Bulgu geçerli' }).expect(201);
+            expect((await prisma.finding.findUniqueOrThrow({ where: { id: ids.fA } })).deletionRequestedAt).toBeNull();
         });
 
         it('VIEWER silme izni olmadan 403', async () => {
-            await http().delete(`/findings/${ids.fADraft}`).set(as('viewerA')).expect(403);
+            await http().delete(`/findings/${ids.fADraft}`).set(as('viewerA')).send({ reason: 'x' }).expect(403);
         });
     });
 
