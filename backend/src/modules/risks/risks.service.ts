@@ -198,6 +198,11 @@ export class RisksService {
                         },
                     },
                 },
+                // Bulgu ekranından yapılan doğrudan risk eşleştirmeleri (çoktan çoğa, iki yönlü görünüm).
+                linkedFindings: {
+                    where: sc.finding ?? undefined,
+                    select: { id: true, findingId: true, summary: true, description: true, severity: true, status: true, workflowStatus: true, resolutionStatus: true, control: { select: { controlId: true, name: true } } },
+                },
                 // Keep direct findings for backward compatibility
                 findings: {
                     where: sc.finding ?? undefined,

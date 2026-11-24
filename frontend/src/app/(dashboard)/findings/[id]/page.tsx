@@ -14,12 +14,13 @@ import { PermissionGate, useAuth } from '@/components/auth';
 import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import AddActionModal from '@/components/modals/AddActionModal';
 import { FindingFollowUpModal } from '@/components/modals/FindingFollowUpModal';
+import { RiskLinksPanel } from '@/components/risks/RiskLinksPanel';
 import { WorkflowBar } from '@/components/workflow/WorkflowBar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Attachment { id: string; fileName?: string; originalName: string; displayName?: string | null; description?: string | null; mimeType: string; sizeBytes: number; createdAt: string }
-interface LinkedRisk { id: string; riskId: string; name: string; status: string; residualRiskScore?: number; inherentRiskScore?: number; owner?: { firstName: string; lastName: string } }
+interface LinkedRisk { id: string; riskId: string; name: string; description?: string | null; status: string; residualRiskScore?: number; inherentRiskScore?: number; owner?: { firstName: string; lastName: string } }
 interface LinkedControl { id: string; controlId: string; name: string; directorate?: string; frequency?: string; status?: string; effectivenessStatus?: string }
 interface Action {
     id: string; actionId: string; description: string; status: string; dueDate: string; completedAt?: string | null;
@@ -1095,35 +1096,12 @@ export default function FindingDetailPage() {
 
                 {/* ═══════ RİSKLER TAB ═══════ */}
                 {activeTab === 'riskler' && (
-                    <div className="space-y-4">
-                        <h2 className="text-sm font-semibold text-slate-700">İlişkili Riskler ({finding.linkedRisks.length})</h2>
-                        {finding.linkedRisks.length === 0 ? (
-                            <div className="bg-white border border-dashed border-slate-200 rounded-xl">
-                                <EmptyState
-                                    title="İlişkili risk yok"
-                                    description="Bu bulgu herhangi bir riskle ilişkilendirilmemiş."
-                                />
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-2 gap-4">
-                                {finding.linkedRisks.map(r => (
-                                    <Link key={r.id} href={`/risks/${r.id}`}
-                                        className="bg-white border border-slate-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-md transition-all group">
-                                        <div className="flex items-start justify-between mb-2">
-                                            <span className="font-mono text-sm font-bold text-blue-700 group-hover:text-blue-900">{r.riskId}</span>
-                                            {r.residualRiskScore != null && (
-                                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${r.residualRiskScore >= 15 ? 'bg-red-100 text-red-700' : r.residualRiskScore >= 8 ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
-                                                    Skor: {r.residualRiskScore}
-                                                </span>
-                                            )}
-                                        </div>
-                                        <p className="text-sm text-slate-700 font-medium">{r.name}</p>
-                                        {r.owner && <p className="text-xs text-slate-400 mt-1">Sahip: {r.owner.firstName} {r.owner.lastName}</p>}
-                                    </Link>
-                                ))}
-                            </div>
-                        )}
-                    </div>
+                    <RiskLinksPanel
+                        risks={finding.linkedRisks}
+                        editable={caps.canLinkRisk && finding.workflowStatus !== 'IPTAL'}
+                        onLink={async (riskId) => { await api.linkRiskToFinding(finding.id, riskId); await load(); }}
+                        onUnlink={async (riskId) => { await api.unlinkRiskFromFinding(finding.id, riskId); await load(); }}
+                    />
                 )}
 
                 {/* ═══════ EKLER TAB ═══════ */}
