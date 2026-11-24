@@ -684,6 +684,10 @@ class ApiClient {
         return this.request(`/controls/annual-plan/${year}/approve`, { method: 'POST', body: { expectedRevision, note } });
     }
 
+    async getAnnualPlanHistory(year: number) {
+        return this.request(`/controls/annual-plan/${year}/history`) as Promise<Array<{ id: string; action: string; at: string; revision: number | null; note: string | null; by: { id: string; name: string } | null }>>;
+    }
+
     async requestAnnualPlanChanges(year: number, expectedRevision: number, note: string) {
         return this.request(`/controls/annual-plan/${year}/request-changes`, { method: 'POST', body: { expectedRevision, note } });
     }

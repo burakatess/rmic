@@ -211,6 +211,32 @@ export class AnnualPlanService {
         return { ...draft, items };
     }
 
+    /**
+     * Karar geçmişi: gönderme / onay / değişiklik talebi / uygulama olayları, denetim izinden okunur
+     * (ayrı tablo yok — kalıcı kayıt zaten AuditLog). Yeniden eskiye sıralı.
+     */
+    async getDecisionHistory(year: number) {
+        const draft = await this.prisma.annualPlanDraft.findUnique({ where: { year }, select: { id: true } });
+        if (!draft) return [];
+        const logs = await this.prisma.auditLog.findMany({
+            where: {
+                entityType: 'AnnualPlanDraft', entityId: draft.id,
+                action: { in: ['ANNUAL_PLAN_SUBMIT', 'ANNUAL_PLAN_APPROVE', 'ANNUAL_PLAN_REQUEST_CHANGES', 'ANNUAL_PLAN_APPLY'] },
+            },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            select: { id: true, action: true, createdAt: true, newValue: true, user: { select: { id: true, firstName: true, lastName: true } } },
+        });
+        return logs.map(l => {
+            const v = (l.newValue ?? {}) as { revision?: number; note?: string | null };
+            return {
+                id: l.id, action: l.action, at: l.createdAt,
+                revision: typeof v.revision === 'number' ? v.revision : null,
+                note: typeof v.note === 'string' && v.note ? v.note : null,
+                by: l.user ? { id: l.user.id, name: `${l.user.firstName ?? ''} ${l.user.lastName ?? ''}`.trim() || '—' } : null,
+            };
+        });
+    }
+
     // ─── Taslak satırlarını güncelle (iyimser eşzamanlılık) ──────────────────
     async saveDraftItems(year: number, userId: string, permissions: string[], dto: SaveDraftItemsDto, requestedScope: { scope?: any; directorateId?: string[] }) {
         await this.resolveAndAssertControlsInScope(userId, permissions, requestedScope, dto.items.map(i => i.controlId), year);

@@ -37,6 +37,11 @@ export class AnnualPlanController {
         return this.service.getDraft(year, userId);
     }
 
+    @Get(':year/history')
+    async getDecisionHistory(@Param('year', ParseIntPipe) year: number) {
+        return this.service.getDecisionHistory(year);
+    }
+
     // ─── Kontrolcü Atamaları sekmesi ──────────────────────────────────────────
     @Get(':year/assignments')
     async getAssignmentsView(
