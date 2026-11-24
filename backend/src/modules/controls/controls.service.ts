@@ -1039,6 +1039,8 @@ export class ControlsService {
         const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
         if (!test) throw new NotFoundException(`Test ${testId} not found`);
         if (test.status !== 'TAMAMLANDI') throw new BadRequestException('Onaylamak için test TAMAMLANDI statüsünde olmalı.');
+        // Sonucu (bulgu var/yok) olmayan test onaylanamaz: kontrol etkinliği hesaplanamaz (eski kayıtlarda görülebilir).
+        if (!test.findingStatus) throw new BadRequestException('Test sonucu (Bulgu Var / Bulgu Yok) girilmeden onaylanamaz; testi geri gönderin.');
 
         const approver = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: { select: { name: true } } } });
         const isAdmin = approver?.role?.name === 'SYSTEM_ADMIN';
@@ -1192,7 +1194,8 @@ export class ControlsService {
             where: { id: controlId },
             data: {
                 lastTestDate: latestApproved?.completedAt || latestApproved?.approvedAt || null,
-                lastTestResult: latestApproved ? effectiveness as any : null,
+                // TestResult enum'unda NOT_TESTED yok: sonucu olmayan (eski) onaylı testte Prisma 500 veriyordu.
+                lastTestResult: latestApproved && effectiveness !== 'NOT_TESTED' ? effectiveness : null,
                 effectivenessStatus: effectiveness as any,
             },
         });

@@ -37,6 +37,12 @@ const DECISION: Record<string, { label: string; variant: BV }> = {
     FOLLOWUP_DELETE_REJECTED: { label: 'Takip silme talebi reddedildi', variant: 'warning' },
     FINDING_CLOSED: { label: 'Bulgu kapatıldı', variant: 'success' },
     FINDING_CLOSURE_RETURNED: { label: 'Bulgu kapanışı iade edildi', variant: 'warning' },
+    FINDING_DELETED: { label: 'Bulgu silindi', variant: 'neutral' },
+    FINDING_DELETE_REJECTED: { label: 'Bulgu silme talebi reddedildi', variant: 'warning' },
+    TEST_RETURNED: { label: 'Test geri gönderildi — düzeltin', variant: 'critical' },
+    TEST_APPROVED: { label: 'Test onaylandı', variant: 'success' },
+    TEST_DELETED: { label: 'Test silindi', variant: 'neutral' },
+    TEST_DELETE_REJECTED: { label: 'Test silme talebi reddedildi', variant: 'warning' },
 };
 
 const fmt = (d?: string | null) => {

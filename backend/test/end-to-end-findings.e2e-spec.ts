@@ -2,7 +2,7 @@ import request from 'supertest';
 import { INestApplication } from '@nestjs/common';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { createTestApp } from './helpers/test-app';
-import { resetDatabase, seedRoles, createTestUser, E2E_TEST_PASSWORD } from './helpers/fixtures';
+import { resetDatabase, seedRoles, createTestUser, createTestControl, createTestControlTest, E2E_TEST_PASSWORD } from './helpers/fixtures';
 
 /**
  * Uçtan uca (kontrol → test → bulgu → aksiyon → takip → kapanış) kullanıcı testinde bulunan
@@ -157,5 +157,67 @@ describe('E2E — uçtan uca bulgu akışı düzeltmeleri', () => {
             controlId: 'BTK.9901', name: 'Ayrıcalıklı Hesap Gözden Geçirmesi', description: 'Tanım', frequency: 'QUARTERLY', directorateId: dir.id,
         }).expect(201)).body;
         expect(c).toMatchObject({ controlId: 'BTK.9901', name: 'Ayrıcalıklı Hesap Gözden Geçirmesi', directorate: 'E2E Bilgi Güvenliği' });
+    });
+    it('yeni aksiyon gerekli: eski aksiyon kapanır, yeni aksiyon kapanınca bulgu kapanışa hazır olur; geri alma eski aksiyonu açar', async () => {
+        const { fId, aId, fuId } = await findingWithApprovedAction(20);
+        const dir = await prisma.directorate.upsert({ where: { name: 'E2E Yeni Aksiyon Birimi' }, update: {}, create: { name: 'E2E Yeni Aksiyon Birimi' } });
+        await evaluateAndApprove(fuId, {
+            result: 'YENI_AKSIYON_GEREKLI', resolutionOutcome: 'YENI_AKSIYON_GEREKLI', currentStatusDetail: 'Yeni aksiyon gerekli',
+            newAction: { description: 'Yerine açılan yeni düzeltici aksiyon açıklaması', directorateId: dir.id, dueDate: day(90) },
+        });
+        const old = await prisma.action.findUniqueOrThrow({ where: { id: aId } });
+        expect(old.status).toBe('KAPATILDI');
+        expect(await prisma.auditLog.count({ where: { entityId: aId, action: 'ACTION_SUPERSEDED' } })).toBe(1);
+        const created = await prisma.action.findFirstOrThrow({ where: { findingId: fId, id: { not: aId } } });
+        expect(created.status).toBe('BEKLIYOR');
+        // Bulgu, yeni aksiyon açıkken kapanışa gönderilemez (engel yalnız yeni aksiyon).
+        const blocked = await wf('maker', 'FINDING', fId, 'COMPLETE', 'Erken').expect(400);
+        expect(blocked.body.message).toContain(created.actionId);
+        expect(blocked.body.message).not.toContain(old.actionId);
+
+        // Geri alma: eski aksiyon önceki durumuna döner, yeni aksiyon iptal edilir.
+        await http().post(`/follow-ups/${fuId}/revert`).set(as('checker')).send({ reason: 'Yanlış sonuç' }).expect(201);
+        expect((await prisma.action.findUniqueOrThrow({ where: { id: aId } })).status).not.toBe('KAPATILDI');
+        expect((await prisma.action.findUniqueOrThrow({ where: { id: created.id } })).status).toBe('IPTAL');
+
+        // Yeniden: yeni aksiyon → onu yeterli bul → bulgu "Kapanışa hazır".
+        await evaluateAndApprove(fuId, {
+            result: 'YENI_AKSIYON_GEREKLI', resolutionOutcome: 'YENI_AKSIYON_GEREKLI', currentStatusDetail: 'Yeni aksiyon gerekli',
+            newAction: { description: 'Yerine açılan yeni düzeltici aksiyon açıklaması 2', directorateId: dir.id, dueDate: day(95) },
+        });
+        const second = await prisma.action.findFirstOrThrow({ where: { findingId: fId, id: { notIn: [aId, created.id] } } });
+        const fu2 = await prisma.findingFollowUp.findFirstOrThrow({ where: { actionId: second.id, status: { not: 'IPTAL' } } });
+        await evaluateAndApprove(fu2.id, { result: 'YETERLI', currentStatusDetail: 'Tamam' });
+        expect(await prisma.finding.findUniqueOrThrow({ where: { id: fId } })).toMatchObject({ resolutionStatus: 'KAPANISA_HAZIR' });
+        await wf('maker', 'FINDING', fId, 'COMPLETE', 'Kapanış önerisi').expect(201);
+    });
+
+    it('kontrol testi geri gönderme ve onayı test edenin kararlarında ve bildiriminde görünür', async () => {
+        const c = await createTestControl(prisma, { ownerId: id.admin });
+        const t = await createTestControlTest(prisma, { controlId: c.id, assigneeId: id.maker, secondControllerId: id.checker, status: 'TAMAMLANDI' });
+        await wf('checker', 'CONTROL_TEST', t.id, 'RETURN', 'Kanıt dökümü eksik').expect(201);
+        let dec = (await http().get('/workflow-approvals').set(as('maker')).expect(200)).body.decisions;
+        expect(dec.find((d: any) => d.recordId === t.id)).toMatchObject({ kind: 'TEST_RETURNED', reason: 'Kanıt dökümü eksik', link: `/controls/testing/${t.id}`, finding: null });
+        const notes = (await http().get('/notifications').set(as('maker')).expect(200)).body as any[];
+        expect(notes.some(n => n.title === 'Kontrol testiniz düzeltme için geri gönderildi' && n.link === `/controls/testing/${t.id}`)).toBe(true);
+
+        // Sonucu girilmemiş test onaylanamaz (önceden 500 veriyordu: lastTestResult enum'u).
+        await prisma.controlTest.update({ where: { id: t.id }, data: { status: 'TAMAMLANDI', findingStatus: null } });
+        const noResult = await wf('checker', 'CONTROL_TEST', t.id, 'APPROVE');
+        expect(noResult.status).toBe(400);
+        await prisma.controlTest.update({ where: { id: t.id }, data: { findingStatus: 'BULGUSU_YOK' } });
+        await wf('checker', 'CONTROL_TEST', t.id, 'APPROVE').expect(201);
+        dec = (await http().get('/workflow-approvals').set(as('maker')).expect(200)).body.decisions;
+        expect(dec.find((d: any) => d.recordId === t.id)).toMatchObject({ kind: 'TEST_APPROVED' });
+    });
+
+    it('tam kullanıcı listesi (/admin/users) yalnız sistem yöneticisine açık; kişi seçimi listesi denetçiye açık kalır', async () => {
+        await http().get('/admin/users').set(as('maker')).expect(403);
+        await http().get('/admin/users').set(as('checker')).expect(403);
+        await http().get('/admin/users').set(as('admin')).expect(200);
+        const opts = (await http().get('/admin/users/options').set(as('maker')).expect(200)).body;
+        const rows = opts.data ?? opts;
+        expect(rows.length).toBeGreaterThan(0);
+        expect(rows[0].ldapDn).toBeUndefined();
     });
 });

@@ -11,11 +11,21 @@ const TYPE_LABEL: Record<DeletionRequestRow['type'], string> = {
     CONTROL_TEST: 'Kontrol Testi', PERIOD_CONTROL: 'Dönem Kontrolü', FINDING: 'Bulgu', ACTION: 'Aksiyon Planı', FOLLOW_UP: 'Takip Çalışması',
 };
 
+const CONSEQUENCE: Record<DeletionRequestRow['type'], string> = {
+    FINDING: 'Bulgu "İptal" olarak işaretlenir; bağlı açık aksiyon ve takip çalışmaları da iptal edilir. Kayıtlar denetim için korunur.',
+    ACTION: 'Aksiyon planı "Silindi" olarak işaretlenir; takip çalışmaları da iptal edilir. Kayıt denetim için korunur.',
+    FOLLOW_UP: 'Takip çalışması "Silindi" olarak işaretlenir. Kayıt denetim için korunur.',
+    CONTROL_TEST: 'Kontrol testi silinir ve listelerden düşer. Kayıt denetim için korunur.',
+    PERIOD_CONTROL: 'Dönem kontrolü kapsamdan çıkarılır; başlamamış testleri iptal edilir. Kayıt denetim için korunur.',
+};
+
 /** Yönetici onayı bekleyen silme talepleri (bulgu, aksiyon planı, takip, kontrol testi, dönem kontrolü). Talep eden kendi talebine karar veremez. */
 export function DeletionRequestsPanel({ onCountChange }: { onCountChange?: (n: number) => void }) {
     const { success, error: showError } = useToast();
     const [rows, setRows] = useState<DeletionRequestRow[] | null>(null);
     const [rejecting, setRejecting] = useState<DeletionRequestRow | null>(null);
+    // Silme onayı tek tıkla uygulanıyordu; sonucu (bağlı kayıtların iptali) gösteren teyit penceresi.
+    const [confirming, setConfirming] = useState<DeletionRequestRow | null>(null);
     const [reason, setReason] = useState('');
     const [busy, setBusy] = useState<string | null>(null);
 
@@ -29,7 +39,7 @@ export function DeletionRequestsPanel({ onCountChange }: { onCountChange?: (n: n
         try {
             await api.decideDeletion(r.type, r.id, approve, why);
             success(approve ? 'Silme onaylandı' : 'Talep reddedildi', approve ? `${r.code} silindi (kayıt tarihçe için korunur).` : `${r.code} mevcut haliyle kaldı.`);
-            setRejecting(null); setReason('');
+            setRejecting(null); setConfirming(null); setReason('');
             load();
         } catch (e) {
             showError('İşlem yapılamadı', (e as Error).message);
@@ -58,7 +68,7 @@ export function DeletionRequestsPanel({ onCountChange }: { onCountChange?: (n: n
                             <td className="px-4 py-3">
                                 {r.canDecide ? (
                                     <div className="flex gap-2 justify-end">
-                                        <Button size="sm" variant="danger" loading={busy === r.id} onClick={() => decide(r, true)}>Silmeyi onayla</Button>
+                                        <Button size="sm" variant="danger" loading={busy === r.id} onClick={() => setConfirming(r)}>Silmeyi onayla</Button>
                                         <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => { setReason(''); setRejecting(r); }}>Reddet</Button>
                                     </div>
                                 ) : <span className="text-xs text-slate-500">Başka bir yöneticinin kararını bekliyor</span>}
@@ -67,6 +77,14 @@ export function DeletionRequestsPanel({ onCountChange }: { onCountChange?: (n: n
                     ))}
                 </tbody>
             </table>
+            <Modal open={!!confirming} onClose={() => !busy && setConfirming(null)} size="md" title={confirming ? `${confirming.code}: silmeyi onayla` : ''}
+                description={confirming ? CONSEQUENCE[confirming.type] : ''}
+                footer={<div className="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setConfirming(null)} disabled={!!busy}>Vazgeç</Button>
+                    <Button variant="danger" size="sm" loading={!!busy} onClick={() => confirming && decide(confirming, true)}>Silmeyi onayla</Button>
+                </div>}>
+                {confirming?.reason && <p className="text-sm text-slate-700"><span className="font-semibold">Talep gerekçesi:</span> {confirming.reason}</p>}
+            </Modal>
             <Modal open={!!rejecting} onClose={() => !busy && setRejecting(null)} size="md" title={rejecting ? `${rejecting.code}: silme talebini reddet` : ''} description="Gerekçe talep edene iletilir ve kayıt mevcut haliyle kalır."
                 footer={<div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => setRejecting(null)}>Vazgeç</Button>

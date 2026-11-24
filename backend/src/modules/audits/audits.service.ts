@@ -1693,6 +1693,20 @@ export class AuditsService {
                         where: { actionId: createdAction.id, status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] } }, orderBy: { createdAt: 'desc' },
                     });
                     if (successor) await this.linkSuccessorFollowUp(findingId, updated, successor, createdAction, userId, tx);
+                    // Eski aksiyon, yerine açılan yeni aksiyonla kapanır (kullanıcı kararı): aksi hâlde açık kalıp
+                    // kendine takip açılmadığından bulgu hiç kapanışa gönderilemiyordu. Kapanışı yeni aksiyon belirler.
+                    // Önceki durum onay yan etkilerinde saklıdır; takip onayı geri alınırsa aksiyon eski durumuna döner.
+                    await tx.action.update({ where: { id: updated.actionId }, data: { status: 'KAPATILDI', completedAt: new Date() } });
+                    await this.recordAuditTrail({
+                        findingId, followUpId: updated.id, actionId: updated.actionId, operation: 'ACTION_CLOSED', userId,
+                        explanation: `Yerine yeni aksiyon açıldı (${createdAction.actionId}); aksiyon kapatıldı.`,
+                    }, tx);
+                    await tx.auditLog.create({
+                        data: {
+                            userId, action: 'ACTION_SUPERSEDED', entityType: 'Action', entityId: updated.actionId,
+                            newValue: { status: 'KAPATILDI', supersededBy: createdAction.id, followUpId: updated.id },
+                        },
+                    });
                 }
             }
 

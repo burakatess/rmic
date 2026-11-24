@@ -38,6 +38,12 @@ const DECISION_TITLE: Record<DecisionKind, string> = {
     FOLLOWUP_DELETE_REJECTED: 'Takip silme talebiniz reddedildi',
     FINDING_CLOSED: 'Bulgu kapanışı onaylandı',
     FINDING_CLOSURE_RETURNED: 'Bulgu kapanışı iade edildi',
+    FINDING_DELETED: 'Bulgu silme talebiniz onaylandı',
+    FINDING_DELETE_REJECTED: 'Bulgu silme talebiniz reddedildi',
+    TEST_RETURNED: 'Kontrol testiniz düzeltme için geri gönderildi',
+    TEST_APPROVED: 'Kontrol testiniz onaylandı',
+    TEST_DELETED: 'Kontrol testi silme talebiniz onaylandı',
+    TEST_DELETE_REJECTED: 'Kontrol testi silme talebiniz reddedildi',
 };
 
 @Injectable()

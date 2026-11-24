@@ -1148,7 +1148,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
     });
 
     describe('Yeni Aksiyon Gerekli — Zorunlu Alanlar', () => {
-        it('newAction eksiksiz gönderilirse: yeni Action tam olarak verilen bilgilerle oluşur + otomatik FollowUp kurulur; orijinal Action durumu değişmez', async () => {
+        it('newAction eksiksiz gönderilirse: yeni Action tam olarak verilen bilgilerle oluşur + otomatik FollowUp kurulur; orijinal Action "yerine yeni aksiyon açıldı" olarak kapanır', async () => {
             const { findingId } = await setupFinding();
             const originalAction = await addAction(findingId);
             const followUp = await getFollowUpForAction(findingId, originalAction.id);
@@ -1178,10 +1178,10 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             expect(newAction.directorateId).toBe(e2eDirectorateId);
             expect(newAction.responsibleDepartment).toBe('E2E Yeni Aksiyon Birimi');
 
-            // Not (ürün kuralı doğrulaması): orijinal aksiyonun durumu YENI_AKSIYON_GEREKLI
-            // dalında DOKUNULMUYOR — yalnızca yeni bir Action ekleniyor, eskisi ne ise öyle kalıyor.
+            // Ürün kuralı (2026-11 kullanıcı kararı): orijinal aksiyon, yerine açılan yeni aksiyonla kapanır.
+            // Önceden açık kalıyor ve kendine takip açılmadığından bulgu hiç kapanışa gönderilemiyordu.
             const originalAfter = finding.actions.find((a: any) => a.id === originalAction.id);
-            expect(originalAfter.status).toBe(originalAction.status);
+            expect(originalAfter.status).toBe('KAPATILDI');
 
             // Yeni aksiyon için otomatik FollowUp oluşmuş olmalı
             const newFollowUp = await getFollowUpForAction(findingId, newAction.id);

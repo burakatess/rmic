@@ -11,7 +11,7 @@ import {
     DataTable,
     StatusBadge,
     Button,
-    ConfirmDialog,
+    Modal,
     KpiCard,
     KpiGrid,
     QuickFilterBar,
@@ -197,6 +197,7 @@ function FindingsContent() {
     const canDeleteFindings = hasAnyPermission(['finding:delete', 'finding:delete:own']);
     const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [deleteReason, setDeleteReason] = useState('');
 
     // Filters
     const [searchQuery, setSearchQuery] = useState('');
@@ -330,27 +331,29 @@ function FindingsContent() {
 
     // ── Bulk Delete ───────────────────────────────────────────────────────────
 
+    // Toplu "sil" artık doğrudan silmez: seçilen her bulgu için gerekçeli silme talebi açar (yönetici onaylar).
+    // Önceki ekran gerekçe göndermediği için sunucu her bulguyu reddediyor, üstelik "kalıcı silinir" diyordu.
     const handleBulkDelete = async () => {
+        if (!deleteReason.trim()) return;
         setDeleting(true);
         try {
-            // Her bulgu ayrı değerlendirilir: biri reddedilse (ör. 409 — süreç başlamış)
-            // diğerleri silinir ve ekran yalnız gerçekten silinenleri listeden çıkarır.
-            const deletedIds = new Set<string>();
+            const requested: string[] = [];
             const failures: string[] = [];
             for (const id of selectedRows) {
+                const label = findings.find(f => f.id === id)?.findingId || id;
                 try {
-                    await api.deleteFinding(id);
-                    deletedIds.add(id);
+                    await api.requestDeletion('FINDING', id, deleteReason.trim());
+                    requested.push(label);
                 } catch (err) {
-                    const label = findings.find(f => f.id === id)?.findingId || id;
-                    failures.push(`${label}: ${err instanceof Error ? err.message : 'silinemedi'}`);
+                    failures.push(`${label}: ${err instanceof Error ? err.message : 'talep açılamadı'}`);
                 }
             }
-            setFindings(prev => prev.filter(f => !deletedIds.has(f.id)));
-            setSelectedRows(prev => new Set([...prev].filter(id => !deletedIds.has(id))));
+            setSelectedRows(new Set());
             setConfirmDeleteOpen(false);
-            if (deletedIds.size > 0) success('Başarılı', `${deletedIds.size} bulgu silindi.`);
-            if (failures.length > 0) showError(`${failures.length} bulgu silinemedi`, failures.join('\n'));
+            setDeleteReason('');
+            if (requested.length > 0) success('Silme talebi gönderildi', `${requested.length} bulgu için talep yönetici onayına gitti.`);
+            if (failures.length > 0) showError(`${failures.length} bulgu için talep açılamadı`, failures.join('\n'));
+            loadFindings();
         } finally {
             setDeleting(false);
         }
@@ -667,7 +670,7 @@ function FindingsContent() {
                                 onClick={() => setConfirmDeleteOpen(true)}
                                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
                             >
-                                {selectedRows.size} Seçiliyi Sil
+                                {selectedRows.size} Seçili İçin Silme Talebi
                             </Button>
                         )}
                         <Button
@@ -775,16 +778,21 @@ function FindingsContent() {
                 }
             />
 
-            <ConfirmDialog
+            <Modal
                 open={confirmDeleteOpen}
-                onClose={() => setConfirmDeleteOpen(false)}
-                onConfirm={handleBulkDelete}
-                title="Bulgular Silinecek"
-                message={`Seçilen ${selectedRows.size} bulgu kalıcı olarak silinecektir. Yalnız TASLAK ve süreci başlamamış bulgular silinebilir (yetkiniz yalnız kendi taslaklarınızı kapsıyorsa diğerleri reddedilir); diğerleri için İptal Et kullanın. Bu işlem geri alınamaz.`}
-                confirmLabel="Evet, Sil"
-                loading={deleting}
-                variant="danger"
-            />
+                onClose={() => !deleting && setConfirmDeleteOpen(false)}
+                size="md"
+                title="Seçili bulgular için silme talebi"
+                description={`${selectedRows.size} bulgu için silme talebi açılacak. Kayıtlar hemen silinmez; yönetici (talep eden hariç) onaylarsa "İptal" olarak işaretlenir ve denetim için korunur.`}
+                footer={<div className="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setConfirmDeleteOpen(false)} disabled={deleting}>Vazgeç</Button>
+                    <Button variant="danger" size="sm" onClick={handleBulkDelete} loading={deleting} disabled={!deleteReason.trim()}>Silme talebi gönder</Button>
+                </div>}
+            >
+                <label htmlFor="bulk-delete-reason" className="block text-xs font-semibold text-slate-600 mb-1">Silme gerekçesi *</label>
+                <textarea id="bulk-delete-reason" value={deleteReason} onChange={e => setDeleteReason(e.target.value)} rows={3} maxLength={2000} autoFocus
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+            </Modal>
 
             <CreateFindingModal
                 isOpen={isCreateFindingOpen}
