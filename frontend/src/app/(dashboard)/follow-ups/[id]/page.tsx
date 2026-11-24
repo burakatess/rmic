@@ -96,12 +96,15 @@ export default function FollowUpDetailPage({ params }: { params: Promise<{ id: s
                                     {!a.findingId && <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 rounded px-1.5 py-0.5">Manuel</span>}
                                 </div>
                                 {a.title && <h3 className="text-base font-semibold text-slate-900">{a.title}</h3>}
-                                <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap" data-testid="related-action-description">{a.description}</p>
+                                <div data-testid="related-action-description-block" className="bg-slate-50 border border-slate-100 rounded-lg px-4 py-3">
+                                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Aksiyon açıklaması</p>
+                                    <p className="text-sm xl:text-[15px] text-slate-800 leading-relaxed whitespace-pre-wrap break-words" data-testid="related-action-description">{a.description || 'Açıklama girilmemiş.'}</p>
+                                </div>
                                 <FieldGrid className="pt-4 border-t border-slate-100">
                                     <Field label="Sorumlu">{pname(a.owner)}</Field>
                                     <Field label="Hedef tarih">{fmt(a.dueDate)}</Field>
                                     <Field label="Birim">{a.responsibleDepartment || '—'}</Field>
-                                    <Field label="Kontrolcüler">{pname(a.firstController)} · {pname(a.secondController)}</Field>
+                                    <Field label="Kontrolcüler">{a.firstController || a.secondController ? `${pname(a.firstController)} · ${pname(a.secondController)}` : <span className="text-amber-700">Atanmamış</span>}</Field>
                                 </FieldGrid>
                             </div>
                         ) : <p className="text-sm text-slate-500">Bu takip bir aksiyon planına bağlı değil (eski kayıt).</p>}
