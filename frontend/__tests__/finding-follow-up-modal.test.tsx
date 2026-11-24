@@ -6,6 +6,7 @@ jest.mock('@/lib/api', () => ({
     __esModule: true,
     default: {
         getUserChoices: jest.fn().mockResolvedValue([]),
+        getApproverChoices: jest.fn().mockResolvedValue([]),
         getDirectorates: jest.fn().mockResolvedValue([{ id: 'dir-1', name: 'Bilgi Teknolojileri' }]),
         updateFollowUp: jest.fn().mockResolvedValue({}),
         assignSecondController: jest.fn(),
@@ -49,7 +50,8 @@ describe('Bulgu takip değerlendirme formu', () => {
         await waitFor(() => expect(api.updateFollowUp).toHaveBeenCalledWith(
             'f-1', 'fu-1', expect.objectContaining({ result: 'YETERLI', resolutionOutcome: null }),
         ));
-        expect(screen.getByText(/Kapanış kararı elle seçilmez/)).toBeInTheDocument();
+        // Bulgu otomatik kapanmaz; tüm aksiyonları kapanınca "Kapanışa hazır" olur (eski "bulgu kapanır" metni yanıltıcıydı).
+        expect(screen.getByText(/Bulgu otomatik kapanmaz/)).toBeInTheDocument();
     });
 
     it('Kaydet onaya göndermez; ayrı düğme TAMAMLANDI ile ikinci kontrolcü onayına gönderir', async () => {

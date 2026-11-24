@@ -63,8 +63,7 @@ export class ControlsService {
             this.prisma.control.findMany({
                 where,
                 include: {
-                    owner: { select: { id: true, firstName: true, lastName: true, email: true, department: true } },
-                    directorateRel: { select: { id: true, name: true, code: true } },
+                    owner: { select: { id: true, firstName: true, lastName: true, email: true, department: true } },                    directorateRel: { select: { id: true, name: true, code: true } },
                     risks: { where: sc.risk ? { risk: sc.risk } : undefined, include: { risk: { select: { id: true, riskId: true, name: true } } } },
                     yearScopes: { where: { status: 'ACTIVE' }, select: { year: true }, orderBy: { year: 'asc' } },
                     _count: {
@@ -268,11 +267,14 @@ export class ControlsService {
         if (isActive === false || status === 'PASSIVE') controlStatus = 'PASSIVE';
 
         // directorateId FK doğrulaması — Prisma FK 500 yerine okunur 400
+        let directorateName: string | null = null;
         if (data.directorateId) {
             const dirExists = await this.prisma.directorate.findUnique({
-                where: { id: data.directorateId }, select: { id: true },
+                where: { id: data.directorateId }, select: { id: true, name: true },
             });
             if (!dirExists) throw new BadRequestException('Geçersiz direktörlük: seçilen direktörlük bulunamadı');
+            // Eski serbest metin `directorate` alanı FK'den türetilir (onu okuyan liste/rapor/bulgu formu boş kalmasın).
+            directorateName = dirExists.name;
         }
 
         const controlId = data.controlId || await generateControlCode(this.prisma);
@@ -303,6 +305,7 @@ export class ControlsService {
                     status: controlStatus,
                     ownerId: userId, // kaydı oluşturan — artık "atanan kontrolcü" değil, DTO'dan kabul edilmez
                     directorateId: data.directorateId || null,
+                    ...(directorateName ? { directorate: directorateName } : {}),
                 },
                 include: {
                     owner: { select: { id: true, firstName: true, lastName: true, email: true } },
@@ -347,14 +350,16 @@ export class ControlsService {
         }
 
         // directorateId doğrulaması: FK 500 yerine 400
+        let directorateName: string | null = null;
         if (data.directorateId) {
             const dirExists = await this.prisma.directorate.findUnique({
                 where: { id: data.directorateId },
-                select: { id: true },
+                select: { id: true, name: true },
             });
             if (!dirExists) {
                 throw new BadRequestException('Geçersiz direktörlük: seçilen direktörlük bulunamadı');
             }
+            directorateName = dirExists.name;
         }
 
         // Whitelist: yalnızca Control şemasında olan alanlar
@@ -377,6 +382,8 @@ export class ControlsService {
         if (data.selectedMonths !== undefined) updateData.selectedMonths = data.selectedMonths;
         if (controlStatus !== undefined) updateData.status = controlStatus;
         if (data.directorateId !== undefined) updateData.directorateId = data.directorateId || null;
+        // Eski serbest metin `directorate` FK ile senkron tutulur.
+        if (directorateName) updateData.directorate = directorateName;
 
         // Kontrol SÜRÜMÜ — yalnızca tanım/test adımları/mehaz/ad GERÇEKTEN
         // değiştiyse artar (madde 17). Bu, uygulanmış Dönem Kontrollerinin
@@ -552,6 +559,16 @@ export class ControlsService {
             { control: { name: { contains: search, mode: 'insensitive' } } },
             { directorate: { name: { contains: search, mode: 'insensitive' } } },
         ] }];
+        // Sütun süzgeçleri sunucuda uygulanır: istemci yalnız açık sayfayı süzerse diğer sayfalardaki
+        // kayıtlar "bulunamadı" görünür. Girdi 200 karakterle sınırlanır (CLAUDE.md: contains + insensitive).
+        const col = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : null);
+        const testNoQ = col(query.testNo), controlNameQ = col(query.controlName), directorateQ = col(query.directorateName);
+        if (testNoQ) where.AND = [...(where.AND || []), { testNo: { contains: testNoQ, mode: 'insensitive' } }];
+        if (controlNameQ) where.AND = [...(where.AND || []), { OR: [
+            { control: { name: { contains: controlNameQ, mode: 'insensitive' } } },
+            { control: { controlId: { contains: controlNameQ, mode: 'insensitive' } } },
+        ] }];
+        if (directorateQ) where.AND = [...(where.AND || []), { directorate: { name: { contains: directorateQ, mode: 'insensitive' } } }];
         if (period) where.periodKey = period;
         if (frequency) {
             where.OR = [

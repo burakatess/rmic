@@ -18,7 +18,7 @@ const RELATION: Record<LinkedFinding['relation'], { label: string; cls: string }
     OTHER_CONTROL: { label: 'Başka kontrol', cls: 'bg-violet-50 text-violet-700' },
 };
 const WF: Record<string, string> = { TASLAK: 'Taslak', MUTABAKATA_GONDERILDI: 'Mutabakatta', IC_KONTROL_ONAYINA_GONDERILDI: 'İç kontrol onayında', MUTABAKAT_YAPILDI: 'Mutabakat yapıldı', IPTAL: 'İptal' };
-const RES: Record<string, string> = { DEVAM_EDIYOR: 'Açık', KISMEN_KAPATILDI: 'Kısmen kapatıldı', KAPATILDI: 'Kapatıldı', ERTELENDI: 'Ertelendi', YENI_AKSIYON_GEREKLI: 'Yeni aksiyon gerekli' };
+const RES: Record<string, string> = { DEVAM_EDIYOR: 'Açık', KISMEN_KAPATILDI: 'Kısmen kapatıldı', KAPANISA_HAZIR: 'Kapanışa hazır', KAPATILDI: 'Kapatıldı', ERTELENDI: 'Ertelendi', YENI_AKSIYON_GEREKLI: 'Yeni aksiyon gerekli' };
 
 /** Kontrol sonucuna eklenecek referans cümlesi (kullanıcı metinde düzenleyebilir). */
 export function buildFindingReferenceText(findings: Array<{ findingId: string }>): string {

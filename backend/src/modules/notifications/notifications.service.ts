@@ -22,6 +22,7 @@ const PENDING_TITLE: Record<PendingKind, string> = {
     ACTION_DELETION: 'Onayınızı bekleyen aksiyon silme talebi',
     FOLLOWUP_APPROVAL: 'Onayınızı bekleyen takip çalışması',
     FOLLOWUP_DELETION: 'Onayınızı bekleyen takip silme talebi',
+    FINDING_CLOSURE: 'Onayınızı bekleyen bulgu kapanış değerlendirmesi',
 };
 
 const DECISION_TITLE: Record<DecisionKind, string> = {
@@ -35,6 +36,8 @@ const DECISION_TITLE: Record<DecisionKind, string> = {
     FOLLOWUP_REVERTED: 'Takip onayı geri alındı',
     FOLLOWUP_DELETED: 'Takip silme talebiniz onaylandı',
     FOLLOWUP_DELETE_REJECTED: 'Takip silme talebiniz reddedildi',
+    FINDING_CLOSED: 'Bulgu kapanışı onaylandı',
+    FINDING_CLOSURE_RETURNED: 'Bulgu kapanışı iade edildi',
 };
 
 @Injectable()

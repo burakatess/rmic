@@ -9,10 +9,20 @@ import { PrismaService } from '../../prisma';
  * Kapsam: kayıt yalnız kullanıcının ikinci (bekleyenler) veya birinci (kararlar)
  * kontrolcü olduğu satırlardan oluşur; başka kayıt kapsamı gerekmez.
  */
-export type PendingKind = 'ACTION_APPROVAL' | 'ACTION_DELETION' | 'FOLLOWUP_APPROVAL' | 'FOLLOWUP_DELETION';
+export type PendingKind = 'ACTION_APPROVAL' | 'ACTION_DELETION' | 'FOLLOWUP_APPROVAL' | 'FOLLOWUP_DELETION' | 'FINDING_CLOSURE';
 export type DecisionKind =
     | 'ACTION_REJECTED' | 'ACTION_APPROVED' | 'ACTION_REVERTED' | 'ACTION_DELETED' | 'ACTION_DELETE_REJECTED'
-    | 'FOLLOWUP_REJECTED' | 'FOLLOWUP_APPROVED' | 'FOLLOWUP_REVERTED' | 'FOLLOWUP_DELETED' | 'FOLLOWUP_DELETE_REJECTED';
+    | 'FOLLOWUP_REJECTED' | 'FOLLOWUP_APPROVED' | 'FOLLOWUP_REVERTED' | 'FOLLOWUP_DELETED' | 'FOLLOWUP_DELETE_REJECTED'
+    | 'FINDING_CLOSED' | 'FINDING_CLOSURE_RETURNED';
+
+/**
+ * Bulgu kapanış değerlendirmesi: 2. kontrolcüsü olduğum, kapanışa gönderilmiş (PENDING_REVIEW) bulgular.
+ * Gönderen kendi değerlendirmesine karar veremez (audits.service.ts::assertClosureDecider).
+ */
+const closurePendingWhere = (userId: string) => ({
+    secondControllerId: userId, status: 'PENDING_REVIEW' as const, deletedAt: null,
+    workflowStatus: { not: 'IPTAL' as const }, NOT: { closureSubmittedById: userId },
+});
 
 export interface PendingApprovalItem {
     kind: PendingKind;
@@ -50,7 +60,7 @@ export class ApprovalsService {
 
     /** İkinci kontrolcü olarak kararımı bekleyen işler (en eski talep önce). */
     async pendingFor(userId: string): Promise<PendingApprovalItem[]> {
-        const [actionApprovals, actionDeletions, fuApprovals, fuDeletions] = await Promise.all([
+        const [actionApprovals, actionDeletions, fuApprovals, fuDeletions, closures] = await Promise.all([
             this.prisma.action.findMany({
                 where: { secondControllerId: userId, approvalState: 'ONAY_BEKLIYOR', deletedAt: null },
                 select: {
@@ -70,12 +80,17 @@ export class ApprovalsService {
                 where: { secondControllerId: userId, deletionRequestedAt: { not: null }, deletedAt: null },
                 select: { id: true, followUpId: true, deletionRequestedAt: true, deletionRequestedById: true, deletionReason: true, finding: findingSelect },
             }),
+            this.prisma.finding.findMany({
+                where: closurePendingWhere(userId),
+                select: { id: true, findingId: true, summary: true, closureNote: true, closureSubmittedAt: true, closureSubmittedById: true, updatedAt: true },
+            }),
         ]);
 
         const requesterIds = [...new Set([
             ...actionDeletions.map(a => a.deletionRequestedById),
             ...fuApprovals.map(f => f.evaluatorId),
             ...fuDeletions.map(f => f.deletionRequestedById),
+            ...closures.map(f => f.closureSubmittedById),
         ].filter((x): x is string => !!x))];
         const users = requesterIds.length
             ? await this.prisma.user.findMany({ where: { id: { in: requesterIds } }, select: { id: true, firstName: true, lastName: true } })
@@ -107,18 +122,26 @@ export class ApprovalsService {
                 finding: f.finding, requestedBy: (f.deletionRequestedById && byId.get(f.deletionRequestedById)) || null,
                 requestedAt: f.deletionRequestedAt!, reason: f.deletionReason, link: fuLink(f.id),
             })),
+            // Kapanış kararı değerlendirmenin okunmasını gerektirir: bulgu detayında verilir.
+            ...closures.map(f => ({
+                kind: 'FINDING_CLOSURE' as const, recordId: f.id, code: f.findingId, description: f.closureNote,
+                finding: { id: f.id, findingId: f.findingId, summary: f.summary },
+                requestedBy: (f.closureSubmittedById && byId.get(f.closureSubmittedById)) || null,
+                requestedAt: f.closureSubmittedAt ?? f.updatedAt, reason: null, link: link(f.id),
+            })),
         ];
         return items.sort((a, b) => +new Date(a.requestedAt) - +new Date(b.requestedAt));
     }
 
     async pendingCount(userId: string): Promise<number> {
-        const [a, b, c, d] = await Promise.all([
+        const [a, b, c, d, e] = await Promise.all([
             this.prisma.action.count({ where: { secondControllerId: userId, approvalState: 'ONAY_BEKLIYOR', deletedAt: null } }),
             this.prisma.action.count({ where: { secondControllerId: userId, deletionRequestedAt: { not: null }, deletedAt: null } }),
             this.prisma.findingFollowUp.count({ where: { secondControllerId: userId, status: 'TAMAMLANDI', approvalStatus: 'BEKLIYOR', result: { not: null }, deletedAt: null } }),
             this.prisma.findingFollowUp.count({ where: { secondControllerId: userId, deletionRequestedAt: { not: null }, deletedAt: null } }),
+            this.prisma.finding.count({ where: closurePendingWhere(userId) }),
         ]);
-        return a + b + c + d;
+        return a + b + c + d + e;
     }
 
     /**
@@ -137,7 +160,7 @@ export class ApprovalsService {
             deletedAt: true, deletedById: true, deletionReason: true, deletionRejectionReason: true, deletionRequestedAt: true, updatedAt: true,
             finding: findingSelect,
         } as const;
-        const [actions, fus] = await Promise.all([
+        const [actions, fus, closures] = await Promise.all([
             this.prisma.action.findMany({
                 where: {
                     firstControllerId: userId,
@@ -164,11 +187,20 @@ export class ApprovalsService {
                 },
                 select: fuSelect,
             }),
+            // Kapanışa gönderdiğim bulgular hakkındaki kararlar (onay = kapatıldı, iade = açık kaldı).
+            this.prisma.finding.findMany({
+                where: { closureSubmittedById: userId, closureDecidedAt: { gte: since }, deletedAt: null },
+                select: { id: true, findingId: true, summary: true, status: true, closureDecidedAt: true, closureReturnReason: true },
+            }),
         ]);
 
         const items: ApprovalDecisionItem[] = [];
+        // Manuel aksiyon planı / takibinde bulgu yoktur (finding = null): bağlantı kaydın kendi ekranına gider.
         const push = (kind: DecisionKind, r: { id: string; finding: any }, code: string, reason: string | null, date: Date | null) =>
-            date && items.push({ kind, recordId: r.id, code, finding: r.finding, reason, date, link: `/findings/${r.finding.id}` });
+            date && items.push({
+                kind, recordId: r.id, code, finding: r.finding ?? null, reason, date,
+                link: r.finding ? `/findings/${r.finding.id}` : kind.startsWith('ACTION_') ? `/actions/${r.id}` : `/follow-ups/${r.id}`,
+            });
 
         for (const a of actions) {
             if (a.deletedAt && a.deletedAt >= since) { push('ACTION_DELETED', a, a.actionId, a.deletionReason, a.deletedAt); continue; }
@@ -185,6 +217,11 @@ export class ApprovalsService {
             else if (f.revertedAt && f.revertedAt >= since) push('FOLLOWUP_REVERTED', f, f.followUpId, f.revertReason, f.revertedAt);
             else if (f.approvalStatus === 'ONAYLANDI' && f.approvedAt && f.approvedAt >= since) push('FOLLOWUP_APPROVED', f, f.followUpId, null, f.approvedAt);
             if (f.deletionRejectionReason && !f.deletionRequestedAt && f.updatedAt >= since) push('FOLLOWUP_DELETE_REJECTED', f, f.followUpId, f.deletionRejectionReason, f.updatedAt);
+        }
+        for (const f of closures) {
+            const self = { id: f.id, finding: { id: f.id, findingId: f.findingId, summary: f.summary } };
+            if (f.status === 'CLOSED') push('FINDING_CLOSED', self, f.findingId, null, f.closureDecidedAt);
+            else if (f.status !== 'PENDING_REVIEW' && f.closureReturnReason) push('FINDING_CLOSURE_RETURNED', self, f.findingId, f.closureReturnReason, f.closureDecidedAt);
         }
         return items.sort((a, b) => +new Date(b.date) - +new Date(a.date));
     }

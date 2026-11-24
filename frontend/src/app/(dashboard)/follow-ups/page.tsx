@@ -78,10 +78,11 @@ const resolutionConfig: Record<string, { label: string; variant: BV }> = {
 };
 
 const severityConfig: Record<string, { label: string; variant: BV }> = {
+    // Geçerli önem dereceleri KZ / KD; MEDIUM / LOW yalnız eski kayıtlarda bulunur.
     CRITICAL: { label: 'KZ', variant: 'critical' },
     HIGH:     { label: 'KD', variant: 'high' },
-    MEDIUM:   { label: 'ÖK', variant: 'medium' },
-    LOW:      { label: 'Düşük', variant: 'low' },
+    MEDIUM:   { label: 'Orta (eski)', variant: 'medium' },
+    LOW:      { label: 'Düşük (eski)', variant: 'low' },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -386,9 +387,9 @@ export default function FollowUpsPage() {
         },
         {
             key: 'severity',
-            header: 'Öncelik',
+            header: 'Önem',
             sortable: true,
-            defaultWidth: 80,
+            defaultWidth: 90,
             render: (f) => {
                 const sv = f.finding ? severityConfig[f.finding.severity] : undefined;
                 return sv ? <StatusBadge variant={sv.variant}>{sv.label}</StatusBadge> : <span className="text-slate-300 text-xs">—</span>;

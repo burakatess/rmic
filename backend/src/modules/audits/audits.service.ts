@@ -24,6 +24,22 @@ const isFutureIstanbulDate = (value: string): boolean => {
     return /^\d{4}-\d{2}-\d{2}$/.test(day) && !Number.isNaN(new Date(`${day}T00:00:00+03:00`).getTime()) && day > today;
 };
 
+/**
+ * Genel bulgu güncellemesi (PUT /findings/:id) için kilit kuralı. Kapalı (CLOSED), kapanış
+ * değerlendirmesindeki (PENDING_REVIEW), iptal edilmiş veya silinmiş bulgu içerik/durum olarak
+ * değiştirilemez; yalnız korumalı iş akışı işlemleri (geri al, iade et) bu durumları değiştirir.
+ */
+export function assertFindingEditable(f: { status: string; workflowStatus?: string | null; deletedAt?: Date | null }) {
+    if (f.deletedAt) throw new BadRequestException('Silinmiş bulgu düzenlenemez.');
+    if (f.workflowStatus === 'IPTAL') throw new BadRequestException('İptal edilmiş bulgu düzenlenemez.');
+    if (f.status === 'CLOSED') {
+        throw new BadRequestException('Kapalı bulgu düzenlenemez. Değişiklik gerekiyorsa 2. kontrolcü "Önceki aşamaya geri al" ile bulguyu yeniden açmalıdır.');
+    }
+    if (f.status === 'PENDING_REVIEW') {
+        throw new BadRequestException('Bulgu kapanış değerlendirmesinde; karar verilene kadar düzenlenemez. Değişiklik için 2. kontrolcü bulguyu iade etmelidir.');
+    }
+}
+
 // Prisma client VEYA transaction client — yardımcı metotlar ikisini de kabul eder
 // (onay zinciri tek transaction içinde aynı tx istemcisini kullanır, Madde 1).
 type PrismaLike = PrismaService | Prisma.TransactionClient;
@@ -491,6 +507,13 @@ export class AuditsService {
             );
         }
 
+        // Kilitli bulgu: kapalı, kapanış değerlendirmesinde, iptal veya silinmiş bulgu genel PUT ile
+        // değiştirilemez (aksi hâlde kapalı bulgu 2. kontrolcü onayı olmadan yeniden açılabiliyordu).
+        // Değişiklik gerekiyorsa önce "Önceki aşamaya geri al" / "İade et" korumalı işlemi kullanılır.
+        const before = await this.prisma.finding.findUnique({ where: { id } });
+        if (!before) throw new NotFoundException('Bulgu bulunamadı');
+        assertFindingEditable(before);
+
         let resolvedRelatedDepartment = relatedDepartment !== undefined ? (relatedDepartment || null) : undefined;
         if (directorateId) {
             const dir = await this.prisma.directorate.findUnique({ where: { id: directorateId }, select: { id: true, name: true } });
@@ -566,7 +589,7 @@ export class AuditsService {
             });
 
             await tx.auditLog.create({
-                data: { userId, action: 'UPDATE', entityType: 'Finding', entityId: id, newValue: finding },
+                data: { userId, action: 'UPDATE', entityType: 'Finding', entityId: id, oldValue: before as any, newValue: finding },
             });
 
             return finding;
@@ -817,7 +840,7 @@ export class AuditsService {
     }
 
     // IC_KONTROL_ONAYINA_GONDERILDI → MUTABAKAT_YAPILDI
-    async mutabakatOnayla(id: string, data: { internalControlAssessment?: string; resolutionStatus?: string }, userId: string) {
+    async mutabakatOnayla(id: string, data: { internalControlAssessment?: string }, userId: string) {
         const finding = await this.prisma.finding.findUnique({ where: { id }, select: { workflowStatus: true } });
         if (!finding) throw new NotFoundException(`Finding ${id} not found`);
         if (finding.workflowStatus !== 'IC_KONTROL_ONAYINA_GONDERILDI') {
@@ -834,12 +857,9 @@ export class AuditsService {
         if (lastSendToApproval?.evaluator && lastSendToApproval.evaluator === userId) {
             throw new ForbiddenException('Kendi gönderdiğiniz mutabakatı onaylayamazsınız.');
         }
+        // Mutabakat çözüm durumunu değiştirmez (bilgi kaydı); kapanış yalnız kapanış değerlendirmesiyle.
         const updateData: Record<string, unknown> = {};
         if (data.internalControlAssessment) updateData.internalControlAssessment = data.internalControlAssessment;
-        if (data.resolutionStatus) {
-            updateData.resolutionStatus = data.resolutionStatus;
-            if (data.resolutionStatus === 'KAPATILDI') updateData.closedDate = new Date();
-        }
         return this.transitionWorkflow(
             id, 'IC_KONTROL_ONAYINA_GONDERILDI', 'MUTABAKAT_YAPILDI', userId,
             'Mutabakat İKS tarafından onaylandı.', updateData,
@@ -986,9 +1006,16 @@ export class AuditsService {
         return f;
     }
 
-    /** Açık durumdaki bulgunun durum değeri (iade/geri almada): kapalı aksiyon varsa kısmen kapatıldı. */
+    /**
+     * Açık durumdaki bulgunun durum değeri (iade/geri almada): tüm aksiyonlar kapalıysa "kapanışa hazır",
+     * bir kısmı kapalıysa "kısmen kapatıldı", hiçbiri kapalı değilse "devam ediyor".
+     */
     private async openStatusFor(id: string, db: PrismaLike) {
-        const closed = await db.action.count({ where: { findingId: id, deletedAt: null, status: { in: ['KAPATILDI', 'CLOSED'] } } });
+        const [closed, live] = await Promise.all([
+            db.action.count({ where: { findingId: id, deletedAt: null, status: { in: ['KAPATILDI', 'CLOSED'] } } }),
+            db.action.count({ where: { findingId: id, deletedAt: null, status: { not: 'IPTAL' } } }),
+        ]);
+        if (closed > 0 && closed === live) return { status: 'PARTIALLY_CLOSED' as const, resolutionStatus: 'KAPANISA_HAZIR' as const };
         return closed > 0
             ? { status: 'PARTIALLY_CLOSED' as const, resolutionStatus: 'KISMEN_KAPATILDI' as const }
             : { status: 'IN_PROGRESS' as const, resolutionStatus: 'DEVAM_EDIYOR' as const };
@@ -1068,7 +1095,7 @@ export class AuditsService {
         const f = await this.loadFindingForClosure(id);
         return this.prisma.$transaction(async (tx) => {
             if (f.status === 'CLOSED') {
-                const res = await tx.finding.updateMany({ where: { id, status: 'CLOSED' }, data: { status: 'PENDING_REVIEW', resolutionStatus: 'KISMEN_KAPATILDI', closedDate: null, closureDecidedAt: null, closureDecidedById: null } });
+                const res = await tx.finding.updateMany({ where: { id, status: 'CLOSED' }, data: { status: 'PENDING_REVIEW', resolutionStatus: 'KAPANISA_HAZIR', closedDate: null, closureDecidedAt: null, closureDecidedById: null } });
                 if (res.count !== 1) throw new ConflictException('Bulgu bu sırada değişti; sayfayı yenileyin.');
                 await logTransition(tx, { entityType: 'FINDING', entityId: id, action: 'REVERT', from: 'ONAYLANDI', to: 'TAMAMLANDI', userId, reason });
                 await this.appendStatusHistory(id, { explanation: `Kapanış geri alındı, bulgu yeniden değerlendirmede: ${reason.trim()}`, evaluator: userId }, userId, tx);
@@ -1606,6 +1633,26 @@ export class AuditsService {
                     await tx.action.update({ where: { id: updated.actionId }, data: { status: 'YETERSIZ' } });
                     await this.recordAuditTrail({ findingId, actionId: updated.actionId, operation: 'ACTION_UPDATED', userId, explanation: 'Takip sonucu yetersiz — aksiyon durumu güncellendi.' }, tx);
                     if (updated.resolutionOutcome === 'ERTELENDI' && updated.newFollowUpDate) {
+                        // Erteleme kararı aksiyonun hedef tarihini yeni takip tarihine taşır (yalnız ileri):
+                        // aksiyon "gecikmiş" görünmez, bulgunun hedef tarihi en ileri aksiyondan yeniden hesaplanır.
+                        // Eski tarih onay yan etkilerinde saklıdır (geri almada döner) ve denetim izine yazılır.
+                        const current = await tx.action.findUnique({ where: { id: updated.actionId }, select: { actionId: true, dueDate: true } });
+                        if (current && updated.newFollowUpDate > current.dueDate) {
+                            await tx.action.update({ where: { id: updated.actionId }, data: { dueDate: updated.newFollowUpDate } });
+                            const fmtDay = (d: Date) => d.toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' });
+                            await this.recordAuditTrail({
+                                findingId, actionId: updated.actionId, operation: 'ACTION_UPDATED', userId,
+                                explanation: `Erteleme onayıyla ${current.actionId} hedef tarihi ${fmtDay(current.dueDate)} → ${fmtDay(updated.newFollowUpDate)} taşındı (${updated.followUpId}).`,
+                                oldValue: { dueDate: current.dueDate }, newValue: { dueDate: updated.newFollowUpDate },
+                            }, tx);
+                            await tx.auditLog.create({
+                                data: {
+                                    userId, action: 'ACTION_DUE_DATE_POSTPONED', entityType: 'Action', entityId: updated.actionId,
+                                    oldValue: { dueDate: current.dueDate }, newValue: { dueDate: updated.newFollowUpDate, followUpId: updated.id },
+                                },
+                            });
+                            await this.recalculateFindingTargetDate(findingId, tx);
+                        }
                         const existing = await tx.findingFollowUp.findFirst({ where: { findingId, actionId: updated.actionId, plannedDate: updated.newFollowUpDate, status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] } } });
                         const actionForNo = await tx.action.findUnique({ where: { id: updated.actionId }, select: { id: true, actionId: true } });
                         if (!actionForNo) throw new BadRequestException('Takibin bağlı olduğu aksiyon bulunamadı.');
@@ -1651,8 +1698,13 @@ export class AuditsService {
 
             if (effectsBefore) await this.captureFollowUpEffectsAfter(effectsBefore, updated, createdAction?.id ?? null, tx);
 
+            // SIEM'de kural yazılabilsin diye maker-checker adımları ayrı ve kararlı olay adlarıyla yazılır
+            // (aksiyondaki ACTION_SUBMIT / ACTION_APPROVE ile aynı ilke); diğer kayıtlar UPDATE kalır.
+            const auditAction = approvalRequestedNow && wonApprovalRace ? 'FOLLOWUP_APPROVE'
+                : updated.status === 'TAMAMLANDI' && followUp.status !== 'TAMAMLANDI' ? 'FOLLOWUP_SUBMIT'
+                : 'UPDATE';
             await tx.auditLog.create({
-                data: { userId, action: 'UPDATE', entityType: 'FindingFollowUp', entityId: followUpId, newValue: updated },
+                data: { userId, action: auditAction, entityType: 'FindingFollowUp', entityId: followUpId, oldValue: followUp as any, newValue: updated },
             });
 
             return { updated, createdAction };
@@ -1732,7 +1784,7 @@ export class AuditsService {
             }, tx);
             await tx.auditLog.create({
                 data: {
-                    userId, action: 'UPDATE', entityType: 'FindingFollowUp', entityId: followUpId,
+                    userId, action: 'FOLLOWUP_SECOND_CONTROLLER_CHANGE', entityType: 'FindingFollowUp', entityId: followUpId,
                     oldValue: { secondControllerId: previous },
                     newValue: { secondControllerId: body.secondControllerId, reason: body.reason.trim() },
                 },
@@ -2411,13 +2463,14 @@ export class AuditsService {
     /** Onay yan etkilerinin "önce" durumu (onay transaction'ı içinde, yan etkilerden önce). */
     private async captureFollowUpEffectsBefore(findingId: string | null, followUp: any, tx: PrismaLike) {
         const [action, finding, openFus] = await Promise.all([
-            followUp.actionId ? tx.action.findUnique({ where: { id: followUp.actionId }, select: { id: true, status: true, completedAt: true } }) : null,
+            followUp.actionId ? tx.action.findUnique({ where: { id: followUp.actionId }, select: { id: true, status: true, completedAt: true, dueDate: true } }) : null,
             findingId ? tx.finding.findUnique({ where: { id: findingId }, select: { status: true, resolutionStatus: true, testDate: true, closedDate: true } }) : null,
             // Manuel takipte "diğer takipler" aksiyonun takipleridir (findingId=null tüm manuel takipleri eşlerdi).
             tx.findingFollowUp.findMany({ where: { ...(findingId ? { findingId } : { actionId: followUp.actionId }), id: { not: followUp.id }, status: { not: 'IPTAL' } }, select: { id: true, status: true } }),
         ]);
         return {
-            action: action ? { id: action.id, status: action.status, completedAt: action.completedAt } : null,
+            // dueDate: erteleme onayı aksiyon hedef tarihini taşır; onay geri alınırsa eski tarihe döner.
+            action: action ? { id: action.id, status: action.status, completedAt: action.completedAt, dueDate: action.dueDate } : null,
             finding,
             openFollowUps: openFus,
             prevCurrentStatusDetail: followUp.currentStatusDetail ?? null,
@@ -2475,7 +2528,14 @@ export class AuditsService {
             if (claim.count !== 1) throw new ConflictException('Takip çalışması bu sırada değişti; tekrar deneyin.');
             await logTransition(tx, { entityType: 'FOLLOW_UP', entityId: followUpId, action: 'REVERT', from: 'ONAYLANDI', to: 'DEVAM_EDIYOR', userId, reason: reason.trim() });
             const now = new Date();
-            if (effects.action) await tx.action.update({ where: { id: effects.action.id }, data: { status: effects.action.status, completedAt: effects.action.completedAt ? new Date(effects.action.completedAt) : null } });
+            if (effects.action) await tx.action.update({
+                where: { id: effects.action.id },
+                data: {
+                    status: effects.action.status, completedAt: effects.action.completedAt ? new Date(effects.action.completedAt) : null,
+                    // Eski kayıtlarda (dueDate yakalanmadan onaylanmış) hedef tarih olduğu gibi kalır.
+                    ...(effects.action.dueDate ? { dueDate: new Date(effects.action.dueDate) } : {}),
+                },
+            });
             if (effects.finding && findingId) {
                 await tx.finding.update({
                     where: { id: findingId },
@@ -2601,9 +2661,8 @@ export class AuditsService {
         const current = await db.finding.findUnique({ where: { id: findingId }, select: { status: true } });
         if (current?.status === 'CLOSED' || current?.status === 'PENDING_REVIEW') return;
         if (actions.length > 0 && actions.every(a => CLOSED.has(a.status))) {
-            if (current?.status !== 'PARTIALLY_CLOSED') {
-                await db.finding.update({ where: { id: findingId }, data: { status: 'PARTIALLY_CLOSED', resolutionStatus: 'KISMEN_KAPATILDI', closedDate: null } });
-            }
+            // "Kapanışa hazır": tüm aksiyonlar kapandı, bulgu açık ve kapanış değerlendirmesine gönderilebilir.
+            await db.finding.update({ where: { id: findingId }, data: { status: 'PARTIALLY_CLOSED', resolutionStatus: 'KAPANISA_HAZIR', closedDate: null } });
             await this.appendStatusHistory(findingId, {
                 explanation: 'Tüm düzeltici aksiyonlar kapatıldı; bulgu açık ve kapanış değerlendirmesine gönderilebilir.',
                 evaluator: 'Sistem',

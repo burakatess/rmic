@@ -28,6 +28,7 @@ describe('Yeni kontrol kayıt güvenliği', () => {
     it('çift tıklamada yalnız bir create isteği gönderir', async () => {
         render(<ToastProvider><NewControlPage /></ToastProvider>);
         fireEvent.change(screen.getByPlaceholderText('BTK.0001'), { target: { value: 'BTK.9999' } });
+        fireEvent.change(screen.getByLabelText(/Kontrol Adı/), { target: { value: 'Ayrıcalıklı Hesap Gözden Geçirmesi' } });
         const option = await screen.findByRole('option', { name: 'Test Direktörlüğü' });
         fireEvent.change(option.parentElement as HTMLSelectElement, { target: { value: 'dir-1' } });
 
@@ -36,6 +37,8 @@ describe('Yeni kontrol kayıt güvenliği', () => {
         fireEvent.click(save);
 
         await waitFor(() => expect(api.createControl).toHaveBeenCalledTimes(1));
+        // Kontrol adı koddan ayrı alınır (eskiden ad = kod kaydediliyordu).
+        expect(api.createControl).toHaveBeenCalledWith(expect.objectContaining({ controlId: 'BTK.9999', name: 'Ayrıcalıklı Hesap Gözden Geçirmesi' }));
         expect(api.createControl).toHaveBeenCalledWith(expect.not.objectContaining({
             dueDate: expect.anything(),
             status: expect.anything(),

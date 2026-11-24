@@ -92,8 +92,12 @@ interface ListState {
     activeFilters: Record<string, string>;
     colFilters: Record<string, string>;
     selectedMonth: number | null;
+    /** 'all' = tüm yıllar (ay seçiliyse ay bu yıla göre süzülür). */
+    selectedYear?: number | 'all';
     page: number;
 }
+// Sütun süzgeci → sunucu sorgu parametresi (süzgeç tüm kayıtlarda uygulanır, yalnız açık sayfada değil).
+const COLUMN_FILTER_PARAMS: Record<string, string> = { testNo: 'testNo', control: 'controlName', directorate: 'directorateName' };
 const loadListState = (): Partial<ListState> => {
     if (typeof window === 'undefined') return {};
     try {
@@ -107,6 +111,7 @@ const loadListState = (): Partial<ListState> => {
             ...(params.has('search') ? { searchQuery: params.get('search') || '' } : {}),
             ...(Object.keys(urlFilters).length ? { activeFilters: { ...(saved.activeFilters || {}), ...urlFilters } } : {}),
             ...(params.has('month') ? { selectedMonth: params.get('month') === 'all' ? null : Number(params.get('month')) - 1 } : {}),
+            ...(params.has('year') ? { selectedYear: params.get('year') === 'all' ? 'all' as const : Number(params.get('year')) || new Date().getFullYear() } : {}),
             ...(params.has('page') ? { page: Math.max(1, Number(params.get('page')) || 1) } : {}),
         };
     } catch { return {}; }
@@ -132,30 +137,41 @@ function ControlTestingPageContent() {
     const [selectedMonth, setSelectedMonth] = useState<number | null>(
         'selectedMonth' in initial ? (initial.selectedMonth as number | null) : new Date().getMonth()
     );
+    const [selectedYear, setSelectedYear] = useState<number | 'all'>(initial.selectedYear ?? new Date().getFullYear());
     const [page, setPage] = useState(initial.page ?? 1);
     const pageSize = 25;
+    // Ay süzgecinin yılı: seçili yıl (Tüm yıllar seçiliyse bu yıl).
+    const monthYear = selectedYear === 'all' ? new Date().getFullYear() : selectedYear;
+    const yearOptions = useMemo(() => {
+        const y = new Date().getFullYear();
+        return [y - 2, y - 1, y, y + 1, y + 2];
+    }, []);
 
     // Her değişiklikte kalıcı listeleme durumu güncellenir
     useEffect(() => {
         try {
-            sessionStorage.setItem(LIST_STATE_KEY, JSON.stringify({ searchQuery, activeFilters, colFilters, selectedMonth, page } as ListState));
+            sessionStorage.setItem(LIST_STATE_KEY, JSON.stringify({ searchQuery, activeFilters, colFilters, selectedMonth, selectedYear, page } as ListState));
         } catch { /* noop */ }
         const params = new URLSearchParams();
         if (searchQuery) params.set('search', searchQuery);
         Object.entries(activeFilters).forEach(([key, value]) => { if (value && value !== 'all') params.set(key, value); });
+        params.set('year', String(selectedYear));
         params.set('month', selectedMonth === null ? 'all' : String(selectedMonth + 1));
         if (page > 1) params.set('page', String(page));
         window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
-    }, [searchQuery, activeFilters, colFilters, selectedMonth, page]);
+    }, [searchQuery, activeFilters, colFilters, selectedMonth, selectedYear, page]);
 
     const load = useCallback(async () => {
         setLoading(true);
         try {
             const query: Record<string, string | number> = { page, limit: pageSize };
             if (searchQuery) query.search = searchQuery;
-            if (selectedMonth !== null) { query.month = selectedMonth + 1; query.year = new Date().getFullYear(); }
+            if (selectedYear !== 'all') query.year = selectedYear;
+            if (selectedMonth !== null) { query.month = selectedMonth + 1; query.year = monthYear; }
             ['assigneeIds', 'secondControllerIds', 'status', 'findingStatus', 'directorateId'].forEach(key => { if (activeFilters[key] && activeFilters[key] !== 'all') query[key] = activeFilters[key]; });
             if (activeFilters.overdue === 'evet') query.overdue = 'true';
+            Object.entries(COLUMN_FILTER_PARAMS).forEach(([col, param]) => { const v = colFilters[col]?.trim(); if (v) query[param] = v; });
+            if (colFilters.status) query.status = colFilters.status;
             const res = await api.getAllControlTests(query) as { data: ControlTest[]; pagination?: { total: number } };
             setTests(res?.data || []);
             setTotalCount(res.pagination?.total || 0);
@@ -166,7 +182,7 @@ function ControlTestingPageContent() {
             setLoading(false);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeFilters, searchQuery, selectedMonth, page]);
+    }, [activeFilters, searchQuery, selectedMonth, selectedYear, colFilters, page]);
 
     useEffect(() => { load(); }, [load]);
     useEffect(() => { api.getAllUserOptions().then(r => setUsers(r.data)).catch(() => setUsers([])); }, []);
@@ -175,9 +191,9 @@ function ControlTestingPageContent() {
         if (selectedMonth === null) return tests;
         return tests.filter(t => {
             const d = new Date(t.plannedDate);
-            return d.getMonth() === selectedMonth && d.getFullYear() === new Date().getFullYear();
+            return d.getMonth() === selectedMonth && d.getFullYear() === monthYear;
         });
-    }, [tests, selectedMonth]);
+    }, [tests, selectedMonth, monthYear]);
 
     const filtered = useMemo(() => {
         return monthFiltered.filter(t => {
@@ -336,15 +352,8 @@ function ControlTestingPageContent() {
         },
     ], [load]);
 
-    const colFiltered = useMemo(() => {
-        if (!Object.values(colFilters).some(v => v)) return filtered;
-        return filtered.filter(t => columns.every(col => {
-            const val = colFilters[col.key];
-            return !val || !col.filter?.fn || col.filter.fn(t, val);
-        }));
-    }, [filtered, colFilters, columns]);
-
-    const paginated = colFiltered;
+    // Sütun süzgeçleri sunucuda uygulanır (COLUMN_FILTER_PARAMS); sayfa zaten süzülmüş gelir.
+    const paginated = filtered;
 
     return (
         <PageShell>
@@ -354,12 +363,22 @@ function ControlTestingPageContent() {
                 breadcrumbs={[{ label: 'Kontrol Testleri' }]}
             />
 
-            {/* Ay seçici */}
+            {/* Yıl + ay seçici */}
             <div className="flex flex-wrap items-center gap-2 mb-3">
-                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 mr-1">
+                <label htmlFor="ct-year" className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 mr-1">
                     <IconCalendar className="w-3.5 h-3.5" />
-                    Ay:
-                </span>
+                    Yıl:
+                </label>
+                <select
+                    id="ct-year"
+                    value={String(selectedYear)}
+                    onChange={e => { setSelectedYear(e.target.value === 'all' ? 'all' : Number(e.target.value)); setPage(1); }}
+                    className="h-8 px-2 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                >
+                    <option value="all">Tüm yıllar</option>
+                    {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+                <span className="text-xs font-medium text-slate-400 ml-2 mr-1">Ay:</span>
                 <button
                     type="button"
                     onClick={() => { setSelectedMonth(null); setPage(1); }}
@@ -413,7 +432,7 @@ function ControlTestingPageContent() {
                 data={paginated}
                 rowKey={t => t.id}
                 loading={loading}
-                totalCount={Object.values(colFilters).some(Boolean) ? colFiltered.length : totalCount}
+                totalCount={totalCount}
                 page={page}
                 pageSize={pageSize}
                 onPageChange={setPage}
@@ -427,12 +446,13 @@ function ControlTestingPageContent() {
                 toolbar={
                     <SavedViewMenu
                         storageKey="control-tests-v2"
-                        getPayload={() => ({ search: searchQuery, filters: activeFilters, columnFilters: colFilters, selectedMonth })}
+                        getPayload={() => ({ search: searchQuery, filters: activeFilters, columnFilters: colFilters, selectedMonth, selectedYear })}
                         onApply={(p) => {
                             setSearchQuery(typeof p.search === 'string' ? p.search : '');
                             setActiveFilters((p.filters as Record<string, string>) || {});
                             setColFilters((p.columnFilters as Record<string, string>) || {});
                             setSelectedMonth(typeof p.selectedMonth === 'number' ? p.selectedMonth : null);
+                            setSelectedYear(typeof p.selectedYear === 'number' || p.selectedYear === 'all' ? p.selectedYear as number | 'all' : new Date().getFullYear());
                             setPage(1);
                         }}
                     />

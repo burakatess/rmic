@@ -56,7 +56,7 @@ const SEVERITY_COLORS: Record<string, string> = {
 const STATUS_LABELS: Record<string, string> = {
     BEKLIYOR: 'Bekliyor', DEVAM_EDIYOR: 'Devam Ediyor', TAMAMLANDI: 'Tamamlandı',
     ONAYLANDI: 'Onaylandı', DEVAM_EDIYOR_2: 'Devam', KAPATILDI: 'Kapatıldı',
-    ERTELENDI: 'Ertelendi', KISMEN_KAPATILDI: 'Kısm. Kapatıldı', YENI_AKSIYON_GEREKLI: 'Yeni Aksiyon',
+    ERTELENDI: 'Ertelendi', KISMEN_KAPATILDI: 'Kısm. Kapatıldı', KAPANISA_HAZIR: 'Kapanışa Hazır', YENI_AKSIYON_GEREKLI: 'Yeni Aksiyon',
 };
 const RESULT_LABELS: Record<string, string> = { YETERLI: 'Yeterli', YETERSIZ: 'Yetersiz', YENI_AKSIYON_GEREKLI: 'Yeni Aksiyon' };
 const SOURCE_LABELS: Record<string, string> = {

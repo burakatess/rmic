@@ -1142,6 +1142,7 @@ enum FindingWorkflowStatus {
 enum FindingResolutionStatus {
   DEVAM_EDIYOR // Aksiyon henüz tamamlanmadı
   KISMEN_KAPATILDI // Kısmen kapatıldı, izleme devam ediyor
+  KAPANISA_HAZIR // Tüm düzeltici aksiyonlar kapandı; bulgu kapanış değerlendirmesini bekliyor
   KAPATILDI // Tamamen kapatıldı
   ERTELENDI // Test tarihi ertelendi
   YENI_AKSIYON_GEREKLI // Yeni düzeltici aksiyon açılması gerekiyor

@@ -3,7 +3,6 @@
  * alınıyordu; çalışma anında `any` ile aynıdır (ValidationPipe doğrulayamaz).
  */
 import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
-import { FindingResolutionStatus } from '@prisma/client';
 import { EmptyToUndefined } from '../decorators';
 
 export class LogoutDto {
@@ -21,9 +20,13 @@ export class IcKontrolOnayinaGonderDto {
     @IsOptional() @EmptyToUndefined() @IsDateString() targetResolutionDate?: string;
 }
 
+/**
+ * Mutabakat bilgi kaydıdır, onay mekanizması değildir: bulgunun çözüm durumunu değiştirmez.
+ * (Eskiden `resolutionStatus: KAPATILDI` kabul ediliyordu — bulgu açıkken "kapatıldı" + kapanış tarihi
+ * yazılabiliyordu. Kapanış yalnız kapanış değerlendirmesiyle olur; alan artık reddedilir.)
+ */
 export class MutabakatOnaylaDto {
     @IsOptional() @IsString() @MaxLength(10000) internalControlAssessment?: string;
-    @IsOptional() @EmptyToUndefined() @IsEnum(FindingResolutionStatus) resolutionStatus?: FindingResolutionStatus;
 }
 
 /** Yazar oturumdaki kullanıcıdır; istemciden yazar adı alınmaz. */

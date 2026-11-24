@@ -23,7 +23,8 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
     const { success, error: showError } = useToast();
     const [state, setState] = useState<WorkflowState | null>(null);
     const [failed, setFailed] = useState(false);
-    const [pending, setPending] = useState<{ action: WorkflowActionKey; label: string } | null>(null);
+    // confirmOnly: gerekçe istemeyen ama geri dönüşü önemli geçişler (bulgu kapanış onayı) için yalnız teyit.
+    const [pending, setPending] = useState<{ action: WorkflowActionKey; label: string; confirmOnly?: boolean } | null>(null);
     const [reason, setReason] = useState('');
     const [busy, setBusy] = useState(false);
     const [historyOpen, setHistoryOpen] = useState(false);
@@ -61,7 +62,8 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
             <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
                 <ol className="flex flex-wrap items-center gap-1.5 text-[12px]" aria-label="Aşamalar">
                     {state.stages.map((st, i) => {
-                        const done = !cancelled && i < idx;
+                        // Son aşamaya varıldıysa (Kapatıldı / Onaylandı) o aşama da tamamlanmış gösterilir.
+                        const done = !cancelled && (i < idx || (i === idx && i === state.stages.length - 1));
                         const now = !cancelled && i === idx;
                         return (
                             <li key={st.key} className="flex items-center gap-1.5" aria-current={now ? 'step' : undefined} title={st.hint}>
@@ -89,7 +91,11 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
                     {buttons.map(a => (
                         <Button key={a.action} size="sm" disabled={busy}
                             variant={a.action === 'APPROVE' ? 'success' : a.action === 'CANCEL' ? 'danger' : a.action === 'START' ? 'primary' : 'outline'}
-                            onClick={() => (a.needsReason ? (setReason(''), setPending({ action: a.action, label: a.label })) : run(a.action))}>
+                            onClick={() => {
+                                if (a.needsReason) { setReason(''); setPending({ action: a.action, label: a.label }); }
+                                else if (type === 'FINDING' && a.action === 'APPROVE') setPending({ action: a.action, label: a.label, confirmOnly: true });
+                                else run(a.action);
+                            }}>
                             {a.label}
                         </Button>
                     ))}
@@ -130,17 +136,27 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
                 </ul>
             )}
 
-            <Modal open={!!pending} onClose={() => !busy && setPending(null)} title={pending?.label} description={pending?.action === 'COMPLETE' && type === 'FINDING'
+            <Modal open={!!pending} onClose={() => !busy && setPending(null)} title={pending?.label} description={pending?.confirmOnly
+                ? 'Bulgu kapatılacak ve kapanış tarihi bugün olarak yazılacak. Gerekirse "Önceki aşamaya geri al" ile yeniden değerlendirmeye alınabilir.'
+                : pending?.action === 'COMPLETE' && type === 'FINDING'
                 ? 'Kapanış değerlendirmenizi yazın; 2. kontrolcü veya yönetici onaylayınca bulgu kapanır. Durum geçmişine yazılır.'
                 : pending?.action === 'CANCEL' ? 'Kayıt silinmez; yönetici (talep eden hariç) onaylarsa silinir. Gerekçe zorunludur.'
                 : 'Gerekçe zorunludur ve durum geçmişine yazılır.'} size="md"
                 footer={<div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => setPending(null)} disabled={busy}>Vazgeç</Button>
-                    <Button variant={pending?.action === 'CANCEL' ? 'danger' : 'primary'} size="sm" loading={busy} disabled={!reason.trim()} onClick={() => pending && run(pending.action, reason.trim())}>Onayla</Button>
+                    <Button variant={pending?.action === 'CANCEL' ? 'danger' : pending?.confirmOnly ? 'success' : 'primary'} size="sm" loading={busy}
+                        disabled={!pending?.confirmOnly && !reason.trim()}
+                        onClick={() => pending && run(pending.action, pending.confirmOnly ? undefined : reason.trim())}>
+                        {pending?.confirmOnly ? pending.label : pending?.action === 'COMPLETE' ? 'Gönder' : pending?.action === 'CANCEL' ? 'Silme talebi gönder' : 'Onayla'}
+                    </Button>
                 </div>}>
-                <label htmlFor="wf-reason" className="block text-xs font-semibold text-slate-600 mb-1">{pending?.action === 'COMPLETE' && type === 'FINDING' ? 'Kapanış değerlendirmesi *' : 'Gerekçe *'}</label>
-                <textarea id="wf-reason" value={reason} onChange={e => setReason(e.target.value)} rows={3} maxLength={2000} autoFocus
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                {!pending?.confirmOnly && (
+                    <>
+                        <label htmlFor="wf-reason" className="block text-xs font-semibold text-slate-600 mb-1">{pending?.action === 'COMPLETE' && type === 'FINDING' ? 'Kapanış değerlendirmesi *' : 'Gerekçe *'}</label>
+                        <textarea id="wf-reason" value={reason} onChange={e => setReason(e.target.value)} rows={3} maxLength={2000} autoFocus
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                    </>
+                )}
             </Modal>
         </section>
     );
