@@ -17,6 +17,7 @@ const CODE_LABELS: Record<string, string> = {
     TEST_APPROVAL_PENDING: 'Test onayı bekleniyor',
     FINDING_WITHOUT_ACTION: 'Aksiyonsuz bulgu',
     ACTION_OVERDUE: 'Gecikmiş aksiyon',
+    ACTION_APPROVAL_PENDING: 'Aksiyon onayı bekleniyor',
     ACTION_COMPLETED_NO_FOLLOWUP: 'Takibi açılmamış aksiyon',
     FOLLOWUP_APPROVAL_PENDING: 'Takip onayı bekleniyor',
     CONTROL_VERSION_OUTDATED: 'Eski kontrol sürümü',
@@ -26,9 +27,11 @@ const FLOW = [
     ['Yıllık Plan', ['PLAN_ASSIGNMENT_MISSING', 'PLAN_APPROVAL_PENDING']],
     ['Dönem Kontrolü / Test', ['TEST_OVERDUE_NOT_STARTED', 'TEST_APPROVAL_PENDING', 'CONTROL_VERSION_OUTDATED']],
     ['Bulgu', ['FINDING_WITHOUT_ACTION']],
-    ['Aksiyon', ['ACTION_OVERDUE', 'ACTION_COMPLETED_NO_FOLLOWUP']],
+    ['Aksiyon', ['ACTION_OVERDUE', 'ACTION_COMPLETED_NO_FOLLOWUP', 'ACTION_APPROVAL_PENDING']],
     ['Bulgu Takip', ['FOLLOWUP_APPROVAL_PENDING']],
 ] as const;
+
+const PAGE_SIZE = 25;
 
 export default function WorkflowHealthPage() {
     const [summary, setSummary] = useState<any>(null);
@@ -38,17 +41,19 @@ export default function WorkflowHealthPage() {
     const [severity, setSeverity] = useState('');
     const [code, setCode] = useState('');
     const [year, setYear] = useState(new Date().getFullYear());
+    const [page, setPage] = useState(1);
+    const [pagination, setPagination] = useState<{ total: number; totalPages: number; pageSize: number; page: number } | null>(null);
 
     const load = useCallback(async () => {
         setLoading(true); setError(null);
         try {
-            const params = { year, severity: severity || undefined, code: code || undefined, scope: 'ORG' };
+            const params = { year, severity: severity || undefined, code: code || undefined, scope: 'ORG', page, pageSize: PAGE_SIZE };
             const [s, list] = await Promise.all([api.getWorkflowHealthSummary({ year, scope: 'ORG' }), api.getWorkflowHealthItems(params)]);
-            setSummary(s); setItems(list.data || []);
+            setSummary(s); setItems(list.data || []); setPagination(list.pagination || null);
         } catch (err) {
             setError(err instanceof ApiError ? err.message : 'Akış sağlığı verileri alınamadı.');
         } finally { setLoading(false); }
-    }, [year, severity, code]);
+    }, [year, severity, code, page]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -71,7 +76,7 @@ export default function WorkflowHealthPage() {
                             {FLOW.map(([label, codes], index) => {
                                 const count = codes.reduce((sum, c) => sum + (summary?.byCode?.[c] ?? 0), 0);
                                 return <div key={label} className="contents">
-                                    <button onClick={() => setCode(codes.length === 1 ? codes[0] : '')} className={`flex-1 text-left rounded-xl border p-4 ${count > 0 ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+                                    <button onClick={() => { setCode(codes.length === 1 ? codes[0] : ''); setPage(1); }} className={`flex-1 text-left rounded-xl border p-4 ${count > 0 ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
                                         <p className="text-xs font-bold text-slate-500">{index + 1}. ADIM</p>
                                         <p className="font-semibold text-slate-800 mt-1">{label}</p>
                                         <p className={`text-2xl font-black mt-2 ${count > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{count}</p>
@@ -85,13 +90,13 @@ export default function WorkflowHealthPage() {
 
                     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
                         <div className="p-4 border-b border-slate-100 flex flex-wrap gap-2">
-                            <select value={year} onChange={e => setYear(Number(e.target.value))} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                            <select value={year} onChange={e => { setYear(Number(e.target.value)); setPage(1); }} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
                                 {[year - 1, year, year + 1].map(y => <option key={y} value={y}>{y}</option>)}
                             </select>
-                            <select value={severity} onChange={e => setSeverity(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                            <select value={severity} onChange={e => { setSeverity(e.target.value); setPage(1); }} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
                                 <option value="">Tüm önem seviyeleri</option><option value="CRITICAL">Kritik</option><option value="WARNING">Uyarı</option><option value="INFO">Bilgi</option>
                             </select>
-                            <select value={code} onChange={e => setCode(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                            <select value={code} onChange={e => { setCode(e.target.value); setPage(1); }} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
                                 <option value="">Tüm sinyaller</option>{Object.entries(CODE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                             </select>
                         </div>
@@ -104,6 +109,19 @@ export default function WorkflowHealthPage() {
                                         <Link href={item.href} className="text-sm font-semibold text-blue-600 hover:underline whitespace-nowrap">İşleme git →</Link>
                                     </div>
                                 ))}
+                            </div>
+                        )}
+                        {pagination && pagination.total > 0 && (
+                            <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 text-sm text-slate-600" data-testid="health-pager">
+                                <span>
+                                    {(pagination.page - 1) * pagination.pageSize + 1}–{Math.min(pagination.page * pagination.pageSize, pagination.total)} / {pagination.total} kayıt
+                                </span>
+                                <div className="flex gap-2">
+                                    <button type="button" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1 || loading}
+                                        className="px-3 py-1.5 rounded-lg border border-slate-200 disabled:opacity-40">Önceki</button>
+                                    <button type="button" onClick={() => setPage(p => p + 1)} disabled={page >= pagination.totalPages || loading}
+                                        className="px-3 py-1.5 rounded-lg border border-slate-200 disabled:opacity-40">Sonraki</button>
+                                </div>
                             </div>
                         )}
                     </div>
