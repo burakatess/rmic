@@ -15,6 +15,7 @@ import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import AddActionModal from '@/components/modals/AddActionModal';
 import { FindingFollowUpModal } from '@/components/modals/FindingFollowUpModal';
 import { RiskLinksPanel } from '@/components/risks/RiskLinksPanel';
+import { ActionDescription } from '@/components/actions/ActionDescription';
 import { RecordCard, Field, FieldGrid, type RecordTone } from '@/components/ui';
 import { WorkflowBar } from '@/components/workflow/WorkflowBar';
 
@@ -976,8 +977,8 @@ export default function FindingDetailPage() {
                                     const linkedAction = finding.actions.find(a => a.id === fu.actionId);
                                     return (
                                         <div id={`follow-up-${fu.id}`} key={fu.id} className={`bg-white border border-l-4 ${fuDeleted || fu.status === 'IPTAL' ? 'border-l-slate-300 opacity-70' : isApproved ? 'border-l-emerald-500' : isPendingApproval ? 'border-l-blue-500' : isRevisionRequired ? 'border-l-orange-500' : fu.status === 'DEVAM_EDIYOR' ? 'border-l-amber-400' : 'border-l-slate-300'} rounded-xl shadow-sm overflow-hidden scroll-mt-24 ${searchParams.get('followUpId') === fu.id ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'}`}>
-                                            <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50 border-b border-slate-100">
-                                                <div>
+                                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between px-5 py-4 bg-slate-50/50 border-b border-slate-100">
+                                                <div className="min-w-0 flex-1">
                                                     <div className="flex items-center gap-2 flex-wrap">
                                                         <Link href={`/follow-ups/${fu.id}`} className="font-mono text-sm font-bold text-blue-700 hover:underline">
                                                             {fu.followUpId}
@@ -993,13 +994,17 @@ export default function FindingDetailPage() {
                                                         {fu.newFollowUpDate && <span className="text-amber-600">Yeni: {fmt(fu.newFollowUpDate)}</span>}
                                                         <span>{fmtDatetime(fu.createdAt)}</span>
                                                     </div>
+                                                    {/* Takibin kaynağı olan aksiyonun açıklaması — kartta doğrudan okunur. */}
+                                                    {linkedAction && (
+                                                        <ActionDescription text={linkedAction.description} className="mt-3 bg-white border border-slate-200 rounded-lg px-3.5 py-2.5 max-w-5xl" />
+                                                    )}
                                                     {!fuDeleted && fu.status !== 'IPTAL' && (
                                                         <div className="mt-2.5">
                                                             <WorkflowBar type="FOLLOW_UP" id={fu.id} compact onChanged={() => load()} refreshKey={`${fu.status}:${fu.approvalStatus}:${fu.deletionRequestedAt ?? ''}`} />
                                                         </div>
                                                     )}
                                                 </div>
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-2 flex-wrap shrink-0">
                                                     {isPendingApproval && fu.secondControllerId === user?.id && (
                                                         <Button variant="success" size="sm" onClick={() => approveFollowUp(fu.id)}>Onayla</Button>
                                                     )}
