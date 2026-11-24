@@ -33,7 +33,8 @@ export class ControlsService {
         const { search, type, nature, ownerId, status, directorateId, sortBy, sortOrder, year } = query;
         const { page, limit, skip } = parsePaging(query, 20);
 
-        const where: any = {};
+        // Onaylı silme talebiyle silinen kontroller envanterde listelenmez (kayıt denetim için korunur).
+        const where: any = { deletedAt: null };
         if (search) {
             // Eski kod (K-YYYY-NNNN) ile arama da yeni BTK kaydına ulaşmalı (Madde
             // 19/22) — CodeAlias'ta eşleşen entityId'ler de arama kümesine eklenir.
@@ -341,6 +342,7 @@ export class ControlsService {
 
     async update(id: string, data: any, userId: string) {
         const existing = await this.findOne(id);
+        if ((existing as any).deletedAt) throw new BadRequestException('Silinmiş kontrol düzenlenemez.');
 
         let controlStatus: 'ACTIVE' | 'PASSIVE' | undefined;
         if (data.isActive !== undefined) {
@@ -413,8 +415,9 @@ export class ControlsService {
     }
 
     private async assertControlExists(id: string) {
-        const c = await this.prisma.control.findUnique({ where: { id }, select: { id: true, status: true } });
+        const c = await this.prisma.control.findUnique({ where: { id }, select: { id: true, status: true, deletedAt: true } });
         if (!c) throw new NotFoundException('Kontrol bulunamadı');
+        if (c.deletedAt) throw new BadRequestException('Silinmiş kontrol üzerinde işlem yapılamaz.');
         return c;
     }
 

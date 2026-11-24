@@ -8,7 +8,27 @@ import { AuditsService } from '../audits/audits.service';
 import { findingStage, logTransition, periodControlStage, testStage } from '../../common/workflow/workflow-stages';
 import { EXEC_ROLES, MANAGER_ROLES } from './workflow-roles';
 
-export type DeletionEntity = 'CONTROL_TEST' | 'PERIOD_CONTROL' | 'FINDING' | 'ACTION' | 'FOLLOW_UP';
+export type DeletionEntity = 'CONTROL' | 'CONTROL_TEST' | 'PERIOD_CONTROL' | 'FINDING' | 'ACTION' | 'FOLLOW_UP';
+
+type Db = Pick<PrismaService, 'controlTest' | 'finding' | 'action'>;
+
+/**
+ * Kontrol silme engelleri (kullanıcı kararı 2026-11): yalnız geçmişi olmayan kontrol silinebilir.
+ * Başlamış/tamamlanmış/onaylı test, bulgu veya aksiyon varsa silinmez — kontrol pasifleştirilir.
+ * Başlamamış (BEKLIYOR) testler ve iptal/kapsam dışı testler engel değildir.
+ */
+export async function controlDeletionBlockers(controlId: string, db: Db): Promise<string[]> {
+    const [tests, findings, actions] = await Promise.all([
+        db.controlTest.count({ where: { controlId, deletedAt: null, status: { notIn: ['BEKLIYOR', 'IPTAL', 'KAPSAM_DISI'] } } }),
+        db.finding.count({ where: { controlId, deletedAt: null } }),
+        db.action.count({ where: { controlId, deletedAt: null } }),
+    ]);
+    const out: string[] = [];
+    if (tests) out.push(`${tests} başlamış/tamamlanmış test`);
+    if (findings) out.push(`${findings} bulgu`);
+    if (actions) out.push(`${actions} aksiyon`);
+    return out;
+}
 
 /**
  * Yönetici onaylı silme (Kontrol Testi, Dönem Kontrolü).
@@ -31,6 +51,11 @@ export class DeletionRequestsService {
     private isManager(actor: AccessActor) { return MANAGER_ROLES.has(String(actor.role ?? '')); }
 
     private async load(type: DeletionEntity, id: string) {
+        if (type === 'CONTROL') {
+            const c = await this.prisma.control.findUnique({ where: { id } });
+            if (!c || c.deletedAt) throw new NotFoundException('Kontrol bulunamadı');
+            return { kind: type, row: c as any, code: c.controlId, title: c.name };
+        }
         if (type === 'FINDING') {
             const f = await this.prisma.finding.findUnique({ where: { id } });
             if (!f || f.deletedAt || f.workflowStatus === 'IPTAL') throw new NotFoundException('Bulgu bulunamadı');
@@ -72,6 +97,7 @@ export class DeletionRequestsService {
             if ((await this.scope.findingAccess(ctx, id)) !== 'FULL') throw new ForbiddenException('Bu bulgu üzerinde işlem yetkiniz yok.');
             return this.audits.requestFindingDeletion(id, reason, actor.id);
         }
+        if (type === 'CONTROL') return this.requestControlDeletion(id, reason, actor);
         if (!(this.isManager(actor) || matchesPermission(ctx.permissions, 'control:test') || matchesPermission(ctx.permissions, 'test:execute'))) {
             throw new ForbiddenException('Silme talebi oluşturma yetkiniz yok.');
         }
@@ -103,6 +129,7 @@ export class DeletionRequestsService {
         const reason = `Silme onaylandı: ${row.deletionReason ?? ''}`.trim();
         if (type === 'ACTION') return this.audits.decideActionDeletion(row.findingId, id, true, undefined, actor.id);
         if (type === 'FOLLOW_UP') return this.audits.decideFollowUpDeletion(row.findingId, id, true, undefined, actor.id);
+        if (type === 'CONTROL') return this.approveControlDeletion(row, actor, now, reason);
         if (type === 'FINDING') {
             return this.prisma.$transaction(async (tx) => {
                 const claim = await tx.finding.updateMany({
@@ -167,26 +194,90 @@ export class DeletionRequestsService {
             });
         }
         return this.prisma.$transaction(async (tx) => {
-            const res = type === 'CONTROL_TEST'
+            const res = type === 'CONTROL'
+                ? await tx.control.updateMany({ where: { id, deletionRequestedAt: { not: null }, deletedAt: null }, data })
+                : type === 'CONTROL_TEST'
                 ? await tx.controlTest.updateMany({ where: { id, deletionRequestedAt: { not: null } }, data })
                 : await tx.controlYearScope.updateMany({ where: { id, deletionRequestedAt: { not: null } }, data });
             if (res.count !== 1) throw new ConflictException('Kayıt bu sırada değişti; sayfayı yenileyin.');
-            await tx.auditLog.create({ data: { userId: actor.id, action: 'DELETE_REJECT', entityType: type === 'CONTROL_TEST' ? 'ControlTest' : 'ControlYearScope', entityId: id, newValue: { requestedBy: row.deletionRequestedById, requestReason: row.deletionReason, rejectionReason: reason.trim() } } });
+            await tx.auditLog.create({ data: { userId: actor.id, action: 'DELETE_REJECT', entityType: type === 'CONTROL' ? 'Control' : type === 'CONTROL_TEST' ? 'ControlTest' : 'ControlYearScope', entityId: id, newValue: { requestedBy: row.deletionRequestedById, requestReason: row.deletionReason, rejectionReason: reason.trim() } } });
             return { rejected: true };
+        });
+    }
+
+    /** Kontrol silme talebi: kontrol oluşturabilen roller açar; geçmişi olan kontrol için talep açılmaz. */
+    private async requestControlDeletion(id: string, reason: string, actor: AccessActor) {
+        if (!EXEC_ROLES.has(String(actor.role ?? ''))) throw new ForbiddenException('Kontrol silme talebi oluşturma yetkiniz yok.');
+        const { row } = await this.load('CONTROL', id);
+        if (row.deletionRequestedAt) throw new ConflictException('Bu kontrol için zaten bekleyen bir silme talebi var.');
+        const blockers = await controlDeletionBlockers(id, this.prisma);
+        if (blockers.length) {
+            throw new ConflictException(`Kontrol silinemez: ${blockers.join(', ')} var. Geçmişi olan kontrol silinmez; bunun yerine pasifleştirin.`);
+        }
+        return this.prisma.$transaction(async (tx) => {
+            const res = await tx.control.updateMany({
+                where: { id, deletionRequestedAt: null, deletedAt: null },
+                data: { deletionRequestedById: actor.id, deletionRequestedAt: new Date(), deletionReason: reason.trim(), deletionRejectionReason: null, deletionDecidedById: null, deletionDecidedAt: null },
+            });
+            if (res.count !== 1) throw new ConflictException('Kayıt bu sırada değişti; sayfayı yenileyin.');
+            await tx.auditLog.create({ data: { userId: actor.id, action: 'DELETE_REQUEST', entityType: 'Control', entityId: id, newValue: { reason: reason.trim() } } });
+            return { requested: true, message: 'Silme talebi yönetici onayına gönderildi; onaylanana kadar kontrol mevcut haliyle kalır.' };
+        });
+    }
+
+    /**
+     * Kontrol silme onayı (tek işlem): engeller yeniden denetlenir; başlamamış testler iptal edilir,
+     * aktif dönem kontrolleri kaldırılır, plan taslağı kalemleri ve risk/kaynak eşleştirmeleri temizlenir;
+     * kontrol "Silindi" olarak işaretlenir (fiziksel silme yok, kod tekrar kullanılmaz).
+     */
+    private async approveControlDeletion(row: any, actor: AccessActor, now: Date, reason: string) {
+        const id = row.id as string;
+        return this.prisma.$transaction(async (tx) => {
+            const blockers = await controlDeletionBlockers(id, tx);
+            if (blockers.length) throw new ConflictException(`Kontrol bu sırada kullanılmaya başlandı (${blockers.join(', ')}); silinemez. Talebi reddedin ve pasifleştirin.`);
+            const claim = await tx.control.updateMany({
+                where: { id, deletedAt: null, deletionRequestedAt: { not: null }, deletionDecidedAt: null },
+                data: { deletedAt: now, deletedById: actor.id, deletionDecidedById: actor.id, deletionDecidedAt: now },
+            });
+            if (claim.count !== 1) throw new ConflictException('Kayıt bu sırada değişti; sayfayı yenileyin.');
+            const cancelled = await tx.controlTest.updateMany({
+                where: { controlId: id, deletedAt: null, status: 'BEKLIYOR' },
+                data: { status: 'IPTAL', deletedAt: now, deletedById: actor.id, cancelledAt: now, cancelledById: actor.id, cancelReason: `Kontrol silindi: ${row.deletionReason ?? ''}`.trim() },
+            });
+            const scopes = await tx.controlYearScope.updateMany({
+                where: { controlId: id, status: 'ACTIVE' },
+                data: { status: 'REMOVED', removedAt: now, removedById: actor.id, removalReason: `Kontrol silindi: ${row.deletionReason ?? ''}`.trim() },
+            });
+            const draftItems = await tx.annualPlanDraftItem.deleteMany({ where: { controlId: id } });
+            const riskMappings = await tx.controlRiskMapping.findMany({ where: { controlId: id }, select: { riskId: true, mappingType: true } });
+            await tx.controlRiskMapping.deleteMany({ where: { controlId: id } });
+            const sourceMappings = await tx.sourceMapping.deleteMany({ where: { controlId: id } });
+            await tx.auditLog.create({
+                data: {
+                    userId: actor.id, action: 'DELETE_APPROVE', entityType: 'Control', entityId: id,
+                    oldValue: { controlId: row.controlId, name: row.name, status: row.status, riskMappings },
+                    newValue: {
+                        requestedBy: row.deletionRequestedById, requestedAt: row.deletionRequestedAt, reason: row.deletionReason, note: reason,
+                        cancelledTests: cancelled.count, removedScopes: scopes.count, removedDraftItems: draftItems.count, removedSourceMappings: sourceMappings.count,
+                    },
+                },
+            });
+            return { deleted: true };
         });
     }
 
     /** Bekleyen silme talepleri: yönetici için (kendi talepleri hariç karar verebileceği kayıtlar işaretli). */
     async pending(actor: AccessActor) {
         const pend = { deletionRequestedAt: { not: null }, deletedAt: null } as const;
-        const [tests, scopes, findings, actions, followUps] = await Promise.all([
+        const [controls, tests, scopes, findings, actions, followUps] = await Promise.all([
+            this.prisma.control.findMany({ where: pend, orderBy: { deletionRequestedAt: 'asc' } }),
             this.prisma.controlTest.findMany({ where: pend, include: { control: { select: { controlId: true, name: true } } }, orderBy: { deletionRequestedAt: 'asc' } }),
             this.prisma.controlYearScope.findMany({ where: { deletionRequestedAt: { not: null }, status: 'ACTIVE' }, include: { control: { select: { controlId: true, name: true } } }, orderBy: { deletionRequestedAt: 'asc' } }),
             this.prisma.finding.findMany({ where: pend, orderBy: { deletionRequestedAt: 'asc' } }),
             this.prisma.action.findMany({ where: pend, orderBy: { deletionRequestedAt: 'asc' } }),
             this.prisma.findingFollowUp.findMany({ where: pend, orderBy: { deletionRequestedAt: 'asc' } }),
         ]);
-        const ids = [...new Set([...tests, ...scopes, ...findings, ...actions, ...followUps].map(r => r.deletionRequestedById).filter((x): x is string => !!x))];
+        const ids = [...new Set([...controls, ...tests, ...scopes, ...findings, ...actions, ...followUps].map(r => r.deletionRequestedById).filter((x): x is string => !!x))];
         const users = ids.length ? await this.prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, firstName: true, lastName: true } }) : [];
         const by = new Map(users.map(u => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
         const manager = this.isManager(actor);
@@ -196,6 +287,7 @@ export class DeletionRequestsService {
             canDecide: manager && r.deletionRequestedById !== actor.id,
         });
         return [
+            ...controls.map(c => row('CONTROL', c, c.controlId, c.name, `/controls/${c.id}`)),
             ...tests.map(t => row('CONTROL_TEST', t, t.testNo, t.control.name, `/controls/testing/${t.id}`)),
             ...scopes.map(s => row('PERIOD_CONTROL', s, s.code ?? `${s.year}.${s.control.controlId}`, s.snapshotName || s.control.name, `/controls/agenda/${s.id}`)),
             ...findings.map(f => row('FINDING', f, f.findingId, f.summary || f.description.slice(0, 120), `/findings/${f.id}`)),

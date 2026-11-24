@@ -47,6 +47,7 @@ export class ReportsService {
             // Control effectiveness overview
             this.prisma.control.groupBy({
                 by: ['effectivenessStatus'],
+                where: { deletedAt: null },
                 _count: true,
             }),
             // Risk trend (last 12 months)
@@ -80,7 +81,7 @@ export class ReportsService {
         // Calculate totals
         const totalRisks = risksByStatus.reduce((sum, r) => sum + r._count, 0);
         const openFindings = await this.prisma.finding.count({ where: { status: { not: 'CLOSED' } } });
-        const totalControls = await this.prisma.control.count();
+        const totalControls = await this.prisma.control.count({ where: { deletedAt: null } });
 
         // Direktörlük adlarını çözümle (tek ek sorgu, N+1 değil)
         const dirIds = [
@@ -282,6 +283,7 @@ export class ReportsService {
 
     async getControlHeatmap() {
         const controls = await this.prisma.control.findMany({
+            where: { deletedAt: null },
             select: {
                 id: true, name: true, type: true, effectivenessStatus: true,
                 risks: { select: { risk: { select: { residualRiskScore: true, inherentRiskScore: true } } } },
@@ -629,7 +631,7 @@ export class ReportsService {
             // Kullanıcının sahibi/test edicisi olduğu, bu ay testi olan aktif kontroller
             this.prisma.control.findMany({
                 where: {
-                    status: 'ACTIVE',
+                    status: 'ACTIVE', deletedAt: null,
                     OR: [{ ownerId: userId }, { testPerformerId: userId }],
                 },
                 select: {

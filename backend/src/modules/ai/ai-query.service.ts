@@ -67,7 +67,7 @@ export class AiQueryService {
             this.prisma.finding.count({
                 where: { status: { not: 'CLOSED' }, targetResolutionDate: { lt: now } },
             }),
-            this.prisma.control.groupBy({ by: ['effectivenessStatus'], _count: true }),
+            this.prisma.control.groupBy({ by: ['effectivenessStatus'], where: { deletedAt: null }, _count: true }),
             this.prisma.controlTest.groupBy({
                 by: ['status'],
                 _count: true,

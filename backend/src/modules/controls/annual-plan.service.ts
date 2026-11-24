@@ -170,7 +170,7 @@ export class AnnualPlanService {
         const resolved = await this.scopeService.resolveScope(userId, permissions, requested);
         if (resolved.appliedScope === 'ORG' || controlIds.length === 0) return resolved;
 
-        const where: any = { id: { in: controlIds } };
+        const where: any = { id: { in: controlIds }, deletedAt: null };
         if (resolved.appliedScope === 'UNIT') {
             where.directorateId = { in: resolved.directorateIds! };
         } else {
@@ -334,7 +334,7 @@ export class AnnualPlanService {
         await this.resolveAndAssertControlsInScope(userId, permissions, requestedScope, dto.controlIds, year);
         const draft = await this.getOrCreateDraft(year, userId);
         this.assertDraftEditable(draft);
-        const controls = await this.prisma.control.findMany({ where: { id: { in: dto.controlIds } } });
+        const controls = await this.prisma.control.findMany({ where: { id: { in: dto.controlIds }, deletedAt: null } });
 
         if (dto.action === 'ASSIGN') {
             return this.bulkAssign(year, userId, draft, controls, dto);
@@ -542,7 +542,7 @@ export class AnnualPlanService {
         const resolved = await this.scopeService.resolveScope(userId, permissions, scopeQuery);
         const scopeOptions = await this.scopeService.getScopeOptions(userId, permissions);
 
-        const rbacWhere: any = { status: 'ACTIVE' };
+        const rbacWhere: any = { status: 'ACTIVE', deletedAt: null };
         if (resolved.appliedScope === 'UNIT') rbacWhere.directorateId = { in: resolved.directorateIds! };
         else if (resolved.appliedScope === 'MINE') {
             rbacWhere.OR = [{ ownerId: userId }, { yearScopes: { some: { year, OR: [{ assigneeId: userId }, { secondControllerId: userId }] } } }];
@@ -776,7 +776,7 @@ export class AnnualPlanService {
             return { toAdd: [], toRemove: [], toModify: [], conflicts: [], missingSchedule: [], assignmentBlocked: [], taskSummary: { toCreate: 0, toCancel: 0, protectedCount: 0 }, blocked: false };
         }
 
-        const controls = await this.prisma.control.findMany({ where: { id: { in: items.map(i => i.controlId) } } });
+        const controls = await this.prisma.control.findMany({ where: { id: { in: items.map(i => i.controlId) }, deletedAt: null } });
         const controlById = new Map(controls.map(c => [c.id, c]));
         const realScopes = await this.prisma.controlYearScope.findMany({
             where: { controlId: { in: items.map(i => i.controlId) }, year },
@@ -1009,7 +1009,7 @@ export class AnnualPlanService {
         }
 
         const items = await this.prisma.annualPlanDraftItem.findMany({ where: { draftId: draft.id } });
-        const controls = await this.prisma.control.findMany({ where: { id: { in: items.map(i => i.controlId) } } });
+        const controls = await this.prisma.control.findMany({ where: { id: { in: items.map(i => i.controlId) }, deletedAt: null } });
         const controlById = new Map(controls.map(c => [c.id, c]));
         const realScopes = await this.prisma.controlYearScope.findMany({ where: { controlId: { in: items.map(i => i.controlId) }, year } });
         const realScopeByControl = new Map(realScopes.map(s => [s.controlId, s]));

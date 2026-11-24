@@ -10,6 +10,7 @@ import ImportControlModal from '@/components/modals/ImportControlModal';
 import ScopeAddModal from '@/components/modals/ScopeAddModal';
 import { PermissionGate } from '@/components/auth/AuthProvider';
 import { FREQUENCY_LABELS } from '@/lib/control-labels';
+import { Button, Modal } from '@/components/ui';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -29,7 +30,12 @@ interface Control {
     /** Bu yılın test uyumu (sunucu özeti) */
     tests: { year: number; planned: number; completed: number; overdue: number; nextPlannedDate: string | null };
     openFindingCount: number;
+    /** Bekleyen yönetici onaylı silme talebi */
+    deletionPending: boolean;
 }
+
+// Kontrol silme talebini kontrol oluşturabilen roller açar; kararı yönetici verir (sunucu da denetler).
+const CONTROL_DELETE_REQUESTERS = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR'];
 
 type TabKey = 'all' | 'active' | 'overdue' | 'findings' | 'mine';
 type SortKey = 'controlId' | 'name' | 'lastTestDate' | 'nextPlannedDate';
@@ -98,12 +104,17 @@ export default function ControlInventoryPage() {
     const router = useRouter();
     const { success, error: showError } = useToast();
     const { user: currentUser } = useAuth();
+    const canRequestDelete = CONTROL_DELETE_REQUESTERS.includes(currentUser?.role?.name ?? '');
 
     const [controls, setControls] = useState<Control[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
     const [importModalOpen, setImportModalOpen] = useState(false);
     const [scopeModalOpen, setScopeModalOpen] = useState(false);
+    // Seçili kontroller için toplu silme talebi (üst araç çubuğu).
+    const [deleteOpen, setDeleteOpen] = useState(false);
+    const [deleteReason, setDeleteReason] = useState('');
+    const [deleting, setDeleting] = useState(false);
 
     const [tab, setTab] = useState<TabKey>('all');
     const [search, setSearch] = useState('');
@@ -137,6 +148,7 @@ export default function ControlInventoryPage() {
                     overdue: c.testSummary?.overdue ?? 0, nextPlannedDate: c.testSummary?.nextPlannedDate ?? null,
                 },
                 openFindingCount: c.openFindingCount ?? 0,
+                deletionPending: !!c.deletionRequestedAt,
             })));
         } catch (err) {
             console.error(err);
@@ -204,6 +216,25 @@ export default function ControlInventoryPage() {
     const setF = (k: keyof typeof filters) => (v: string) => { setFilters(p => ({ ...p, [k]: v })); setPage(1); };
     const toggleSort = (key: SortKey) => setSort(p => (p.key === key ? { key, dir: p.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
 
+    // Her kontrol ayrı talep edilir: geçmişi olan kontrol sunucuda reddedilir (gerekçesiyle), diğerleri onaya gider.
+    const submitDeleteRequests = async () => {
+        if (!deleteReason.trim()) return;
+        setDeleting(true);
+        const ok: string[] = [];
+        const failed: string[] = [];
+        for (const c of controls.filter(x => selectedRows.has(x.id))) {
+            if (c.deletionPending) { failed.push(`${c.controlId}: zaten bekleyen talep var`); continue; }
+            try { await api.requestDeletion('CONTROL', c.id, deleteReason.trim()); ok.push(c.controlId); }
+            catch (err) { failed.push(`${c.controlId}: ${err instanceof Error ? err.message : 'talep açılamadı'}`); }
+        }
+        setDeleting(false);
+        setDeleteOpen(false);
+        setSelectedRows(new Set());
+        if (ok.length) success('Silme talebi gönderildi', `${ok.join(', ')} yönetici onayına gitti.`);
+        if (failed.length) showError(`${failed.length} kontrol için talep açılamadı`, failed.join('\n'));
+        fetchControls();
+    };
+
     const allSelected = pageRows.length > 0 && pageRows.every(c => selectedRows.has(c.id));
     const toggleRow = (id: string) => setSelectedRows(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
     const toggleAll = () => setSelectedRows(prev => {
@@ -242,6 +273,14 @@ export default function ControlInventoryPage() {
                                 {selectedRows.size} Kontrolü Kapsama Al
                             </button>
                         </PermissionGate>
+                    )}
+                    {canRequestDelete && (
+                        <button type="button" onClick={() => { setDeleteReason(''); setDeleteOpen(true); }} disabled={selectedRows.size === 0}
+                            title={selectedRows.size === 0 ? 'Silmek istediğiniz kontrolleri listeden seçin' : undefined}
+                            data-testid="control-delete-request"
+                            className="h-9 px-3.5 rounded-lg border border-rose-300 bg-white text-[13px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white">
+                            {selectedRows.size > 0 ? `${selectedRows.size} Kontrol İçin Silme Talebi` : 'Silme Talebi'}
+                        </button>
                     )}
                     <button type="button" onClick={() => setImportModalOpen(true)} className="h-9 px-3.5 rounded-lg border border-slate-300 bg-white text-[13px] font-medium text-slate-700 hover:bg-slate-50">İçe Aktar</button>
                     <Link href="/controls/new" className="h-9 px-4 inline-flex items-center rounded-lg bg-blue-600 text-[13px] font-semibold text-white hover:bg-blue-700">+ Yeni Kontrol</Link>
@@ -351,7 +390,10 @@ export default function ControlInventoryPage() {
                                             {eff && <div className={`mt-1 w-fit text-[10.5px] font-semibold border rounded px-1.5 py-0.5 ${eff.cls}`}>{eff.label}</div>}
                                         </td>
                                         <td className="px-3 py-3 text-right" onClick={e => e.stopPropagation()}>
-                                            <Link href={`/controls/${c.id}/edit`} title="Düzenle" className="text-[12px] font-medium text-slate-400 hover:text-blue-600">Düzenle</Link>
+                                            <div className="flex items-center justify-end gap-2">
+                                                {c.deletionPending && <span className="text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded px-1.5 py-0.5 whitespace-nowrap" title="Yönetici onayı bekleniyor">Silme onayı bekliyor</span>}
+                                                <Link href={`/controls/${c.id}/edit`} title="Düzenle" className="text-[12px] font-medium text-slate-400 hover:text-blue-600">Düzenle</Link>
+                                            </div>
                                         </td>
                                     </tr>
                                 );
@@ -376,6 +418,20 @@ export default function ControlInventoryPage() {
                 controlIds={Array.from(selectedRows)}
                 onSuccess={() => { setSelectedRows(new Set()); fetchControls(); }}
             />
+            <Modal open={deleteOpen} onClose={() => !deleting && setDeleteOpen(false)} size="md"
+                title={`${selectedRows.size} kontrol için silme talebi`}
+                description="Yalnız geçmişi olmayan kontrol silinebilir (başlamış/tamamlanmış testi, bulgusu veya aksiyonu yok); öyleyse kontrolü pasifleştirin. Talep yönetici onayına gider; onaylanınca başlamamış testler ve dönem kontrolleri iptal edilir, kayıt denetim için korunur."
+                footer={<div className="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setDeleteOpen(false)} disabled={deleting}>Vazgeç</Button>
+                    <Button variant="danger" size="sm" loading={deleting} disabled={!deleteReason.trim()} onClick={submitDeleteRequests}>Silme talebi gönder</Button>
+                </div>}>
+                <p className="text-xs text-slate-600 mb-2">
+                    {controls.filter(c => selectedRows.has(c.id)).map(c => c.controlId).join(', ')}
+                </p>
+                <label htmlFor="control-delete-reason" className="block text-xs font-semibold text-slate-600 mb-1">Silme gerekçesi *</label>
+                <textarea id="control-delete-reason" value={deleteReason} onChange={e => setDeleteReason(e.target.value)} rows={3} maxLength={2000} autoFocus
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            </Modal>
             <ImportControlModal
                 isOpen={importModalOpen}
                 onClose={() => setImportModalOpen(false)}

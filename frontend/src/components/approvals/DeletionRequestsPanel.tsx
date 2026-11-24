@@ -8,10 +8,11 @@ import { useToast } from '@/components/ui/Toast';
 import type { DeletionRequestRow } from '@/types/workflow';
 
 const TYPE_LABEL: Record<DeletionRequestRow['type'], string> = {
-    CONTROL_TEST: 'Kontrol Testi', PERIOD_CONTROL: 'Dönem Kontrolü', FINDING: 'Bulgu', ACTION: 'Aksiyon Planı', FOLLOW_UP: 'Takip Çalışması',
+    CONTROL: 'Kontrol', CONTROL_TEST: 'Kontrol Testi', PERIOD_CONTROL: 'Dönem Kontrolü', FINDING: 'Bulgu', ACTION: 'Aksiyon Planı', FOLLOW_UP: 'Takip Çalışması',
 };
 
 const CONSEQUENCE: Record<DeletionRequestRow['type'], string> = {
+    CONTROL: 'Kontrol "Silindi" olarak işaretlenir ve envanterden düşer; başlamamış testleri ve dönem kontrolleri iptal edilir, plan taslağı ve risk eşleştirmeleri kaldırılır. Kayıt denetim için korunur.',
     FINDING: 'Bulgu "İptal" olarak işaretlenir; bağlı açık aksiyon ve takip çalışmaları da iptal edilir. Kayıtlar denetim için korunur.',
     ACTION: 'Aksiyon planı "Silindi" olarak işaretlenir; takip çalışmaları da iptal edilir. Kayıt denetim için korunur.',
     FOLLOW_UP: 'Takip çalışması "Silindi" olarak işaretlenir. Kayıt denetim için korunur.',

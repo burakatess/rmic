@@ -10,7 +10,7 @@ import { useToast } from '@/components/ui/Toast';
  * Bekleyen talep varsa düğme yerine bilgi rozeti gösterilir.
  */
 export function DeletionRequestButton({ type, id, code, pending, onDone, size = 'sm', variant = 'outline' }: {
-    type: 'CONTROL_TEST' | 'PERIOD_CONTROL'; id: string; code: string; pending?: boolean; onDone?: () => void;
+    type: 'CONTROL' | 'CONTROL_TEST' | 'PERIOD_CONTROL'; id: string; code: string; pending?: boolean; onDone?: () => void;
     size?: 'xs' | 'sm'; variant?: 'outline' | 'ghost' | 'danger';
 }) {
     const { success, error: showError } = useToast();
@@ -37,10 +37,12 @@ export function DeletionRequestButton({ type, id, code, pending, onDone, size = 
             <Button size={size} variant={variant} onClick={(e) => { e.stopPropagation(); setOpen(true); }}>Silme talebi</Button>
             <Modal open={open} onClose={() => !busy && setOpen(false)} size="md"
                 title={`${code} için silme talebi`}
-                description="Kayıt hemen silinmez: talep yönetici onayına gider ve onaylanana kadar mevcut haliyle kalır. Talebi siz onaylayamazsınız."
+                description={type === 'CONTROL'
+                    ? 'Yalnız geçmişi olmayan kontrol silinebilir (başlamış/tamamlanmış testi, bulgusu veya aksiyonu yok); öyleyse kontrolü pasifleştirin. Talep yönetici onayına gider; onaylanınca başlamamış testler ve dönem kontrolleri iptal edilir, kayıt denetim için korunur.'
+                    : 'Kayıt hemen silinmez: talep yönetici onayına gider ve onaylanana kadar mevcut haliyle kalır. Talebi siz onaylayamazsınız.'}
                 footer={<div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => setOpen(false)} disabled={busy}>Vazgeç</Button>
-                    <Button variant="danger" size="sm" loading={busy} disabled={!reason.trim()} onClick={submit}>Onaya gönder</Button>
+                    <Button variant="danger" size="sm" loading={busy} disabled={!reason.trim()} onClick={submit}>Silme talebi gönder</Button>
                 </div>}>
                 <div onClick={e => e.stopPropagation()}>
                     <label htmlFor={`del-${id}`} className="block text-xs font-semibold text-slate-600 mb-1">Silme gerekçesi *</label>

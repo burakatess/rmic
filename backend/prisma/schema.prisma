@@ -481,9 +481,22 @@ model Control {
   // kontrolde yeni sürüm var" göstergesi hesaplanır (bkz. plan D4).
   version Int @default(1)
 
+  // Yönetici onaylı silme talebi (bkz. DeletionRequestsService, tür CONTROL). Yalnız geçmişi olmayan
+  // (başlamış/tamamlanmış testi, bulgusu, aksiyonu bulunmayan) kontrol silinebilir; kayıt fiziksel
+  // silinmez, deletedAt ile işaretlenir ve listelerden düşer (kod tekrar kullanılmaz, iz korunur).
+  deletionRequestedById   String?
+  deletionRequestedAt     DateTime?
+  deletionReason          String?   @db.Text
+  deletionRejectionReason String?   @db.Text
+  deletionDecidedById     String?
+  deletionDecidedAt       DateTime?
+  deletedAt               DateTime?
+  deletedById             String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([deletedAt])
   @@index([ownerId])
   @@index([testPerformerId])
   @@index([reviewerId])
