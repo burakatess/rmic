@@ -41,7 +41,7 @@ export function DetailHeader({
 }: DetailHeaderProps) {
   return (
     <div
-      className={`mb-6 ${sticky ? 'sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-4 bg-slate-50/95 backdrop-blur border-b border-slate-200' : ''} ${className}`}
+      className={`mb-6 ${sticky ? 'sticky top-16 z-20 -mx-4 lg:-mx-6 2xl:-mx-8 px-4 lg:px-6 2xl:px-8 py-4 bg-slate-50/95 backdrop-blur border-b border-slate-200' : ''} ${className}`}
     >
       {breadcrumbs && breadcrumbs.length > 0 && (
         <nav className="flex items-center gap-1.5 text-xs text-slate-400 mb-3">
@@ -93,7 +93,7 @@ interface DetailShellProps {
 /** Detay sayfası dış kabuğu — PageShell ile aynı zemin/spacing dili */
 export function DetailShell({ children, className = '' }: DetailShellProps) {
   return (
-    <div className={`flex flex-col min-h-full bg-slate-50/50 px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-12 ${className}`}>
+    <div className={`flex flex-col min-h-full pb-8 ${className}`}>
       {children}
     </div>
   );

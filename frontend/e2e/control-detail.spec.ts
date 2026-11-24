@@ -60,16 +60,16 @@ test('kontrol detayı: yıl bazlı sorumlular, test planı, değişiklik geçmi�
     await expect(page.getByText(`${YEAR} dönem kontrolü`)).toBeVisible();
     await shot(page, 'detail-summary');
 
-    await page.getByRole('button', { name: /Test Planı/ }).click();
+    await page.getByRole('tab', { name: /Test Planı/ }).click();
     const row = page.getByTestId('control-test-row').first();
     await expect(row).toBeVisible();
     await expect(row).not.toContainText('Atanmamış'); // gerçek test sorumlusu (eskiden kontrol sahibi yazıyordu)
     await shot(page, 'detail-tests');
 
-    await page.getByRole('button', { name: /Bulgular/ }).click();
+    await page.getByRole('tab', { name: /Bulgular/ }).click();
     await shot(page, 'detail-findings');
 
-    await page.getByRole('button', { name: 'Değişiklik Geçmişi' }).click();
+    await page.getByRole('tab', { name: 'Değişiklik Geçmişi' }).click();
     const history = page.getByTestId('control-history');
     await expect(history).toContainText('Kontrol güncellendi');
     await expect(history).toContainText('Notlar');
@@ -82,6 +82,6 @@ test('kontrol detayı: yıl bazlı sorumlular, test planı, değişiklik geçmi�
     await page.getByRole('button', { name: 'Aktifleştir' }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Aktifleştir' }).click();
     await expect(page.getByText('Envanterde pasif', { exact: true })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Değişiklik Geçmişi' }).click();
+    await page.getByRole('tab', { name: 'Değişiklik Geçmişi' }).click();
     await expect(page.getByTestId('control-history')).toContainText('Envanterde aktifleştirildi');
 });

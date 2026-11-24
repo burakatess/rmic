@@ -27,6 +27,8 @@ interface FileUploadProps {
     label?: string;
     disabled?: boolean;
     compact?: boolean;
+    /** Tek satır: "EKLER  + Dosya ekle  [dosya] [dosya]" — kart alt şeritleri için. Sürükle-bırak da çalışır. */
+    inline?: boolean;
     attachmentKind?: 'control-test' | 'finding' | 'action' | 'follow-up';
     onUpdate?: (att: AttachmentMeta, patch: { displayName?: string; description?: string }) => void | Promise<void>;
 }
@@ -50,7 +52,7 @@ function fmtSize(bytes: number): string {
 }
 
 export function FileUpload({
-    attachments, onUpload, onRemove, label = 'Ekler', disabled = false, compact = false, attachmentKind = 'finding', onUpdate,
+    attachments, onUpload, onRemove, label = 'Ekler', disabled = false, compact = false, inline = false, attachmentKind = 'finding', onUpdate,
 }: FileUploadProps) {
     const [uploading, setUploading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -87,6 +89,37 @@ export function FileUpload({
             setError('İndirme başarısız');
         }
     };
+
+    const fileChip = (att: AttachmentMeta, i: number) => (
+        <li key={att.id ?? att.fileName ?? i} className="flex items-center gap-1.5 pl-2 pr-1.5 py-1 bg-white border border-slate-200 rounded-lg text-xs max-w-[260px]">
+            <span>{fileIcon(att.originalName)}</span>
+            <button type="button" onClick={() => att.id ? setPreview(att) : undefined} title={att.displayName || att.originalName}
+                className="text-slate-700 hover:text-indigo-600 hover:underline truncate">{att.displayName || att.originalName}</button>
+            {att.id && <button type="button" title="İndir" onClick={() => handleDownload(att)} className="text-slate-400 hover:text-indigo-600">↓</button>}
+            {!disabled && <button type="button" onClick={() => onRemove(att, i)} className="text-slate-400 hover:text-red-500" title="Kaldır">×</button>}
+        </li>
+    );
+
+    if (inline) {
+        return (
+            <div className="flex flex-wrap items-center gap-2"
+                onDragOver={e => { e.preventDefault(); }}
+                onDrop={e => { e.preventDefault(); if (!disabled) handleFiles(e.dataTransfer.files); }}>
+                {label && <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{label}</span>}
+                {!disabled && (
+                    <button type="button" onClick={() => !uploading && inputRef.current?.click()} title="PDF, DOCX, XLSX, PNG, JPEG — en fazla 15 MB"
+                        className="inline-flex items-center gap-1 h-8 px-3 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-blue-700 hover:border-blue-300 hover:bg-blue-50">
+                        {uploading ? 'Yükleniyor…' : '+ Dosya ekle'}
+                    </button>
+                )}
+                {disabled && attachments.length === 0 && <span className="text-xs text-slate-400">Ek yok</span>}
+                <input ref={inputRef} type="file" multiple accept={FILE_UPLOAD_ACCEPT} className="hidden" onChange={e => handleFiles(e.target.files)} disabled={disabled} />
+                {attachments.length > 0 && <ul className="flex flex-wrap gap-1.5">{attachments.map(fileChip)}</ul>}
+                {error && <span className="text-[11px] text-red-500">{error}</span>}
+                {preview && <div className="fixed inset-0 z-[60] bg-black/50 p-8" onClick={() => setPreview(null)}><div className="bg-white rounded-xl h-full max-w-5xl mx-auto overflow-hidden" onClick={e => e.stopPropagation()}><div className="h-full"><EvidencePreview attachment={preview as any} kind={attachmentKind}/></div></div></div>}
+            </div>
+        );
+    }
 
     return (
         <div>
