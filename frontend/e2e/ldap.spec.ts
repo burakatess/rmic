@@ -85,6 +85,16 @@ test('LDAP/LDAPS bağlantısı ekle → test et → LDAP kullanıcısını dizin
     await expect(page.getByRole('row').filter({ hasText: 'ayse.ldap@rmic.test' })).toContainText('LDAP', { timeout: 30_000 });
     await shot(page, 'users-with-ldap');
 
+    // Kaynak süzgeci: "LDAP Kullanıcısı" kartı yalnız LDAP kullanıcılarını bırakır; Yerel seçilince LDAP kullanıcısı çıkar.
+    await page.getByText('LDAP Kullanıcısı', { exact: true }).click();
+    const rows = page.getByRole('row').filter({ hasText: '@' });
+    await expect(rows.first()).toBeVisible();
+    for (const t of await rows.allInnerTexts()) expect(t).toContain('LDAP');
+    await expect(page.getByRole('row').filter({ hasText: 'playwright-admin@e2e.local' })).toHaveCount(0);
+    await shot(page, 'users-ldap-filter');
+    await page.getByText('LDAP Kullanıcısı', { exact: true }).click(); // süzgeci kaldır
+    await expect(page.getByRole('row').filter({ hasText: 'playwright-admin@e2e.local' })).toHaveCount(1);
+
     // LDAP kullanıcısı kurum kullanıcı adı + LDAP şifresiyle girer.
     const ctx = await browser.newContext({ baseURL: 'http://127.0.0.1:3100' });
     const p2 = await ctx.newPage();

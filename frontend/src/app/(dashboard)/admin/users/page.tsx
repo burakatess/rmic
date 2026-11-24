@@ -59,6 +59,9 @@ export default function UsersPage() {
     const [search, setSearch] = useState('');
     const [roleFilter, setRoleFilter] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
+    // Kimlik kaynağı (Yerel / LDAP) ve LDAP bağlantısı süzgeçleri.
+    const [sourceFilter, setSourceFilter] = useState('');
+    const [connectionFilter, setConnectionFilter] = useState('');
     const [page, setPage] = useState(1);
     const pageSize = 20;
     const [showModal, setShowModal] = useState(false);
@@ -219,13 +222,24 @@ export default function UsersPage() {
             const q = search.toLowerCase();
             if (!u.email.toLowerCase().includes(q) &&
                 !u.firstName.toLowerCase().includes(q) &&
-                !u.lastName.toLowerCase().includes(q)) return false;
+                !u.lastName.toLowerCase().includes(q) &&
+                !(u.ldapUsername ?? '').toLowerCase().includes(q)) return false;
         }
         if (roleFilter && u.role.id !== roleFilter) return false;
         if (statusFilter === 'active' && !u.isActive) return false;
         if (statusFilter === 'passive' && u.isActive) return false;
+        if (sourceFilter && (u.authSource ?? 'LOCAL') !== sourceFilter) return false;
+        if (connectionFilter && u.ldapConnection?.id !== connectionFilter) return false;
         return true;
-    }), [users, search, roleFilter, statusFilter]);
+    }), [users, search, roleFilter, statusFilter, sourceFilter, connectionFilter]);
+
+    // Listede kullanılan LDAP bağlantıları (süzgeç seçenekleri).
+    const ldapConnections = useMemo(() => {
+        const m = new Map<string, string>();
+        users.forEach(u => { if (u.ldapConnection) m.set(u.ldapConnection.id, u.ldapConnection.name); });
+        return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1], 'tr'));
+    }, [users]);
+    const ldapCount = users.filter(u => u.authSource === 'LDAP').length;
 
     const paginated = useMemo(
         () => filteredUsers.slice((page - 1) * pageSize, page * pageSize),
@@ -248,9 +262,24 @@ export default function UsersPage() {
                 { value: 'passive', label: 'Pasif' },
             ],
         },
+        {
+            type: 'select', key: 'source', label: 'Kaynak',
+            value: sourceFilter,
+            onChange: (v) => { setSourceFilter(v); if (v !== 'LDAP') setConnectionFilter(''); setPage(1); },
+            options: [
+                { value: 'LOCAL', label: 'Yerel' },
+                { value: 'LDAP', label: 'LDAP' },
+            ],
+        },
+        ...(ldapConnections.length > 0 ? [{
+            type: 'select' as const, key: 'ldapConnection', label: 'LDAP bağlantısı',
+            value: connectionFilter,
+            onChange: (v: string) => { setConnectionFilter(v); if (v) setSourceFilter('LDAP'); setPage(1); },
+            options: ldapConnections.map(([id, name]) => ({ value: id, label: name })),
+        }] : []),
     ];
 
-    const clearAll = () => { setSearch(''); setRoleFilter(''); setStatusFilter(''); setPage(1); };
+    const clearAll = () => { setSearch(''); setRoleFilter(''); setStatusFilter(''); setSourceFilter(''); setConnectionFilter(''); setPage(1); };
 
     const columns: ColumnDef<User>[] = [
         {
@@ -358,7 +387,7 @@ export default function UsersPage() {
             />
 
             {/* KPI'lar */}
-            <KpiGrid columns={4}>
+            <KpiGrid columns={5}>
                 <KpiCard title="Toplam Kullanıcı" value={users.length} variant="default" />
                 <KpiCard title="Aktif" value={users.filter(u => u.isActive).length} variant="success"
                     active={statusFilter === 'active'}
@@ -366,7 +395,10 @@ export default function UsersPage() {
                 <KpiCard title="Pasif" value={users.filter(u => !u.isActive).length} variant="critical"
                     active={statusFilter === 'passive'}
                     onClick={() => { setStatusFilter(statusFilter === 'passive' ? '' : 'passive'); setPage(1); }} />
-                <KpiCard title="Rol Sayısı" value={roles.length} variant="primary" />
+                <KpiCard title="LDAP Kullanıcısı" value={ldapCount} variant="primary"
+                    active={sourceFilter === 'LDAP'}
+                    onClick={() => { setSourceFilter(sourceFilter === 'LDAP' ? '' : 'LDAP'); setConnectionFilter(''); setPage(1); }} />
+                <KpiCard title="Rol Sayısı" value={roles.length} variant="default" />
             </KpiGrid>
 
             {/* Filtre paneli */}
@@ -375,7 +407,7 @@ export default function UsersPage() {
                 onSearchChange={(v) => { setSearch(v); setPage(1); }}
                 searchPlaceholder="Kullanıcı ara..."
                 fields={advancedFields}
-                activeCount={[roleFilter, statusFilter].filter(Boolean).length}
+                activeCount={[roleFilter, statusFilter, sourceFilter, connectionFilter].filter(Boolean).length}
                 onClearAll={clearAll}
             />
 
