@@ -88,8 +88,8 @@ describe('WorkflowBar', () => {
         expect(screen.getByTestId('workflow-history')).toHaveTextContent('Devam Ediyor → Tamamlandı');
 
         fireEvent.click(screen.getByRole('button', { name: 'İade et' }));
-        // Modal içindeki onay düğmesi gerekçe girilmeden kapalı.
-        const dialogConfirm = screen.getAllByRole('button', { name: 'Onayla' }).find(b => b.closest('[role="dialog"]'))!;
+        // Modal içindeki teyit düğmesi işlemin adını taşır ("İade et") ve gerekçe girilmeden kapalıdır.
+        const dialogConfirm = screen.getAllByRole('button', { name: 'İade et' }).find(b => b.closest('[role="dialog"]'))!;
         expect(dialogConfirm).toBeDisabled();
         fireEvent.change(screen.getByLabelText(/Gerekçe/), { target: { value: 'Kanıt eksik' } });
         fireEvent.click(dialogConfirm);

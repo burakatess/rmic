@@ -158,6 +158,7 @@ const actionStatusConfig: Record<string, { label: string; variant: BV }> = {
     TAMAMLANDI:   { label: 'Tamamlandı',   variant: 'info' },
     YETERSIZ:     { label: 'Yetersiz',     variant: 'high' },
     KAPATILDI:    { label: 'Kapatıldı',    variant: 'success' },
+    IPTAL:        { label: 'İptal',        variant: 'neutral' },
 };
 
 const followUpStatusConfig: Record<string, { label: string; variant: BV }> = {
@@ -165,6 +166,8 @@ const followUpStatusConfig: Record<string, { label: string; variant: BV }> = {
     DEVAM_EDIYOR: { label: 'Devam Ediyor', variant: 'warning' },
     TAMAMLANDI:   { label: 'Tamamlandı',   variant: 'info' },
     ONAYLANDI:    { label: 'Onaylandı',    variant: 'success' },
+    // Silinen / onay geri alınan aksiyonun iptal edilen takibi ham kodla ("IPTAL") görünüyordu.
+    IPTAL:        { label: 'İptal',        variant: 'neutral' },
 };
 
 const operationLabels: Record<string, { label: string; variant: TimelineVariant }> = {

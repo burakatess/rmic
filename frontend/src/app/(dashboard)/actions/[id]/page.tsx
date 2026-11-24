@@ -22,6 +22,7 @@ const statusLabels: Record<string, { label: string; variant: BadgeVariant }> = {
     TAMAMLANDI: { label: 'Tamamlandı', variant: 'success' },
     YETERSIZ: { label: 'Yetersiz', variant: 'critical' },
     KAPATILDI: { label: 'Kapatıldı', variant: 'neutral' },
+    IPTAL: { label: 'İptal', variant: 'neutral' },
     OPEN: { label: 'Açık', variant: 'info' },
     IN_PROGRESS: { label: 'Devam Ediyor', variant: 'warning' },
     COMPLETED: { label: 'Tamamlandı', variant: 'success' },

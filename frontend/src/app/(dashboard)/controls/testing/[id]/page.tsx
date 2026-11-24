@@ -780,6 +780,13 @@ export default function ControlTestDetailPage() {
                 <div className="mt-3">
                     <WorkflowBar type="CONTROL_TEST" id={test.id} onChanged={() => load(true)} refreshKey={test.status} compact />
                 </div>
+                {/* Geri gönderme gerekçesi yalnız kapalı "Geçmiş" listesindeydi; test eden kişi neyi düzelteceğini hemen görsün. */}
+                {test.status === 'GERI_GONDERILDI' && test.rejectionReason && (
+                    <div role="alert" data-testid="test-returned-reason" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                        <span className="font-semibold">2. kontrolcü düzeltme için geri gönderdi:</span> {test.rejectionReason}
+                        {test.returnedAt && <span className="ml-2 text-xs text-red-600">({fmtDateTime(test.returnedAt)})</span>}
+                    </div>
+                )}
             </div>
 
             {/* Gövde */}

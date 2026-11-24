@@ -359,7 +359,7 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                         <div className="space-y-4">
                             <div className="flex items-center gap-2">
                                 <div className="flex-1 h-px bg-slate-200" />
-                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">Birim Tarafı</span>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">Birimden alınan bilgi (denetçi girer)</span>
                                 <div className="flex-1 h-px bg-slate-200" />
                             </div>
 

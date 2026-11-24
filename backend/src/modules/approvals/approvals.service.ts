@@ -13,7 +13,8 @@ export type PendingKind = 'ACTION_APPROVAL' | 'ACTION_DELETION' | 'FOLLOWUP_APPR
 export type DecisionKind =
     | 'ACTION_REJECTED' | 'ACTION_APPROVED' | 'ACTION_REVERTED' | 'ACTION_DELETED' | 'ACTION_DELETE_REJECTED'
     | 'FOLLOWUP_REJECTED' | 'FOLLOWUP_APPROVED' | 'FOLLOWUP_REVERTED' | 'FOLLOWUP_DELETED' | 'FOLLOWUP_DELETE_REJECTED'
-    | 'FINDING_CLOSED' | 'FINDING_CLOSURE_RETURNED';
+    | 'FINDING_CLOSED' | 'FINDING_CLOSURE_RETURNED' | 'FINDING_DELETED' | 'FINDING_DELETE_REJECTED'
+    | 'TEST_RETURNED' | 'TEST_APPROVED' | 'TEST_DELETED' | 'TEST_DELETE_REJECTED';
 
 /**
  * Bulgu kapanış değerlendirmesi: 2. kontrolcüsü olduğum, kapanışa gönderilmiş (PENDING_REVIEW) bulgular.
@@ -160,7 +161,7 @@ export class ApprovalsService {
             deletedAt: true, deletedById: true, deletionReason: true, deletionRejectionReason: true, deletionRequestedAt: true, updatedAt: true,
             finding: findingSelect,
         } as const;
-        const [actions, fus, closures] = await Promise.all([
+        const [actions, fus, closures, tests, deletedFindings] = await Promise.all([
             this.prisma.action.findMany({
                 where: {
                     firstControllerId: userId,
@@ -192,14 +193,42 @@ export class ApprovalsService {
                 where: { closureSubmittedById: userId, closureDecidedAt: { gte: since }, deletedAt: null },
                 select: { id: true, findingId: true, summary: true, status: true, closureDecidedAt: true, closureReturnReason: true },
             }),
+            // Kontrol testi kararları (test eden = 1. kontrolcü): geri gönderme düzeltilene kadar, diğerleri 7 gün.
+            // Önceden yalnız test listesinden fark ediliyordu; ne kararlarda ne bildirimde vardı.
+            this.prisma.controlTest.findMany({
+                where: {
+                    assigneeId: userId,
+                    OR: [
+                        { status: 'GERI_GONDERILDI', deletedAt: null },
+                        { status: 'ONAYLANDI', approvedAt: { gte: since } },
+                        { deletedAt: { gte: since } },
+                        { deletionRejectionReason: { not: null }, deletionRequestedAt: null, updatedAt: { gte: since } },
+                    ],
+                },
+                select: {
+                    id: true, testNo: true, status: true, rejectionReason: true, returnedAt: true, approvedAt: true, updatedAt: true,
+                    deletedAt: true, deletionReason: true, deletionRejectionReason: true, deletionRequestedAt: true,
+                },
+            }),
+            // Bulgu silme talebi kararları (1. kontrolcüsü olduğum bulgular).
+            this.prisma.finding.findMany({
+                where: {
+                    firstControllerId: userId,
+                    OR: [
+                        { deletedAt: { gte: since } },
+                        { deletionRejectionReason: { not: null }, deletionRequestedAt: null, updatedAt: { gte: since } },
+                    ],
+                },
+                select: { id: true, findingId: true, summary: true, deletedAt: true, deletionReason: true, deletionRejectionReason: true, deletionRequestedAt: true, updatedAt: true },
+            }),
         ]);
 
         const items: ApprovalDecisionItem[] = [];
         // Manuel aksiyon planı / takibinde bulgu yoktur (finding = null): bağlantı kaydın kendi ekranına gider.
-        const push = (kind: DecisionKind, r: { id: string; finding: any }, code: string, reason: string | null, date: Date | null) =>
+        const push = (kind: DecisionKind, r: { id: string; finding: any }, code: string, reason: string | null, date: Date | null, link?: string) =>
             date && items.push({
                 kind, recordId: r.id, code, finding: r.finding ?? null, reason, date,
-                link: r.finding ? `/findings/${r.finding.id}` : kind.startsWith('ACTION_') ? `/actions/${r.id}` : `/follow-ups/${r.id}`,
+                link: link ?? (r.finding ? `/findings/${r.finding.id}` : kind.startsWith('ACTION_') ? `/actions/${r.id}` : `/follow-ups/${r.id}`),
             });
 
         for (const a of actions) {
@@ -222,6 +251,19 @@ export class ApprovalsService {
             const self = { id: f.id, finding: { id: f.id, findingId: f.findingId, summary: f.summary } };
             if (f.status === 'CLOSED') push('FINDING_CLOSED', self, f.findingId, null, f.closureDecidedAt);
             else if (f.status !== 'PENDING_REVIEW' && f.closureReturnReason) push('FINDING_CLOSURE_RETURNED', self, f.findingId, f.closureReturnReason, f.closureDecidedAt);
+        }
+        for (const t of tests) {
+            const self = { id: t.id, finding: null }, link = `/controls/testing/${t.id}`;
+            if (t.deletedAt && t.deletedAt >= since) { push('TEST_DELETED', self, t.testNo, t.deletionReason, t.deletedAt, link); continue; }
+            if (t.deletedAt) continue;
+            if (t.status === 'GERI_GONDERILDI') push('TEST_RETURNED', self, t.testNo, t.rejectionReason, t.returnedAt ?? t.updatedAt, link);
+            else if (t.status === 'ONAYLANDI' && t.approvedAt && t.approvedAt >= since) push('TEST_APPROVED', self, t.testNo, null, t.approvedAt, link);
+            if (t.deletionRejectionReason && !t.deletionRequestedAt && t.updatedAt >= since) push('TEST_DELETE_REJECTED', self, t.testNo, t.deletionRejectionReason, t.updatedAt, link);
+        }
+        for (const f of deletedFindings) {
+            const self = { id: f.id, finding: { id: f.id, findingId: f.findingId, summary: f.summary } };
+            if (f.deletedAt && f.deletedAt >= since) push('FINDING_DELETED', self, f.findingId, f.deletionReason, f.deletedAt);
+            else if (f.deletionRejectionReason && !f.deletionRequestedAt && f.updatedAt >= since) push('FINDING_DELETE_REJECTED', self, f.findingId, f.deletionRejectionReason, f.updatedAt);
         }
         return items.sort((a, b) => +new Date(b.date) - +new Date(a.date));
     }

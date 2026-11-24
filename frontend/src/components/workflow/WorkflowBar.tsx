@@ -147,7 +147,12 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
                     <Button variant={pending?.action === 'CANCEL' ? 'danger' : pending?.confirmOnly ? 'success' : 'primary'} size="sm" loading={busy}
                         disabled={!pending?.confirmOnly && !reason.trim()}
                         onClick={() => pending && run(pending.action, pending.confirmOnly ? undefined : reason.trim())}>
-                        {pending?.confirmOnly ? pending.label : pending?.action === 'COMPLETE' ? 'Gönder' : pending?.action === 'CANCEL' ? 'Silme talebi gönder' : 'Onayla'}
+                        {pending?.confirmOnly ? pending.label
+                            : pending?.action === 'COMPLETE' ? 'Gönder'
+                            : pending?.action === 'CANCEL' ? 'Silme talebi gönder'
+                            : pending?.action === 'RETURN' ? 'İade et'
+                            : pending?.action === 'REVERT' ? 'Geri al'
+                            : 'Onayla'}
                     </Button>
                 </div>}>
                 {!pending?.confirmOnly && (

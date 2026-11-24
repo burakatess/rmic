@@ -31,8 +31,9 @@ export class AdminController {
     constructor(private adminService: AdminService) { }
 
     // Users
+    // Tam kullanıcı kaydı (e-posta, LDAP DN/kullanıcı adı, bağlantı) yalnız sistem yöneticisine (CLAUDE.md: /admin/*
+    // yalnız SYSTEM_ADMIN). Denetçi/yönetici kişi seçimi için asgari alanlı `users/options` ucunu kullanır (KVKK veri azaltma).
     @Get('users')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async findAllUsers(
         @Query('search') search?: string,
         @Query('roleId') roleId?: string,

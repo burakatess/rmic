@@ -674,7 +674,7 @@ export function CreateFindingModal({
                 <div className="bg-blue-50/40 p-4 rounded-xl border border-blue-100 space-y-4">
                     <h4 className="text-xs font-black text-blue-600 uppercase tracking-wider flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>
-                        İş Birimi Tarafından Doldurulur
+                        Birimden Alınan Bilgi (denetçi girer)
                     </h4>
 
                     <div>

@@ -67,6 +67,7 @@ const followUpStatusConfig: Record<string, { label: string; variant: BV }> = {
     DEVAM_EDIYOR: { label: 'Devam Ediyor', variant: 'warning' },
     TAMAMLANDI:   { label: 'Tamamlandı',   variant: 'info' },
     ONAYLANDI:    { label: 'Onaylandı',    variant: 'success' },
+    IPTAL:        { label: 'İptal',        variant: 'neutral' },
 };
 
 const resolutionConfig: Record<string, { label: string; variant: BV }> = {

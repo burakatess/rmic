@@ -194,10 +194,11 @@ function ApprovalDetailModal({
                     {/* Geri gönderme gerekçesi — ikincil durum */}
                     {returnMode && (
                         <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
-                            <label className="block text-sm font-semibold text-slate-700">
+                            <label htmlFor="return-reason" className="block text-sm font-semibold text-slate-700">
                                 Geri Gönderme Gerekçesi <span className="text-red-500">*</span>
                             </label>
                             <textarea
+                                id="return-reason"
                                 autoFocus
                                 value={returnReason}
                                 onChange={e => setReturnReason(e.target.value)}
@@ -210,8 +211,9 @@ function ApprovalDetailModal({
                                 <Button variant="outline" size="sm" onClick={() => { setReturnMode(false); setReturnReason(''); }} disabled={saving}>
                                     İptal
                                 </Button>
-                                <Button variant="primary" size="sm" onClick={handleReturn} loading={saving} disabled={saving || !returnReason.trim()}>
-                                    Onayla
+                                {/* "Onayla" yazıyordu; aynı pencerede gerçek "Onayla" da olduğu için karıştırılabiliyordu. */}
+                                <Button variant="danger" size="sm" onClick={handleReturn} loading={saving} disabled={saving || !returnReason.trim()}>
+                                    Geri gönder
                                 </Button>
                             </div>
                         </div>
