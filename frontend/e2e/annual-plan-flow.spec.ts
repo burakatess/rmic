@@ -113,9 +113,12 @@ test('yıllık plan: hazırla → gönder → başka yönetici onaylar → uygul
     expect(appliedVersion, 'plan uygulanınca yıl kapsamı oluşmalı').toBeDefined();
 
     // Sinyal henüz yok: kapsam güncel sürümde.
-    const healthBefore = await json<{ data: Array<{ code: string; entityId: string }> }>(
-        await request.get(`${API}/workflow-health/items`, { headers: auth(adminToken), params: { scope: 'ORG', year: String(YEAR), pageSize: '200' } }));
-    expect(healthBefore.data.filter(i => i.code === 'CONTROL_VERSION_OUTDATED' && i.entityId === control!.id)).toHaveLength(0);
+    const versionFlag = async () => {
+        const b = await json<{ columns: Array<{ items: Array<{ title: string; flags?: string[] }> }> }>(
+            await request.get(`${API}/workflow/board`, { headers: auth(adminToken), params: { scope: 'ORG', type: 'PERIOD_CONTROL', year: String(YEAR) } }));
+        return b.columns.flatMap(c => c.items).filter(i => i.title === CONTROL_NAME && (i.flags ?? []).includes('YENI_SURUM')).length;
+    };
+    expect(await versionFlag()).toBe(0);
 
     // ── 5) Ana kontrol güncellenir (tanım değişimi → sürüm artar) ─────────────────────
     await gotoStable(admin, `/controls/${control!.id}/edit`);
@@ -123,26 +126,39 @@ test('yıllık plan: hazırla → gönder → başka yönetici onaylar → uygul
     await admin.getByRole('button', { name: 'Değişiklikleri Kaydet' }).click();
     await expect(admin.getByText('Kontrol Sürümü Etki Analizi')).toBeVisible();   // etki analizi penceresi
 
-    // ── 6) Sinyal Akış Sağlığı'nda görünür (karar verilmeden pencere kapatıldı: "Şimdilik Koru") ──
+    // ── 6) Sinyal İşlem Durumları panosunda görünür (karar verilmeden pencere kapatıldı: "Şimdilik Koru") ──
     await admin.getByRole('button', { name: 'Şimdilik Koru' }).click();
-    const healthMid = await json<{ data: Array<{ code: string; entityId: string }> }>(
-        await request.get(`${API}/workflow-health/items`, { headers: auth(adminToken), params: { scope: 'ORG', year: String(YEAR), pageSize: '200' } }));
-    expect(healthMid.data.filter(i => i.code === 'CONTROL_VERSION_OUTDATED' && i.entityId === control!.id)).toHaveLength(1);
-    await gotoStable(admin, '/workflow-health');
-    await admin.locator('select', { has: admin.locator(`option[value="${YEAR}"]`) }).first().selectOption(String(YEAR));
-    await expect(admin.getByText(CONTROL_NAME).first()).toBeVisible();
+    expect(await versionFlag()).toBe(1);
+    // İşlem Durumları (Kanban): kurum görünümü + yıl; dönem kontrolü kartında "Yeni kontrol sürümü" rozeti.
+    await gotoStable(admin, '/workflow');
+    await admin.getByRole('tab', { name: 'Kurum' }).click();
+    await admin.getByLabel('Yıl').selectOption(String(YEAR));
+    const card = admin.locator('[data-testid="board-card"][data-entity^="PERIOD_CONTROL:"]').filter({ hasText: CONTROL_NAME });
+    await expect(card).toContainText('Yeni kontrol sürümü');
 
     // ── 7) Etki kararı: yeni sürüm uygulanır → sinyal kendiliğinden kaybolur ──────────────
     await gotoStable(admin, `/controls/${control!.id}/edit?versionImpact=1`);
     await expect(admin.getByText('Kontrol Sürümü Etki Analizi')).toBeVisible();
     await admin.getByRole('combobox').filter({ hasText: 'Mevcut sürümü koru' }).selectOption('APPLY_TO_NOT_STARTED');
     await admin.getByRole('button', { name: 'Kararları Uygula' }).click();
-    await expect.poll(async () => {
-        const h = await json<{ data: Array<{ code: string; entityId: string }> }>(
-            await request.get(`${API}/workflow-health/items`, { headers: auth(adminToken), params: { scope: 'ORG', year: String(YEAR), pageSize: '200' } }));
-        return h.data.filter(i => i.code === 'CONTROL_VERSION_OUTDATED' && i.entityId === control!.id).length;
-    }).toBe(0);
+    await expect.poll(versionFlag).toBe(0);
     expect((await scopeVersion()) ?? 0).toBeGreaterThan(appliedVersion ?? 0);
+
+    // ── Kanban sürükle-bırak: aşama atlanamaz, komşu aşamaya taşıma kayda yansır ─────────────
+    await gotoStable(admin, '/workflow');
+    await admin.getByLabel('Yıl').selectOption(String(YEAR));
+    await admin.getByLabel('İşlem türü').selectOption('CONTROL_TEST');
+    const todo = admin.getByTestId('column-BEKLIYOR').getByTestId('board-card').first();
+    await expect(todo).toBeVisible();
+    const entity = (await todo.getAttribute('data-entity'))!;
+    const testId = entity.split(':')[1];
+    await todo.dragTo(admin.getByTestId('column-ONAYLANDI'));
+    await expect(admin.getByText('Aşamalar sırayla ilerler; bir aşama atlanamaz.')).toBeVisible();
+    await admin.getByTestId('column-BEKLIYOR').locator(`[data-entity="${entity}"]`).dragTo(admin.getByTestId('column-DEVAM_EDIYOR'));
+    await expect(admin.getByTestId('column-DEVAM_EDIYOR').locator(`[data-entity="${entity}"]`)).toBeVisible();
+    const moved = await json<{ stage: string; history: Array<{ action: string }> }>(await request.get(`${API}/workflow/CONTROL_TEST/${testId}`, { headers: auth(adminToken) }));
+    expect(moved.stage).toBe('DEVAM_EDIYOR');
+    expect(moved.history[0].action).toBe('START');
 
     await adminCtx.close();
     await mgrCtx.close();

@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { PageShell, PageHeader, StatusBadge, LoadingState, EmptyState, Button, Modal } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
+import { WorkflowBar } from '@/components/workflow/WorkflowBar';
 
 type BV = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'success' | 'warning' | 'neutral' | 'primary';
 
@@ -153,6 +154,10 @@ export default function PeriodControlDetailPage() {
                     </div>
                 }
             />
+
+            {detail.status === 'ACTIVE' && (
+                <div className="mb-5"><WorkflowBar type="PERIOD_CONTROL" id={detail.scopeId} onChanged={() => load()} /></div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 space-y-6">

@@ -9,6 +9,7 @@ import {
 } from '@/components/ui';
 import type { ColumnDef, ActiveFilterChip, AdvancedFilterField } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
+import { DeletionRequestButton } from '@/components/workflow/DeletionRequestButton';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -16,6 +17,7 @@ type BV = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'success' | 'warning
 
 interface ControlTest {
     timingStatus?: string;
+    deletionRequestedAt?: string | null;
     id: string;
     testNo: string;
     controlId: string;
@@ -316,8 +318,10 @@ function ControlTestingPageContent() {
         {
             key: 'actions',
             header: '',
-            defaultWidth: 90,
+            defaultWidth: 220,
             render: (t) => (
+                <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                <DeletionRequestButton type="CONTROL_TEST" id={t.id} code={t.testNo} pending={!!t.deletionRequestedAt} onDone={() => load()} size="xs" variant="ghost" />
                 <Link
                     href={`/controls/testing/${t.id}`}
                     target="_blank"
@@ -327,9 +331,10 @@ function ControlTestingPageContent() {
                 >
                     Testi Aç <IconExternal className="w-3 h-3" />
                 </Link>
+                </div>
             ),
         },
-    ], []);
+    ], [load]);
 
     const colFiltered = useMemo(() => {
         if (!Object.values(colFilters).some(v => v)) return filtered;

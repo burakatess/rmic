@@ -30,7 +30,7 @@ import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 import { LibraryModule } from './modules/library/library.module';
 import { RiskSimulationModule } from './modules/risk-simulation/risk-simulation.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
-import { WorkflowHealthModule } from './modules/workflow-health/workflow-health.module';
+import { WorkflowModule } from './modules/workflow/workflow.module';
 import { SearchModule } from './modules/search/search.module';
 import { AccessScopeModule } from './common/services/access-scope.service';
 import { JwtAuthGuard, PermissionsGuard } from './common/guards';
@@ -75,7 +75,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     LibraryModule,
     RiskSimulationModule,
     DashboardModule,
-    WorkflowHealthModule,
+    WorkflowModule,
     SearchModule,
   ],
   providers: [

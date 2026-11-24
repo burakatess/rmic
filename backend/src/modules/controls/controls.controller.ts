@@ -8,7 +8,7 @@ import { CreateAttachmentDto, UpdateAttachmentDto } from '../../common/dto/attac
 import { AccessScopeService, actionWhere, controlTestWhere, findingFullWhere, riskWhere } from '../../common/services/access-scope.service';
 import type { AccessActor, AccessContext } from '../../common/services/access-scope.service';
 import type { RelatedScopes } from './controls.service';
-import { CompleteControlTestDto, CreateControlDto, CreateControlTestDto, UpdateControlDto, SaveTestDraftDto } from './dto';
+import { CompleteControlTestDto, CreateControlDto, CreateControlTestDto, UpdateControlDto, SaveTestDraftDto, SetFindingLinksDto } from './dto';
 import { MapControlRiskDto, RequiredReasonDto } from '../../common/dto/misc-bodies.dto';
 
 @ApiTags('Controls')
@@ -83,6 +83,28 @@ export class ControlsController {
         const ctx = await this.scope.context(user);
         await this.scope.assertControlTestAccess(ctx, testId);
         return this.controlsService.getOpenFindingReferences(testId, findingFullWhere(ctx));
+    }
+
+    @Get('tests/:testId/finding-candidates')
+    async findingCandidates(@Param('testId') testId: string, @Query('search') search: string | undefined, @CurrentUser() user: AccessActor) {
+        const ctx = await this.scope.context(user);
+        await this.scope.assertControlTestAccess(ctx, testId);
+        return this.controlsService.findingLinkCandidates(testId, search, findingFullWhere(ctx));
+    }
+
+    @Get('tests/:testId/finding-links')
+    async findingLinks(@Param('testId') testId: string, @CurrentUser() user: AccessActor) {
+        const ctx = await this.scope.context(user);
+        await this.scope.assertControlTestAccess(ctx, testId);
+        return this.controlsService.getFindingLinks(testId, findingFullWhere(ctx));
+    }
+
+    @Put('tests/:testId/finding-links')
+    @RequireAnyPermission('control:test', 'test:execute')
+    async setFindingLinks(@Param('testId') testId: string, @Body() dto: SetFindingLinksDto, @CurrentUser() user: AccessActor) {
+        const ctx = await this.scope.context(user);
+        await this.scope.assertControlTestAccess(ctx, testId);
+        return this.controlsService.setFindingLinks(testId, dto.findingIds, user.id, findingFullWhere(ctx));
     }
 
     @Patch('tests/:testId/approve')

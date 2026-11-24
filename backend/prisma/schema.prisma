@@ -539,6 +539,23 @@ model ControlYearScope {
 
   copiedFromYear Int? // "önceki yıldan kopyala" ile oluşturulduysa kaynak yıl
 
+  // Dönem Kontrolü iş akışı: testler onaylanınca birinci kontrolcü tamamlar (2. kontrolcüye iletir),
+  // ikinci kontrolcü onaylar veya gerekçeyle iade eder. Bekliyor/Devam Ediyor testlerden türetilir.
+  reviewSubmittedAt   DateTime?
+  reviewSubmittedById String?
+  reviewApprovedAt    DateTime?
+  reviewApprovedById  String?
+  reviewReturnedAt    DateTime?
+  reviewReturnReason  String?   @db.Text
+
+  // Yönetici onaylı silme (kontrol testiyle aynı desen). Onaylanınca kapsam kaldırılır (REMOVED).
+  deletionRequestedById   String?
+  deletionRequestedAt     DateTime?
+  deletionReason          String?   @db.Text
+  deletionRejectionReason String?   @db.Text
+  deletionDecidedById     String?
+  deletionDecidedAt       DateTime?
+
   tasks ControlTest[]
 
   createdAt DateTime @default(now())
@@ -740,9 +757,23 @@ model ControlTest {
   // ilişki: bir test en fazla bir açık bulguyu referans alabilir. Çoklu referans
   // ihtiyacı doğarsa ayrı bir ilişki tablosuna (ControlTestFindingReference)
   // geçilebilir; şu an için en basit/güvenli çözüm tercih edildi.
-  referencedFinding   Finding? @relation("ControlTestFindingReference", fields: [referencedFindingId], references: [id])
+  referencedFinding   Finding?                 @relation("ControlTestFindingReference", fields: [referencedFindingId], references: [id])
   referencedFindingId String?
-  referenceReason     String?  @db.Text
+  referenceReason     String?                  @db.Text
+  // Çoklu bulgu ilişkilendirme (aynı veya başka kontrolden tespit edilmiş mevcut bulgular).
+  // referencedFindingId geriye dönük uyumluluk için korunur; yeni kayıtlar bu tabloya yazılır.
+  findingLinks        ControlTestFindingLink[]
+
+  // Yönetici onaylı silme: talep → (talep eden hariç) yönetici onayı/reddi. Onaylanınca
+  // kayıt fiziksel silinmez; deletedAt ile işaretlenir (iz ve ilişkiler korunur).
+  deletionRequestedById   String?
+  deletionRequestedAt     DateTime?
+  deletionReason          String?   @db.Text
+  deletionRejectionReason String?   @db.Text
+  deletionDecidedById     String?
+  deletionDecidedAt       DateTime?
+  deletedAt               DateTime?
+  deletedById             String?
 
   // Tarihler
   completedAt DateTime?
@@ -983,9 +1014,10 @@ model Finding {
   statusHistory    FindingStatusHistory[]
   attachments      FindingAttachment[]
   statusLogs       FindingStatusLog[]
-  riskProposals    RiskProposal[]         @relation("FindingRiskProposals")
+  riskProposals    RiskProposal[]           @relation("FindingRiskProposals")
   // Bu bulguyu "referans" alarak ilerletilmiş sonraki kontrol testleri (Madde 6)
-  referencingTests ControlTest[]          @relation("ControlTestFindingReference")
+  referencingTests ControlTest[]            @relation("ControlTestFindingReference")
+  testLinks        ControlTestFindingLink[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3197,4 +3229,36 @@ model RiskSimulationTransfer {
 
   @@unique([scenarioId, scenarioVersionAtTransfer])
   @@index([scenarioId])
+}
+
+// Kontrol testi ↔ bulgu çoklu ilişki (çift yönlü görüntülenir). Mükerrer bulgu açmak yerine
+// mevcut bulguya bağlanmayı sağlar.
+model ControlTestFindingLink {
+  id            String      @id @default(cuid())
+  controlTest   ControlTest @relation(fields: [controlTestId], references: [id], onDelete: Cascade)
+  controlTestId String
+  finding       Finding     @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  findingId     String
+  linkedById    String
+  linkedAt      DateTime    @default(now())
+  note          String?     @db.Text
+
+  @@unique([controlTestId, findingId])
+  @@index([findingId])
+}
+
+// Ortak iş akışı geçiş geçmişi: Bulgu, Kontrol Testi, Takip Çalışması ve Dönem Kontrolü.
+// Her durum değişikliği ana kayıtla AYNI işlemde yazılır (denetim izi ayrıca AuditLog'da).
+model WorkflowTransition {
+  id         String   @id @default(cuid())
+  entityType String // CONTROL_TEST | FOLLOW_UP | FINDING | PERIOD_CONTROL
+  entityId   String
+  action     String // START | COMPLETE | APPROVE | RETURN | REVERT | CANCEL | REOPEN
+  fromStage  String // BEKLIYOR | DEVAM_EDIYOR | TAMAMLANDI | ONAYLANDI | IPTAL
+  toStage    String
+  userId     String?
+  reason     String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
 }

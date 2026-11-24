@@ -62,11 +62,12 @@ export default function ControlScopePanel({ controlId, yearScopes, onChanged }: 
                 showError('Karar Gerekli', 'Devam eden tasklar için devam/iptal kararı verin.');
                 return;
             }
-            success('Başarılı', `${removeTarget.year} kapsamdan çıkarıldı.`);
+            // Kapsamdan çıkarma artık yönetici onaylı silme talebidir; onaya kadar kapsam aynen kalır.
+            success('Silme talebi gönderildi', r.message ?? `${removeTarget.year} dönem kontrolü için silme talebi yönetici onayına gönderildi.`);
             setRemoveTarget(null);
             onChanged();
-        } catch {
-            showError('Hata', 'Kapsamdan çıkarma başarısız oldu.');
+        } catch (e) {
+            showError('Talep oluşturulamadı', (e as Error).message || 'Silme talebi oluşturulamadı.');
         } finally {
             setBusy(false);
         }
@@ -164,7 +165,7 @@ export default function ControlScopePanel({ controlId, yearScopes, onChanged }: 
                                 {s.status === 'ACTIVE' ? (
                                     <>
                                         <Button variant="outline" size="sm" onClick={() => openPeriodicity(s)}>Periyodikliği Değiştir</Button>
-                                        <Button variant="danger" size="sm" onClick={() => openRemove(s)}>Kapsamdan Çıkar</Button>
+                                        <Button variant="danger" size="sm" onClick={() => openRemove(s)}>Kapsamdan Çıkarma Talebi</Button>
                                     </>
                                 ) : (
                                     <Button variant="outline" size="sm" onClick={() => handleReactivate(s)} disabled={busy}>Yeniden Etkinleştir</Button>
@@ -179,7 +180,7 @@ export default function ControlScopePanel({ controlId, yearScopes, onChanged }: 
             <Modal open={!!removeTarget} onClose={() => setRemoveTarget(null)} title={`${removeTarget?.year} Kapsamından Çıkar`} size="md"
                 footer={<div className="flex justify-end gap-2">
                     <Button variant="outline" onClick={() => setRemoveTarget(null)}>Vazgeç</Button>
-                    <Button variant="danger" onClick={submitRemove} disabled={busy}>{busy ? 'İşleniyor...' : 'Kapsamdan Çıkar'}</Button>
+                    <Button variant="danger" onClick={submitRemove} disabled={busy}>{busy ? 'İşleniyor...' : 'Yönetici Onayına Gönder'}</Button>
                 </div>}
             >
                 <div className="space-y-4">

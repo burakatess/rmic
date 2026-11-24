@@ -45,13 +45,14 @@ const navigation: NavItem[] = [
         ),
     },
     {
-        label: 'Akış Sağlığı',
-        href: '/workflow-health',
+        label: 'İşlem Durumları',
+        href: '/workflow',
         permission: 'control:view',
         icon: (
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="9" fill="currentColor" fillOpacity="0.2" />
-                <path d="M5.5 12h3l2-4.5 3 9 2-4.5h3" fill="none" />
+                <rect x="3.5" y="4" width="4.5" height="16" rx="1.2" fill="currentColor" fillOpacity="0.2" />
+                <rect x="9.75" y="4" width="4.5" height="11" rx="1.2" />
+                <rect x="16" y="4" width="4.5" height="7" rx="1.2" />
             </svg>
         ),
     },

@@ -8,6 +8,7 @@ import { projectActionStatus, projectFindingStatus, projectFindingTiming, projec
 import { approachingFindingWhere, overdueFindingWhere, overdueFollowUpWhere } from '../../common/util/metric-definitions';
 import { personFieldWhere } from '../../common/util/person-filter';
 import { matchesPermission } from '../../common/util/permission-match';
+import { logTransition, findingStage, followUpStage, type WorkflowAction } from '../../common/workflow/workflow-stages';
 import { parsePaging, safeOrderBy } from '../../common/util/list-query';
 
 // Takip değerlendirmesini onaylayabilecek roller (ikinci kontrolcü) — mutabakat
@@ -580,6 +581,8 @@ export class AuditsService {
                 control: true,
                 controlTest: { select: { id: true, testNo: true, periodLabel: true, plannedDate: true } },
                 referencingTests: { select: { id: true, testNo: true, periodLabel: true, plannedDate: true, status: true, referenceReason: true }, orderBy: [{ plannedDate: 'asc' }, { id: 'asc' }] },
+                // Çift yönlü görünüm: bu bulguyla ilişkilendirilen kontrol testleri (başka kontrollerden de olabilir).
+                testLinks: { where: { controlTest: { deletedAt: null } }, include: { controlTest: { select: { id: true, testNo: true, periodLabel: true, plannedDate: true, status: true, control: { select: { id: true, controlId: true, name: true } } } } }, orderBy: { linkedAt: 'asc' } },
                 linkedRisks: {
                     select: {
                         id: true, riskId: true, name: true, status: true,
@@ -823,6 +826,14 @@ export class AuditsService {
                 );
             }
 
+            {
+                const action: WorkflowAction = newStatus === 'IPTAL' ? 'CANCEL'
+                    : findingStage(newStatus) === 'ONAYLANDI' ? 'APPROVE'
+                        : findingStage(from) === 'TAMAMLANDI' && findingStage(newStatus) === 'DEVAM_EDIYOR' ? 'RETURN'
+                            : findingStage(from) === 'BEKLIYOR' ? 'START'
+                                : findingStage(from) === 'IPTAL' ? 'REOPEN' : 'COMPLETE';
+                await logTransition(tx, { entityType: 'FINDING', entityId: id, action, from: findingStage(from), to: findingStage(newStatus), userId, reason: note ?? null });
+            }
             await tx.findingStatusHistory.create({
                 data: {
                     findingId: id,
@@ -1387,6 +1398,7 @@ export class AuditsService {
                         approvedBy: null, approvedAt: null, rejectionReason: explanation.trim(),
                     },
                 });
+                await logTransition(tx, { entityType: 'FOLLOW_UP', entityId: followUpId, action: 'RETURN', from: 'TAMAMLANDI', to: 'DEVAM_EDIYOR', userId, reason: explanation.trim() });
                 await this.recordAuditTrail({
                     findingId, followUpId, operation: 'FOLLOWUP_REJECTED', userId,
                     explanation: `Takip değerlendirmesi reddedildi: ${explanation.trim()}`,
@@ -1476,6 +1488,15 @@ export class AuditsService {
                     rejectionReason: status === 'TAMAMLANDI' ? null : undefined,
                 },
             });
+            {
+                const fromSt = followUpStage(followUp.status);
+                const toSt = followUpStage(updated.status);
+                if (fromSt !== toSt) {
+                    const action: WorkflowAction = toSt === 'ONAYLANDI' ? 'APPROVE' : toSt === 'TAMAMLANDI' ? 'COMPLETE'
+                        : toSt === 'IPTAL' ? 'CANCEL' : fromSt === 'BEKLIYOR' ? 'START' : 'REVERT';
+                    await logTransition(tx, { entityType: 'FOLLOW_UP', entityId: followUpId, action, from: fromSt, to: toSt, userId, reason: null });
+                }
+            }
 
             // Onayın yan etkilerinden önceki durum: ikinci kontrolcü onayı geri alırsa buna döner.
             const effectsBefore = approvalRequestedNow && wonApprovalRace
@@ -2324,6 +2345,7 @@ export class AuditsService {
                 },
             });
             if (claim.count !== 1) throw new ConflictException('Takip çalışması bu sırada değişti; tekrar deneyin.');
+            await logTransition(tx, { entityType: 'FOLLOW_UP', entityId: followUpId, action: 'REVERT', from: 'ONAYLANDI', to: 'DEVAM_EDIYOR', userId, reason: reason.trim() });
             const now = new Date();
             if (effects.action) await tx.action.update({ where: { id: effects.action.id }, data: { status: effects.action.status, completedAt: effects.action.completedAt ? new Date(effects.action.completedAt) : null } });
             if (effects.finding) {

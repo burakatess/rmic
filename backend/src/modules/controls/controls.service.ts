@@ -5,6 +5,7 @@ import { generateControlCode } from './control-code.util';
 import { nextTestCode } from './test-code.util';
 import { projectControlStatus, projectTestStatus } from '../../common/workflow/workflow-projection';
 import { overdueTestWhere, isTestOverdue, ACTIVE_TEST_STATUSES, OPEN_TEST_STATUSES } from '../../common/util/metric-definitions';
+import { logTransition, testStage } from '../../common/workflow/workflow-stages';
 import { personFieldWhere } from '../../common/util/person-filter';
 import { CompleteControlTestDto, CreateControlTestDto } from './dto';
 import { parsePaging, safeOrderBy } from '../../common/util/list-query';
@@ -105,7 +106,7 @@ export class ControlsService {
         const to = new Date(Date.UTC(year + 1, 0, 1) - 3 * 3600000);
         const [tests, findings] = await Promise.all([
             this.prisma.controlTest.findMany({
-                where: { AND: [{ controlId: { in: ids }, status: { in: [...ACTIVE_TEST_STATUSES] }, plannedDate: { gte: from, lt: to } }, sc.test ?? {}] },
+                where: { AND: [{ controlId: { in: ids }, deletedAt: null, status: { in: [...ACTIVE_TEST_STATUSES] }, plannedDate: { gte: from, lt: to } }, sc.test ?? {}] },
                 select: { controlId: true, status: true, plannedDate: true },
             }),
             this.prisma.finding.groupBy({
@@ -151,7 +152,7 @@ export class ControlsService {
                     },
                 },
                 tests: {
-                    where: sc.test ?? undefined,
+                    where: sc.test ? { AND: [{ deletedAt: null }, sc.test] } : { deletedAt: null },
                     orderBy: { plannedDate: 'asc' },
                     include: {
                         findings: { where: sc.finding ?? undefined, select: { id: true, findingId: true, severity: true, resolutionStatus: true } },
@@ -407,7 +408,7 @@ export class ControlsService {
         } = query;
         const { page, limit, skip } = parsePaging(query, 50);
 
-        const where: any = {};
+        const where: any = { deletedAt: null }; // yönetici onayıyla silinmiş testler listelenmez (kayıt korunur)
         if (status) where.status = status;
         if (controlId) where.controlId = controlId;
         if (directorateId) where.directorateId = directorateId;
@@ -474,7 +475,7 @@ export class ControlsService {
     async getTests(controlId: string, sc: RelatedScopes = {}) {
         const now = new Date();
         const tests = await this.prisma.controlTest.findMany({
-            where: sc.test ? { AND: [{ controlId }, sc.test] } : { controlId },
+            where: sc.test ? { AND: [{ controlId, deletedAt: null }, sc.test] } : { controlId, deletedAt: null },
             include: {
                 findings: { where: sc.finding ?? undefined, select: { id: true, findingId: true, severity: true, resolutionStatus: true } },
                 directorate: { select: { id: true, name: true } },
@@ -703,6 +704,7 @@ export class ControlsService {
         return this.prisma.$transaction(async (tx) => {
             const res = await tx.controlTest.updateMany({ where: { id: testId, status: 'BEKLIYOR' }, data: { status: 'DEVAM_EDIYOR' } });
             if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti; başlatılmadı.');
+            await logTransition(tx, { entityType: 'CONTROL_TEST', entityId: testId, action: 'START', from: 'BEKLIYOR', to: 'DEVAM_EDIYOR', userId, reason: null });
             await tx.auditLog.create({
                 data: { userId, action: 'START_TEST', entityType: 'ControlTest', entityId: testId },
             });
@@ -734,6 +736,77 @@ export class ControlsService {
             control: finding.control ?? finding.controlTest?.control ?? null,
             recommended: !!finding.controlTest?.plannedDate && finding.controlTest.plannedDate < test.plannedDate,
         })).sort((a, b) => Number(b.recommended) - Number(a.recommended));
+    }
+
+    // ─── Kontrol testi ↔ bulgu çoklu ilişkilendirme ─────────────────────────
+    private findingLinkSelect = {
+        id: true, findingId: true, summary: true, status: true, workflowStatus: true, resolutionStatus: true, severity: true,
+        control: { select: { id: true, controlId: true, name: true } },
+        controlTest: { select: { id: true, testNo: true, control: { select: { id: true, controlId: true, name: true } } } },
+    } as const;
+
+    private relationOf(f: { control?: { id: string } | null; controlTest?: { id: string; control: { id: string } } | null }, test: { id: string; controlId: string }): 'SAME_TEST' | 'SAME_CONTROL' | 'OTHER_CONTROL' {
+        if (f.controlTest?.id === test.id) return 'SAME_TEST';
+        if (f.control?.id === test.controlId || f.controlTest?.control.id === test.controlId) return 'SAME_CONTROL';
+        return 'OTHER_CONTROL';
+    }
+
+    /** Bağlanabilecek bulgular: açık (kapanmamış/iptal edilmemiş), aynı veya başka kontrolden. Aynı kontrol önce. */
+    async findingLinkCandidates(testId: string, search: string | undefined, findingScope?: Prisma.FindingWhereInput | null) {
+        const test = await this.prisma.controlTest.findUnique({ where: { id: testId }, select: { id: true, controlId: true } });
+        if (!test) throw new NotFoundException('Test bulunamadı');
+        const q = search?.trim().slice(0, 100);
+        const rows = await this.prisma.finding.findMany({
+            where: {
+                AND: [
+                    { workflowStatus: { not: 'IPTAL' }, resolutionStatus: { not: 'KAPATILDI' }, status: { not: 'CLOSED' } },
+                    q ? { OR: [{ findingId: { contains: q, mode: 'insensitive' } }, { summary: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }] } : {},
+                    ...(findingScope ? [findingScope] : []),
+                ],
+            },
+            select: this.findingLinkSelect, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: 100,
+        });
+        const order = { SAME_TEST: 0, SAME_CONTROL: 1, OTHER_CONTROL: 2 } as const;
+        return rows
+            .map(f => ({ ...f, control: f.control ?? f.controlTest?.control ?? null, relation: this.relationOf(f, test) }))
+            .sort((a, b) => order[a.relation] - order[b.relation]);
+    }
+
+    async getFindingLinks(testId: string, findingScope?: Prisma.FindingWhereInput | null) {
+        const test = await this.prisma.controlTest.findUnique({ where: { id: testId }, select: { id: true, controlId: true } });
+        if (!test) throw new NotFoundException('Test bulunamadı');
+        const links = await this.prisma.controlTestFindingLink.findMany({
+            where: { controlTestId: testId, ...(findingScope ? { finding: findingScope } : {}) },
+            include: { finding: { select: this.findingLinkSelect } }, orderBy: { linkedAt: 'asc' },
+        });
+        return links.map(l => ({ id: l.id, linkedAt: l.linkedAt, linkedById: l.linkedById, note: l.note, finding: { ...l.finding, control: l.finding.control ?? l.finding.controlTest?.control ?? null, relation: this.relationOf(l.finding, test) } }));
+    }
+
+    /** Bağlı bulgu kümesini değiştirir (çoklu). Yalnız yürütülmekte olan test; 2. kontrolcü değiştiremez. */
+    async setFindingLinks(testId: string, findingIds: string[], userId: string, findingScope?: Prisma.FindingWhereInput | null) {
+        const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
+        if (!test || test.deletedAt) throw new NotFoundException('Test bulunamadı');
+        if (!['BEKLIYOR', 'DEVAM_EDIYOR', 'GERI_GONDERILDI'].includes(test.status)) {
+            throw new ConflictException('Bulgu ilişkisi yalnız yürütülmekte olan testte değiştirilebilir (onaya gönderilmiş/onaylı test dondurulmuştur).');
+        }
+        this.assertNotChecker(test, userId);
+        const ids = [...new Set(findingIds)];
+        if (ids.length > 50) throw new BadRequestException('Bir teste en fazla 50 bulgu bağlanabilir.');
+        if (ids.length) {
+            const found = await this.prisma.finding.findMany({ where: { AND: [{ id: { in: ids } }, ...(findingScope ? [findingScope] : [])] }, select: { id: true, workflowStatus: true } });
+            if (found.length !== ids.length) throw new BadRequestException('Geçersiz bulgu: seçilen bulgulardan biri bulunamadı veya erişiminiz yok.');
+            if (found.some(f => f.workflowStatus === 'IPTAL')) throw new BadRequestException('İptal edilmiş bulgu ilişkilendirilemez.');
+        }
+        return this.prisma.$transaction(async (tx) => {
+            const before = await tx.controlTestFindingLink.findMany({ where: { controlTestId: testId }, select: { findingId: true } });
+            const prev = new Set(before.map(b => b.findingId));
+            const removed = [...prev].filter(id => !ids.includes(id));
+            const added = ids.filter(id => !prev.has(id));
+            if (removed.length) await tx.controlTestFindingLink.deleteMany({ where: { controlTestId: testId, findingId: { in: removed } } });
+            if (added.length) await tx.controlTestFindingLink.createMany({ data: added.map(findingId => ({ controlTestId: testId, findingId, linkedById: userId })) });
+            await tx.auditLog.create({ data: { userId, action: 'TEST_FINDING_LINKS', entityType: 'ControlTest', entityId: testId, oldValue: { findingIds: [...prev] }, newValue: { findingIds: ids, added, removed } } });
+            return { findingIds: ids, added, removed };
+        });
     }
 
     async completeTest(testId: string, data: CompleteControlTestDto, userId: string) {
@@ -776,6 +849,7 @@ export class ControlsService {
                     },
                 });
                 if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti; tamamlanmadı.');
+                await logTransition(tx, { entityType: 'CONTROL_TEST', entityId: testId, action: 'COMPLETE', from: testStage(test.status), to: 'TAMAMLANDI', userId, reason: null });
                 await tx.auditLog.create({
                     data: { userId, action: 'REFERENCE_FINDING', entityType: 'ControlTest', entityId: testId, newValue: { referencedFindingId: ref.id, findingId: ref.findingId, referenceReason: data.referenceReason!.trim() } },
                 });
@@ -812,6 +886,7 @@ export class ControlsService {
             });
             if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti; tamamlanmadı.');
             const updated = await tx.controlTest.findUniqueOrThrow({ where: { id: testId } });
+            await logTransition(tx, { entityType: 'CONTROL_TEST', entityId: testId, action: 'COMPLETE', from: testStage(test.status), to: 'TAMAMLANDI', userId, reason: null });
             await tx.auditLog.create({
                 data: { userId, action: 'COMPLETE_TEST', entityType: 'ControlTest', entityId: testId, newValue: updated },
             });
@@ -845,6 +920,7 @@ export class ControlsService {
             });
             if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti; onaylanmadı.');
             await this.recalculateControlTestSummary(test.controlId, tx);
+            await logTransition(tx, { entityType: 'CONTROL_TEST', entityId: testId, action: 'APPROVE', from: 'TAMAMLANDI', to: 'ONAYLANDI', userId, reason: null });
             await tx.auditLog.create({
                 data: { userId, action: 'APPROVE_TEST', entityType: 'ControlTest', entityId: testId },
             });
@@ -872,9 +948,58 @@ export class ControlsService {
                 data: { status: 'GERI_GONDERILDI', rejectionReason: reason, returnedById: userId, returnedAt: new Date() },
             });
             if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti; geri gönderilmedi.');
+            await logTransition(tx, { entityType: 'CONTROL_TEST', entityId: testId, action: 'RETURN', from: 'TAMAMLANDI', to: 'DEVAM_EDIYOR', userId, reason: reason });
             await tx.auditLog.create({
                 data: { userId, action: 'RETURN_TEST', entityType: 'ControlTest', entityId: testId, newValue: { reason } },
             });
+            return tx.controlTest.findUniqueOrThrow({ where: { id: testId } });
+        });
+    }
+
+    /**
+     * İş akışı: yetkili kullanıcı testi bir önceki aşamaya geri alır (gerekçe zorunlu).
+     * Onaylandı → Tamamlandı (onay kaldırılır, kontrol özeti yeniden hesaplanır), Tamamlandı → Devam Ediyor,
+     * Devam Ediyor → Bekliyor. Rol kısıtı WorkflowService'te uygulanır.
+     */
+    async revertTestStage(testId: string, reason: string, userId: string) {
+        if (!reason?.trim()) throw new BadRequestException('Geri alma gerekçesi zorunludur.');
+        const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
+        if (!test || test.deletedAt) throw new NotFoundException('Test bulunamadı');
+        const plan: Record<string, { to: string; data: Record<string, unknown>; toStage: 'BEKLIYOR' | 'DEVAM_EDIYOR' | 'TAMAMLANDI' }> = {
+            ONAYLANDI: { to: 'TAMAMLANDI', data: { approvedAt: null, approvedById: null }, toStage: 'TAMAMLANDI' },
+            TAMAMLANDI: { to: 'DEVAM_EDIYOR', data: {}, toStage: 'DEVAM_EDIYOR' },
+            GERI_GONDERILDI: { to: 'BEKLIYOR', data: {}, toStage: 'BEKLIYOR' },
+            DEVAM_EDIYOR: { to: 'BEKLIYOR', data: {}, toStage: 'BEKLIYOR' },
+        };
+        const step = plan[test.status];
+        if (!step) throw new BadRequestException('Bu aşamadaki test geri alınamaz.');
+        return this.prisma.$transaction(async (tx) => {
+            const res = await tx.controlTest.updateMany({ where: { id: testId, status: test.status }, data: { status: step.to as never, ...step.data } });
+            if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti.');
+            if (test.status === 'ONAYLANDI') await this.recalculateControlTestSummary(test.controlId, tx);
+            await logTransition(tx, { entityType: 'CONTROL_TEST', entityId: testId, action: 'REVERT', from: testStage(test.status), to: step.toStage, userId, reason });
+            await tx.auditLog.create({ data: { userId, action: 'REVERT_TEST_STAGE', entityType: 'ControlTest', entityId: testId, oldValue: { status: test.status }, newValue: { status: step.to, reason } } });
+            return tx.controlTest.findUniqueOrThrow({ where: { id: testId } });
+        });
+    }
+
+    /** İş akışı: onaylanmamış testi gerekçeyle iptal eder (onaylı test için cancelFinalApproval). */
+    async cancelTest(testId: string, reason: string, userId: string) {
+        if (!reason?.trim()) throw new BadRequestException('İptal gerekçesi zorunludur.');
+        const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
+        if (!test || test.deletedAt) throw new NotFoundException('Test bulunamadı');
+        if (test.status === 'ONAYLANDI') return this.cancelFinalApproval(testId, reason, userId);
+        if (!['BEKLIYOR', 'DEVAM_EDIYOR', 'GERI_GONDERILDI', 'TAMAMLANDI'].includes(test.status)) {
+            throw new BadRequestException('Bu test zaten iptal edilmiş veya kapsam dışı.');
+        }
+        return this.prisma.$transaction(async (tx) => {
+            const res = await tx.controlTest.updateMany({
+                where: { id: testId, status: test.status },
+                data: { status: 'IPTAL', cancelledAt: new Date(), cancelledById: userId, cancelReason: reason.trim() },
+            });
+            if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti.');
+            await logTransition(tx, { entityType: 'CONTROL_TEST', entityId: testId, action: 'CANCEL', from: testStage(test.status), to: 'IPTAL', userId, reason });
+            await tx.auditLog.create({ data: { userId, action: 'CANCEL_TEST', entityType: 'ControlTest', entityId: testId, oldValue: { status: test.status }, newValue: { reason } } });
             return tx.controlTest.findUniqueOrThrow({ where: { id: testId } });
         });
     }
@@ -894,6 +1019,7 @@ export class ControlsService {
             });
             if (res.count !== 1) throw new ConflictException('Test bu sırada başka bir işlemle değişti; iptal edilmedi.');
             await this.recalculateControlTestSummary(test.controlId, tx);
+            await logTransition(tx, { entityType: 'CONTROL_TEST', entityId: testId, action: 'CANCEL', from: 'ONAYLANDI', to: 'IPTAL', userId, reason: reason });
             await tx.auditLog.create({
                 data: { userId, action: 'CANCEL_FINAL_APPROVAL', entityType: 'ControlTest', entityId: testId, newValue: { reason } },
             });
@@ -903,6 +1029,11 @@ export class ControlsService {
 
     /** Kontrol özeti, onaylama sırasına değil tamamlanma tarihine göre en yeni
      * onaylı teste dayanır. Final onay iptalinde bir önceki onaylı teste döner. */
+    /** Silme onayı gibi dış akışlar için (aynı işlem istemcisiyle). */
+    recalculateControlSummaryPublic(controlId: string, db: Prisma.TransactionClient) {
+        return this.recalculateControlTestSummary(controlId, db);
+    }
+
     private async recalculateControlTestSummary(controlId: string, db: Prisma.TransactionClient | PrismaService = this.prisma) {
         const latestApproved = await db.controlTest.findFirst({
             where: { controlId, status: 'ONAYLANDI' },
