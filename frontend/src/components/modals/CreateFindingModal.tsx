@@ -18,6 +18,7 @@ interface Control {
     name: string;
     gmy?: string;
     directorate?: string;
+    contactPersonId?: string | null;
     owner?: { id: string; firstName?: string; lastName?: string; department?: string };
 }
 
@@ -62,11 +63,12 @@ const severityOptions = [
     { value: 'HIGH',     label: 'KD', sublabel: 'Kayda Değer Kontrol Eksikliği', color: 'border-orange-500 bg-orange-50 text-orange-700 ring-orange-500' },
 ];
 
-// İş kuralı: Bulgunun Durumu yalnızca bu 3 seçenekten biri olabilir.
+// Bulgunun durumu: "Kapatıldı" bu formdan seçilemez — kapanış yalnız kapanış değerlendirmesi
+// (1. kontrolcü gönderir, 2. kontrolcü onaylar) ile olur; sunucu da reddeder (SELECTABLE_STATUSES).
+// Yeni bulgu her zaman "Devam Ediyor" açılır.
 const statusOptions = [
     { value: 'IN_PROGRESS',       label: 'Devam Ediyor' },
     { value: 'PARTIALLY_CLOSED',  label: 'Kısmen Kapatıldı' },
-    { value: 'CLOSED',            label: 'Kapatıldı' },
 ];
 
 export function CreateFindingModal({
@@ -93,6 +95,7 @@ export function CreateFindingModal({
         relatedDepartment: '',
         directorateId: '',
         responsiblePerson: '',
+        iletisimKisisi: '',
         status: 'IN_PROGRESS',
         severity: '',
         internalControlAssessment: '',
@@ -135,7 +138,13 @@ export function CreateFindingModal({
                 try { setApprovers(await api.getApproverChoices() as User[]); } catch { setApprovers([]); }
 
                 const res = await api.getControls() as any;
-                setControls(Array.isArray(res) ? res : (res?.data || []));
+                const controlList: Control[] = Array.isArray(res) ? res : (res?.data || []);
+                setControls(controlList);
+                // İletişim kişisi kontrolde kullanıcı kimliği olarak tutulur; formda ad-soyad gösterilir.
+                const contactNameOf = (c?: Control) => {
+                    const u = c?.contactPersonId ? userList.find(x => x.id === c.contactPersonId) : undefined;
+                    return u ? `${u.firstName} ${u.lastName}`.trim() : '';
+                };
 
                 try {
                     const dirs = await api.getDirectorates({ isActive: 'true' }) as any;
@@ -152,6 +161,7 @@ export function CreateFindingModal({
                         relatedDepartment: editContext.relatedDepartment || '',
                         directorateId: editContext.directorateId || (editContext.directorateRel?.id || ''),
                         responsiblePerson: editContext.responsiblePerson || '',
+                        iletisimKisisi: editContext.iletisimKisisi || '',
                         status: editContext.status || 'IN_PROGRESS',
                         severity: editContext.severity || 'HIGH',
                         internalControlAssessment: editContext.internalControlAssessment || '',
@@ -176,6 +186,7 @@ export function CreateFindingModal({
                 let initialDirectorateId = '';
                 let initialResponsible = '';
                 let initialAssigneeId = '';
+                let initialContact = '';
 
                 if (testContext) {
                     initialControlId = testContext.controlUID || '';
@@ -189,6 +200,10 @@ export function CreateFindingModal({
                 } else if (prefillData) {
                     initialControlId = prefillData.controlId || '';
                     initialDirectorateId = prefillData.directorateId || '';
+                    // Kontrol testinden açılan bulgu: GMY ve iletişim kişisi kontrolden gelir (değiştirilebilir).
+                    const ctl = controlList.find(c => c.id === initialControlId);
+                    initialGMY = ctl?.gmy || '';
+                    initialContact = contactNameOf(ctl);
                 } else if (controlContext) {
                     initialControlId = controlContext.id || '';
                     initialGMY = controlContext.gmy || '';
@@ -208,6 +223,7 @@ export function CreateFindingModal({
                     relatedDepartment: initialDept,
                     directorateId: initialDirectorateId,
                     responsiblePerson: initialResponsible,
+                    iletisimKisisi: initialContact || contactNameOf(controlList.find(c => c.id === initialControlId)),
                     status: 'IN_PROGRESS',
                     severity: '', // bilinçli seçim zorunlu
                     internalControlAssessment: '',
@@ -237,6 +253,10 @@ export function CreateFindingModal({
             ...prev,
             controlId: selectedId,
             gmy: sel?.gmy || prev.gmy,
+            iletisimKisisi: (() => {
+                const u = sel?.contactPersonId ? users.find(x => x.id === sel.contactPersonId) : undefined;
+                return u ? `${u.firstName} ${u.lastName}`.trim() : prev.iletisimKisisi;
+            })(),
             relatedDepartment: sel?.directorate || prev.relatedDepartment,
             responsiblePerson: sel?.owner ? `${sel.owner.firstName || ''} ${sel.owner.lastName || ''}`.trim() : prev.responsiblePerson,
             assigneeId: sel?.owner?.id || prev.assigneeId,
@@ -456,16 +476,25 @@ export function CreateFindingModal({
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">Bulgunun Durumu *</label>
-                            <select
-                                value={formData.status}
-                                onChange={e => setFormData({ ...formData, status: e.target.value })}
-                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/20 outline-none font-semibold"
-                            >
-                                {statusOptions.map(opt => (
-                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                ))}
-                            </select>
+                            <label htmlFor="cf-status" className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">Bulgunun Durumu *</label>
+                            {editContext ? (
+                                <select
+                                    id="cf-status"
+                                    value={formData.status}
+                                    onChange={e => setFormData({ ...formData, status: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/20 outline-none font-semibold"
+                                >
+                                    {statusOptions.map(opt => (
+                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                    ))}
+                                </select>
+                            ) : (
+                                <>
+                                    <input id="cf-status" readOnly value="Devam Ediyor"
+                                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-600 outline-none font-semibold" />
+                                    <p className="text-[10px] text-slate-400 mt-1">Yeni bulgu açık başlar; kapanış, kapanış değerlendirmesiyle yapılır.</p>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -515,7 +544,7 @@ export function CreateFindingModal({
 
                         {/* Atanan Sorumlu */}
                         <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Atanan Sorumlu (Assignee)</label>
+                            <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Atanan Sorumlu</label>
                             <select
                                 value={formData.assigneeId}
                                 onChange={e => setFormData({ ...formData, assigneeId: e.target.value })}
@@ -544,11 +573,13 @@ export function CreateFindingModal({
 
                         {/* İletişim Kişisi */}
                         <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">İletişim Kişisi</label>
+                            <label htmlFor="cf-contact" className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">İletişim Kişisi</label>
                             <input
+                                id="cf-contact"
                                 type="text"
-                                value={formData.responsiblePerson}
-                                onChange={e => setFormData({ ...formData, responsiblePerson: e.target.value })}
+                                maxLength={200}
+                                value={formData.iletisimKisisi}
+                                onChange={e => setFormData({ ...formData, iletisimKisisi: e.target.value })}
                                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none bg-white"
                                 placeholder="İsim Soyisim..."
                             />
@@ -659,14 +690,13 @@ export function CreateFindingModal({
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
                         <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Dosya Eki</label>
-                            <input
-                                type="text"
-                                value={formData.attachment}
-                                onChange={e => setFormData({ ...formData, attachment: e.target.value })}
-                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/10 outline-none bg-white"
-                                placeholder="kanit_dosyasi.xlsx, bulgu_kanit.pdf..."
-                            />
+                            {/* Eski serbest metin "Dosya Eki" alanı gerçek yükleme değildi; kanıt dosyaları bulgu
+                                kaydedildikten sonra bulgu detayındaki Ekler sekmesinden yüklenir (eski değer korunur). */}
+                            <p className="text-xs font-bold text-slate-500 mb-1.5 uppercase">Dosya Eki</p>
+                            <p className="text-xs text-slate-500">
+                                Kanıt dosyalarını bulgu kaydedildikten sonra bulgu detayındaki <span className="font-semibold">Ekler</span> sekmesinden yükleyin.
+                                {formData.attachment && <span className="block mt-1 text-slate-400">Önceki not: {formData.attachment}</span>}
+                            </p>
                         </div>
                         <div className="flex items-center mt-5">
                             <label className="flex items-center gap-3 cursor-pointer select-none">

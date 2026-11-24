@@ -44,11 +44,12 @@ function buildQuery(params?: object): string {
 
 
 export interface WorkflowPendingItem {
-    kind: 'ACTION_APPROVAL' | 'ACTION_DELETION' | 'FOLLOWUP_APPROVAL' | 'FOLLOWUP_DELETION';
+    kind: 'ACTION_APPROVAL' | 'ACTION_DELETION' | 'FOLLOWUP_APPROVAL' | 'FOLLOWUP_DELETION' | 'FINDING_CLOSURE';
     recordId: string;
     code: string;
     description: string | null;
-    finding: { id: string; findingId: string; summary: string | null };
+    /** Manuel aksiyon planı / takibinde bulgu yoktur. */
+    finding: { id: string; findingId: string; summary: string | null } | null;
     requestedBy: { id: string; name: string } | null;
     requestedAt: string;
     reason: string | null;
@@ -59,7 +60,7 @@ export interface WorkflowDecisionItem {
     kind: string;
     recordId: string;
     code: string;
-    finding: { id: string; findingId: string; summary: string | null };
+    finding: { id: string; findingId: string; summary: string | null } | null;
     reason: string | null;
     date: string;
     link: string;
@@ -1283,7 +1284,7 @@ class ApiClient {
         return this.request(`/findings/${findingId}/workflow/ic-kontrol-onayina-gonder`, { method: 'POST', body: data });
     }
 
-    async mutabakatOnayla(findingId: string, data: { internalControlAssessment?: string; resolutionStatus?: string }) {
+    async mutabakatOnayla(findingId: string, data: { internalControlAssessment?: string }) {
         return this.request(`/findings/${findingId}/workflow/mutabakat-onayla`, { method: 'POST', body: data });
     }
 

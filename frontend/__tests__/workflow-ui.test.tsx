@@ -41,8 +41,38 @@ describe('WorkflowBar', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Kapanış değerlendirmesine gönder' }));
         expect(await screen.findByLabelText('Kapanış değerlendirmesi *')).toBeInTheDocument();
         fireEvent.change(screen.getByLabelText('Kapanış değerlendirmesi *'), { target: { value: 'Tüm aksiyonlar kapatıldı' } });
-        fireEvent.click(screen.getByRole('button', { name: 'Onayla' }));
+        // Gönderme düğmesi "Gönder" etiketlidir (onay değil).
+        fireEvent.click(screen.getByRole('button', { name: 'Gönder' }));
         await waitFor(() => expect(api.workflowTransition).toHaveBeenCalledWith('FINDING', 'f1', 'COMPLETE', 'Tüm aksiyonlar kapatıldı'));
+    });
+
+    it('bulgu kapanış onayı tek tıkla değil teyit penceresiyle verilir; kapalı son aşama ✓ gösterir', async () => {
+        (api.getWorkflowState as jest.Mock).mockResolvedValue({
+            ...baseState, entityType: 'FINDING', entityId: 'f1', code: 'B-1', stage: 'TAMAMLANDI', stageLabel: 'Kapanış Değerlendirmesinde',
+            stages: [{ key: 'DEVAM_EDIYOR', label: 'Açık' }, { key: 'TAMAMLANDI', label: 'Kapanış Değerlendirmesinde' }, { key: 'ONAYLANDI', label: 'Kapatıldı' }],
+            actions: [{ action: 'APPROVE', label: 'Kapanışı onayla', needsReason: false }],
+            history: [],
+        });
+        (api.workflowTransition as jest.Mock).mockResolvedValue({});
+        render(<WorkflowBar type="FINDING" id="f1" />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Kapanışı onayla' }));
+        expect(api.workflowTransition).not.toHaveBeenCalled();
+        const confirm = screen.getAllByRole('button', { name: 'Kapanışı onayla' }).find(b => b.closest('[role="dialog"]'))!;
+        expect(confirm).toBeEnabled();
+        fireEvent.click(confirm);
+        await waitFor(() => expect(api.workflowTransition).toHaveBeenCalledWith('FINDING', 'f1', 'APPROVE', undefined));
+    });
+
+    it('son aşamaya varılmış kayıtta son aşama da ✓ ile gösterilir', async () => {
+        (api.getWorkflowState as jest.Mock).mockResolvedValue({
+            ...baseState, entityType: 'FINDING', entityId: 'f1', code: 'B-1', stage: 'ONAYLANDI', stageLabel: 'Kapatıldı',
+            stages: [{ key: 'DEVAM_EDIYOR', label: 'Açık' }, { key: 'TAMAMLANDI', label: 'Kapanış Değerlendirmesinde' }, { key: 'ONAYLANDI', label: 'Kapatıldı' }],
+            actions: [], history: [],
+        });
+        render(<WorkflowBar type="FINDING" id="f1" />);
+        const bar = await screen.findByTestId('workflow-bar');
+        const last = [...bar.querySelectorAll('ol[aria-label="Aşamalar"] > li')].at(-1)!;
+        expect(last.textContent).toContain('✓');
     });
 
     it('mevcut aşamayı, onaycıyı ve geçmişi gösterir; onay gerekçesiz, iade gerekçeli çalışır', async () => {

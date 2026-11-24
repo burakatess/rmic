@@ -89,6 +89,7 @@ const workflowConfig: Record<string, { label: string; variant: BV; step: number 
 const resolutionConfig: Record<string, { label: string; variant: BV }> = {
     DEVAM_EDIYOR:    { label: 'Devam Ediyor',     variant: 'warning' },
     KISMEN_KAPATILDI:{ label: 'Kısmen Kapatıldı', variant: 'info' },
+    KAPANISA_HAZIR:  { label: 'Kapanışa Hazır', variant: 'success' },
     KAPATILDI:       { label: 'Kapatıldı',        variant: 'success' },
     ERTELENDI:       { label: 'Ertelendi',        variant: 'neutral' },
 };

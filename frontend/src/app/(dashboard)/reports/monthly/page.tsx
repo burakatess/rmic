@@ -77,7 +77,7 @@ const SEVERITY_LABELS: Record<string, string> = {
     CRITICAL: 'Kritik', HIGH: 'Yüksek', MEDIUM: 'Orta', LOW: 'Düşük',
 };
 const RESOLUTION_LABELS: Record<string, string> = {
-    DEVAM_EDIYOR: 'Devam Ediyor', KISMEN_KAPATILDI: 'Kısmen Kapatıldı',
+    DEVAM_EDIYOR: 'Devam Ediyor', KISMEN_KAPATILDI: 'Kısmen Kapatıldı', KAPANISA_HAZIR: 'Kapanışa Hazır',
     KAPATILDI: 'Kapatıldı', ERTELENDI: 'Ertelendi', YENI_AKSIYON_GEREKLI: 'Yeni Aksiyon',
 };
 const ACTION_STATUS_LABELS: Record<string, string> = {

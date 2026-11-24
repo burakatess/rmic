@@ -23,6 +23,12 @@ describe('finding-capabilities — arayüz yetenekleri uç kurallarını yansıt
         expect(cancelled).toMatchObject({ canCreateAction: false, canEditFinding: false });
     });
 
+    it('kapalı veya kapanış değerlendirmesindeki bulgu düzenlenemez (Düzenle gizlenir)', () => {
+        expect(findingCapabilities({ status: 'CLOSED', workflowStatus: 'MUTABAKAT_YAPILDI' }, { role: 'AUDITOR' }, 'FULL').canEditFinding).toBe(false);
+        expect(findingCapabilities({ status: 'PENDING_REVIEW', workflowStatus: 'TASLAK' }, { role: 'SYSTEM_ADMIN' }, 'FULL').canEditFinding).toBe(false);
+        expect(findingCapabilities({ status: 'PARTIALLY_CLOSED', workflowStatus: 'TASLAK' }, { role: 'AUDITOR' }, 'FULL').canEditFinding).toBe(true);
+    });
+
     it('aksiyon: sorumlu kendi aksiyonunu tamamlar/uzatır ama düzenleyemez; başkasınınkine dokunamaz', () => {
         const own = actionCapabilities({ status: 'DEVAM_EDIYOR', ownerId: 'u1' }, { id: 'u1', role: 'AUDITEE' }, 'PARTIAL');
         expect(own).toEqual({

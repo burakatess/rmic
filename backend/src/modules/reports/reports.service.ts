@@ -850,7 +850,7 @@ export class ReportsService {
 
         const severityLabel: Record<string, string> = { CRITICAL: 'Kritik', HIGH: 'Yüksek', MEDIUM: 'Orta', LOW: 'Düşük' };
         const resLabel: Record<string, string> = {
-            DEVAM_EDIYOR: 'Devam Ediyor', KISMEN_KAPATILDI: 'Kısmen Kapatıldı',
+            DEVAM_EDIYOR: 'Devam Ediyor', KISMEN_KAPATILDI: 'Kısmen Kapatıldı', KAPANISA_HAZIR: 'Kapanışa Hazır',
             KAPATILDI: 'Kapatıldı', ERTELENDI: 'Ertelendi', YENI_AKSIYON_GEREKLI: 'Yeni Aksiyon Gerekli',
         };
         const actionStatusLabel: Record<string, string> = {

@@ -160,15 +160,14 @@ describe('AuditsService — kritik iş kuralları', () => {
     });
 
     describe('mutabakatOnayla', () => {
-        it('onaylar ve KAPATILDI ise closedDate geçişle birlikte yazılır', async () => {
+        it('onaylar; mutabakat bilgi kaydıdır — çözüm durumu veya kapanış tarihi yazmaz', async () => {
             prisma.finding.findUnique.mockResolvedValue({ workflowStatus: 'IC_KONTROL_ONAYINA_GONDERILDI' });
             prisma.finding.findUniqueOrThrow.mockResolvedValue({ id: 'f-1', workflowStatus: 'MUTABAKAT_YAPILDI' });
 
-            await service.mutabakatOnayla('f-1', { resolutionStatus: 'KAPATILDI' }, 'user-1');
+            await service.mutabakatOnayla('f-1', { internalControlAssessment: 'Değerlendirme' }, 'user-1');
 
-            expectAtomicTransition('IC_KONTROL_ONAYINA_GONDERILDI', 'MUTABAKAT_YAPILDI', {
-                resolutionStatus: 'KAPATILDI', closedDate: expect.any(Date),
-            });
+            // Veri tam eşleşir: resolutionStatus / closedDate yoktur.
+            expectAtomicTransition('IC_KONTROL_ONAYINA_GONDERILDI', 'MUTABAKAT_YAPILDI', { internalControlAssessment: 'Değerlendirme' });
         });
 
         it('yanlış statüden çağrılırsa reddeder', async () => {
@@ -305,7 +304,7 @@ describe('AuditsService — kritik iş kuralları', () => {
     // ─── checkAndCloseFindinIfAllActionsClosed ─────────────────────────────
 
     describe('checkAndCloseFindinIfAllActionsClosed', () => {
-        it('tüm aksiyonlar KAPATILDI olsa da bulgu OTOMATİK KAPANMAZ (kapanış değerlendirmesi gerekir); açık takipler iptal edilmez', async () => {
+        it('tüm aksiyonlar KAPATILDI olsa da bulgu OTOMATİK KAPANMAZ: "Kapanışa hazır" olur (kapanış değerlendirmesi gerekir); açık takipler iptal edilmez', async () => {
             prisma.action.findMany.mockResolvedValue([{ status: 'KAPATILDI' }, { status: 'KAPATILDI' }]);
             prisma.finding.findUnique.mockResolvedValue({ id: 'f-1', status: 'IN_PROGRESS' });
             prisma.finding.update.mockResolvedValue({});
@@ -315,7 +314,7 @@ describe('AuditsService — kritik iş kuralları', () => {
 
             expect(prisma.finding.update).toHaveBeenCalledWith({
                 where: { id: 'f-1' },
-                data: { status: 'PARTIALLY_CLOSED', resolutionStatus: 'KISMEN_KAPATILDI', closedDate: null },
+                data: { status: 'PARTIALLY_CLOSED', resolutionStatus: 'KAPANISA_HAZIR', closedDate: null },
             });
             expect(prisma.finding.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'CLOSED' }) }));
             expect(prisma.findingFollowUp.updateMany).not.toHaveBeenCalled();
@@ -450,10 +449,30 @@ describe('AuditsService — kritik iş kuralları', () => {
             expect(prisma.finding.update).not.toHaveBeenCalled();
         });
 
-        it('ara statü (IN_PROGRESS) genel güncellemeden geçebilir', async () => {
+        it('ara statü (IN_PROGRESS) genel güncellemeden geçebilir; denetim kaydı eski değeri de tutar', async () => {
+            prisma.finding.findUnique.mockResolvedValue({ id: 'f-1', status: 'PARTIALLY_CLOSED', workflowStatus: 'TASLAK', deletedAt: null });
             await service.updateFinding('f-1', { status: 'IN_PROGRESS', summary: 'x' }, 'u-1');
             const data = prisma.finding.update.mock.calls[0][0].data;
             expect(data.status).toBe('IN_PROGRESS');
+            expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+                data: expect.objectContaining({ action: 'UPDATE', oldValue: expect.objectContaining({ status: 'PARTIALLY_CLOSED' }) }),
+            }));
+        });
+
+        it.each([
+            ['kapalı', { status: 'CLOSED', workflowStatus: 'TASLAK', deletedAt: null }],
+            ['kapanış değerlendirmesinde', { status: 'PENDING_REVIEW', workflowStatus: 'TASLAK', deletedAt: null }],
+            ['iptal', { status: 'IN_PROGRESS', workflowStatus: 'IPTAL', deletedAt: null }],
+            ['silinmiş', { status: 'IN_PROGRESS', workflowStatus: 'TASLAK', deletedAt: new Date() }],
+        ])('%s bulgu genel güncellemeyle değiştirilemez / yeniden açılamaz', async (_l, row) => {
+            prisma.finding.findUnique.mockResolvedValue({ id: 'f-1', ...row });
+            await expect(service.updateFinding('f-1', { status: 'IN_PROGRESS', summary: 'değişti' }, 'u-1')).rejects.toThrow(BadRequestException);
+            expect(prisma.finding.update).not.toHaveBeenCalled();
+        });
+
+        it('bulunamayan bulgu 404 verir (Prisma hatası değil)', async () => {
+            prisma.finding.findUnique.mockResolvedValue(null);
+            await expect(service.updateFinding('yok', { summary: 'x' }, 'u-1')).rejects.toThrow(NotFoundException);
         });
     });
 

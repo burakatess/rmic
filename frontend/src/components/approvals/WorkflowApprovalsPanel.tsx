@@ -21,6 +21,7 @@ const KIND: Record<WorkflowPendingItem['kind'], { label: string; variant: BV }> 
     ACTION_DELETION: { label: 'Aksiyon silme', variant: 'critical' },
     FOLLOWUP_APPROVAL: { label: 'Takip onayı', variant: 'info' },
     FOLLOWUP_DELETION: { label: 'Takip silme', variant: 'critical' },
+    FINDING_CLOSURE: { label: 'Bulgu kapanışı', variant: 'success' },
 };
 
 const DECISION: Record<string, { label: string; variant: BV }> = {
@@ -34,6 +35,8 @@ const DECISION: Record<string, { label: string; variant: BV }> = {
     FOLLOWUP_REVERTED: { label: 'Takip onayı geri alındı', variant: 'warning' },
     FOLLOWUP_DELETED: { label: 'Takip silindi', variant: 'neutral' },
     FOLLOWUP_DELETE_REJECTED: { label: 'Takip silme talebi reddedildi', variant: 'warning' },
+    FINDING_CLOSED: { label: 'Bulgu kapatıldı', variant: 'success' },
+    FINDING_CLOSURE_RETURNED: { label: 'Bulgu kapanışı iade edildi', variant: 'warning' },
 };
 
 const fmt = (d?: string | null) => {
@@ -79,6 +82,7 @@ export function WorkflowApprovalsPanel({ onCountChange }: { onCountChange?: (n: 
         setSaving(true);
         try {
             const r = approve ? undefined : reason.trim();
+            if (!item.finding) throw new Error('Bu kaydın kararı kendi detay ekranında verilir.');
             if (item.kind === 'ACTION_APPROVAL') await api.findingActionOp(item.finding.id, item.recordId, approve ? 'approve' : 'reject', r);
             else if (item.kind === 'ACTION_DELETION') await api.findingActionOp(item.finding.id, item.recordId, approve ? 'delete-approve' : 'delete-reject', r);
             else if (item.kind === 'FOLLOWUP_DELETION') await api.followUpOp(item.finding.id, item.recordId, approve ? 'delete-approve' : 'delete-reject', r);
@@ -101,12 +105,12 @@ export function WorkflowApprovalsPanel({ onCountChange }: { onCountChange?: (n: 
         },
         {
             key: 'finding', header: 'Bulgu', defaultWidth: 190,
-            render: (i) => (
+            render: (i) => i.finding ? (
                 <Link href={i.link} className="block min-w-0 hover:underline">
                     <span className="font-mono text-[11px] text-violet-700">{i.finding.findingId}</span>
                     {i.finding.summary && <span className="block text-xs text-slate-600 truncate">{i.finding.summary}</span>}
                 </Link>
-            ),
+            ) : <span className="text-xs text-slate-500">Manuel aksiyon planı</span>,
         },
         {
             key: 'detail', header: 'Açıklama / Gerekçe', defaultWidth: 220,
@@ -126,9 +130,10 @@ export function WorkflowApprovalsPanel({ onCountChange }: { onCountChange?: (n: 
         },
         {
             key: 'ops', header: '', defaultWidth: 210,
-            render: (i) => i.kind === 'FOLLOWUP_APPROVAL' ? (
-                // Takip onayı değerlendirmenin okunmasını gerektirir: karar bulgu detayındaki takip penceresinde verilir.
-                <Link href={i.link}><Button size="sm" variant="primary">Değerlendirmeyi incele</Button></Link>
+            render: (i) => i.kind === 'FOLLOWUP_APPROVAL' || i.kind === 'FINDING_CLOSURE' || !i.finding ? (
+                // Takip onayı ve bulgu kapanışı değerlendirmenin okunmasını gerektirir; manuel (bulgusuz)
+                // kayıtların işlemleri bulgu ucundan yapılamaz — karar kaydın kendi detay ekranında verilir.
+                <Link href={i.link}><Button size="sm" variant="primary">{i.kind === 'FINDING_CLOSURE' ? 'Kapanışı incele' : i.kind === 'FOLLOWUP_APPROVAL' ? 'Değerlendirmeyi incele' : 'İncele'}</Button></Link>
             ) : (
                 <div className="flex gap-1.5">
                     <Button size="sm" variant="primary" onClick={() => { setReason(''); setDeciding({ item: i, approve: true }); }}>
@@ -171,7 +176,7 @@ export function WorkflowApprovalsPanel({ onCountChange }: { onCountChange?: (n: 
                 pageSize={Math.max(filtered.length, 1)}
                 onPageChange={() => undefined}
                 storageKey="workflow-approvals-table"
-                emptyTitle="Onayınızı bekleyen aksiyon veya takip yok"
+                emptyTitle="Onayınızı bekleyen aksiyon, takip veya bulgu kapanışı yok"
                 emptyDescription="İkinci kontrolcüsü olduğunuz kayıtlar onaya gönderildiğinde burada görünür."
                 onRefresh={load}
             />
@@ -187,7 +192,7 @@ export function WorkflowApprovalsPanel({ onCountChange }: { onCountChange?: (n: 
                             <li key={`${d.kind}-${d.recordId}`} className="flex flex-wrap items-center gap-3 px-3 py-2">
                                 <StatusBadge variant={DECISION[d.kind]?.variant || 'neutral'}>{DECISION[d.kind]?.label || d.kind}</StatusBadge>
                                 <span className="font-mono text-xs font-bold text-slate-700">{d.code}</span>
-                                <Link href={d.link} className="font-mono text-[11px] text-violet-700 hover:underline">{d.finding.findingId}</Link>
+                                <Link href={d.link} className="font-mono text-[11px] text-violet-700 hover:underline">{d.finding?.findingId ?? 'Kaydı aç'}</Link>
                                 {d.reason && <span className="text-xs text-slate-600 flex-1 min-w-0 truncate">Gerekçe: {d.reason}</span>}
                                 <span className="text-[11px] text-slate-400 ml-auto">{fmt(d.date)}</span>
                             </li>

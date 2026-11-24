@@ -49,6 +49,7 @@ export default function NewControlPage() {
 
     const [formData, setFormData] = useState({
         summary: '',
+        name: '',
         description: '',
         mehaz: '',
         testSteps: '',
@@ -110,6 +111,11 @@ export default function NewControlPage() {
             return;
         }
 
+        if (!formData.name.trim()) {
+            toastError('Eksik Alan', 'Lütfen kontrol adını yazın.');
+            return;
+        }
+
         if (!formData.directorateId) {
             toastError('Eksik Alan', 'Lütfen ilgili direktörlüğü seçin.');
             return;
@@ -121,7 +127,7 @@ export default function NewControlPage() {
         try {
             await api.createControl({
                 controlId: formData.summary,
-                name: formData.summary,
+                name: formData.name.trim(),
                 description: formData.description,
                 mehaz: formData.mehaz,
                 testSteps: formData.testSteps,
@@ -211,6 +217,21 @@ export default function NewControlPage() {
                                 </div>
 
                                 <div className="col-span-2">
+                                    <label htmlFor="ctl-name" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Kontrol Adı <span className="text-red-500">*</span></label>
+                                    <input
+                                        id="ctl-name"
+                                        type="text"
+                                        required
+                                        maxLength={200}
+                                        value={formData.name}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                                        className="w-full px-4 py-2.5 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all text-sm font-semibold"
+                                        placeholder="Örn: Ayrıcalıklı Hesap Gözden Geçirmesi"
+                                    />
+                                    <p className="text-[10px] text-slate-400 mt-1">Listelerde ve raporlarda kontrol kodunun yanında görünen kısa ad.</p>
+                                </div>
+
+                                <div className="col-span-2">
                                     <p className="text-[11px] text-slate-400 bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5">
                                         Uygulama ayı/takvimi ve yıllık kapsam artık burada seçilmiyor — kontrolü oluşturduktan sonra{' '}
                                         <span className="font-semibold text-slate-500">Kontrol Yönetimi → Yıllık Plan</span> sayfasından planlayın.
@@ -218,7 +239,7 @@ export default function NewControlPage() {
                                 </div>
 
                                 <div className="col-span-2">
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Description (Kontrol Tanımı)</label>
+                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Kontrol Tanımı</label>
                                     <textarea
                                         rows={3}
                                         value={formData.description}

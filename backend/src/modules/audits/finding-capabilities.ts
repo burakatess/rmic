@@ -43,7 +43,7 @@ const CLOSED_ACTION = new Set(['KAPATILDI', 'CLOSED', 'IPTAL']);
 const COMPLETED_ACTION = new Set(['TAMAMLANDI', 'COMPLETED']);
 
 export function findingCapabilities(
-    finding: { status?: string | null; workflowStatus?: string | null; firstControllerId?: string | null },
+    finding: { status?: string | null; workflowStatus?: string | null; firstControllerId?: string | null; deletedAt?: Date | string | null },
     actor: { id?: string; role?: string | null },
     level: FindingAccessLevel,
 ): FindingCapabilities {
@@ -54,8 +54,10 @@ export function findingCapabilities(
     const writer = full && FINDING_WRITERS.has(role);
     const approver = full && FINDING_APPROVERS.has(role);
     const open = finding.status !== 'CLOSED' && finding.workflowStatus !== 'IPTAL';
+    // audits.service.ts::assertFindingEditable ile aynı kilit: kapalı / kapanış değerlendirmesinde / iptal / silinmiş.
+    const editable = open && finding.status !== 'PENDING_REVIEW' && !finding.deletedAt;
     return {
-        canEditFinding: writer && finding.workflowStatus !== 'IPTAL',
+        canEditFinding: writer && editable,
         canAdvanceWorkflow: writer,
         canApproveWorkflow: approver,
         canCreateAction: (writer && open) && isFirstController,

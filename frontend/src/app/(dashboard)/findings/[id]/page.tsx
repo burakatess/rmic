@@ -138,6 +138,7 @@ const severityConfig: Record<string, { label: string; sublabel: string; variant:
 const resolutionConfig: Record<string, { label: string; variant: BV }> = {
     DEVAM_EDIYOR:          { label: 'Devam Ediyor',         variant: 'info' },
     KISMEN_KAPATILDI:      { label: 'Kısmen Kapatıldı',     variant: 'warning' },
+    KAPANISA_HAZIR:        { label: 'Kapanışa Hazır',       variant: 'success' },
     KAPATILDI:             { label: 'Kapatıldı',            variant: 'success' },
     ERTELENDI:             { label: 'Ertelendi',            variant: 'neutral' },
     YENI_AKSIYON_GEREKLI:  { label: 'Yeni Aksiyon Gerekli', variant: 'high' },

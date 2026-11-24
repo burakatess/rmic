@@ -160,6 +160,7 @@ const findingWorkflowLabel: Record<string, string> = {
 const findingResolutionConfig: Record<string, { label: string; variant: BV }> = {
     DEVAM_EDIYOR: { label: 'Açık', variant: 'warning' },
     KISMEN_KAPATILDI: { label: 'Kısmen kapatıldı', variant: 'info' },
+    KAPANISA_HAZIR: { label: 'Kapanışa hazır', variant: 'success' },
     KAPATILDI: { label: 'Kapatıldı', variant: 'success' },
     ERTELENDI: { label: 'Ertelendi', variant: 'neutral' },
     YENI_AKSIYON_GEREKLI: { label: 'Yeni aksiyon gerekli', variant: 'high' },

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import api from '@/lib/api';
 import { Button } from '../ui';
 import { useToast } from '../ui/Toast';
@@ -139,6 +139,16 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
     const [directorates, setDirectorates] = useState<{ id: string; name: string }[]>([]);
 
     const [users, setUsers] = useState<{ id: string; firstName: string; lastName: string; department?: string }[]>([]);
+    // İkinci kontrolcü yalnız onay yetkili kişilerden seçilir (bulgu formuyla aynı liste); değerlendiren hariç.
+    const [approvers, setApprovers] = useState<{ id: string; firstName: string; lastName: string; department?: string | null }[]>([]);
+    const makerId = (followUp as { assigneeId?: string | null } | null)?.assigneeId ?? null;
+    const secondControllerChoices = useMemo(() => {
+        const list = approvers.filter(u => u.id !== makerId);
+        // Önceden atanmış (artık listede olmayan) kontrolcü seçili kalsın diye eklenir.
+        const current = form.secondControllerId && !list.some(u => u.id === form.secondControllerId)
+            ? users.find(u => u.id === form.secondControllerId) : undefined;
+        return current ? [current, ...list] : list;
+    }, [approvers, users, makerId, form.secondControllerId]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -173,6 +183,7 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
         }
         // İkinci kontrolcü ataması için kullanıcılar.
         api.getUserChoices().then((res: any) => setUsers(Array.isArray(res) ? res : res?.data || [])).catch(() => setUsers([]));
+        api.getApproverChoices().then(res => setApprovers(res || [])).catch(() => setApprovers([]));
         api.getDirectorates({ isActive: 'true' })
             .then((res: any) => setDirectorates(Array.isArray(res) ? res : res?.data || []))
             .catch(() => setDirectorates([]));
@@ -446,7 +457,9 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
 
                             {form.result === 'YETERLI' && (
                                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
-                                    Kapanış kararı elle seçilmez. Onay sırasında tüm aksiyonlar kapandıysa bulgu kapanır; açık aksiyon varsa kısmen kapalı kalır.
+                                    Onayla birlikte bu aksiyon kapanır. Bulgu otomatik kapanmaz: tüm aksiyonları kapandıysa
+                                    bulgu &ldquo;Kapanışa hazır&rdquo; olur ve 1. kontrolcü kapanış değerlendirmesine gönderir; açık aksiyon
+                                    varsa &ldquo;Kısmen kapatıldı&rdquo; kalır.
                                 </div>
                             )}
 
@@ -528,7 +541,7 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                                 <select value={form.secondControllerId} onChange={set('secondControllerId')}
                                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-300 outline-none bg-white">
                                     <option value="">— Seçilmedi —</option>
-                                    {users.map(u => (
+                                    {secondControllerChoices.map(u => (
                                         <option key={u.id} value={u.id}>{u.firstName} {u.lastName}{u.department ? ` · ${u.department}` : ''}</option>
                                     ))}
                                 </select>
@@ -544,8 +557,9 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                                 <p className="font-semibold mb-1">İkinci kontrolcü onayından sonra uygulanacak:</p>
                                 <ul className="space-y-0.5 list-disc list-inside">
                                     <li>Değerlendirme → <strong>{RESULT_OPTIONS.find(o => o.value === form.result)?.label}</strong></li>
-                                    {form.result === 'YETERLI' && <li>Bulgu sonucu açık aksiyonlara göre sistem tarafından türetilir</li>}
+                                    {form.result === 'YETERLI' && <li>Aksiyon kapanır; bulgu tüm aksiyonları kapandıysa <strong>Kapanışa hazır</strong> olur</li>}
                                     {form.result === 'YETERSIZ' && <li>Çözüm Durumu → <strong>{RESOLUTION_OPTIONS.find(o => o.value === form.resolutionOutcome)?.label}</strong></li>}
+                                    {form.result === 'YETERSIZ' && form.resolutionOutcome === 'ERTELENDI' && form.newFollowUpDate && <li>Aksiyon hedef tarihi → <strong>{form.newFollowUpDate}</strong> (ileri ise)</li>}
                                     {form.currentStatusDetail && <li>Güncel Durum log'una yeni satır eklenir</li>}
                                     {form.newFollowUpDate && form.result !== 'YENI_AKSIYON_GEREKLI' && <li>Yeni takip tarihi → <strong>{form.newFollowUpDate}</strong></li>}
                                     {form.result === 'YENI_AKSIYON_GEREKLI' && <li className="text-orange-700 font-semibold">Yeni aksiyon oluşturulur{newAction.dueDate ? <> — hedef tarih <strong>{newAction.dueDate}</strong></> : null}</li>}
