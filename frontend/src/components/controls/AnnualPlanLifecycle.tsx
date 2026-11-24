@@ -37,7 +37,7 @@ export const PLAN_ACTION_LABELS: Record<string, string> = {
 export function AnnualPlanStepper({ status }: { status: Status }) {
     const current = stepIndexOf(status);
     return (
-        <ol className="flex items-center gap-2 text-xs" aria-label="Plan onay adımları" data-testid="plan-stepper">
+        <ol className="flex items-center gap-2 text-xs" aria-label="Plan onay adımları" data-testid="plan-stepper" data-status={status}>
             {STEPS.map((s, i) => {
                 const done = i < current || (status === 'APPLIED' && i === current);
                 const active = i === current && status !== 'APPLIED';

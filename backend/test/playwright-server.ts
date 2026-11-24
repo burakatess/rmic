@@ -60,6 +60,12 @@ async function bootstrap() {
             },
         ],
     });
+    // Yıllık plan akışı (e2e/annual-plan-flow.spec.ts): ikinci yönetici + yalnızca bu akışta kullanılan kontrol.
+    await createTestUser(prisma, roles['RISK_CONTROL_MANAGER'], {
+        email: 'playwright-manager@e2e.local', firstName: 'Playwright', lastName: 'Yönetici',
+    });
+    const planControl = await createTestControl(prisma, { ownerId: admin.id, directorateId: directorate.id });
+    await prisma.control.update({ where: { id: planControl.id }, data: { controlId: 'BTK.9001', name: 'E2E Plan Akışı Kontrolü', type: 'BT_DISI' } });
     const annualDraft = await prisma.annualPlanDraft.create({
         data: { year: 2026, revision: 1, status: 'OPEN', updatedById: admin.id },
     });
@@ -203,6 +209,7 @@ async function bootstrap() {
             ownerId: admin.id,
             directorateId: directorate.id,
             status: 'DEVAM_EDIYOR',
+            approvalState: 'ONAYLANDI', // gecikme kuralı yalnız onaylı aksiyonlara uygulanır (metric-definitions)
             dueDate: new Date('2026-09-01T09:00:00.000Z'),
         },
     });

@@ -21,7 +21,8 @@ export default defineConfig({
     projects: [browserProject],
     webServer: [
         {
-            command: 'DOTENV_CONFIG_PATH=.env.test node -r dotenv/config -r ts-node/register test/playwright-server.ts',
+            // NODE_ENV=test: auth hız sınırı (5/dk) birden çok oturum açan akışları 429'a düşürmesin (jest e2e ile aynı).
+            command: 'NODE_ENV=test DOTENV_CONFIG_PATH=.env.test node -r dotenv/config -r ts-node/register test/playwright-server.ts',
             cwd: '../backend',
             url: 'http://127.0.0.1:3099/api/health',
             reuseExistingServer: false,
