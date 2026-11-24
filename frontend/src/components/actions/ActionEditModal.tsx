@@ -52,7 +52,7 @@ export default function ActionEditModal({ isOpen, onClose, onSuccess, action }: 
     useEffect(() => {
         if (!isOpen || !action) return;
 
-        api.getUsers().then((u: any[]) => setUsers(u || [])).catch(() => setUsers([]));
+        api.getUserChoices().then((u: any[]) => setUsers(u || [])).catch(() => setUsers([]));
 
         setForm({
             description: action.description || '',

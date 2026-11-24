@@ -76,7 +76,7 @@ describe('Annual plan explicit task assignment decisions', () => {
     });
     it('rolls back when a new task requiring a decision appears after preview', async () => {
         const original = db.$transaction.getMockImplementation();
-        db.$transaction.mockImplementation(async fn => {
+        db.$transaction.mockImplementation(async (fn: unknown) => {
             tasks.push({ ...tasks[1], id: 'new-ongoing' });
             return original(fn);
         });
@@ -85,7 +85,7 @@ describe('Annual plan explicit task assignment decisions', () => {
     });
     it('does not overwrite a task approved between reading and writing', async () => {
         const original = db.controlTest.updateMany.getMockImplementation();
-        db.controlTest.updateMany.mockImplementation(async args => {
+        db.controlTest.updateMany.mockImplementation(async (args: any) => {
             if (args.where.id.in.includes('t1')) tasks[1].status = 'ONAYLANDI';
             return original(args);
         });

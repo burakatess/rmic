@@ -2,7 +2,7 @@
  * Sistem/referans veri seed'i — PİLOT ORTAM İÇİN GÜVENLİDİR.
  *
  * Bu script yalnızca sistemin çalışması için gereken referans/sistem verisini
- * upsert eder: roller, tek zorunlu admin kullanıcı, sistem parametreleri ve
+ * eksikse oluşturur (mevcut kayıtları EZMEZ): roller, tek zorunlu admin kullanıcı, sistem parametreleri ve
  * (opsiyonel) gerçek direktörlükler. HİÇBİR domain/demo verisi (Risk, Control,
  * Finding, Action, FollowUp vb.) ÜRETMEZ ve mevcut hiçbir kaydı SİLMEZ —
  * `seed.ts`'in aksine tamamen idempotent ve additive'dir; dolu bir DB üzerinde
@@ -27,6 +27,8 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import * as bcrypt from 'bcrypt';
+import { isTruthyEnv, planRoleSeed } from './seed-system.plan';
+import { SYSTEM_ROLES } from './system-roles';
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -37,48 +39,7 @@ function maskDatabaseUrl(url: string | undefined): string {
     return url.replace(/:\/\/([^:]+):([^@]+)@/, '://$1:****@');
 }
 
-// Uygulamanın kullandığı 7 rol (5 çekirdek + 2 IKS — seed-roles.ts ile aynı liste,
-// idempotent upsert olduğu için burada birleştirmek güvenli).
-const SYSTEM_ROLES: { name: string; description?: string; permissions: string[] }[] = [
-    { name: 'SYSTEM_ADMIN', description: 'Sistem Yöneticisi — tüm yetkiler', permissions: ['*'] },
-    {
-        name: 'RISK_CONTROL_MANAGER', description: 'Risk ve Kontrol Yöneticisi',
-        permissions: [
-            'dashboard:view',
-            'finding:view', 'finding:create', 'finding:update', 'action:*', 'control:*',
-            'report:view', 'report:export', 'report:org',
-            'ai:view', 'ai:run', 'ai:accept', 'ai:review', 'ai:admin',
-        ],
-    },
-    {
-        // AUDITOR varsayılanı SCOPED raporlar: kendi denetim görevi kapsamındaki
-        // kayıtları görüntüler/dışa aktarır. Kurum geneli özet (report:org) ROL'den
-        // gelmez — gerektiğinde yetkili yönetici açıkça ekler.
-        name: 'AUDITOR', description: 'Denetçi',
-        permissions: [
-            'dashboard:view',
-            'finding:view', 'finding:create', 'action:view', 'action:create', 'control:view', 'control:test',
-            'report:view', 'report:export',
-            'ai:view', 'ai:run', 'ai:accept',
-        ],
-    },
-    { name: 'RISK_ANALYST', description: 'Risk Analisti', permissions: ['dashboard:view', 'finding:view', 'control:view'] },
-    // AUDITEE (denetlenen birim): yalnızca kendisine atanmış kayıtların raporları.
-    // Kurum geneli özet / dışa aktarma KAPALI.
-    { name: 'AUDITEE', description: 'Denetlenen Birim', permissions: ['dashboard:view', 'finding:view', 'action:view', 'action:update', 'report:view'] },
-    { name: 'VIEWER', description: 'Görüntüleyici', permissions: ['dashboard:view', 'finding:view', 'control:view', 'action:view'] },
-    {
-        name: 'IKS_EMPLOYEE', description: 'İç Kontrol Sistemi Çalışanı',
-        permissions: ['dashboard:view', 'control:view', 'finding:view', 'action:view', 'test:execute'],
-    },
-    {
-        name: 'IKS_MANAGER', description: 'İç Kontrol Sistemi Yöneticisi',
-        permissions: [
-            'dashboard:view', 'control:view', 'finding:view', 'action:view', 'test:execute',
-            'finding:update', 'finding:create', 'action:update', 'action:create', 'report:view',
-        ],
-    },
-];
+// Rol tanımları prisma/system-roles.ts içinde (dry-run raporu da aynı listeyi kullanır).
 
 // Uygulamanın çalışması için gerekli minimum sistem parametreleri (SLA eşikleri vb.)
 // — demo/rastgele veri değil, iş kuralı konfigürasyonu.
@@ -89,17 +50,37 @@ const SYSTEM_PARAMETERS: { category: string; key: string; value: any; descriptio
     { category: 'GENERAL', key: 'app_name', value: 'RMIC - İç Kontrol Sistemi' },
 ];
 
+// Mevcut rollerin izinleri EZİLMEZ (yönetici ekranındaki değişiklikler restart'ta
+// kaybolmasın). Eksik varsayılan izinler raporlanır; yalnızca operatör açıkça
+// SEED_SYSTEM_SYNC_ROLE_PERMISSIONS=true verirse eklenir (hiçbir izin kaldırılmaz).
 async function upsertRoles(): Promise<Record<string, string>> {
-    const roleIds: Record<string, string> = {};
-    for (const r of SYSTEM_ROLES) {
-        const role = await prisma.role.upsert({
-            where: { name: r.name },
-            update: { description: r.description, permissions: r.permissions },
-            create: { name: r.name, description: r.description, permissions: r.permissions },
-        });
-        roleIds[r.name] = role.id;
-        console.log(`  ✅ Rol: ${role.name}`);
+    const syncMissing = isTruthyEnv(process.env.SEED_SYSTEM_SYNC_ROLE_PERMISSIONS);
+    const existing = await prisma.role.findMany({
+        where: { name: { in: SYSTEM_ROLES.map(r => r.name) } },
+        select: { name: true, permissions: true },
+    });
+    const plan = planRoleSeed(SYSTEM_ROLES, existing, syncMissing);
+
+    for (const r of plan.toCreate) {
+        await prisma.role.create({ data: { name: r.name, description: r.description, permissions: r.permissions } });
+        console.log(`  ✅ Rol oluşturuldu: ${r.name}`);
     }
+    for (const [name, missing] of Object.entries(plan.missingDefaults)) {
+        if (plan.toMerge[name]) {
+            await prisma.role.update({ where: { name }, data: { permissions: plan.toMerge[name] } });
+            console.log(`  ✅ Rol ${name}: eksik varsayılan izinler eklendi (${missing.join(', ')})`);
+        } else {
+            console.warn(`  ⚠️  Rol ${name}: varsayılanda olup rolde olmayan izinler (dokunulmadı): ${missing.join(', ')}`);
+        }
+    }
+
+    const roles = await prisma.role.findMany({
+        where: { name: { in: SYSTEM_ROLES.map(r => r.name) } },
+        select: { id: true, name: true },
+    });
+    const roleIds: Record<string, string> = {};
+    for (const role of roles) roleIds[role.name] = role.id;
+    console.log(`  ✅ ${roles.length} sistem rolü hazır (mevcut izinler korunur)`);
     return roleIds;
 }
 
@@ -107,7 +88,8 @@ async function upsertParameters() {
     for (const p of SYSTEM_PARAMETERS) {
         await prisma.parameter.upsert({
             where: { key: p.key },
-            update: { category: p.category, value: p.value, description: p.description },
+            // Yönetici SLA/parametre değerini değiştirmiş olabilir — yalnız eksikse oluştur.
+            update: {},
             create: p,
         });
     }
@@ -155,7 +137,8 @@ async function upsertDirectorates() {
         if (!name) continue;
         await prisma.directorate.upsert({
             where: { name },
-            update: { code: code || undefined, isActive: true },
+            // Pasife alınmış direktörlüğü restart'ta yeniden aktifleştirme.
+            update: {},
             create: { name, code: code || null, isActive: true },
         });
         console.log(`  ✅ Direktörlük: ${name}${code ? ` (${code})` : ''}`);
@@ -218,7 +201,8 @@ async function upsertKnowledgeDocs() {
     for (const d of STARTER_KNOWLEDGE_DOCS) {
         await prisma.knowledgeDoc.upsert({
             where: { code: d.code },
-            update: { kind: d.kind, title: d.title, body: d.body, category: d.category, isActive: true },
+            // Kurumun düzenlediği/arşivlediği başlangıç kaynağını ezme.
+            update: {},
             create: { ...d, createdById: admin.id },
         });
         console.log(`  ✅ Kaynak: ${d.code}`);

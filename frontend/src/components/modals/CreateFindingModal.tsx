@@ -9,7 +9,6 @@ interface User {
     id: string;
     firstName: string;
     lastName: string;
-    email: string;
     department?: string;
 }
 
@@ -126,7 +125,7 @@ export function CreateFindingModal({
             try {
                 let userList: User[] = [];
                 try {
-                    userList = await api.getUsers() as User[];
+                    userList = await api.getUserChoices() as User[];
                 } catch { /* yetki yoksa boş liste */ }
                 setUsers(userList || []);
 

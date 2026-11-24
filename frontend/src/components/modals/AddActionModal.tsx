@@ -7,7 +7,6 @@ interface User {
     id: string;
     firstName: string;
     lastName: string;
-    email: string;
     department: string;
 }
 
@@ -56,7 +55,7 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
         const fetchUsers = async () => {
             setLoadingUsers(true);
             try {
-                const userList = await api.getUsers() as User[];
+                const userList = await api.getUserChoices() as User[];
                 setUsers(userList || []);
             } catch { /* yetki yoksa boş liste */ } finally {
                 setLoadingUsers(false);

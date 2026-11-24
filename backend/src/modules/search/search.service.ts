@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma';
 import { DirectorateScopeService } from '../../common/services/directorate-scope.service';
 import { GlobalSearchCategory, GlobalSearchQueryDto } from './dto/global-search.dto';
 import { matchesPermission } from '../../common/util/permission-match';
+import { AccessScopeService, actionWhere, controlTestWhere, findingFullWhere, followUpWhere, riskWhere } from '../../common/services/access-scope.service';
 
 export interface GlobalSearchResult {
     id: string;
@@ -18,6 +19,7 @@ export class SearchService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly scopeService: DirectorateScopeService,
+        private readonly accessScope: AccessScopeService,
     ) {}
 
     async search(dto: GlobalSearchQueryDto, userId: string, permissions: string[]) {
@@ -48,33 +50,45 @@ export class SearchService {
             : { assigneeId: userId };
         const take = Math.min(limit, 20);
 
+        // Kayıt kapsamı uygulaması açıkken arama, liste/detay uçlarıyla AYNI merkezi
+        // politikayı kullanır (report:org kayıt kapsamı vermez; Kontrol Havuzu
+        // control:view ile kurum geneli). Kapalıyken mevcut davranış korunur.
+        const access = await this.accessScope.context({ id: userId, permissions });
+        const enforced = access.enforced;
+        const sRisk: any = enforced ? (riskWhere(access) ?? {}) : (orgWide ? {} : { ownerId: userId });
+        const sControl: any = enforced ? {} : controlScope;
+        const sTest: any = enforced ? (controlTestWhere(access) ?? {}) : { control: controlScope };
+        const sFinding: any = enforced ? (findingFullWhere(access) ?? {}) : findingScope;
+        const sAction: any = enforced ? (actionWhere(access) ?? {}) : { finding: findingScope };
+        const sFollowUp: any = enforced ? (followUpWhere(access) ?? {}) : { finding: findingScope };
+
         const groups = await Promise.all([
             selected(GlobalSearchCategory.RISK) ? this.prisma.risk.findMany({
-                where: { ...(orgWide ? {} : { ownerId: userId }), OR: [{ riskId: contains }, { name: contains }, { description: contains }, { ozet: contains }] },
+                where: { AND: [sRisk], OR: [{ riskId: contains }, { name: contains }, { description: contains }, { ozet: contains }] },
                 select: { id: true, riskId: true, name: true, description: true }, take,
             }).then(rows => rows.map(r => this.result('risk', r.id, r.riskId, r.name, r.description, `/risks/${r.id}`))) : [],
             selected(GlobalSearchCategory.CONTROL) ? this.prisma.control.findMany({
-                where: { ...controlScope, OR: [{ controlId: contains }, { name: contains }, { description: contains }, { directorateRel: { name: contains } }] },
+                where: { AND: [sControl], OR: [{ controlId: contains }, { name: contains }, { description: contains }, { directorateRel: { name: contains } }] },
                 select: { id: true, controlId: true, name: true, description: true, directorateRel: { select: { name: true } } }, take,
             }).then(rows => rows.map(r => this.result('control', r.id, r.controlId, r.name, this.context(r.description, r.directorateRel?.name), `/controls/${r.id}`))) : [],
             selected(GlobalSearchCategory.PERIOD_CONTROL) ? this.prisma.controlYearScope.findMany({
-                where: { status: 'ACTIVE', control: controlScope, OR: [{ code: contains }, { snapshotName: contains }, { snapshotDescription: contains }, { control: { OR: [{ name: contains }, { description: contains }, { directorateRel: { name: contains } }] } }] },
+                where: { status: 'ACTIVE', control: sControl, OR: [{ code: contains }, { snapshotName: contains }, { snapshotDescription: contains }, { control: { OR: [{ name: contains }, { description: contains }, { directorateRel: { name: contains } }] } }] },
                 select: { id: true, code: true, snapshotName: true, snapshotDescription: true, control: { select: { name: true, description: true, directorateRel: { select: { name: true } } } } }, take,
             }).then(rows => rows.map(r => this.result('period-control', r.id, r.code ?? '', r.snapshotName ?? r.control.name, this.context(r.snapshotDescription ?? r.control.description, r.control.directorateRel?.name), `/controls/agenda/${r.id}`))) : [],
             selected(GlobalSearchCategory.CONTROL_TEST) ? this.prisma.controlTest.findMany({
-                where: { control: controlScope, OR: [{ testNo: contains }, { summary: contains }, { description: contains }, { control: { OR: [{ name: contains }, { description: contains }] } }, { directorate: { name: contains } }] },
+                where: { AND: [sTest], OR: [{ testNo: contains }, { summary: contains }, { description: contains }, { control: { OR: [{ name: contains }, { description: contains }] } }, { directorate: { name: contains } }] },
                 select: { id: true, testNo: true, summary: true, description: true, control: { select: { name: true } }, directorate: { select: { name: true } } }, take,
             }).then(rows => rows.map(r => this.result('control-test', r.id, r.testNo, r.summary ?? r.control.name, this.context(r.description, r.directorate?.name), `/controls/testing/${r.id}`))) : [],
             selected(GlobalSearchCategory.FINDING) ? this.prisma.finding.findMany({
-                where: { AND: [findingScope, { OR: [{ findingId: contains }, { summary: contains }, { description: contains }, { directorateRel: { name: contains } }] }] },
+                where: { AND: [sFinding, { OR: [{ findingId: contains }, { summary: contains }, { description: contains }, { directorateRel: { name: contains } }] }] },
                 select: { id: true, findingId: true, summary: true, description: true, directorateRel: { select: { name: true } } }, take,
             }).then(rows => rows.map(r => this.result('finding', r.id, r.findingId, r.summary ?? r.description, this.context(r.description, r.directorateRel?.name), `/findings/${r.id}`))) : [],
             selected(GlobalSearchCategory.ACTION) ? this.prisma.action.findMany({
-                where: { finding: findingScope, OR: [{ actionId: contains }, { description: contains }, { directorate: { name: contains } }] },
+                where: { AND: [sAction], OR: [{ actionId: contains }, { description: contains }, { directorate: { name: contains } }] },
                 select: { id: true, actionId: true, description: true, directorate: { select: { name: true } }, finding: { select: { findingId: true } } }, take,
             }).then(rows => rows.map(r => this.result('action', r.id, r.actionId, r.description, this.context(`Bulgu: ${r.finding.findingId}`, r.directorate?.name), `/actions/${r.id}`))) : [],
             selected(GlobalSearchCategory.FOLLOW_UP) ? this.prisma.findingFollowUp.findMany({
-                where: { finding: findingScope, OR: [{ followUpId: contains }, { explanation: contains }, { currentStatusDetail: contains }, { directorate: { name: contains } }] },
+                where: { AND: [sFollowUp], OR: [{ followUpId: contains }, { explanation: contains }, { currentStatusDetail: contains }, { directorate: { name: contains } }] },
                 select: { id: true, followUpId: true, explanation: true, currentStatusDetail: true, findingId: true, directorate: { select: { name: true } }, finding: { select: { findingId: true } } }, take,
             }).then(rows => rows.map(r => this.result('follow-up', r.id, r.followUpId, r.explanation ?? r.currentStatusDetail ?? `Takip ${r.followUpId}`, this.context(`Bulgu: ${r.finding.findingId}`, r.directorate?.name), `/findings/${r.findingId}?tab=takip&followUpId=${r.id}`))) : [],
         ]);

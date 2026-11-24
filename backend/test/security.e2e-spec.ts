@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import request from 'supertest';
 import { INestApplication } from '@nestjs/common';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -76,7 +77,7 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
                 await request(app.getHttpServer())
                     .get('/reports/executive-summary').set('Authorization', `Bearer ${managerToken}`).expect(403);
             } finally {
-                await prisma.role.update({ where: { name: 'RISK_CONTROL_MANAGER' }, data: { permissions: role!.permissions } });
+                await prisma.role.update({ where: { name: 'RISK_CONTROL_MANAGER' }, data: { permissions: role!.permissions as Prisma.InputJsonValue } });
             }
         });
 
@@ -168,19 +169,34 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
             const action = (await request(app.getHttpServer()).post(`/findings/${fId}/actions`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ description: 'Kapanış testi aksiyonu yeterince uzun açıklama', ownerId: adminId, dueDate }).expect(201)).body;
 
-            // Aksiyon TAMAMLANDI ama KAPATILDI değil → kapanış reddedilir
+            // Aksiyon sorumlusu "tamamla" ucuyla tamamlar (COMPLETED) — onaylı kapanış DEĞİL → kapanış reddedilir.
+            // Genel güncelleme ucu TAMAMLANDI/KAPATILDI kabul etmez (DTO).
             await request(app.getHttpServer()).put(`/findings/${fId}/actions/${action.id}`).set('Authorization', `Bearer ${adminToken}`)
-                .send({ status: 'TAMAMLANDI' }).expect(200);
+                .send({ status: 'KAPATILDI' }).expect(400);
+            await request(app.getHttpServer()).post(`/actions/${action.id}/complete`).set('Authorization', `Bearer ${adminToken}`)
+                .send({}).expect(201);
             await request(app.getHttpServer()).post(`/findings/${fId}/workflow/kapat`).set('Authorization', `Bearer ${managerToken}`)
                 .send({ reason: 'test' }).expect(400);
 
-            // Aksiyon KAPATILDI → kapanış geçer, closedDate sunucuda üretilir
-            await request(app.getHttpServer()).put(`/findings/${fId}/actions/${action.id}`).set('Authorization', `Bearer ${adminToken}`)
-                .send({ status: 'KAPATILDI' }).expect(200);
-            const closed = await request(app.getHttpServer()).post(`/findings/${fId}/workflow/kapat`).set('Authorization', `Bearer ${managerToken}`)
-                .send({ reason: 'tüm aksiyonlar tamam' }).expect(201);
-            expect(closed.body.status).toBe('CLOSED');
-            expect(closed.body.closedDate).toBeTruthy();
+            // Aksiyon yalnız ONAYLI takiple KAPATILDI olur: değerlendir → ikinci kontrolcü → onaya gönder → onay.
+            const fu = (await request(app.getHttpServer()).get(`/findings/${fId}/follow-ups`).set('Authorization', `Bearer ${adminToken}`).expect(200))
+                .body.find((f: any) => f.actionId === action.id);
+            await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
+                .send({ result: 'YETERLI', currentStatusDetail: 'Kanıtlar yeterli.' }).expect(200);
+            await request(app.getHttpServer()).post(`/findings/${fId}/follow-ups/${fu.id}/second-controller`).set('Authorization', `Bearer ${adminToken}`)
+                .send({ secondControllerId: managerId, reason: 'e2e' }).expect(201);
+            await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
+                .send({ status: 'TAMAMLANDI' }).expect(200);
+            await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${managerToken}`)
+                .send({ status: 'ONAYLANDI' }).expect(200);
+
+            // Tüm aksiyonlar KAPATILDI → bulgu onay transaction'ında kapanır, closedDate sunucuda üretilir.
+            const closed = await prisma.finding.findUnique({ where: { id: fId } });
+            expect(closed?.status).toBe('CLOSED');
+            expect(closed?.closedDate).toBeTruthy();
+            // Zaten kapalı bulguya ikinci kapanış reddedilir.
+            await request(app.getHttpServer()).post(`/findings/${fId}/workflow/kapat`).set('Authorization', `Bearer ${managerToken}`)
+                .send({ reason: 'tekrar' }).expect(400);
         });
 
         it('sıfır aksiyonlu bulgu kapatılamaz', async () => {
@@ -211,10 +227,13 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
                 .body.find((f: any) => f.actionId === action.id);
             // admin: değerlendirme = YETERLI (evaluator=admin)
             await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
-                .send({ status: 'TAMAMLANDI', result: 'YETERLI' }).expect(200);
+                .send({ result: 'YETERLI' }).expect(200);
             // ikinci kontrolcü ayrı, gerekçeli işlemle atanır
             await request(app.getHttpServer()).post(`/findings/${fId}/follow-ups/${fu.id}/second-controller`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ secondControllerId: managerId, reason: 'e2e' }).expect(201);
+            // maker tamamlar → onaya gönderilir
+            await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
+                .send({ status: 'TAMAMLANDI' }).expect(200);
             return { fId, fuId: fu.id };
         }
 
@@ -254,12 +273,15 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
             const { fId, fuId } = await setupApprovableFollowUp();
             await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fuId}`).set('Authorization', `Bearer ${managerToken}`)
                 .send({ status: 'ONAYLANDI' }).expect(200);
-            await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fuId}`).set('Authorization', `Bearer ${adminToken}`)
-                .send({ result: 'YETERSIZ' }).expect(400);
+            const res = await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fuId}`).set('Authorization', `Bearer ${adminToken}`)
+                .send({ result: 'YETERSIZ' }).expect(403);
+            expect(res.body.message).toContain('tarihsel kayıt');
         });
 
-        it('transaction: aksiyon yazımından sonra hata → onay/aksiyon/takip/bulgu/log tümü rollback; retry başarılı', async () => {
+        it('YENI_AKSIYON_GEREKLI: taslak onaya kadar geçersizleşirse onay reddedilir, hiçbir yan etki kalmaz; reddet → düzelt → yeniden onay başarılı', async () => {
             const dir = await createTestDirectorate(prisma);
+            const draftDir = await createTestDirectorate(prisma, `Silinecek Birim ${Date.now()}`);
+            const goodDir = await createTestDirectorate(prisma);
             const ctrl = await createTestControl(prisma, { ownerId: adminId, directorateId: dir.id });
             const ct = await createTestControlTest(prisma, { controlId: ctrl.id, assigneeId: adminId });
             const fId = (await request(app.getHttpServer()).post('/findings').set('Authorization', `Bearer ${adminToken}`)
@@ -270,36 +292,40 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
                 .send({ description: 'Rollback testi aksiyonu yeterince uzun açıklama', ownerId: adminId, dueDate }).expect(201)).body;
             const fu = (await request(app.getHttpServer()).get(`/findings/${fId}/follow-ups`).set('Authorization', `Bearer ${adminToken}`).expect(200))
                 .body.find((f: any) => f.actionId === action.id);
-            await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
-                .send({ status: 'TAMAMLANDI', result: 'YENI_AKSIYON_GEREKLI',
-                    resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
-                    newAction: { description: 'Geçici — geçersiz tarihle rollback', ownerId: adminId, dueDate } }).expect(200);
+            const put = (token: string, body: Record<string, unknown>) =>
+                request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${token}`).send(body);
+
+            expect((await put(adminToken, { result: 'YENI_AKSIYON_GEREKLI', resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
+                newAction: { description: 'Birimi sonradan silinecek taslak', directorateId: draftDir.id, ownerId: adminId, dueDate } })).status).toBe(200);
             await request(app.getHttpServer()).post(`/findings/${fId}/follow-ups/${fu.id}/second-controller`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ secondControllerId: managerId, reason: 'e2e' }).expect(201);
-            const completedHistoryBeforeApproval = await prisma.findingStatusHistory.count({
-                where: { findingId: fId, operation: 'FOLLOWUP_COMPLETED' },
-            });
+            expect((await put(adminToken, { status: 'TAMAMLANDI' })).status).toBe(200);
+            const historyBefore = await prisma.findingStatusHistory.count({ where: { findingId: fId, operation: 'FOLLOWUP_COMPLETED' } });
 
-            // Onayda newAction.dueDate GEÇERSİZ → createAction tx içinde patlar → tüm zincir rollback
-            await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${managerToken}`)
-                .send({ status: 'ONAYLANDI', newAction: { description: 'x', ownerId: adminId, dueDate: 'GECERSIZ-TARIH' } })
-                .expect((r) => { if (r.status < 400) throw new Error(`beklenen hata, alınan ${r.status}`); });
+            // Onaylayan taslağı değiştiremez.
+            const override = await put(managerToken, { status: 'ONAYLANDI', newAction: { description: 'x', directorateId: goodDir.id, dueDate } });
+            expect(override.status).toBe(400);
 
+            // Taslağın birimi onaydan önce kaldırılırsa (dış değişiklik) onay reddedilir.
+            await prisma.directorate.delete({ where: { id: draftDir.id } });
+            const failed = await put(managerToken, { status: 'ONAYLANDI' });
+            expect(failed.status).toBe(400);
             const fuAfter = await prisma.findingFollowUp.findUnique({ where: { id: fu.id } });
             expect(fuAfter?.approvalStatus).not.toBe('ONAYLANDI');
-            expect(fuAfter?.status).not.toBe('ONAYLANDI');
-            expect(await prisma.action.count({ where: { findingId: fId } })).toBe(1); // yalnız orijinal
-            expect(await prisma.findingStatusHistory.count({ where: { findingId: fId, operation: 'FOLLOWUP_COMPLETED' } }))
-                .toBe(completedHistoryBeforeApproval);
+            expect(await prisma.action.count({ where: { findingId: fId } })).toBe(1);
+            expect(await prisma.findingStatusHistory.count({ where: { findingId: fId, operation: 'FOLLOWUP_COMPLETED' } })).toBe(historyBefore);
 
-            // Retry — geçerli tarihle → başarı
-            const goodDate = new Date(Date.now() + 20 * 86400000).toISOString().split('T')[0];
-            await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${managerToken}`)
-                .send({ status: 'ONAYLANDI', newAction: { description: 'Gerçek yeni aksiyon açıklaması', ownerId: adminId, dueDate: goodDate } })
-                .expect(200);
+            // Doğru yol: reddet → maker taslağı düzeltir → yeniden gönderir → onay.
+            await put(managerToken, { approvalStatus: 'REDDEDILDI', explanation: 'Sorumlu birim artık mevcut değil.' }).expect(200);
+            expect((await put(adminToken, { result: 'YENI_AKSIYON_GEREKLI', resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
+                newAction: { description: 'Gerçek yeni aksiyon açıklaması', directorateId: goodDir.id, ownerId: adminId, dueDate } })).status).toBe(200);
+            expect((await put(adminToken, { status: 'TAMAMLANDI' })).status).toBe(200);
+            const ok = await put(managerToken, { status: 'ONAYLANDI' }).expect(200);
+            expect(ok.body.createdAction).toBeTruthy();
+            const created = await prisma.action.findUnique({ where: { id: ok.body.createdAction.id } });
+            expect(created?.directorateId).toBe(goodDir.id);
             expect(await prisma.action.count({ where: { findingId: fId } })).toBe(2);
         });
-
         it('paralel iki YENI_AKSIYON_GEREKLI onayı → tek yeni aksiyon', async () => {
             const dir = await createTestDirectorate(prisma);
             const ctrl = await createTestControl(prisma, { ownerId: adminId, directorateId: dir.id });
@@ -312,17 +338,18 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
                 .send({ description: 'Paralel yeni aksiyon aksiyonu yeterince uzun açıklama', ownerId: adminId, dueDate }).expect(201)).body;
             const fu = (await request(app.getHttpServer()).get(`/findings/${fId}/follow-ups`).set('Authorization', `Bearer ${adminToken}`).expect(200))
                 .body.find((f: any) => f.actionId === action.id);
+            const naDir = await createTestDirectorate(prisma);
             await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
-                .send({ status: 'TAMAMLANDI', result: 'YENI_AKSIYON_GEREKLI',
-                    resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
-                    newAction: { description: 'y', ownerId: adminId, dueDate } }).expect(200);
+                .send({ result: 'YENI_AKSIYON_GEREKLI', resolutionOutcome: 'YENI_AKSIYON_GEREKLI',
+                    newAction: { description: 'Paralel yeni düzeltici aksiyon açıklaması', directorateId: naDir.id, ownerId: adminId, dueDate } }).expect(200);
             await request(app.getHttpServer()).post(`/findings/${fId}/follow-ups/${fu.id}/second-controller`).set('Authorization', `Bearer ${adminToken}`)
                 .send({ secondControllerId: managerId, reason: 'e2e' }).expect(201);
+            await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
+                .send({ status: 'TAMAMLANDI' }).expect(200);
 
-            const na = { description: 'Paralel yeni düzeltici aksiyon açıklaması', ownerId: adminId, dueDate };
             const [a, b] = await Promise.all([
-                request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${managerToken}`).send({ status: 'ONAYLANDI', newAction: na }),
-                request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${managerToken}`).send({ status: 'ONAYLANDI', newAction: na }),
+                request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${managerToken}`).send({ status: 'ONAYLANDI' }),
+                request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${managerToken}`).send({ status: 'ONAYLANDI' }),
             ]);
             expect([a.status, b.status].every((s) => s === 200)).toBe(true);
             expect(await prisma.action.count({ where: { findingId: fId } })).toBe(2); // orijinal + 1 yeni
@@ -341,7 +368,7 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
                 expect((log!.oldValue as any).permissions).not.toContain('report:view');
                 expect((log!.newValue as any).permissions).toContain('report:view');
                 // geri al
-                await prisma.role.update({ where: { id: role!.id }, data: { permissions: role!.permissions } });
+                await prisma.role.update({ where: { id: role!.id }, data: { permissions: role!.permissions as Prisma.InputJsonValue } });
             });
 
             it('kullanıcı rol değişikliği ROLE_CHANGE olarak loglanır', async () => {
@@ -412,7 +439,7 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
             const fu = (await request(app.getHttpServer()).get(`/findings/${fId}/follow-ups`).set('Authorization', `Bearer ${adminToken}`).expect(200))
                 .body.find((f: any) => f.actionId === action.id);
             await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
-                .send({ status: 'TAMAMLANDI', result: 'YETERLI' }).expect(200);
+                .send({ result: 'YETERLI' }).expect(200);
             return { fId, fuId: fu.id };
         }
 
@@ -480,9 +507,16 @@ describe('E2E — Güvenlik ve Workflow Bütünlüğü', () => {
             const fu = (await request(app.getHttpServer()).get(`/findings/${fId}/follow-ups`).set('Authorization', `Bearer ${adminToken}`).expect(200))
                 .body.find((f: any) => f.actionId === action.id);
             await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
-                .send({ status: 'TAMAMLANDI', result: 'YETERLI' }).expect(200);
-            await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${managerToken}`)
-                .send({ status: 'ONAYLANDI' }).expect(403);
+                .send({ result: 'YETERLI' }).expect(200);
+            // Negatif: ikinci kontrolcü olmadan onaya gönderilemez.
+            const submit = await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${adminToken}`)
+                .send({ status: 'TAMAMLANDI' }).expect(400);
+            expect(submit.body.message).toContain('ikinci kontrolcü');
+            // Negatif: tamamlanmamış (onaya gönderilmemiş) takip onaylanamaz.
+            const approve = await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${fu.id}`).set('Authorization', `Bearer ${managerToken}`)
+                .send({ status: 'ONAYLANDI' });
+            expect([400, 403]).toContain(approve.status);
+            expect((await prisma.findingFollowUp.findUnique({ where: { id: fu.id } }))?.approvalStatus).not.toBe('ONAYLANDI');
         });
     });
 });

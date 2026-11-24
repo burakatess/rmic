@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import api from '@/lib/api';
+import api, { type GmyOption } from '@/lib/api';
+import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import {
     PageHeader, PageShell, DataTable, StatusBadge, Button, Modal,
     KpiCard, KpiGrid, QuickFilterBar, AdvancedFilterPanel, ActiveFilterChips, SavedViewMenu,
@@ -15,6 +16,9 @@ import { useAuth } from '@/components/auth';
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Risk {
     id: string;
+    directorateId?: string | null;
+    directorate?: { id: string; name: string } | null;
+    isOrgWide?: boolean;
     riskId: string;
     kayitId?: string;
     name: string;
@@ -22,10 +26,12 @@ interface Risk {
     status: string;
     ozet?: string;
     ilgiliGmy?: string;
+    gmyId?: string | null;
     surec?: string;
     altSurec?: string;
     flagForIT: boolean;
     riskSorumlusu?: string;
+    riskSorumlusuId?: string | null;
     mutabakatTarihi?: string;
     riskIsleme?: string;
     // Impact dimensions
@@ -112,22 +118,26 @@ function ScoreCell({ puan, seviye }: { puan?: number; seviye?: string }) {
 // ─── Risk Form Modal ───────────────────────────────────────────────────────────
 interface RiskFormState {
     name: string; description: string; ozet: string;
-    ilgiliGmy: string; surec: string; altSurec: string;
-    flagForIT: boolean; riskSorumlusu: string; riskIsleme: string;
+    // İlgili GMY ve Risk Sorumlusu veritabanında tanımlı kayıtlardan seçilir (kimlik).
+    gmyId: string; surec: string; altSurec: string;
+    flagForIT: boolean; riskSorumlusuId: string; riskIsleme: string;
     finansalEtki: string; itibarEtkisi: string; regulasyonEtkisi: string; musteriEtkisi: string;
     gizlilikEtkisi: string; butunlukEtkisi: string; erisilebilirlikEtkisi: string;
     olasilik: string;
     categoryId: string; ownerId: string;
+    // Riskin organizasyon yerleşimi: birim riski (directorateId) VEYA kurum geneli risk.
+    directorateId: string; isOrgWide: boolean;
 }
 
 const emptyForm: RiskFormState = {
     name: '', description: '', ozet: '',
-    ilgiliGmy: '', surec: '', altSurec: '',
-    flagForIT: false, riskSorumlusu: '', riskIsleme: '',
+    gmyId: '', surec: '', altSurec: '',
+    flagForIT: false, riskSorumlusuId: '', riskIsleme: '',
     finansalEtki: '', itibarEtkisi: '', regulasyonEtkisi: '', musteriEtkisi: '',
     gizlilikEtkisi: '', butunlukEtkisi: '', erisilebilirlikEtkisi: '',
     olasilik: '',
     categoryId: '', ownerId: '',
+    directorateId: '', isOrgWide: false,
 };
 
 function calcEtki(form: RiskFormState, isBT: boolean): number {
@@ -151,12 +161,15 @@ function calcSeviye(puan: number): string {
     return 'DÜŞÜK';
 }
 
-function RiskFormModal({ open, onClose, onSaved, editing, users, categories }: {
+function RiskFormModal({ open, onClose, onSaved, editing, users, categories, directorates, gmys }: {
     open: boolean; onClose: () => void; onSaved: () => void;
     editing?: Risk | null;
-    users: any[]; categories: any[];
+    users: any[]; categories: any[]; directorates: { id: string; name: string }[]; gmys: GmyOption[];
 }) {
     const { success, error: showError } = useToast();
+    const { hasPermission } = useAuth();
+    // Direktörlük değişikliği erişimi etkiler → ayrı izin (backend de denetler, 403).
+    const canChangePlacement = !editing || hasPermission('risk:directorate:change');
     const [saving, setSaving] = useState(false);
     const [form, setForm] = useState<RiskFormState>(emptyForm);
 
@@ -166,11 +179,11 @@ function RiskFormModal({ open, onClose, onSaved, editing, users, categories }: {
                 name: editing.name || '',
                 description: editing.description || '',
                 ozet: editing.ozet || '',
-                ilgiliGmy: editing.ilgiliGmy || '',
+                gmyId: editing.gmyId || '',
                 surec: editing.surec || '',
                 altSurec: editing.altSurec || '',
                 flagForIT: editing.flagForIT || false,
-                riskSorumlusu: editing.riskSorumlusu || '',
+                riskSorumlusuId: editing.riskSorumlusuId || '',
                 riskIsleme: editing.riskIsleme || '',
                 finansalEtki: String(editing.finansalEtki ?? ''),
                 itibarEtkisi: String(editing.itibarEtkisi ?? ''),
@@ -182,6 +195,8 @@ function RiskFormModal({ open, onClose, onSaved, editing, users, categories }: {
                 olasilik: String(editing.olasilik ?? ''),
                 categoryId: editing.category?.id || '',
                 ownerId: editing.owner?.id || '',
+                directorateId: editing.directorateId || '',
+                isOrgWide: !!editing.isOrgWide,
             });
         } else {
             setForm(emptyForm);
@@ -191,9 +206,12 @@ function RiskFormModal({ open, onClose, onSaved, editing, users, categories }: {
     const set = (field: keyof RiskFormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
         setForm(prev => ({ ...prev, [field]: e.target.value }));
 
-    const etki = calcEtki(form, form.flagForIT);
+    // Önizleme sunucu hesabıyla (risk-scoring.util.ts) aynı: kayan nokta artığı 2 haneyle
+    // temizlenir, aksi hâlde 7,999… gibi değerler eşikte farklı seviye gösterirdi.
+    const round2 = (x: number) => Math.round(x * 100) / 100;
+    const etki = round2(calcEtki(form, form.flagForIT));
     const olasilik = Number(form.olasilik) || 0;
-    const dogalPuan = etki * olasilik;
+    const dogalPuan = round2(etki * olasilik);
     const dogalSeviye = dogalPuan > 0 ? calcSeviye(dogalPuan) : undefined;
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -201,18 +219,20 @@ function RiskFormModal({ open, onClose, onSaved, editing, users, categories }: {
         if (!form.name.trim()) { showError('Zorunlu', 'Risk adı gerekli'); return; }
         if (!form.categoryId) { showError('Zorunlu', 'Kategori seçin'); return; }
         if (!form.ownerId) { showError('Zorunlu', 'Risk sahibi seçin'); return; }
+        if (!editing && !form.isOrgWide && !form.directorateId) {
+            showError('Zorunlu', 'Sorumlu direktörlük seçin veya riski "Kurum geneli risk" olarak işaretleyin.');
+            return;
+        }
 
         setSaving(true);
         try {
-            const payload = {
+            const payload: Record<string, unknown> = {
                 name: form.name,
                 description: form.description,
                 ozet: form.ozet || undefined,
-                ilgiliGmy: form.ilgiliGmy || undefined,
                 surec: form.surec || undefined,
                 altSurec: form.altSurec || undefined,
                 flagForIT: form.flagForIT,
-                riskSorumlusu: form.riskSorumlusu || undefined,
                 riskIsleme: form.riskIsleme || undefined,
                 finansalEtki: form.finansalEtki ? Number(form.finansalEtki) : undefined,
                 itibarEtkisi: form.itibarEtkisi ? Number(form.itibarEtkisi) : undefined,
@@ -221,17 +241,26 @@ function RiskFormModal({ open, onClose, onSaved, editing, users, categories }: {
                 gizlilikEtkisi: form.gizlilikEtkisi ? Number(form.gizlilikEtkisi) : undefined,
                 butunlukEtkisi: form.butunlukEtkisi ? Number(form.butunlukEtkisi) : undefined,
                 erisilebilirlikEtkisi: form.erisilebilirlikEtkisi ? Number(form.erisilebilirlikEtkisi) : undefined,
-                etki: etki > 0 ? etki : undefined,
+                // Etki, doğal puan ve seviye SUNUCUDA hesaplanır (yalnız girdiler gönderilir).
                 olasilik: olasilik > 0 ? olasilik : undefined,
-                dogalRiskPuani: dogalPuan > 0 ? dogalPuan : undefined,
-                dogalRiskSkoru: dogalPuan > 0 ? Math.round(dogalPuan) : undefined,
-                dogalRiskSeviyesi: dogalSeviye,
                 categoryId: form.categoryId,
                 ownerId: form.ownerId,
-                inherentProbability: olasilik || 1,
-                inherentImpact: Math.round(etki) || 1,
-                inherentRiskScore: Math.round(dogalPuan) || 1,
+                inherentProbability: Math.min(5, Math.max(1, olasilik || 1)),
+                inherentImpact: Math.min(5, Math.max(1, Math.round(etki) || 1)),
             };
+            // Yerleşim yalnız değiştiyse gönderilir (değişiklik ayrı izin ister).
+            const placementChanged = !editing
+                || (form.directorateId || null) !== (editing.directorateId ?? null)
+                || form.isOrgWide !== !!editing.isOrgWide;
+            if (placementChanged) {
+                payload.directorateId = form.isOrgWide ? (editing ? null : undefined) : (form.directorateId || undefined);
+                payload.isOrgWide = form.isOrgWide;
+            }
+
+            // GMY ve sorumlu yalnız değiştiyse gönderilir: eski (serbest metinli) kayıtta seçim
+            // yapılmadan kaydetmek mevcut metni silmez.
+            if (!editing || (form.gmyId || null) !== (editing.gmyId ?? null)) payload.gmyId = form.gmyId || (editing ? null : undefined);
+            if (!editing || (form.riskSorumlusuId || null) !== (editing.riskSorumlusuId ?? null)) payload.riskSorumlusuId = form.riskSorumlusuId || (editing ? null : undefined);
 
             if (editing) {
                 await api.updateRisk(editing.id, payload);
@@ -294,13 +323,54 @@ function RiskFormModal({ open, onClose, onSaved, editing, users, categories }: {
                                 {users.map((u: any) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
                             </select>
                         </div>
+                        <div className="col-span-full grid grid-cols-1 md:grid-cols-2 gap-3 rounded-lg border border-slate-200 p-3">
+                            <div>
+                                <label htmlFor="risk-directorate" className="block text-xs font-semibold text-slate-600 mb-1">
+                                    Sorumlu Direktörlük {!form.isOrgWide && <span className="text-red-500">*</span>}
+                                </label>
+                                <select id="risk-directorate" value={form.directorateId} disabled={form.isOrgWide || !canChangePlacement}
+                                    onChange={set('directorateId')}
+                                    className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100">
+                                    <option value="">-- Seçin --</option>
+                                    {directorates.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                                </select>
+                            </div>
+                            <label className="flex items-start gap-2 text-xs text-slate-600 md:mt-6">
+                                <input type="checkbox" checked={form.isOrgWide} disabled={!canChangePlacement}
+                                    onChange={e => setForm(p => ({ ...p, isOrgWide: e.target.checked, directorateId: e.target.checked ? '' : p.directorateId }))} />
+                                <span><strong>Kurum geneli risk</strong> — tek bir direktörlüğe ait değil. Birim kullanıcılarına açılmaz; yalnız kurum geneli kapsamlı kullanıcılar ve risk sahibi görür.</span>
+                            </label>
+                            {editing && !canChangePlacement && (
+                                <p className="md:col-span-2 text-[11px] text-slate-500">Direktörlük değişikliği için risk:directorate:change yetkisi gerekir.</p>
+                            )}
+                            {editing && !editing.directorateId && !editing.isOrgWide && (
+                                <p className="md:col-span-2 text-[11px] text-amber-700">Bu risk henüz bir direktörlüğe eşlenmemiş; birim kullanıcıları göremez.</p>
+                            )}
+                        </div>
                         <div>
                             <label className="block text-xs font-semibold text-slate-600 mb-1">İlgili GMY</label>
-                            <input value={form.ilgiliGmy} onChange={set('ilgiliGmy')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="GMY adı…" />
+                            <select value={form.gmyId} onChange={set('gmyId')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+                                <option value="">-- Seçin --</option>
+                                {gmys.map(g => <option key={g.id} value={g.id}>{g.name}{g.code ? ` (${g.code})` : ''}</option>)}
+                                {editing?.gmyId && !gmys.some(g => g.id === editing.gmyId) && (
+                                    <option value={editing.gmyId}>{editing.ilgiliGmy ?? 'Pasif GMY'} (pasif)</option>
+                                )}
+                            </select>
+                            {editing && !editing.gmyId && editing.ilgiliGmy && (
+                                <p className="mt-1 text-[11px] text-amber-700">Eski kayıt: “{editing.ilgiliGmy}” — listeden seçilene kadar korunur.</p>
+                            )}
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-slate-600 mb-1">Risk Sorumlusu</label>
-                            <input value={form.riskSorumlusu} onChange={set('riskSorumlusu')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="Sorumlu adı…" />
+                            <select value={form.riskSorumlusuId} onChange={set('riskSorumlusuId')} className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+                                <option value="">-- Seçin --</option>
+                                {users.filter((u: any) => u.isActive !== false || u.id === editing?.riskSorumlusuId).map((u: any) => (
+                                    <option key={u.id} value={u.id}>{u.firstName} {u.lastName}{u.department ? ` — ${u.department}` : ''}</option>
+                                ))}
+                            </select>
+                            {editing && !editing.riskSorumlusuId && editing.riskSorumlusu && (
+                                <p className="mt-1 text-[11px] text-amber-700">Eski kayıt: “{editing.riskSorumlusu}” — listeden seçilene kadar korunur.</p>
+                            )}
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-slate-600 mb-1">Süreç</label>
@@ -406,7 +476,10 @@ function RiskInventoryContent() {
     const [risks, setRisks] = useState<Risk[]>([]);
     const [users, setUsers] = useState<any[]>([]);
     const [categories, setCategories] = useState<any[]>([]);
+    const [directorates, setDirectorates] = useState<{ id: string; name: string }[]>([]);
+    const [gmys, setGmys] = useState<GmyOption[]>([]);
     const [loading, setLoading] = useState(true);
+    const [listError, setListError] = useState<LoadError | null>(null);
     const [search, setSearch] = useState('');
     const [filters, setFilters] = useState<Record<string, string>>({});
     const [colFilters, setColFilters] = useState<Record<string, string>>({});
@@ -419,6 +492,7 @@ function RiskInventoryContent() {
 
     // Dashboard KPI linkleri (?score=high|medium|low) quick filter olarak uygulanır
     useEffect(() => {
+        if (searchParams.get('new') === '1') { setEditing(null); setModalOpen(true); }
         const score = searchParams.get('score');
         if (score === 'high' || score === 'medium' || score === 'low') {
             setQuickFilter(`score-${score}`);
@@ -428,19 +502,33 @@ function RiskInventoryContent() {
 
     const load = useCallback(async () => {
         setLoading(true);
+        setListError(null);
         try {
-            const [risksRes, usersRes, catsRes] = await Promise.all([
-                api.getRisks() as Promise<any>,
-                api.getUsers() as Promise<any>,
-                api.getRiskCategories?.() as Promise<any> ?? Promise.resolve([]),
+            // Risk listesi yan isteklerden BAĞIMSIZ yüklenir: kullanıcı/kategori/birim listeleri
+            // yalnız oluşturma formu içindir ve bazı roller (birim kullanıcısı, görüntüleyici,
+            // risk analisti) /admin/users'a erişemez — bu 403 listeyi boşaltmamalı.
+            const [risksRes, usersRes, catsRes, dirRes, gmyRes] = await Promise.all([
+                // Liste istemci tarafında filtrelenir; sunucu varsayılanı 20 kayıtla sınırlıydı.
+                api.getRisks({ limit: 500 }) as Promise<any>,
+                (api.getUserChoices() as Promise<any>).catch(() => []),
+                ((api.getRiskCategories?.() as Promise<any>) ?? Promise.resolve([])).catch(() => []),
+                api.getDirectorates({ isActive: 'true' }).catch(() => []) as Promise<any>,
+                api.getGmys().catch(() => [] as GmyOption[]),
             ]);
+            setDirectorates(Array.isArray(dirRes) ? dirRes : (dirRes?.data || []));
+            setGmys(gmyRes);
             const rList = Array.isArray(risksRes) ? risksRes : (risksRes.data || risksRes.risks || []);
             const uList = Array.isArray(usersRes) ? usersRes : (usersRes.data || usersRes.users || []);
             const cList = Array.isArray(catsRes) ? catsRes : (catsRes.data || []);
             setRisks(rList);
             setUsers(uList);
             setCategories(cList);
-        } catch { showError('Hata', 'Veriler yüklenemedi.'); }
+        } catch (e) {
+            // Boş sonuç ile yüklenemeyen liste ayrı gösterilir.
+            const le = classifyLoadError(e, 'Risk listesi');
+            setListError(le);
+            showError(le.title, le.description);
+        }
         finally { setLoading(false); }
     }, []);
 
@@ -466,6 +554,11 @@ function RiskInventoryContent() {
         if (filters.seviye && filters.seviye !== 'all' && r.dogalRiskSeviyesi !== filters.seviye) return false;
         if (filters.isleme && filters.isleme !== 'all' && r.riskIsleme !== filters.isleme) return false;
         if (filters.flagIT && filters.flagIT === 'evet' && !r.flagForIT) return false;
+        if (filters.directorate) {
+            if (filters.directorate === '__orgwide') { if (!r.isOrgWide) return false; }
+            else if (filters.directorate === '__none') { if (r.directorateId || r.isOrgWide) return false; }
+            else if (r.directorateId !== filters.directorate) return false;
+        }
         if (quickFilter && quickFilterFns[quickFilter] && !quickFilterFns[quickFilter](r)) return false;
         return true;
     }), [risks, search, filters, quickFilter, quickFilterFns]);
@@ -626,16 +719,27 @@ function RiskInventoryContent() {
             options: Object.keys(islemeConfig).map(k => ({ value: k, label: islemeConfig[k].label })),
         },
         {
+            type: 'select', key: 'directorate', label: 'Direktörlük',
+            value: filters.directorate || '',
+            onChange: (v) => { setFilters(p => ({ ...p, directorate: v })); setPage(1); },
+            options: [
+                ...directorates.map(d => ({ value: d.id, label: d.name })),
+                { value: '__orgwide', label: 'Kurum geneli risk' },
+                { value: '__none', label: 'Eşlenmemiş' },
+            ],
+        },
+        {
             type: 'select', key: 'flagIT', label: 'Flag 4 IT',
             value: filters.flagIT || '',
             onChange: (v) => { setFilters(p => ({ ...p, flagIT: v })); setPage(1); },
             options: [{ value: 'evet', label: 'IT Riski' }],
         },
-    ], [filters]);
+    ], [filters, directorates]);
 
     // ── Aktif filtre chip'leri ──
-    const filterLabels: Record<string, string> = { status: 'Statü', seviye: 'Seviye', isleme: 'İşleme', flagIT: 'IT' };
+    const filterLabels: Record<string, string> = { status: 'Statü', seviye: 'Seviye', isleme: 'İşleme', flagIT: 'IT', directorate: 'Direktörlük' };
     const filterValueLabel = (key: string, value: string): string => {
+        if (key === 'directorate') return value === '__orgwide' ? 'Kurum geneli' : value === '__none' ? 'Eşlenmemiş' : (directorates.find(d => d.id === value)?.name ?? value);
         if (key === 'status') return statusConfig[value]?.label ?? value;
         if (key === 'seviye') return seviyelConfig[value]?.label ?? value;
         if (key === 'isleme') return islemeConfig[value]?.label ?? value;
@@ -729,8 +833,8 @@ function RiskInventoryContent() {
                 pageSize={pageSize}
                 onPageChange={setPage}
                 storageKey="risk-inventory-table"
-                emptyTitle="Risk bulunamadı"
-                emptyDescription="Filtrelerinizi değiştirin veya yeni bir risk kaydı oluşturun."
+                emptyTitle={listError ? listError.title : 'Risk bulunamadı'}
+                emptyDescription={listError ? listError.description : 'Filtrelerinizi değiştirin veya yeni bir risk kaydı oluşturun.'}
                 columnFilters={colFilters}
                 onColumnFilterChange={(k, v) => { setColFilters(p => ({ ...p, [k]: v })); setPage(1); }}
                 stickyFirstColumn
@@ -757,6 +861,8 @@ function RiskInventoryContent() {
                 editing={editing}
                 users={users}
                 categories={categories}
+                directorates={directorates}
+                gmys={gmys}
             />
         </PageShell>
     );

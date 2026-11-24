@@ -34,6 +34,9 @@ describe('RisksService', () => {
 
     beforeEach(async () => {
         prisma = {
+            directorate: { findUnique: jest.fn().mockResolvedValue({ isActive: true }) },
+            gmy: { findUnique: jest.fn().mockResolvedValue({ name: 'GMY-1', isActive: true }) },
+            user: { findUnique: jest.fn().mockResolvedValue({ isActive: true }) },
             risk: {
                 findMany: jest.fn(),
                 findUnique: jest.fn(),
@@ -44,6 +47,7 @@ describe('RisksService', () => {
             },
             riskCategory: {
                 findMany: jest.fn(),
+                findUnique: jest.fn().mockResolvedValue(null),
                 findFirst: jest.fn(),
                 create: jest.fn(),
             },
@@ -82,10 +86,8 @@ describe('RisksService', () => {
             auditLog: {
                 create: jest.fn(),
             },
-            user: {
-                findUnique: jest.fn(),
-            },
         };
+        prisma.$transaction = jest.fn((fn: any) => fn(prisma));
 
         const module: TestingModule = await Test.createTestingModule({
             providers: [
@@ -185,15 +187,106 @@ describe('RisksService', () => {
                     categoryId: 'cat-1',
                     inherentProbability: 3,
                     inherentImpact: 4,
+                    directorateId: 'dir-1',
                 },
                 'user-1',
             );
 
             expect(result).toBeDefined();
+            expect(prisma.risk.create.mock.calls[0][0].data).toEqual(expect.objectContaining({ directorateId: 'dir-1', isOrgWide: false }));
             expect(prisma.risk.create).toHaveBeenCalled();
             // Verify score calculation
             const createCall = prisma.risk.create.mock.calls[0][0];
             expect(createCall.data.inherentRiskScore).toBe(12); // 3 * 4
+        });
+    });
+
+    describe('create — organizasyon yerleşimi', () => {
+        const base = { name: 'R', description: 'd', categoryId: 'cat-1', inherentProbability: 1, inherentImpact: 1 };
+        beforeEach(() => {
+            prisma.riskCategory.findFirst.mockResolvedValue({ id: 'cat-1' });
+            prisma.risk.create.mockResolvedValue(mockRisk);
+        });
+
+        it('direktörlük de kurum geneli işareti de yoksa 400', async () => {
+            await expect(service.create(base as any, 'u')).rejects.toThrow('direktörlük');
+            expect(prisma.risk.create).not.toHaveBeenCalled();
+        });
+
+        it('kurum geneli risk direktörlüğe bağlanamaz', async () => {
+            await expect(service.create({ ...base, isOrgWide: true, directorateId: 'dir-1' } as any, 'u')).rejects.toThrow('Kurum geneli');
+        });
+
+        it('kurum geneli risk direktörlüksüz oluşur', async () => {
+            await service.create({ ...base, isOrgWide: true } as any, 'u');
+            expect(prisma.risk.create.mock.calls[0][0].data).toEqual(expect.objectContaining({ directorateId: null, isOrgWide: true }));
+        });
+
+        it('pasif/bulunmayan direktörlük reddedilir', async () => {
+            prisma.directorate.findUnique.mockResolvedValue(null);
+            await expect(service.create({ ...base, directorateId: 'x' } as any, 'u')).rejects.toThrow('Geçersiz direktörlük');
+        });
+    });
+
+    describe('İlgili GMY ve Risk Sorumlusu — yalnız tanımlı kayıtlardan', () => {
+        const base = { name: 'R', description: 'd', categoryId: 'cat-1', inherentProbability: 1, inherentImpact: 1, directorateId: 'dir-1' };
+        beforeEach(() => {
+            prisma.riskCategory.findUnique.mockResolvedValue({ id: 'cat-1' });
+            prisma.risk.create.mockResolvedValue({ ...mockRisk });
+        });
+
+        it('seçilen GMY ve kullanıcıdan gösterim adları sunucuda türetilir', async () => {
+            prisma.user.findUnique.mockResolvedValue({ firstName: 'Ayşe', lastName: 'Şahin', isActive: true });
+            await service.create({ ...base, gmyId: 'g-1', riskSorumlusuId: 'u-9' } as any, 'u');
+            expect(prisma.risk.create.mock.calls[0][0].data).toEqual(expect.objectContaining({
+                gmyId: 'g-1', ilgiliGmy: 'GMY-1', riskSorumlusuId: 'u-9', riskSorumlusu: 'Ayşe Şahin',
+            }));
+        });
+
+        it('pasif/bulunmayan GMY veya sorumlu reddedilir, kayıt yazılmaz', async () => {
+            prisma.gmy.findUnique.mockResolvedValueOnce({ name: 'Eski', isActive: false });
+            await expect(service.create({ ...base, gmyId: 'g-x' } as any, 'u')).rejects.toThrow('Geçersiz GMY');
+            prisma.user.findUnique.mockResolvedValueOnce(null);
+            await expect(service.create({ ...base, riskSorumlusuId: 'u-x' } as any, 'u')).rejects.toThrow('Geçersiz risk sorumlusu');
+            expect(prisma.risk.create).not.toHaveBeenCalled();
+        });
+
+        it('güncellemede null seçimi kaldırır; alan gönderilmezse dokunulmaz', async () => {
+            jest.spyOn(service, 'findOne').mockResolvedValue({ ...mockRisk, directorateId: 'dir-1' } as any);
+            prisma.risk.update.mockResolvedValue({ ...mockRisk });
+            await service.update('risk-1', { gmyId: null, riskSorumlusuId: null } as any, 'u');
+            expect(prisma.risk.update.mock.calls[0][0].data).toEqual(expect.objectContaining({ gmyId: null, ilgiliGmy: null, riskSorumlusuId: null, riskSorumlusu: null }));
+            await service.update('risk-1', { name: 'Yeni ad' } as any, 'u');
+            expect(prisma.risk.update.mock.calls[1][0].data).not.toHaveProperty('gmyId');
+            expect(prisma.risk.update.mock.calls[1][0].data).not.toHaveProperty('riskSorumlusu');
+        });
+    });
+
+    describe('update — direktörlük değişikliği', () => {
+        beforeEach(() => {
+            jest.spyOn(service, 'findOne').mockResolvedValue({ ...mockRisk, directorateId: 'dir-1', isOrgWide: false } as any);
+            prisma.risk.update.mockResolvedValue({ ...mockRisk, directorateId: 'dir-2', version: 2 });
+        });
+
+        it('risk:directorate:change izni yoksa 403, hiçbir şey yazılmaz', async () => {
+            await expect(service.update('risk-1', { directorateId: 'dir-2' } as any, 'u', ['risk:view'])).rejects.toThrow('direktörlüğünü değiştirme');
+            expect(prisma.risk.update).not.toHaveBeenCalled();
+        });
+
+        it('izinle değişir ve ayrı RISK_DIRECTORATE_CHANGE denetim kaydı aynı transaction\'da yazılır', async () => {
+            await service.update('risk-1', { directorateId: 'dir-2' } as any, 'u', ['risk:directorate:change']);
+            expect(prisma.risk.update.mock.calls[0][0].data).toEqual(expect.objectContaining({ directorateId: 'dir-2', isOrgWide: false }));
+            expect(prisma.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+                action: 'RISK_DIRECTORATE_CHANGE',
+                oldValue: { directorateId: 'dir-1', isOrgWide: false },
+                newValue: { directorateId: 'dir-2', isOrgWide: false },
+            }) });
+            expect(prisma.$transaction).toHaveBeenCalled();
+        });
+
+        it('direktörlük aynı kalıyorsa izin gerekmez', async () => {
+            await service.update('risk-1', { name: 'yeni ad', directorateId: 'dir-1' } as any, 'u', []);
+            expect(prisma.auditLog.create).not.toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'RISK_DIRECTORATE_CHANGE' }) });
         });
     });
 
@@ -320,6 +413,16 @@ describe('RisksService', () => {
                     where: { riskId: 'risk-1' },
                 }),
             );
+        });
+    });
+
+    describe('kategori çözümleme', () => {
+        it('gerçek kategori kimliği (cuid) ile seçilen kategori kullanılır; kimlik adıyla yeni kategori üretilmez', async () => {
+            prisma.riskCategory.findUnique.mockResolvedValue({ id: 'cmabc123' });
+            prisma.risk.create.mockResolvedValue(mockRisk);
+            await service.create({ name: 'R', description: 'd', categoryId: 'cmabc123', inherentProbability: 1, inherentImpact: 1, directorateId: 'dir-1' } as any, 'u');
+            expect(prisma.riskCategory.create).not.toHaveBeenCalled();
+            expect(prisma.risk.create.mock.calls[0][0].data.categoryId).toBe('cmabc123');
         });
     });
 });

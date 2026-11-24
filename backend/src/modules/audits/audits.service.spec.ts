@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { AuditsService } from './audits.service';
 import { PrismaService } from '../../prisma';
 
@@ -9,8 +9,13 @@ describe('AuditsService — kritik iş kuralları', () => {
 
     beforeEach(async () => {
         prisma = {
-            finding: { findUnique: jest.fn(), update: jest.fn() },
-            findingStatusHistory: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
+            finding: {
+                findUnique: jest.fn(), update: jest.fn(),
+                updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+                findUniqueOrThrow: jest.fn(),
+                deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+            },
+            findingStatusHistory: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null), updateMany: jest.fn() },
             findingStatusLog: { create: jest.fn() },
             auditLog: { create: jest.fn() },
             action: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn(), updateMany: jest.fn() },
@@ -63,38 +68,66 @@ describe('AuditsService — kritik iş kuralları', () => {
             const dueDate = new Date('2026-01-01');
             prisma.action.findMany.mockResolvedValue([{ id: 'a-1', actionId: 'A-2026-0002-01', findingId: 'f-1', dueDate, status: 'TAMAMLANDI' }]);
             prisma.findingFollowUp.findFirst.mockResolvedValue(null);
-            prisma.findingFollowUp.create.mockResolvedValue({ id: 'fu-1' });
+            prisma.findingFollowUp.create.mockResolvedValue({ id: 'fu-1', followUpId: 'T-1' });
 
-            const result = await service.generateDueFollowUps('manual');
+            const result = await service.generateDueFollowUps('cron');
 
             expect(result.generatedCount).toBe(1);
             expect(prisma.findingFollowUp.create).toHaveBeenCalledWith({
                 data: expect.objectContaining({ findingId: 'f-1', actionId: 'a-1', status: 'BEKLIYOR' }),
+                select: { id: true, followUpId: true },
             });
             expect(prisma.action.update).not.toHaveBeenCalled();
+            // Otomatik üretim denetim izine girer (cron → kullanıcı yok, SYSTEM aktörü Prisma katmanında).
+            expect(prisma.auditLog.create).toHaveBeenCalledWith({
+                data: expect.objectContaining({ userId: null, action: 'AUTO_GENERATE', entityType: 'FindingFollowUp', entityId: 'fu-1' }),
+            });
         });
     });
 
     // ─── Mutabakat Workflow Geçişleri ──────────────────────────────────────
 
+    // Geçişler atomiktir: durum koşulu updateMany WHERE'indedir; statü geçmişi ve
+    // denetim izi aynı transaction'da yazılır.
+    const expectAtomicTransition = (from: string, to: string, extra: Record<string, unknown> = {}) => {
+        expect(prisma.finding.updateMany).toHaveBeenCalledWith({
+            where: { id: 'f-1', workflowStatus: from },
+            data: { ...extra, workflowStatus: to },
+        });
+        expect(prisma.findingStatusHistory.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ workflowStatus: to, previousWorkflowStatus: from }),
+        }));
+        expect(prisma.auditLog.create).toHaveBeenCalled();
+        expect(prisma.finding.update).not.toHaveBeenCalled();
+    };
+
     describe('mutabakataGonder', () => {
-        it('TASLAK statüsündeki bulguyu MUTABAKATA_GONDERILDI\'ye geçirir', async () => {
+        it('TASLAK statüsündeki bulguyu MUTABAKATA_GONDERILDI\'ye atomik geçirir', async () => {
             prisma.finding.findUnique.mockResolvedValue({ workflowStatus: 'TASLAK' });
-            prisma.finding.update.mockResolvedValue({ id: 'f-1', workflowStatus: 'MUTABAKATA_GONDERILDI' });
+            prisma.finding.findUniqueOrThrow.mockResolvedValue({ id: 'f-1', workflowStatus: 'MUTABAKATA_GONDERILDI' });
 
             const result = await service.mutabakataGonder('f-1', 'user-1');
 
             expect(result.workflowStatus).toBe('MUTABAKATA_GONDERILDI');
-            expect(prisma.finding.update).toHaveBeenCalledWith(
-                expect.objectContaining({ data: { workflowStatus: 'MUTABAKATA_GONDERILDI' } }),
-            );
+            expectAtomicTransition('TASLAK', 'MUTABAKATA_GONDERILDI');
         });
 
-        it('TASLAK dışındaki statüden geçişe izin vermez', async () => {
+        it('TASLAK dışındaki statüden geçişe izin vermez (400)', async () => {
             prisma.finding.findUnique.mockResolvedValue({ workflowStatus: 'MUTABAKAT_YAPILDI' });
 
             await expect(service.mutabakataGonder('f-1', 'user-1')).rejects.toThrow(BadRequestException);
-            expect(prisma.finding.update).not.toHaveBeenCalled();
+            expect(prisma.finding.updateMany).not.toHaveBeenCalled();
+        });
+
+        it('ön kontrolden sonra durum eşzamanlı değişirse 409 döner ve geçmiş/denetim yazılmaz', async () => {
+            prisma.finding.findUnique
+                .mockResolvedValueOnce({ workflowStatus: 'TASLAK' })
+                .mockResolvedValueOnce({ workflowStatus: 'MUTABAKATA_GONDERILDI' });
+            prisma.finding.updateMany.mockResolvedValue({ count: 0 });
+
+            await expect(service.mutabakataGonder('f-1', 'user-1')).rejects.toThrow(ConflictException);
+            expect(prisma.findingStatusHistory.create).not.toHaveBeenCalled();
+            expect(prisma.auditLog.create).not.toHaveBeenCalled();
         });
 
         it('bulgu bulunamazsa NotFoundException fırlatır', async () => {
@@ -105,18 +138,15 @@ describe('AuditsService — kritik iş kuralları', () => {
     });
 
     describe('icKontrolOnayinaGonder', () => {
-        it('MUTABAKATA_GONDERILDI statüsünde birim cevabını kaydedip geçiş yapar', async () => {
+        it('birim cevabı ve hedef tarih geçişle aynı atomik güncellemede yazılır', async () => {
             prisma.finding.findUnique.mockResolvedValue({ workflowStatus: 'MUTABAKATA_GONDERILDI' });
-            prisma.finding.update.mockResolvedValue({ id: 'f-1', workflowStatus: 'IC_KONTROL_ONAYINA_GONDERILDI' });
+            prisma.finding.findUniqueOrThrow.mockResolvedValue({ id: 'f-1', workflowStatus: 'IC_KONTROL_ONAYINA_GONDERILDI' });
 
             await service.icKontrolOnayinaGonder('f-1', 'Birim cevabı metni', '2026-12-01', 'user-1');
 
-            // İlk update çağrısı birim cevabını + hedef tarihi yazar
-            expect(prisma.finding.update).toHaveBeenNthCalledWith(1,
-                expect.objectContaining({
-                    data: expect.objectContaining({ birimCevabi: 'Birim cevabı metni', targetResolutionDate: new Date('2026-12-01') }),
-                }),
-            );
+            expectAtomicTransition('MUTABAKATA_GONDERILDI', 'IC_KONTROL_ONAYINA_GONDERILDI', {
+                birimCevabi: 'Birim cevabı metni', targetResolutionDate: new Date('2026-12-01'),
+            });
         });
 
         it('yanlış statüden çağrılırsa reddeder', async () => {
@@ -129,17 +159,15 @@ describe('AuditsService — kritik iş kuralları', () => {
     });
 
     describe('mutabakatOnayla', () => {
-        it('IC_KONTROL_ONAYINA_GONDERILDI statüsünde onaylar ve KAPATILDI ise closedDate set eder', async () => {
+        it('onaylar ve KAPATILDI ise closedDate geçişle birlikte yazılır', async () => {
             prisma.finding.findUnique.mockResolvedValue({ workflowStatus: 'IC_KONTROL_ONAYINA_GONDERILDI' });
-            prisma.finding.update.mockResolvedValue({ id: 'f-1', workflowStatus: 'MUTABAKAT_YAPILDI' });
+            prisma.finding.findUniqueOrThrow.mockResolvedValue({ id: 'f-1', workflowStatus: 'MUTABAKAT_YAPILDI' });
 
             await service.mutabakatOnayla('f-1', { resolutionStatus: 'KAPATILDI' }, 'user-1');
 
-            expect(prisma.finding.update).toHaveBeenNthCalledWith(1,
-                expect.objectContaining({
-                    data: expect.objectContaining({ resolutionStatus: 'KAPATILDI', closedDate: expect.any(Date) }),
-                }),
-            );
+            expectAtomicTransition('IC_KONTROL_ONAYINA_GONDERILDI', 'MUTABAKAT_YAPILDI', {
+                resolutionStatus: 'KAPATILDI', closedDate: expect.any(Date),
+            });
         });
 
         it('yanlış statüden çağrılırsa reddeder', async () => {
@@ -157,28 +185,38 @@ describe('AuditsService — kritik iş kuralları', () => {
             await expect(
                 service.mutabakatOnayla('f-1', {}, 'user-1'),
             ).rejects.toThrow(ForbiddenException);
-            expect(prisma.finding.update).not.toHaveBeenCalled();
+            expect(prisma.finding.updateMany).not.toHaveBeenCalled();
         });
 
         it('gönderen BAŞKA bir kullanıcıysa onay sorunsuz ilerler', async () => {
             prisma.finding.findUnique.mockResolvedValue({ workflowStatus: 'IC_KONTROL_ONAYINA_GONDERILDI' });
-            prisma.finding.update.mockResolvedValue({ id: 'f-1', workflowStatus: 'MUTABAKAT_YAPILDI' });
+            prisma.finding.findUniqueOrThrow.mockResolvedValue({ id: 'f-1', workflowStatus: 'MUTABAKAT_YAPILDI' });
             prisma.findingStatusHistory.findFirst.mockResolvedValue({ evaluator: 'other-user' });
 
             const result = await service.mutabakatOnayla('f-1', {}, 'user-1');
 
             expect(result.workflowStatus).toBe('MUTABAKAT_YAPILDI');
         });
+
+        it('iki eşzamanlı onaydan ikincisi 409 alır', async () => {
+            prisma.finding.findUnique
+                .mockResolvedValueOnce({ workflowStatus: 'IC_KONTROL_ONAYINA_GONDERILDI' })
+                .mockResolvedValueOnce({ workflowStatus: 'MUTABAKAT_YAPILDI' });
+            prisma.finding.updateMany.mockResolvedValue({ count: 0 });
+
+            await expect(service.mutabakatOnayla('f-1', {}, 'user-1')).rejects.toThrow(ConflictException);
+        });
     });
 
     describe('mutabakatGeriGonder', () => {
         it('IC_KONTROL_ONAYINA_GONDERILDI\'den MUTABAKATA_GONDERILDI\'ye geri gönderir', async () => {
             prisma.finding.findUnique.mockResolvedValue({ workflowStatus: 'IC_KONTROL_ONAYINA_GONDERILDI' });
-            prisma.finding.update.mockResolvedValue({ id: 'f-1', workflowStatus: 'MUTABAKATA_GONDERILDI' });
+            prisma.finding.findUniqueOrThrow.mockResolvedValue({ id: 'f-1', workflowStatus: 'MUTABAKATA_GONDERILDI' });
 
             const result = await service.mutabakatGeriGonder('f-1', 'Yetersiz kanıt', 'user-1');
 
             expect(result.workflowStatus).toBe('MUTABAKATA_GONDERILDI');
+            expectAtomicTransition('IC_KONTROL_ONAYINA_GONDERILDI', 'MUTABAKATA_GONDERILDI');
         });
 
         it('yanlış statüden çağrılırsa reddeder', async () => {
@@ -191,19 +229,128 @@ describe('AuditsService — kritik iş kuralları', () => {
     });
 
     describe('iptalEt', () => {
-        it('herhangi bir statüden IPTAL\'e geçirir', async () => {
+        it('herhangi bir statüden IPTAL\'e koşullu geçirir', async () => {
             prisma.finding.findUnique.mockResolvedValue({ workflowStatus: 'MUTABAKATA_GONDERILDI' });
-            prisma.finding.update.mockResolvedValue({ id: 'f-1', workflowStatus: 'IPTAL' });
+            prisma.finding.findUniqueOrThrow.mockResolvedValue({ id: 'f-1', workflowStatus: 'IPTAL' });
+            prisma.findingFollowUp.findMany.mockResolvedValue([]);
 
             const result = await service.iptalEt('f-1', 'Hatalı bulgu', 'user-1');
 
             expect(result.workflowStatus).toBe('IPTAL');
+            expect(prisma.finding.updateMany).toHaveBeenCalledWith({
+                where: { id: 'f-1', workflowStatus: 'MUTABAKATA_GONDERILDI' },
+                data: { workflowStatus: 'IPTAL' },
+            });
+        });
+
+        it('iptal sırasında durum değiştiyse 409 döner', async () => {
+            prisma.finding.findUnique.mockResolvedValue({ workflowStatus: 'MUTABAKATA_GONDERILDI' });
+            prisma.findingFollowUp.findMany.mockResolvedValue([]);
+            prisma.finding.updateMany.mockResolvedValue({ count: 0 });
+
+            await expect(service.iptalEt('f-1', 'Hatalı bulgu', 'user-1')).rejects.toThrow(ConflictException);
         });
 
         it('zaten IPTAL olan bulguyu tekrar iptal etmeye izin vermez', async () => {
             prisma.finding.findUnique.mockResolvedValue({ workflowStatus: 'IPTAL' });
 
             await expect(service.iptalEt('f-1', 'sebep', 'user-1')).rejects.toThrow(BadRequestException);
+        });
+    });
+
+    describe('deleteFinding', () => {
+        const draft = (over: Record<string, unknown> = {}) => ({
+            id: 'f-1', findingId: 'B-2026-0001', description: 'd', workflowStatus: 'TASLAK', status: 'OPEN', createdById: 'creator-1',
+            resolutionStatus: null, controlTestId: null, controlId: null,
+            actions: [{ id: 'a-1', actionId: 'A-1', status: 'BEKLIYOR' }],
+            followUps: [{ id: 'fu-1', followUpId: 'T-1', status: 'BEKLIYOR', approvalStatus: 'BEKLIYOR' }],
+            _count: { referencingTests: 0, attachments: 2 },
+            ...over,
+        });
+
+        beforeEach(() => {
+            prisma.action.deleteMany = jest.fn();
+            prisma.findingFollowUp.deleteMany = jest.fn();
+        });
+
+        it('süreci başlamamış TASLAK bulguyu bağımlılıklarıyla tek transaction\'da siler', async () => {
+            prisma.finding.findUnique.mockResolvedValue(draft());
+
+            const result = await service.deleteFinding('f-1', 'user-1', ['finding:delete']);
+
+            expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+            expect(prisma.findingFollowUp.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['fu-1'] } } });
+            expect(prisma.action.deleteMany).toHaveBeenCalledWith({ where: { findingId: 'f-1' } });
+            expect(prisma.finding.deleteMany).toHaveBeenCalledWith({ where: { id: 'f-1', workflowStatus: 'TASLAK' } });
+            expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+                data: expect.objectContaining({
+                    action: 'DELETE', entityType: 'Finding',
+                    oldValue: expect.objectContaining({ findingId: 'B-2026-0001', deletedActions: ['A-1'], deletedAttachmentCount: 2 }),
+                }),
+            }));
+            expect(result).toEqual({ message: 'Bulgu silindi', findingId: 'B-2026-0001' });
+        });
+
+        it.each([
+            ['mutabakata gönderilmiş', { workflowStatus: 'MUTABAKATA_GONDERILDI' }],
+            ['kapalı', { status: 'CLOSED', resolutionStatus: 'KAPATILDI' }],
+            ['aksiyonunda ilerleme olan', { actions: [{ id: 'a-1', actionId: 'A-1', status: 'DEVAM_EDIYOR' }] }],
+            ['onaylı takipli', { followUps: [{ id: 'fu-1', followUpId: 'T-1', status: 'ONAYLANDI', approvalStatus: 'ONAYLANDI' }] }],
+            ['kontrol testi referanslı', { _count: { referencingTests: 1, attachments: 0 } }],
+        ])('%s bulgu 409 ile reddedilir ve hiçbir şey silinmez', async (_label, over) => {
+            prisma.finding.findUnique.mockResolvedValue(draft(over));
+
+            await expect(service.deleteFinding('f-1', 'user-1', ['finding:delete'])).rejects.toThrow(ConflictException);
+            expect(prisma.finding.deleteMany).not.toHaveBeenCalled();
+            expect(prisma.action.deleteMany).not.toHaveBeenCalled();
+            expect(prisma.auditLog.create).not.toHaveBeenCalled();
+        });
+
+        it('kontrolden sonra bulgu mutabakata gönderildiyse (count=0) 409 döner, denetim izi yazılmaz', async () => {
+            prisma.finding.findUnique.mockResolvedValue(draft());
+            prisma.finding.deleteMany.mockResolvedValue({ count: 0 });
+
+            await expect(service.deleteFinding('f-1', 'user-1', ['finding:delete'])).rejects.toThrow(ConflictException);
+            expect(prisma.auditLog.create).not.toHaveBeenCalled();
+        });
+
+        it('finding:delete:own: kendi oluşturduğu taslağı siler; koşullu silme sahipliği de içerir', async () => {
+            prisma.finding.findUnique.mockResolvedValue(draft({ createdById: 'auditor-1' }));
+
+            await service.deleteFinding('f-1', 'auditor-1', ['finding:delete:own']);
+
+            expect(prisma.finding.deleteMany).toHaveBeenCalledWith({
+                where: { id: 'f-1', workflowStatus: 'TASLAK', createdById: 'auditor-1' },
+            });
+            expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+                data: expect.objectContaining({ oldValue: expect.objectContaining({ deletedVia: 'finding:delete:own' }) }),
+            }));
+        });
+
+        it('finding:delete:own: başkasının taslağı 403 (durumdan önce), hiçbir şey silinmez', async () => {
+            prisma.finding.findUnique.mockResolvedValue(draft({ createdById: 'someone-else' }));
+            await expect(service.deleteFinding('f-1', 'auditor-1', ['finding:delete:own'])).rejects.toThrow(ForbiddenException);
+            expect(prisma.finding.deleteMany).not.toHaveBeenCalled();
+        });
+
+        it('finding:delete:own: oluşturucusu bilinmeyen (null) taslak 403', async () => {
+            prisma.finding.findUnique.mockResolvedValue(draft({ createdById: null }));
+            await expect(service.deleteFinding('f-1', 'auditor-1', ['finding:delete:own'])).rejects.toThrow(ForbiddenException);
+        });
+
+        it('finding:delete:own: kendi taslağı da olsa süreç başlamışsa 409', async () => {
+            prisma.finding.findUnique.mockResolvedValue(draft({ createdById: 'auditor-1', workflowStatus: 'MUTABAKATA_GONDERILDI' }));
+            await expect(service.deleteFinding('f-1', 'auditor-1', ['finding:delete:own'])).rejects.toThrow(ConflictException);
+        });
+
+        it('silme izni yoksa 403 ve DB okunmaz', async () => {
+            await expect(service.deleteFinding('f-1', 'viewer-1', ['finding:view'])).rejects.toThrow(ForbiddenException);
+            expect(prisma.$transaction).not.toHaveBeenCalled();
+        });
+
+        it('bulunamayan bulgu 404', async () => {
+            prisma.finding.findUnique.mockResolvedValue(null);
+            await expect(service.deleteFinding('f-x', 'user-1', ['finding:delete'])).rejects.toThrow(NotFoundException);
         });
     });
 
@@ -401,7 +548,11 @@ describe('AuditsService — kritik iş kuralları', () => {
     // ─── Onaylı kapanış / yeniden açma (Madde 3) ──────────────────────────
     describe('closeFinding / reopenFinding', () => {
         beforeEach(() => {
-            prisma.finding = { ...prisma.finding, findUnique: jest.fn(), update: jest.fn().mockResolvedValue({ id: 'f-1' }) };
+            prisma.finding = {
+                ...prisma.finding, findUnique: jest.fn(), update: jest.fn().mockResolvedValue({ id: 'f-1' }),
+                updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+                findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'f-1' }),
+            };
             prisma.findingStatusHistory = { create: jest.fn().mockResolvedValue({}) };
         });
 
@@ -415,7 +566,7 @@ describe('AuditsService — kritik iş kuralları', () => {
                 id: 'f-1', status: 'IN_PROGRESS', actions: [{ status: 'TAMAMLANDI' }, { status: 'KAPATILDI' }],
             });
             await expect(service.closeFinding('f-1', 'gerekçe', 'u-1')).rejects.toThrow(BadRequestException);
-            expect(prisma.finding.update).not.toHaveBeenCalled();
+            expect(prisma.finding.updateMany).not.toHaveBeenCalled();
         });
 
         it('gerekçe yoksa kapatılamaz', async () => {
@@ -428,12 +579,24 @@ describe('AuditsService — kritik iş kuralları', () => {
                 id: 'f-1', status: 'IN_PROGRESS', actions: [{ status: 'KAPATILDI' }, { status: 'CLOSED' }],
             });
             await service.closeFinding('f-1', 'tüm aksiyonlar tamam', 'u-1');
-            const data = prisma.finding.update.mock.calls[0][0].data;
-            expect(data.status).toBe('CLOSED');
-            expect(data.closedDate).toBeInstanceOf(Date);
+            const call = prisma.finding.updateMany.mock.calls[0][0];
+            // Kapanış koşulu UPDATE içinde: arada açık aksiyon eklenirse kapanmaz.
+            expect(call.where).toEqual({
+                id: 'f-1', status: { not: 'CLOSED' },
+                actions: { some: {}, every: { status: { in: ['KAPATILDI', 'CLOSED'] } } },
+            });
+            expect(call.data.status).toBe('CLOSED');
+            expect(call.data.closedDate).toBeInstanceOf(Date);
             expect(prisma.auditLog.create).toHaveBeenCalledWith(
                 expect.objectContaining({ data: expect.objectContaining({ action: 'CLOSE', entityType: 'Finding' }) }),
             );
+        });
+
+        it('kapanış sırasında yeni açık aksiyon eklendiyse (count=0) 409 döner', async () => {
+            prisma.finding.findUnique.mockResolvedValue({ id: 'f-1', status: 'IN_PROGRESS', actions: [{ status: 'KAPATILDI' }] });
+            prisma.finding.updateMany.mockResolvedValue({ count: 0 });
+            await expect(service.closeFinding('f-1', 'gerekçe', 'u-1')).rejects.toThrow(ConflictException);
+            expect(prisma.auditLog.create).not.toHaveBeenCalled();
         });
 
         it('kapalı olmayan bulgu yeniden açılamaz', async () => {
@@ -444,7 +607,8 @@ describe('AuditsService — kritik iş kuralları', () => {
         it('kapalı bulgu gerekçeyle yeniden açılır → IN_PROGRESS, closedDate temizlenir', async () => {
             prisma.finding.findUnique.mockResolvedValue({ id: 'f-1', status: 'CLOSED' });
             await service.reopenFinding('f-1', 'yeni kanıt geldi', 'u-1');
-            const data = prisma.finding.update.mock.calls[0][0].data;
+            expect(prisma.finding.updateMany.mock.calls[0][0].where).toEqual({ id: 'f-1', status: 'CLOSED' });
+            const data = prisma.finding.updateMany.mock.calls[0][0].data;
             expect(data.status).toBe('IN_PROGRESS');
             expect(data.closedDate).toBeNull();
             expect(prisma.auditLog.create).toHaveBeenCalledWith(
@@ -637,6 +801,18 @@ describe('AuditsService — kritik iş kuralları', () => {
             expect((result as { createdAction?: unknown }).createdAction).toEqual({ id: 'a-2', actionId: 'A-2026-0034-02' });
         });
 
+        it('ikinci kontrolcü onay isteğinde yeni aksiyon taslağını değiştiremez', async () => {
+            prisma.findingFollowUp.findFirst.mockResolvedValue(readyFollowUp({
+                actionId: 'a-1', result: 'YENI_AKSIYON_GEREKLI',
+                newActionDraft: { description: 'Plan', directorateId: 'dir-1', ownerId: 'owner-1', dueDate: '2099-12-31' },
+            }));
+            await expect(service.updateFollowUp('f-1', 'fu-1', {
+                status: 'ONAYLANDI',
+                newAction: { description: 'Onaylayanın değişikliği', directorateId: 'dir-2', dueDate: '2099-12-31' },
+            }, 'second-ctrl', 'SYSTEM_ADMIN')).rejects.toThrow('Onay sırasında yeni aksiyon taslağı değiştirilemez');
+            expect(prisma.findingFollowUp.updateMany).not.toHaveBeenCalled();
+        });
+
         it('yeni aksiyon oluşturma başarısızsa onay işlemi hata verir', async () => {
             const draft = { description: 'Plan', directorateId: 'dir-1', ownerId: 'owner-1', dueDate: '2099-12-31' };
             prisma.findingFollowUp.findFirst.mockResolvedValue(readyFollowUp({
@@ -760,5 +936,81 @@ describe('AuditsService — kritik iş kuralları', () => {
                 expect(prisma.action.update).not.toHaveBeenCalled();
             },
         );
+    });
+
+    describe('takip birinci kontrolcü yeniden atama', () => {
+        const fu = (over: Record<string, unknown> = {}) => ({
+            id: 'fu-1', findingId: 'f-1', status: 'DEVAM_EDIYOR', approvalStatus: 'BEKLIYOR',
+            assigneeId: 'left-user', evaluatorId: 'left-user', secondControllerId: 'checker', ...over,
+        });
+        beforeEach(() => {
+            prisma.findingFollowUp = {
+                findFirst: jest.fn().mockResolvedValue(fu()),
+                updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+                findUniqueOrThrow: jest.fn().mockResolvedValue(fu({ assigneeId: 'new-maker', evaluatorId: null })),
+            };
+            prisma.user.findUnique.mockResolvedValue({ isActive: true, role: { name: 'AUDITOR' } });
+            prisma.findingStatusHistory.create = jest.fn();
+        });
+        const call = (body: any, user = 'manager', role = 'RISK_CONTROL_MANAGER') =>
+            service.reassignFollowUpAssignee('f-1', 'fu-1', body, user, role);
+
+        it('yetkili yönetici gerekçeyle yeniden atar; taslak sahipliği düşer; denetim kaydı aynı transaction\'da', async () => {
+            await call({ assigneeId: 'new-maker', reason: 'Önceki sorumlu kurumdan ayrıldı' });
+            expect(prisma.findingFollowUp.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+                data: { assigneeId: 'new-maker', evaluatorId: null, evaluatedAt: null },
+            }));
+            expect(prisma.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+                action: 'FOLLOWUP_REASSIGN', oldValue: { assigneeId: 'left-user', evaluatorId: 'left-user' },
+            }) });
+            expect(prisma.$transaction).toHaveBeenCalled();
+        });
+
+        it('onaylanmış takipte tarihsel aktör değişmez (409); onay bekleyende önce ret gerekir (409)', async () => {
+            prisma.findingFollowUp.findFirst.mockResolvedValue(fu({ status: 'ONAYLANDI', approvalStatus: 'ONAYLANDI' }));
+            await expect(call({ assigneeId: 'new-maker', reason: 'x' })).rejects.toThrow(ConflictException);
+            prisma.findingFollowUp.findFirst.mockResolvedValue(fu({ status: 'TAMAMLANDI', approvalStatus: 'BEKLIYOR' }));
+            await expect(call({ assigneeId: 'new-maker', reason: 'x' })).rejects.toThrow('önce değerlendirmeyi gerekçeyle reddedin');
+            expect(prisma.findingFollowUp.updateMany).not.toHaveBeenCalled();
+        });
+
+        it('maker/checker korunur: kendini, ikinci kontrolcüyü veya değerlendirme yetkisi olmayanı atayamaz', async () => {
+            await expect(call({ assigneeId: 'manager', reason: 'x' })).rejects.toThrow('Kendinizi');
+            await expect(call({ assigneeId: 'checker', reason: 'x' })).rejects.toThrow('İkinci kontrolcü');
+            prisma.user.findUnique.mockResolvedValue({ isActive: true, role: { name: 'VIEWER' } });
+            await expect(call({ assigneeId: 'viewer', reason: 'x' })).rejects.toThrow('yetkisine sahip değil');
+            prisma.user.findUnique.mockResolvedValue({ isActive: false, role: { name: 'AUDITOR' } });
+            await expect(call({ assigneeId: 'passive', reason: 'x' })).rejects.toThrow('aktif değil');
+        });
+
+        it('yetkisiz rol ve gerekçesiz istek reddedilir', async () => {
+            await expect(call({ assigneeId: 'new-maker', reason: 'x' }, 'aud', 'AUDITOR')).rejects.toThrow(ForbiddenException);
+            await expect(call({ assigneeId: 'new-maker', reason: '  ' })).rejects.toThrow('gerekçesi');
+        });
+
+        it('eşzamanlı onaya gönderme olduysa (count=0) yeniden atama yapılmaz', async () => {
+            prisma.findingFollowUp.updateMany.mockResolvedValue({ count: 0 });
+            await expect(call({ assigneeId: 'new-maker', reason: 'x' })).rejects.toThrow(ConflictException);
+            expect(prisma.auditLog.create).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('ikinci kontrolcü atama — çıkmaz önleme', () => {
+        beforeEach(() => {
+            prisma.findingFollowUp = {
+                findFirst: jest.fn().mockResolvedValue({ id: 'fu-1', status: 'DEVAM_EDIYOR', approvalStatus: 'BEKLIYOR', assigneeId: 'maker', evaluatorId: null }),
+                update: jest.fn(),
+            };
+        });
+        it('onay yetkisi olmayan kullanıcı ikinci kontrolcü atanamaz', async () => {
+            prisma.user.findUnique.mockResolvedValue({ id: 'x', isActive: true, role: { name: 'AUDITEE' } });
+            await expect(service.assignSecondController('f-1', 'fu-1', { secondControllerId: 'x', reason: 'r' }, 'mgr', 'SYSTEM_ADMIN'))
+                .rejects.toThrow('takip onayı verme yetkisine');
+        });
+        it('birinci kontrolcü aynı takibin ikinci kontrolcüsü olamaz', async () => {
+            prisma.user.findUnique.mockResolvedValue({ id: 'maker', isActive: true, role: { name: 'RISK_CONTROL_MANAGER' } });
+            await expect(service.assignSecondController('f-1', 'fu-1', { secondControllerId: 'maker', reason: 'r' }, 'mgr', 'SYSTEM_ADMIN'))
+                .rejects.toThrow('Birinci kontrolcü');
+        });
     });
 });

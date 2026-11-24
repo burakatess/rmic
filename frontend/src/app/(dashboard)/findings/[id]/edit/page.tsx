@@ -4,13 +4,14 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import api from '@/lib/api';
+import { ErrorState } from '@/components/ui';
+import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import { useToast } from '@/components/ui/Toast';
 
 interface User {
     id: string;
     firstName: string;
     lastName: string;
-    email: string;
     department?: string;
 }
 
@@ -87,13 +88,15 @@ export default function FindingEditPage() {
         sendEmail: true,
     });
 
+    const [loadError, setLoadError] = useState<LoadError | null>(null);
+
     useEffect(() => {
         const loadData = async () => {
             try {
                 // Fetch users
                 let userList: User[] = [];
                 try {
-                    userList = await api.getUsers() as User[];
+                    userList = await api.getUserChoices() as User[];
                 } catch {
                     // Yetki yoksa boş liste — mock data kullanılmaz
                 }
@@ -112,6 +115,11 @@ export default function FindingEditPage() {
 
                 // Fetch finding
                 const data = await api.getFinding(params.id as string) as any;
+                // Sayfa erişimi düzenleme yetkisi değildir: backend yetenek bayrağı belirler.
+                if (data && data.capabilities?.canEditFinding !== true) {
+                    setLoadError({ kind: 'forbidden', title: 'Düzenleme yetkiniz yok', description: 'Bu bulguyu düzenleme yetkiniz bulunmuyor; detay sayfasından yalnız size açık işlemleri yapabilirsiniz.', retryable: false });
+                    return;
+                }
                 if (data) {
                     setFormData({
                         findingType: data.findingType || 'CONTROL_DEFICIENCY',
@@ -137,7 +145,7 @@ export default function FindingEditPage() {
                     setLoadedStatus(data.status || 'IN_PROGRESS');
                 }
             } catch (error) {
-                console.error('Failed to load edit data:', error);
+                setLoadError(classifyLoadError(error, 'Bulgu'));
             } finally {
                 setLoading(false);
             }
@@ -200,6 +208,12 @@ export default function FindingEditPage() {
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
             </div>
         );
+    }
+
+    // Yüklenemeyen kayıt için varsayılan değerli form gösterilmez — kaydetmek kaydı ezerdi.
+    if (loadError) {
+        return <ErrorState title={loadError.title} description={loadError.description}
+            onRetry={loadError.retryable ? () => window.location.reload() : undefined} />;
     }
 
     return (

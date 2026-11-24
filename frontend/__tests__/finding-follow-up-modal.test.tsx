@@ -1,15 +1,22 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FindingFollowUpModal } from '@/components/modals/FindingFollowUpModal';
 import api from '@/lib/api';
 
 jest.mock('@/lib/api', () => ({
     __esModule: true,
     default: {
-        getUsers: jest.fn().mockResolvedValue([]),
+        getUserChoices: jest.fn().mockResolvedValue([]),
         getDirectorates: jest.fn().mockResolvedValue([{ id: 'dir-1', name: 'Bilgi Teknolojileri' }]),
         updateFollowUp: jest.fn().mockResolvedValue({}),
         assignSecondController: jest.fn(),
+        reassignFollowUpAssignee: jest.fn().mockResolvedValue({}),
+        getFollowUpAssigneeCandidates: jest.fn().mockResolvedValue([{ id: 'u-eligible', firstName: 'Uygun', lastName: 'Denetçi' }]),
     },
+}));
+
+let mockRole = 'AUDITOR';
+jest.mock('@/components/auth', () => ({
+    useAuth: () => ({ user: { id: 'me', role: { name: mockRole, permissions: [] } }, hasPermission: () => true }),
 }));
 
 jest.mock('@/components/ui/Toast', () => ({
@@ -24,7 +31,7 @@ describe('Bulgu takip değerlendirme formu', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        (api.getUsers as jest.Mock).mockReturnValue(new Promise(() => undefined));
+        (api.getUserChoices as jest.Mock).mockReturnValue(new Promise(() => undefined));
         (api.getDirectorates as jest.Mock).mockResolvedValue([{ id: 'dir-1', name: 'Bilgi Teknolojileri' }]);
     });
 
@@ -124,5 +131,40 @@ describe('Bulgu takip değerlendirme formu', () => {
 
         expect(screen.queryByRole('button', { name: 'Güncelle' })).not.toBeInTheDocument();
         expect(screen.getByRole('heading', { name: 'Takip Çalışması' })).toBeInTheDocument();
+    });
+
+    it('birinci kontrolcü yeniden atama yalnız yöneticiye görünür; salt okunur görünümde de kullanılabilir', () => {
+        mockRole = 'AUDITOR';
+        const { unmount } = render(
+            <FindingFollowUpModal isOpen readOnly findingId="f-1" followUp={followUp} actions={[]} onClose={jest.fn()} onSuccess={jest.fn()} />,
+        );
+        expect(screen.queryByTestId('followup-reassign')).not.toBeInTheDocument();
+        unmount();
+
+        mockRole = 'RISK_CONTROL_MANAGER';
+        render(<FindingFollowUpModal isOpen readOnly findingId="f-1" followUp={followUp} actions={[]} onClose={jest.fn()} onSuccess={jest.fn()} />);
+        expect(screen.getByTestId('followup-reassign')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Yeniden Ata' })).not.toBeDisabled();
+        mockRole = 'AUDITOR';
+    });
+
+    it('yeniden atama hedefleri backend aday listesinden gelir (genel kullanıcı listesinden değil)', async () => {
+        mockRole = 'RISK_CONTROL_MANAGER';
+        (api.getUserChoices as jest.Mock).mockResolvedValueOnce([{ id: 'u-analyst', firstName: 'Risk', lastName: 'Analisti' }]);
+        render(<FindingFollowUpModal isOpen readOnly findingId="f-1" followUp={followUp} actions={[]} onClose={jest.fn()} onSuccess={jest.fn()} />);
+        const select = screen.getByRole('combobox', { name: 'Yeni birinci kontrolcü' });
+        expect(await within(select).findByRole('option', { name: 'Uygun Denetçi' })).toBeInTheDocument();
+        expect(within(select).queryByRole('option', { name: 'Risk Analisti' })).not.toBeInTheDocument();
+        expect(api.getFollowUpAssigneeCandidates).toHaveBeenCalledWith('f-1', followUp.id);
+        mockRole = 'AUDITOR';
+    });
+
+    it('onaylanmış takipte yeniden atama yerine açıklama gösterilir', () => {
+        mockRole = 'RISK_CONTROL_MANAGER';
+        render(<FindingFollowUpModal isOpen readOnly findingId="f-1" followUp={{ ...followUp, status: 'ONAYLANDI', approvalStatus: 'ONAYLANDI' } as any}
+            actions={[]} onClose={jest.fn()} onSuccess={jest.fn()} />);
+        expect(screen.getByText(/tarihsel kayıttır/)).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Yeniden Ata' })).not.toBeInTheDocument();
+        mockRole = 'AUDITOR';
     });
 });

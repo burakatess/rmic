@@ -20,11 +20,11 @@ const navigation: NavItem[] = [
         href: '/dashboard',
         permission: 'dashboard:view',
         icon: (
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
-                <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-                <rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-                <rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-                <rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="8" height="10" rx="2.5" fill="currentColor" fillOpacity="0.2" />
+                <rect x="14" y="3" width="7" height="6" rx="2" fill="none" />
+                <rect x="14" y="12" width="7" height="9" rx="2.5" fill="currentColor" fillOpacity="0.2" />
+                <rect x="3" y="16" width="8" height="5" rx="2" fill="none" />
             </svg>
         ),
     },
@@ -33,8 +33,9 @@ const navigation: NavItem[] = [
         href: '/approvals',
         permission: 'control:view',
         icon: (
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" fill="currentColor" fillOpacity="0.2" />
+                <path d="M8.5 12.5l2.5 2.5 4.5-5" fill="none" />
             </svg>
         ),
     },
@@ -43,8 +44,9 @@ const navigation: NavItem[] = [
         href: '/workflow-health',
         permission: 'control:view',
         icon: (
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4l2-6 4 12 2-6h6" />
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" fill="currentColor" fillOpacity="0.2" />
+                <path d="M5.5 12h3l2-4.5 3 9 2-4.5h3" fill="none" />
             </svg>
         ),
     },
@@ -52,10 +54,10 @@ const navigation: NavItem[] = [
         label: 'Risk Yönetimi',
         permission: 'risk:view',
         icon: (
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
-                <path d="M12 3L20 7.5V12C20 16.4 16.6 20.2 12 21C7.4 20.2 4 16.4 4 12V7.5L12 3Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M12 8V12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                <circle cx="12" cy="15" r="1" fill="currentColor" />
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6L12 3z" fill="currentColor" fillOpacity="0.2" />
+                <path d="M12 8.5v4" fill="none" />
+                <path d="M12 15.9v.01" fill="none" />
             </svg>
         ),
         children: [
@@ -63,16 +65,16 @@ const navigation: NavItem[] = [
             { label: 'Kontrol Alanı', href: '/risks/controls' },
             { label: 'Aksiyon Tablosu', href: '/risks/actions' },
             { label: 'RCA Haritalama', href: '/risks/rca-mapping' },
-            { label: 'Risk Simülasyonu', href: '/risks/simulation', permission: 'risk:sim:view' },
+            { label: 'Risk Simülasyonu', href: '/risks/simulation' }, // Risk Yönetimi (risk:view) gören herkes
         ],
     },
     {
         label: 'Kontrol Yönetimi',
         permission: 'control:view',
         icon: (
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
-                <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M8 12L11 15L16 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="4" y="4" width="16" height="16" rx="4" fill="currentColor" fillOpacity="0.2" />
+                <path d="M8.5 12.2l2.4 2.4 4.6-5" fill="none" />
             </svg>
         ),
         children: [
@@ -87,12 +89,11 @@ const navigation: NavItem[] = [
         label: 'Denetim & İnceleme',
         permission: 'audit:view',
         icon: (
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
-                <rect x="4" y="3" width="12" height="16" rx="2" stroke="currentColor" strokeWidth="1.5" />
-                <circle cx="16" cy="17" r="4" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M19 20L21 22" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                <line x1="7" y1="7" x2="13" y2="7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                <line x1="7" y1="10" x2="11" y2="10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="4" y="3" width="12" height="16" rx="2.5" fill="currentColor" fillOpacity="0.2" />
+                <path d="M7.5 8h5M7.5 11.5h3" fill="none" />
+                <circle cx="16" cy="16.5" r="3.5" fill="none" />
+                <path d="M18.6 19.1L21 21.5" fill="none" />
             </svg>
         ),
         children: [
@@ -104,12 +105,12 @@ const navigation: NavItem[] = [
         label: 'Bulgu & Aksiyon Yönetimi',
         permission: 'finding:view',
         icon: (
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
-                <circle cx="6" cy="12" r="2" stroke="currentColor" strokeWidth="1.5" />
-                <circle cx="12" cy="6" r="2" stroke="currentColor" strokeWidth="1.5" />
-                <circle cx="12" cy="18" r="2" stroke="currentColor" strokeWidth="1.5" />
-                <circle cx="18" cy="12" r="2" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M8 12H10M14 6L16 10M14 18L16 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="6" cy="12" r="2.2" fill="currentColor" fillOpacity="0.2" />
+                <circle cx="12.5" cy="5.5" r="2.2" fill="currentColor" fillOpacity="0.2" />
+                <circle cx="12.5" cy="18.5" r="2.2" fill="currentColor" fillOpacity="0.2" />
+                <circle cx="18.5" cy="12" r="2.2" fill="currentColor" fillOpacity="0.2" />
+                <path d="M8.1 11.3l2.5-4M8.1 12.7l2.5 4M14.3 7l2.6 3M14.3 17l2.6-3" fill="none" />
             </svg>
         ),
         children: [
@@ -123,13 +124,10 @@ const navigation: NavItem[] = [
         label: 'Uyum & Regülasyon',
         permission: 'compliance:view',
         icon: (
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
-                <rect x="4" y="4" width="16" height="18" rx="2" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M4 9H20" stroke="currentColor" strokeWidth="1.5" />
-                <line x1="8" y1="13" x2="16" y2="13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                <line x1="8" y1="16" x2="14" y2="16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                <circle cx="16" cy="16" r="1.5" stroke="currentColor" strokeWidth="1" />
-                <path d="M15.5 16.5L17 18" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="4" y="3" width="16" height="18" rx="2.5" fill="currentColor" fillOpacity="0.2" />
+                <path d="M4 8.5h16" fill="none" />
+                <path d="M8 12.5h8M8 16h5" fill="none" />
             </svg>
         ),
         children: [
@@ -142,11 +140,11 @@ const navigation: NavItem[] = [
         href: '/reports',
         permission: 'report:view',
         icon: (
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
-                <rect x="4" y="14" width="4" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
-                <rect x="10" y="10" width="4" height="10" rx="1" stroke="currentColor" strokeWidth="1.5" />
-                <rect x="16" y="6" width="4" height="14" rx="1" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M4 4L8 8L14 5L20 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="4" y="13" width="4" height="7" rx="1.2" fill="currentColor" fillOpacity="0.2" />
+                <rect x="10" y="9" width="4" height="11" rx="1.2" fill="currentColor" fillOpacity="0.2" />
+                <rect x="16" y="5" width="4" height="15" rx="1.2" fill="currentColor" fillOpacity="0.2" />
+                <path d="M4 8.5l5-3.5 4 2 5-3.5" fill="none" />
             </svg>
         ),
     },
@@ -154,9 +152,9 @@ const navigation: NavItem[] = [
         label: 'Yapay Zeka (AI)',
         permission: 'ai:view',
         icon: (
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
-                <path d="M12 3a3.5 3.5 0 0 0-3.5 3.5A3.5 3.5 0 0 0 6 13a3.5 3.5 0 0 0 3.5 5.5 3.5 3.5 0 0 0 5 0A3.5 3.5 0 0 0 18 13a3.5 3.5 0 0 0-2.5-6.5A3.5 3.5 0 0 0 12 3Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-                <path d="M12 8v9M9.5 11h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M10.5 3.5l1.6 4.4 4.4 1.6-4.4 1.6-1.6 4.4-1.6-4.4L4.5 9.5l4.4-1.6z" fill="currentColor" fillOpacity="0.2" />
+                <path d="M17.5 14.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" fill="currentColor" fillOpacity="0.2" />
             </svg>
         ),
         children: [
@@ -171,15 +169,18 @@ const navigation: NavItem[] = [
         label: 'Sistem Yönetimi',
         permission: 'user:view',
         icon: (
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M12 2V4M12 20V22M2 12H4M20 12H22M4.93 4.93L6.34 6.34M17.66 17.66L19.07 19.07M4.93 19.07L6.34 17.66M17.66 6.34L19.07 4.93" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1" fill="none" />
+                <circle cx="15" cy="7" r="2" fill="currentColor" fillOpacity="0.2" />
+                <circle cx="9" cy="12" r="2" fill="currentColor" fillOpacity="0.2" />
+                <circle cx="17" cy="17" r="2" fill="currentColor" fillOpacity="0.2" />
             </svg>
         ),
         children: [
             { label: 'Kullanıcılar', href: '/admin/users' },
             { label: 'Roller & Yetkiler', href: '/admin/roles', permission: 'role:manage' },
             { label: 'Risk Öneri Talepleri', href: '/admin/risk-proposals', permission: 'user:view' },
+            { label: 'GMY Tanımları', href: '/admin/gmys' },
             { label: 'Sistem Parametreleri', href: '/admin/parameters', permission: 'parameter:view' },
             { label: 'Denetim İzleri', href: '/admin/audit-logs', permission: 'audit_log:view' },
         ],
@@ -198,30 +199,20 @@ export default function Sidebar() {
             <div className="relative flex h-16 items-center justify-center border-b border-slate-800/80 bg-[#0b0f19]">
                 <div className="flex items-center gap-3">
                     <div className="relative">
-                        <div className="absolute inset-0 rounded-[10px] blur-md opacity-60" style={{background: 'linear-gradient(135deg, #2563eb, #1d4ed8)'}} />
-                        <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" className="relative">
+                        <div className="absolute inset-0 rounded-full blur-md opacity-50" style={{background: '#2563eb'}} />
+                        <svg width="36" height="36" viewBox="0 0 64 64" role="img" aria-label="RMIC logosu" className="relative">
                             <defs>
-                                <linearGradient id="sb-logo-bg" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
-                                    <stop stopColor="#2563eb" />
-                                    <stop offset="1" stopColor="#1d4ed8" />
-                                </linearGradient>
-                                <linearGradient id="sb-logo-border" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
-                                    <stop stopColor="#60a5fa" stopOpacity="0.7" />
-                                    <stop offset="1" stopColor="#3b82f6" stopOpacity="0.4" />
-                                </linearGradient>
-                                <linearGradient id="sb-top-shine" x1="0" y1="0" x2="0" y2="1">
-                                    <stop stopColor="white" stopOpacity="0.18" />
-                                    <stop offset="1" stopColor="white" stopOpacity="0" />
+                                <linearGradient id="sb-logo-bg" x1="8" y1="4" x2="56" y2="60" gradientUnits="userSpaceOnUse">
+                                    <stop stopColor="#60a5fa" />
+                                    <stop offset="0.55" stopColor="#2563eb" />
+                                    <stop offset="1" stopColor="#1e3a8a" />
                                 </linearGradient>
                             </defs>
-                            <rect width="36" height="36" rx="10" fill="url(#sb-logo-bg)" />
-                            <rect x="0.75" y="0.75" width="34.5" height="34.5" rx="9.25" stroke="url(#sb-logo-border)" strokeWidth="1" fill="none" />
-                            <rect width="36" height="18" rx="10" fill="url(#sb-top-shine)" />
-                            <path d="M18 5.5L28 11V19.5C28 24.5 23.6 29 18 30C12.4 29 8 24.5 8 19.5V11L18 5.5Z"
-                                fill="white" fillOpacity="0.06" stroke="white" strokeWidth="1" strokeOpacity="0.15" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M18 10L24 13.5V19C24 22.2 21.3 25 18 25.5C14.7 25 12 22.2 12 19V13.5L18 10Z"
-                                fill="white" fillOpacity="0.14" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M15 19L17.2 21.2L21.5 16" stroke="white" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M32 4L56 13V32C56 46 46 56 32 60C18 56 8 46 8 32V13Z" fill="url(#sb-logo-bg)" />
+                            <path d="M32 4L56 13V32C56 46 46 56 32 60Z" fill="white" fillOpacity="0.08" />
+                            <path d="M32 4L56 13V32C56 46 46 56 32 60C18 56 8 46 8 32V13Z" fill="none" stroke="#93c5fd" strokeOpacity="0.55" strokeWidth="1" />
+                            <path d="M25 46V19H33.5a7.5 7.5 0 0 1 0 15H25M34 34L42 46" fill="none" stroke="white" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+                            <circle cx="45" cy="19" r="2.6" fill="#22d3ee" />
                         </svg>
                     </div>
                     <div className="flex flex-col">

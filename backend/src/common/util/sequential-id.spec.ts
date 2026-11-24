@@ -9,12 +9,13 @@ function counterDb() {
   const counters = new Map<string, number>();
   return {
     counters,
+    // RawClient.$queryRaw jenerik imzalı; sahte istemci yalnız sayaç satırını döndürür.
     $queryRaw: jest.fn((query: { values: unknown[] }) => {
       const scope = String(query.values[0]);
       const value = (counters.get(scope) ?? 0) + 1;
       counters.set(scope, value);
       return Promise.resolve([{ value }]);
-    }),
+    }) as unknown as <T = unknown>(query: unknown) => Promise<T>,
   };
 }
 

@@ -1,0 +1,25 @@
+# Yalnız otomatik testler için izole PostgreSQL.
+#  - Ana docker-compose.yml'daki postgres (5432) ve yerel kurulu bir PostgreSQL ile
+#    ÇAKIŞMAZ: yalnız 127.0.0.1:55432'de dinler.
+#  - Veri tmpfs'te tutulur (konteyner silinince kaybolur) — gerçek veri barındırmaz.
+#  - Kimlik bilgileri yalnız bu test konteynerine aittir, sır değildir.
+#
+# Kullanım:  docker compose -f docker-compose.test.yml up -d postgres-test
+#            cd backend && cp .env.test.example .env.test   # ilk kurulumda
+#            npm run test:e2e
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: grc_db_test
+      POSTGRES_USER: grc_test
+      POSTGRES_PASSWORD: grc_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grc_test -d grc_db_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

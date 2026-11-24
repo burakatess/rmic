@@ -35,7 +35,7 @@ describe('Annual plan bulk assignments and year isolation', () => {
         const result = await service.bulkDraftAction(2027, 'actor', ['control:*'], {
             controlIds: controls.map(c => c.id), action: 'ASSIGN', [role]: 'new', onlyMissing: true, expectedRevision: 1,
         }, {});
-        expect(result.affectedCount).toBe(20);
+        expect((result as any).affectedCount).toBe(20);
         expect(items.every(i => i[role] === 'new' && i[other] === 'existing')).toBe(true);
     });
 
@@ -43,10 +43,11 @@ describe('Annual plan bulk assignments and year isolation', () => {
         items[0].secondControllerId = 'keep';
         const dto = { controlIds: controls.map(c => c.id), action: 'ASSIGN' as const, secondControllerId: 'second', onlyMissing: true, expectedRevision: 1 };
         const preview = await service.bulkDraftAction(2027, 'actor', [], { ...dto, dryRun: true }, {});
-        expect(preview.totalAffected).toBe(19);
-        expect(preview.willOverwrite).toEqual([]);
+        const p = preview as any;
+        expect(p.totalAffected).toBe(19);
+        expect(p.willOverwrite).toEqual([]);
         expect(db.annualPlanDraftItem.upsert).not.toHaveBeenCalled();
-        const result = await service.bulkDraftAction(2027, 'actor', [], dto, {});
+        const result: any = await service.bulkDraftAction(2027, 'actor', [], dto, {});
         expect(result.affectedCount).toBe(19);
         expect(items[0].secondControllerId).toBe('keep');
     });
@@ -62,18 +63,18 @@ describe('Annual plan bulk assignments and year isolation', () => {
         const scopes = items.map(i => ({ ...i, year: 2027, status: 'ACTIVE' }));
         items = [];
         db.controlYearScope.findMany.mockResolvedValue(scopes);
-        db.annualPlanDraftItem.upsert.mockImplementation(async ({ create }) => items.push(create));
+        db.annualPlanDraftItem.upsert.mockImplementation(async ({ create }: any) => items.push(create));
         await service.bulkDraftAction(2027, 'actor', [], {
             controlIds: controls.map(c => c.id), action: 'ASSIGN', secondControllerId: 'second', onlyMissing: true, expectedRevision: 1,
         }, {});
         expect(items).toHaveLength(20);
         expect(items.every(i => i.assigneeId === 'first' && i.secondControllerId === 'second')).toBe(true);
-        expect(scope.validateAssignment).toHaveBeenCalledWith(db, 'first', 'second');
+        expect(scope.validateAssignment).toHaveBeenCalledWith(db, 'first', 'second', expect.any(Array));
     });
 
     it('applies complete 2027 without touching or being blocked by incomplete 2026', async () => {
         items.forEach(i => { i.secondControllerId = 'second'; });
-        db.annualPlanDraft.findUnique.mockImplementation(({ where }) => Promise.resolve({
+        db.annualPlanDraft.findUnique.mockImplementation(({ where }: any) => Promise.resolve({
             id: `d${where.year}`, year: where.year, revision: 1,
             status: where.year === 2027 ? 'APPROVED' : 'OPEN', approvedRevision: where.year === 2027 ? 1 : null,
         }));

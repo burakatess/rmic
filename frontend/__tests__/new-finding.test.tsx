@@ -10,7 +10,7 @@ jest.mock('@/lib/api', () => ({
     default: {
         getControls: jest.fn().mockResolvedValue([]),
         getDirectorates: jest.fn().mockResolvedValue([]),
-        getUsers: jest.fn().mockResolvedValue([]),
+        getUserChoices: jest.fn().mockResolvedValue([]),
         createFinding: jest.fn(),
     },
 }));

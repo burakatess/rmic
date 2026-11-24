@@ -1,86 +1,118 @@
 import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { controlTestCapabilities } from './control-test-capabilities';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ControlsService } from './controls.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
-import { Roles, CurrentUser } from '../../common/decorators';
+import { Roles, CurrentUser, RequirePermissions, RequireAnyPermission } from '../../common/decorators';
 import { CreateAttachmentDto, UpdateAttachmentDto } from '../../common/dto/attachment.dto';
-import { CompleteControlTestDto, CreateControlDto, UpdateControlDto, SaveTestDraftDto } from './dto';
+import { AccessScopeService, actionWhere, controlTestWhere, findingFullWhere, riskWhere } from '../../common/services/access-scope.service';
+import type { AccessActor, AccessContext } from '../../common/services/access-scope.service';
+import type { RelatedScopes } from './controls.service';
+import { CompleteControlTestDto, CreateControlDto, CreateControlTestDto, UpdateControlDto, SaveTestDraftDto } from './dto';
 
 @ApiTags('Controls')
 @ApiBearerAuth('JWT-Auth')
 @Controller('controls')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ControlsController {
-    constructor(private controlsService: ControlsService) { }
+    constructor(private controlsService: ControlsService, private scope: AccessScopeService) { }
+
+    private related(ctx: AccessContext): RelatedScopes {
+        return { test: controlTestWhere(ctx), finding: findingFullWhere(ctx), action: actionWhere(ctx), risk: riskWhere(ctx) };
+    }
+
+    // Kontrol Havuzu: control:view izni olan herkese kurum geneli açık.
+    private async poolContext(user: AccessActor): Promise<AccessContext> {
+        const ctx = await this.scope.context(user);
+        this.scope.assertViewPermission(ctx, 'control:view', 'Kontrol Havuzu görüntüleme yetkiniz yok.');
+        return ctx;
+    }
+
+    // Test yaşam döngüsü yazma uçları: detay ucuyla aynı kayıt kapsamı (birim/atanmış).
+    private async assertTestAccess(user: AccessActor, testId: string): Promise<void> {
+        await this.scope.assertControlTestAccess(await this.scope.context(user), testId);
+    }
 
     // ─── Controls ─────────────────────────────────────────────────────────────
 
     @Get()
-    async findAll(@Query() query: any) {
-        return this.controlsService.findAll(query);
+    async findAll(@Query() query: any, @CurrentUser() user: AccessActor) {
+        return this.controlsService.findAll(query, this.related(await this.poolContext(user)));
     }
 
     // ─── ControlTests (literal path — :id'den ÖNCE olmalı, NestJS route order) ─
     @Get('tests')
-    async getAllTests(@Query() query: any, @CurrentUser('id') userId: string) {
-        return this.controlsService.getAllTests(query, userId);
+    async getAllTests(@Query() query: any, @CurrentUser() user: AccessActor) {
+        const ctx = await this.scope.context(user);
+        return this.controlsService.getAllTests(query, user.id, controlTestWhere(ctx));
     }
 
     // Kontrol Testi çalışma sayfası — tekil, tam detaylı kayıt (deep link/yenileme için)
     @Get('tests/:testId')
-    async getTestById(@Param('testId') testId: string) {
-        return this.controlsService.getTestById(testId);
+    async getTestById(@Param('testId') testId: string, @CurrentUser() user: AccessActor) {
+        const ctx = await this.scope.context(user);
+        await this.scope.assertControlTestAccess(ctx, testId);
+        const test = await this.controlsService.getTestById(testId, this.related(ctx));
+        return { ...test, capabilities: controlTestCapabilities(test, user) };
     }
 
     @Patch('tests/:testId/draft')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async saveDraft(@Param('testId') testId: string, @Body() data: SaveTestDraftDto, @CurrentUser('id') userId: string) {
-        return this.controlsService.saveDraft(testId, data, userId);
+    @RequireAnyPermission('control:test', 'test:execute')
+    async saveDraft(@Param('testId') testId: string, @Body() data: SaveTestDraftDto, @CurrentUser() user: AccessActor) {
+        await this.assertTestAccess(user, testId);
+        return this.controlsService.saveDraft(testId, data, user.id);
     }
 
     @Patch('tests/:testId/start')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async startTest(@Param('testId') testId: string, @CurrentUser('id') userId: string) {
-        return this.controlsService.startTest(testId, userId);
+    @RequireAnyPermission('control:test', 'test:execute')
+    async startTest(@Param('testId') testId: string, @CurrentUser() user: AccessActor) {
+        await this.assertTestAccess(user, testId);
+        return this.controlsService.startTest(testId, user.id);
     }
 
     @Patch('tests/:testId/complete')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async completeTest(@Param('testId') testId: string, @Body() data: CompleteControlTestDto, @CurrentUser('id') userId: string) {
-        return this.controlsService.completeTest(testId, data, userId);
+    @RequireAnyPermission('control:test', 'test:execute')
+    async completeTest(@Param('testId') testId: string, @Body() data: CompleteControlTestDto, @CurrentUser() user: AccessActor) {
+        await this.assertTestAccess(user, testId);
+        return this.controlsService.completeTest(testId, data, user.id);
     }
 
     @Get('tests/:testId/open-finding-references')
-    async getOpenFindingReferences(@Param('testId') testId: string) {
-        return this.controlsService.getOpenFindingReferences(testId);
+    async getOpenFindingReferences(@Param('testId') testId: string, @CurrentUser() user: AccessActor) {
+        const ctx = await this.scope.context(user);
+        await this.scope.assertControlTestAccess(ctx, testId);
+        return this.controlsService.getOpenFindingReferences(testId, findingFullWhere(ctx));
     }
 
     @Patch('tests/:testId/approve')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async approveTest(@Param('testId') testId: string, @CurrentUser('id') userId: string) {
-        return this.controlsService.approveTest(testId, userId);
+    @RequirePermissions('control:approve')
+    async approveTest(@Param('testId') testId: string, @CurrentUser() user: AccessActor) {
+        await this.assertTestAccess(user, testId);
+        return this.controlsService.approveTest(testId, user.id);
     }
 
     @Patch('tests/:testId/return')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    @RequirePermissions('control:approve')
     async returnTest(
         @Param('testId') testId: string,
         @Body('reason') reason: string,
-        @CurrentUser('id') userId: string,
+        @CurrentUser() user: AccessActor,
     ) {
-        return this.controlsService.returnTest(testId, reason, userId);
+        await this.assertTestAccess(user, testId);
+        return this.controlsService.returnTest(testId, reason, user.id);
     }
 
     // Repo deseni: "submit-approval" ayrı bir iş kuralı değil, mevcut "complete" ile
     // eşdeğer (test tamamlanınca zaten onaya düşüyor) — endpoint tekilliği için alias.
     @Patch('tests/:testId/submit-approval')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async submitApproval(@Param('testId') testId: string, @Body() data: CompleteControlTestDto, @CurrentUser('id') userId: string) {
-        return this.controlsService.completeTest(testId, data, userId);
+    @RequireAnyPermission('control:test', 'test:execute')
+    async submitApproval(@Param('testId') testId: string, @Body() data: CompleteControlTestDto, @CurrentUser() user: AccessActor) {
+        await this.assertTestAccess(user, testId);
+        return this.controlsService.completeTest(testId, data, user.id);
     }
 
     @Patch('tests/:testId/cancel-final')
-    @Roles('SYSTEM_ADMIN')
+    @Roles('SYSTEM_ADMIN') // final onay iptali yalnız sistem yöneticisi (yetki genişletilmedi)
     async cancelFinal(
         @Param('testId') testId: string,
         @Body('reason') reason: string,
@@ -116,13 +148,13 @@ export class ControlsController {
     }
 
     @Get(':id/relations')
-    async getRelations(@Param('id') id: string) {
-        return this.controlsService.getRelations(id);
+    async getRelations(@Param('id') id: string, @CurrentUser() user: AccessActor) {
+        return this.controlsService.getRelations(id, this.related(await this.poolContext(user)));
     }
 
     @Get(':id')
-    async findOne(@Param('id') id: string) {
-        return this.controlsService.findOne(id);
+    async findOne(@Param('id') id: string, @CurrentUser() user: AccessActor) {
+        return this.controlsService.findOne(id, this.related(await this.poolContext(user)));
     }
 
     @Post()
@@ -167,20 +199,20 @@ export class ControlsController {
     // ─── ControlTests (Per-Control) ───────────────────────────────────────────
 
     @Get(':id/tests')
-    async getTests(@Param('id') id: string) {
-        return this.controlsService.getTests(id);
+    async getTests(@Param('id') id: string, @CurrentUser() user: AccessActor) {
+        return this.controlsService.getTests(id, this.related(await this.scope.context(user)));
     }
 
     @Post(':id/tests')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async createTest(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
+    async createTest(@Param('id') id: string, @Body() data: CreateControlTestDto, @CurrentUser('id') userId: string) {
         return this.controlsService.createTest(id, data, userId);
     }
 
     // Legacy: POST :id/test — backward compat
     @Post(':id/test')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
-    async createTestLegacy(@Param('id') id: string, @Body() data: any, @CurrentUser('id') userId: string) {
+    async createTestLegacy(@Param('id') id: string, @Body() data: CreateControlTestDto, @CurrentUser('id') userId: string) {
         return this.controlsService.createTest(id, data, userId);
     }
 }

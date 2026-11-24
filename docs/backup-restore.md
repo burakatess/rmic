@@ -54,7 +54,17 @@ BACKUP_RETENTION_DAYS=90 ./scripts/backup-db.sh
 bir onay istemi gösterir. Geri yükleme sonrası backend'in yeniden
 başlatılması önerilir.
 
-## Geri yükleme testi (önerilir)
+## Geri yükleme tatbikatı (önerilen yol)
+
+```bash
+./scripts/restore-drill.sh backups/grc_db_XXXXXXXX_XXXXXX.dump backups/uploads_XXXXXXXX_XXXXXX.tar.gz
+```
+
+Test konteynerinde geçici bir DB'ye geri yükler; sağlama toplamı, migration geçmişi, satır sayıları ve
+**DB ↔ kanıt dosyası tutarlılığını** denetler, sonra her şeyi siler. Canlı DB/dizine dokunmaz.
+Sonuçlar ve veri aktarım prosedürü: `docs/production-readiness.md`.
+
+## Geri yükleme testi (elle)
 
 Bir yedeğin gerçekten işe yaradığından emin olmanın tek yolu, düzenli
 aralıklarla (ör. üç ayda bir) ayrı, izole bir ortamda geri yükleme

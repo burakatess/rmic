@@ -22,6 +22,11 @@ mkdir -p "$BACKUP_DIR"
 
 echo "[$(date)] Yedekleme başlıyor → $BACKUP_DIR"
 
+# Tutarlılık: SIRA ÖNEMLİ. Önce DB dump'ı (pg_dump tek tutarlı anlık görüntü), SONRA
+# uploads arşivi. Uygulama kayıtlı dosyayı diskten silmediği için dump'taki her ek
+# referansı arşivde bulunur; arşivde fazladan (dump'tan sonra yüklenen) dosya olabilir,
+# zararsızdır. Doğrulama: ./scripts/restore-drill.sh <dump> <uploads.tar.gz>
+
 # 1) Veritabanı dump'ı (sıkıştırılmış, tek dosyada tüm şema+veri)
 DB_DUMP_FILE="$BACKUP_DIR/grc_db_${TIMESTAMP}.dump"
 docker exec "$DB_CONTAINER" pg_dump -U "$DB_USER" -d "$DB_NAME" -F custom -f "/tmp/backup_${TIMESTAMP}.dump"
@@ -37,8 +42,14 @@ if [ -d "$UPLOADS_DIR" ]; then
     echo "[$(date)] Dosya ekleri arşivlendi: $UPLOADS_ARCHIVE ($(du -h "$UPLOADS_ARCHIVE" | cut -f1))"
 fi
 
+# Sağlama toplamları (off-site kopya ve geri yüklemede bütünlük kontrolü için)
+for f in "$DB_DUMP_FILE" ${UPLOADS_ARCHIVE:+"$UPLOADS_ARCHIVE"}; do
+    (cd "$(dirname "$f")" && shasum -a 256 "$(basename "$f")" > "$(basename "$f").sha256")
+done
+
 # 3) Eski yedekleri temizle (retention süresini aşanlar)
 find "$BACKUP_DIR" -name "grc_db_*.dump" -mtime "+${RETENTION_DAYS}" -delete
 find "$BACKUP_DIR" -name "uploads_*.tar.gz" -mtime "+${RETENTION_DAYS}" -delete
+find "$BACKUP_DIR" -name "*.sha256" -mtime "+${RETENTION_DAYS}" -delete
 
 echo "[$(date)] Yedekleme tamamlandı. Saklama süresi: ${RETENTION_DAYS} gün."

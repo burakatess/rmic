@@ -12,6 +12,8 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
+import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
+import { AuditLogExportQueryDto, AuditLogQueryDto } from './dto/audit-log-query.dto';
 import { Roles, CurrentUser } from '../../common/decorators';
 import { RolesGuard } from '../../common/guards';
 
@@ -105,6 +107,12 @@ export class AdminController {
         return this.adminService.resetPassword(id, body.newPassword, user.id);
     }
 
+    // İzin kataloğu — rol yönetimi ekranının tek kaynağı
+    @Get('permissions')
+    getPermissionCatalog() {
+        return this.adminService.getPermissionCatalog();
+    }
+
     // Roles
     @Get('roles')
     async findAllRoles() {
@@ -118,7 +126,7 @@ export class AdminController {
 
     @Post('roles')
     async createRole(
-        @Body() body: { name: string; description?: string; permissions: string[] },
+        @Body() body: CreateRoleDto,
         @CurrentUser() user: { id: string },
     ) {
         return this.adminService.createRole(body, user.id);
@@ -127,7 +135,7 @@ export class AdminController {
     @Put('roles/:id')
     async updateRole(
         @Param('id') id: string,
-        @Body() body: { name?: string; description?: string; permissions?: string[] },
+        @Body() body: UpdateRoleDto,
         @CurrentUser() user: { id: string },
     ) {
         return this.adminService.updateRole(id, body, user.id);
@@ -150,43 +158,18 @@ export class AdminController {
 
     // Audit Logs
     @Get('audit-logs')
-    async findAuditLogs(
-        @Query('userId') userId?: string,
-        @Query('entityType') entityType?: string,
-        @Query('action') action?: string,
-        @Query('startDate') startDate?: string,
-        @Query('endDate') endDate?: string,
-        @Query('limit') limit?: string,
-    ) {
-        return this.adminService.findAuditLogs({
-            userId,
-            entityType,
-            action,
-            startDate: startDate ? new Date(startDate) : undefined,
-            endDate: endDate ? new Date(endDate) : undefined,
-            limit: limit ? parseInt(limit) : undefined,
-        });
+    async findAuditLogs(@Query() query: AuditLogQueryDto) {
+        return this.adminService.findAuditLogsPage(query);
     }
 
     // SIEM Export
     @Get('audit-logs/export')
     async exportAuditLogs(
         @Res() res: any,
-        @Query('format') format?: string,
-        @Query('userId') userId?: string,
-        @Query('entityType') entityType?: string,
-        @Query('action') action?: string,
-        @Query('startDate') startDate?: string,
-        @Query('endDate') endDate?: string,
-        @Query('limit') limit?: string,
+        @Query() query: AuditLogExportQueryDto,
     ) {
-        const fmt = (['cef', 'leef', 'json'].includes(format || '') ? format : 'json') as 'cef' | 'leef' | 'json';
-        const content = await this.adminService.exportAuditLogs({
-            userId, entityType, action,
-            startDate: startDate ? new Date(startDate) : undefined,
-            endDate: endDate ? new Date(endDate) : undefined,
-            limit: limit ? parseInt(limit) : undefined,
-        }, fmt);
+        const fmt = (['cef', 'leef', 'json'].includes(query.format || '') ? query.format : 'json') as 'cef' | 'leef' | 'json';
+        const content = await this.adminService.exportAuditLogs(query, fmt);
 
         const ext = fmt === 'json' ? 'ndjson' : 'log';
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');

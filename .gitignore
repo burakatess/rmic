@@ -43,3 +43,31 @@ coverage/
 # Misc
 *.tgz
 .cache/
+
+# Yedekler ve veri dökümleri — gerçek (KVKK kapsamında) veri içerebilir, ASLA commit edilmez.
+# scripts/backup-db.sh varsayılan çıktısı ./backups/ altındadır.
+backups/
+**/backups/
+scratchpad/
+*.dump
+*.dump.gz
+*.sql.gz
+*.tar.gz
+*.bak
+# Kök dizine bırakılmış SQL dökümleri (migration .sql dosyaları backend/prisma/migrations/ altında kalır)
+/*.sql
+
+# Ortam/sır dosyaları — yalnız *.example sürümleri izlenir
+.env
+.env.*
+!.env.example
+!**/.env.example
+!.env.*.example
+!**/.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# /brag tanıtım videosu çıktıları (yerel)
+brag-output*/

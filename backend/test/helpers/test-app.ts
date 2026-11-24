@@ -4,6 +4,8 @@
 import * as dotenv from 'dotenv';
 import { join } from 'path';
 dotenv.config({ path: join(__dirname, '../../.env.test') });
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+require('./db-guard').assertTestDatabase(process.env.DATABASE_URL);
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';

@@ -662,8 +662,10 @@ function AnnualPlanPageContent() {
                     <div className="ml-auto flex items-center gap-2">
                         {workspace.draftStatus === 'PENDING_APPROVAL' && (
                             <>
-                                <Button size="sm" variant="outline" onClick={requestChanges} disabled={transitioning}>Değişiklik İste</Button>
-                                <Button size="sm" variant="primary" onClick={approvePlan} disabled={transitioning}>Onayla</Button>
+                                {workspace.capabilities?.canRequestChanges && <Button size="sm" variant="outline" onClick={requestChanges} disabled={transitioning}>Değişiklik İste</Button>}
+                                {workspace.capabilities?.canApprove
+                                    ? <Button size="sm" variant="primary" onClick={approvePlan} disabled={transitioning}>Onayla</Button>
+                                    : <span className="text-xs text-slate-500">Onay başka bir yöneticide (gönderen kendi planını onaylayamaz)</span>}
                             </>
                         )}
                         {workspace.draftStatus === 'APPROVED' && (

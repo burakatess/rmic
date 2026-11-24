@@ -92,6 +92,33 @@ function seedP2FromNature(nature: string): 'TESPIT_EDICI' | 'ONLEYICI' {
     return nature === 'PREVENTIVE' ? 'ONLEYICI' : 'TESPIT_EDICI';
 }
 
+/** DB'den yüklenmiş (controls/actions/methodology dahil) bir senaryoyu hesaplar — saf, sorgu yok. */
+export function calculateScenarioRow(scenario: any): ScenarioCalcResult {
+    const cfg = scenario.methodology.config as unknown as MethodologyConfig;
+    // Yalnız onaylı (dahil) kontroller ve onlara bağlı aksiyonlar hesaplanır; onaysız
+    // kontrol simülasyonda kalır ama BKP/ağırlık/artık riske katılmaz.
+    const included = scenario.controls.filter((c: any) => c.isApproved);
+    const includedIds = new Set(included.map((c: any) => c.id));
+    const controls = included.map(toControlInput);
+    const actions = scenario.actions.filter((a: any) => includedIds.has(a.targetControlSimId)).map(toActionInput);
+    const residualOverride = scenario.residualIsOverridden && scenario.residualOverrideProbability != null && scenario.residualOverrideImpact != null
+        ? { probability: scenario.residualOverrideProbability, impact: scenario.residualOverrideImpact, reason: scenario.residualOverrideReason ?? '' }
+        : null;
+    return calculateScenario({
+        cfg,
+        naturalProbability: scenario.naturalProbability,
+        businessImpactInputs: {
+            financial: scenario.finansalEtki, reputation: scenario.itibarEtkisi,
+            regulatory: scenario.regulasyonEtkisi, customer: scenario.musteriEtkisi,
+        },
+        infosecImpactInputs: {
+            confidentiality: scenario.gizlilikEtkisi, integrity: scenario.butunlukEtkisi, availability: scenario.erisilebilirlikEtkisi,
+        },
+        finalImpactChoice: scenario.finalImpactChoice,
+        controls, actions, residualOverride,
+    });
+}
+
 @Injectable()
 export class RiskSimulationService {
     constructor(private prisma: PrismaService) { }
@@ -109,6 +136,7 @@ export class RiskSimulationService {
     async listSimulations(query: { status?: string; search?: string }) {
         return this.prisma.riskSimulation.findMany({
             where: {
+                isDraft: false, // güncel simülatör taslakları listede yer almaz
                 status: query.status as any,
                 ...(query.search ? {
                     OR: [
@@ -117,8 +145,8 @@ export class RiskSimulationService {
                     ],
                 } : {}),
             },
-            include: { _count: { select: { scenarios: true } }, createdBy: { select: { id: true, firstName: true, lastName: true } } },
-            orderBy: { createdAt: 'desc' },
+            include: { _count: { select: { scenarios: true, tests: true } }, createdBy: { select: { id: true, firstName: true, lastName: true } } },
+            orderBy: { updatedAt: 'desc' },
         });
     }
 
@@ -523,26 +551,7 @@ export class RiskSimulationService {
     // ─── Hesaplama (canlı önizleme VE kayıt/aktarım sırasında yeniden hesaplama) ──
 
     async calculate(scenarioId: string): Promise<ScenarioCalcResult> {
-        const scenario = await this.getScenario(scenarioId);
-        const cfg = scenario.methodology.config as unknown as MethodologyConfig;
-        const controls = scenario.controls.map(toControlInput);
-        const actions = scenario.actions.map(toActionInput);
-        const residualOverride = scenario.residualIsOverridden && scenario.residualOverrideProbability != null && scenario.residualOverrideImpact != null
-            ? { probability: scenario.residualOverrideProbability, impact: scenario.residualOverrideImpact, reason: scenario.residualOverrideReason ?? '' }
-            : null;
-        return calculateScenario({
-            cfg,
-            naturalProbability: scenario.naturalProbability,
-            businessImpactInputs: {
-                financial: scenario.finansalEtki, reputation: scenario.itibarEtkisi,
-                regulatory: scenario.regulasyonEtkisi, customer: scenario.musteriEtkisi,
-            },
-            infosecImpactInputs: {
-                confidentiality: scenario.gizlilikEtkisi, integrity: scenario.butunlukEtkisi, availability: scenario.erisilebilirlikEtkisi,
-            },
-            finalImpactChoice: scenario.finalImpactChoice,
-            controls, actions, residualOverride,
-        });
+        return calculateScenarioRow(await this.getScenario(scenarioId));
     }
 
     async compare(scenarioIdA: string, scenarioIdB: string) {

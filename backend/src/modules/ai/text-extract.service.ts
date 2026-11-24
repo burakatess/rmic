@@ -1,7 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { existsSync, readFileSync } from 'fs';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { readFileSync } from 'fs';
 import { extname, join } from 'path';
-import { UPLOAD_ROOT } from '../uploads/uploads.controller';
+import { UPLOAD_ROOT, resolveUploadPath } from '../uploads/uploads.controller';
 
 // pdf-parse v2 — PDFParse sınıfı. (v1'deki fonksiyon API'si kaldırıldı.)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -77,13 +77,14 @@ export class TextExtractService {
             kind: 'error',
         };
 
-        // Path traversal koruması (uploads.controller ile aynı mantık)
-        if (att.fileName.includes('..') || att.fileName.startsWith('/')) {
-            return { ...base, note: 'Geçersiz dosya yolu' };
-        }
-        const abs = join(UPLOAD_ROOT, att.fileName);
-        if (!existsSync(abs)) {
-            return { ...base, note: 'Dosya diskte bulunamadı' };
+        // Yol doğrulaması kanıt gönderimiyle ORTAK: traversal, mutlak yol ve kök dışı bağlantı reddedilir.
+        let abs: string;
+        try {
+            abs = join(UPLOAD_ROOT, resolveUploadPath(att.fileName));
+        } catch (e) {
+            if (e instanceof NotFoundException) return { ...base, note: 'Dosya diskte bulunamadı' };
+            if (e instanceof BadRequestException) return { ...base, note: 'Geçersiz dosya yolu' };
+            return { ...base, note: 'Dosya okunamadı' };
         }
 
         const ext = extname(att.originalName || att.fileName).toLowerCase();
@@ -134,7 +135,8 @@ export class TextExtractService {
             return { ...base, kind: 'unsupported', note: `Tanınmayan tür: ${ext || 'uzantısız'}` };
         } catch (e) {
             this.logger.warn(`Çıkarım hatası ${att.originalName}: ${(e as Error).message}`);
-            return { ...base, kind: 'error', note: `Dosya okunamadı: ${(e as Error).message}` };
+            // Ayrıntı (iç yol içerebilir) yalnız sunucu günlüğünde; nota genel ifade yazılır.
+            return { ...base, kind: 'error', note: 'Dosya okunamadı veya içeriği çözümlenemedi.' };
         }
     }
 
