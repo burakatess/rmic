@@ -7,12 +7,14 @@ import api from '@/lib/api';
 import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import {
     EmptyState, LoadingState, DetailShell, DetailHeader,
-    Tabs, StatusBadge, Button,
+    Tabs, StatusBadge, Button, Modal,
 } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
+import { useAuth } from '@/components/auth';
 import { CreateFindingModal } from '@/components/modals/CreateFindingModal';
 import { FREQUENCY_LABELS } from '@/lib/control-labels';
 import ControlScopePanel from '@/components/controls/ControlScopePanel';
+import ControlHistoryPanel from '@/components/controls/ControlHistoryPanel';
 
 interface User {
     id?: string;
@@ -27,23 +29,41 @@ interface Action {
     id: string;
     actionId: string;
     description: string;
-    status: 'OPEN' | 'IN_PROGRESS' | 'COMPLETED';
+    status: string;
+    approvalState?: string;
     dueDate: string;
+    completedAt?: string | null;
     owner?: {
         firstName: string;
         lastName: string;
-    };
+    } | null;
 }
 
 interface Finding {
     id: string;
     findingId: string;
+    summary?: string | null;
     description: string;
     severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-    status: 'OPEN' | 'IN_PROGRESS' | 'CLOSED' | 'VERIFIED';
+    workflowStatus: string;
+    resolutionStatus: string;
     targetResolutionDate: string;
     actions: Action[];
 }
+
+/** Bu kontrolün testlerine "mevcut bulgu" olarak bağlanmış, başka kontrole ait bulgu. */
+interface LinkedOtherFinding {
+    id: string;
+    findingId: string;
+    summary: string | null;
+    severity: string;
+    workflowStatus: string;
+    resolutionStatus: string;
+    control: { id: string; controlId: string; name: string } | null;
+    viaTests: Array<{ id: string; testNo: string }>;
+}
+
+interface Person { id: string; firstName: string; lastName: string; department?: string | null }
 
 interface ControlTest {
     id: string;
@@ -58,7 +78,17 @@ interface TestRecord {
     id: string;
     testNo: string;
     dueDate: string;
+    /** Sıradaki test hesabı için kaba durum. */
     status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'OVERDUE';
+    /** Gerçek iş akışı durumu (ControlTestStatus). */
+    rawStatus: string;
+    overdue: boolean;
+    year: number | null;
+    periodLabel: string | null;
+    assignee: string | null;
+    secondController: string | null;
+    deletionRequested: boolean;
+    findingLinkCount: number;
     testResult?: string;
     notes?: string;
     hasFinding?: boolean;
@@ -79,10 +109,11 @@ interface Control {
     lastTestDate: string;
     nextTestDate: string;
     owner: User | null;
-    testPerformer: User | null;
-    reviewer: User | null;
-    linkedRisks: { id: string; riskId: string; name: string; score: number; category: string }[];
+    inventoryStatus: 'ACTIVE' | 'PASSIVE';
+    linkedRisks: { id: string; riskId: string; name: string; inherent: number | null; residual: number | null; category: string | null }[];
+    regulations: Array<{ id: string; articleCode: string; title: string; regulationCode: string; regulationName: string }>;
     linkedFindings: Finding[];
+    linkedOtherFindings: LinkedOtherFinding[];
     linkedTests: ControlTest[];
     linkedTestRecords: TestRecord[];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -109,11 +140,40 @@ const severityConfig: Record<string, { label: string; variant: BV }> = {
 
 const frequencyLabel = FREQUENCY_LABELS;
 
-const testStatusConfig: Record<string, { label: string; variant: BV }> = {
-    PENDING: { label: 'Bekliyor', variant: 'neutral' },
-    IN_PROGRESS: { label: 'Devam Ediyor', variant: 'warning' },
-    COMPLETED: { label: 'Tamamlandı', variant: 'success' },
-    OVERDUE: { label: 'Gecikmiş', variant: 'critical' },
+const personName = (u: Person | null | undefined): string | null => (u ? `${u.firstName} ${u.lastName}` : null);
+
+/** Testin iş akışı durumu — ortak aşama adlarıyla (İşlem Durumları ile aynı dil). */
+const testStageConfig: Record<string, { label: string; variant: BV }> = {
+    BEKLIYOR: { label: 'Bekliyor', variant: 'neutral' },
+    DEVAM_EDIYOR: { label: 'Devam ediyor', variant: 'warning' },
+    GERI_GONDERILDI: { label: 'İade edildi', variant: 'high' },
+    TAMAMLANDI: { label: 'Tamamlandı · onayda', variant: 'info' },
+    ONAYLANDI: { label: 'Onaylandı', variant: 'success' },
+    IPTAL: { label: 'İptal', variant: 'neutral' },
+    KAPSAM_DISI: { label: 'Kapsam dışı', variant: 'neutral' },
+};
+
+const findingWorkflowLabel: Record<string, string> = {
+    TASLAK: 'Taslak', MUTABAKATA_GONDERILDI: 'Mutabakatta', IC_KONTROL_ONAYINA_GONDERILDI: 'İç kontrol onayında',
+    MUTABAKAT_YAPILDI: 'Mutabakat yapıldı', IPTAL: 'İptal',
+};
+const findingResolutionConfig: Record<string, { label: string; variant: BV }> = {
+    DEVAM_EDIYOR: { label: 'Açık', variant: 'warning' },
+    KISMEN_KAPATILDI: { label: 'Kısmen kapatıldı', variant: 'info' },
+    KAPATILDI: { label: 'Kapatıldı', variant: 'success' },
+    ERTELENDI: { label: 'Ertelendi', variant: 'neutral' },
+    YENI_AKSIYON_GEREKLI: { label: 'Yeni aksiyon gerekli', variant: 'high' },
+};
+/** Açık bulgu: iptal edilmemiş ve tamamen kapatılmamış. */
+const isFindingOpen = (f: { workflowStatus: string; resolutionStatus: string }) => f.workflowStatus !== 'IPTAL' && f.resolutionStatus !== 'KAPATILDI';
+
+const actionStatusConfig: Record<string, { label: string; variant: BV }> = {
+    BEKLIYOR: { label: 'Bekliyor', variant: 'neutral' },
+    DEVAM_EDIYOR: { label: 'Devam ediyor', variant: 'warning' },
+    TAMAMLANDI: { label: 'Tamamlandı', variant: 'info' },
+    YETERSIZ: { label: 'Yetersiz', variant: 'high' },
+    KAPATILDI: { label: 'Kapatıldı', variant: 'success' },
+    IPTAL: { label: 'İptal', variant: 'neutral' },
 };
 
 const formatDate = (d: string | null | undefined) => {
@@ -126,7 +186,12 @@ const formatDate = (d: string | null | undefined) => {
 export default function ControlDetailPage() {
     const params = useParams();
     const router = useRouter();
-    const { error: showError } = useToast();
+    const { success, error: showError } = useToast();
+    const { user } = useAuth();
+    // Backend @Roles('SYSTEM_ADMIN','RISK_CONTROL_MANAGER') ile aynı küme — düğme yalnız izinli kullanıcıya görünür.
+    const canToggleStatus = user?.role?.name === 'SYSTEM_ADMIN' || user?.role?.name === 'RISK_CONTROL_MANAGER';
+    const [statusConfirm, setStatusConfirm] = useState(false);
+    const [statusBusy, setStatusBusy] = useState(false);
 
     const [activeTab, setActiveTab] = useState<string>('summary');
     const [control, setControl] = useState<Control | null>(null);
@@ -137,6 +202,8 @@ export default function ControlDetailPage() {
     const [editFindingContext, setEditFindingContext] = useState<any | null>(null);
 
     const [loadError, setLoadError] = useState<LoadError | null>(null);
+    // Her başarılı yeniden yüklemede artar; geçmiş sekmesi buna göre tazelenir (pasifleştirme, kapsam değişikliği…).
+    const [dataVersion, setDataVersion] = useState(0);
     const fetchControlData = useCallback(async (silent = false) => {
         if (!params.id) return;
         if (!silent) setLoading(true);
@@ -163,8 +230,7 @@ export default function ControlDetailPage() {
                         email: data.owner.email,
                         department: data.owner.department
                     } : null,
-                    testPerformer: data.testPerformer ? { name: `${data.testPerformer.firstName} ${data.testPerformer.lastName}`, email: data.testPerformer.email } : null,
-                    reviewer: data.reviewer ? { name: `${data.reviewer.firstName} ${data.reviewer.lastName}`, email: data.reviewer.email } : null,
+                    inventoryStatus: data.status === 'PASSIVE' ? 'PASSIVE' : 'ACTIVE',
                     effectivenessStatus: String(data.effectivenessStatus || 'NOT_TESTED'),
                     lastTestDate: data.lastTestDate || '',
                     nextTestDate: data.nextTestDate || '',
@@ -175,11 +241,22 @@ export default function ControlDetailPage() {
                             id: String(risk.id),
                             riskId: String(risk.riskId),
                             name: String(risk.name),
-                            score: Number(risk.inherentRiskScore || 10),
-                            category: risk.category?.name || 'Genel Risk'
+                            // Puan yoksa uydurma değer gösterilmez.
+                            inherent: typeof risk.inherentRiskScore === 'number' ? risk.inherentRiskScore : null,
+                            residual: typeof risk.residualRiskScore === 'number' ? risk.residualRiskScore : null,
+                            category: risk.category?.name ?? (typeof risk.category === 'string' ? risk.category : null),
                         };
                     }),
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    regulations: (data.regulations || []).filter((r: any) => r.article).map((r: any) => ({
+                        id: String(r.article.id),
+                        articleCode: String(r.article.articleCode),
+                        title: String(r.article.title),
+                        regulationCode: String(r.article.regulation?.code ?? ''),
+                        regulationName: String(r.article.regulation?.name ?? ''),
+                    })),
                     linkedFindings: data.findings || [],
+                    linkedOtherFindings: data.linkedFindings || [],
                     linkedTests: (data.tests || [])
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         .filter((t: any) => t.status === 'ONAYLANDI' || t.status === 'TAMAMLANDI')
@@ -187,7 +264,7 @@ export default function ControlDetailPage() {
                         .map((t: any) => ({
                             id: t.id,
                             testDate: t.completedAt || t.plannedDate,
-                            tester: t.assignee ? `${t.assignee.firstName} ${t.assignee.lastName}` : 'Belirlenmemiş',
+                            tester: personName(t.assignee) ?? 'Belirlenmemiş',
                             result: t.findingStatus === 'BULGUSU_YOK' ? 'EFFECTIVE' : t.findingStatus === 'BULGUSU_VAR' ? 'INEFFECTIVE' : 'NOT_TESTED',
                             // eslint-disable-next-line @typescript-eslint/no-explicit-any
                             findings: t.findings?.map((f: any) => f.findingId).join(', ') || undefined,
@@ -211,6 +288,14 @@ export default function ControlDetailPage() {
                             testNo: t.testNo,
                             dueDate: t.plannedDate,
                             status: status,
+                            rawStatus: String(t.status),
+                            overdue: isOverdue,
+                            year: typeof t.year === 'number' ? t.year : null,
+                            periodLabel: t.periodLabel ?? null,
+                            assignee: personName(t.assignee),
+                            secondController: personName(t.secondController),
+                            deletionRequested: !!t.deletionRequestedAt,
+                            findingLinkCount: t._count?.findingLinks ?? 0,
                             testResult: t.findingStatus === 'BULGUSU_YOK' ? 'EFFECTIVE' : t.findingStatus === 'BULGUSU_VAR' ? 'INEFFECTIVE' : undefined,
                             notes: t.resultText,
                             hasFinding: t.findingStatus === 'BULGUSU_VAR'
@@ -220,6 +305,7 @@ export default function ControlDetailPage() {
                     displayStatus: data.displayStatus,
                     statusReason: data.statusReason,
                 });
+                setDataVersion(v => v + 1);
             }
         } catch (err) {
             // Sessiz yeniden yüklemede mevcut kontrol korunur; yalnız bildirilir.
@@ -277,7 +363,13 @@ export default function ControlDetailPage() {
         );
     }
 
-    const hasFinding = control.linkedFindings.length > 0;
+    const openFindings = control.linkedFindings.filter(isFindingOpen);
+    const hasFinding = openFindings.length > 0;
+    const openActionCount = openFindings.reduce((n, f) => n + (f.actions ?? []).filter(a => a.status !== 'KAPATILDI' && a.status !== 'IPTAL').length, 0);
+    const currentYear = new Date().getFullYear();
+    // Süreç sorumluları yıl bazlıdır (Dönem Kontrolü). Bu yılın aktif kapsamı, yoksa en son aktif kapsam.
+    const activeScopes = control.yearScopes.filter((sc) => sc.status === 'ACTIVE').sort((a, b) => b.year - a.year);
+    const ownerScope = activeScopes.find((sc) => sc.year === currentYear) ?? activeScopes[0] ?? null;
     const activeScopeYears = control.yearScopes.filter((sc) => sc.status === 'ACTIVE').map((sc) => sc.year as number).sort((a, b) => a - b);
     const effCfg = effectivenessConfig[control.effectivenessStatus];
 
@@ -285,9 +377,23 @@ export default function ControlDetailPage() {
         { key: 'summary', label: 'Özet ve Kapsam' },
         { key: 'yearScope', label: 'Yıllık Kapsam', count: control.yearScopes.filter((s) => s.status === 'ACTIVE').length },
         { key: 'risks', label: 'Eşleşen Riskler', count: control.linkedRisks.length },
-        { key: 'findings', label: 'Bulgular & Aksiyonlar', count: control.linkedFindings.length },
+        { key: 'findings', label: 'Bulgular & Aksiyonlar', count: control.linkedFindings.length + control.linkedOtherFindings.length },
         { key: 'tests', label: 'Test Planı', count: control.linkedTestRecords.length },
+        { key: 'history', label: 'Değişiklik Geçmişi' },
     ];
+
+    const toggleStatus = async () => {
+        setStatusBusy(true);
+        try {
+            if (control.inventoryStatus === 'ACTIVE') await api.passivateControl(control.id);
+            else await api.activateControl(control.id);
+            success('Kaydedildi', control.inventoryStatus === 'ACTIVE' ? 'Kontrol envanterde pasifleştirildi.' : 'Kontrol envanterde aktifleştirildi.');
+            setStatusConfirm(false);
+            await fetchControlData(true);
+        } catch (e) {
+            showError('İşlem yapılamadı', (e as Error).message);
+        } finally { setStatusBusy(false); }
+    };
 
     return (
         <DetailShell>
@@ -302,7 +408,8 @@ export default function ControlDetailPage() {
                 badges={
                     <>
                         {effCfg && <StatusBadge variant={effCfg.variant}>{effCfg.label}</StatusBadge>}
-                        {hasFinding && <StatusBadge variant="critical" dot>{control.linkedFindings.length} Açık Bulgu</StatusBadge>}
+                        {control.inventoryStatus === 'PASSIVE' && <StatusBadge variant="neutral">Envanterde pasif</StatusBadge>}
+                        {hasFinding && <StatusBadge variant="critical" dot>{openFindings.length} Açık Bulgu</StatusBadge>}
                     </>
                 }
                 meta={
@@ -319,8 +426,13 @@ export default function ControlDetailPage() {
                         >
                             Düzenle
                         </Button>
-                        <Button variant="primary" size="sm" onClick={() => router.push('/controls/testing')}>
-                            Test Çalışma Alanı
+                        {canToggleStatus && (
+                            <Button variant={control.inventoryStatus === 'ACTIVE' ? 'outline' : 'success'} size="sm" onClick={() => setStatusConfirm(true)}>
+                                {control.inventoryStatus === 'ACTIVE' ? 'Pasifleştir' : 'Aktifleştir'}
+                            </Button>
+                        )}
+                        <Button variant="primary" size="sm" onClick={() => router.push(`/controls/testing?search=${encodeURIComponent(control.controlId)}`)}>
+                            Bu Kontrolün Testleri
                         </Button>
                     </>
                 }
@@ -335,8 +447,8 @@ export default function ControlDetailPage() {
                 </div>
                 <div className="bg-white rounded-xl border border-slate-200 px-4 py-3.5">
                     <div className="flex items-center gap-2 text-[11.5px] font-medium text-slate-500"><span className={`w-2 h-2 rounded-sm ${hasFinding ? 'bg-rose-600' : 'bg-emerald-600'}`} />Mevcut bulgu durumu</div>
-                    <p className={`text-xl font-bold mt-1.5 truncate ${hasFinding ? 'text-rose-700' : 'text-emerald-700'}`}>{hasFinding ? `${control.linkedFindings.length} açık bulgu` : 'Bulgu bulunmuyor'}</p>
-                    <p className="text-[11.5px] text-slate-500 mt-0.5">{control.linkedFindings.length} açık bulgu · {control.linkedFindings.reduce((n, f) => n + (f.actions?.length ?? 0), 0)} aksiyon</p>
+                    <p className={`text-xl font-bold mt-1.5 truncate ${hasFinding ? 'text-rose-700' : 'text-emerald-700'}`}>{hasFinding ? `${openFindings.length} açık bulgu` : 'Açık bulgu yok'}</p>
+                    <p className="text-[11.5px] text-slate-500 mt-0.5">{control.linkedFindings.length} bulgu toplam · {openActionCount} açık aksiyon{control.linkedOtherFindings.length > 0 ? ` · ${control.linkedOtherFindings.length} bağlı bulgu` : ''}</p>
                 </div>
                 <div className="bg-white rounded-xl border border-slate-200 px-4 py-3.5">
                     <div className="flex items-center gap-2 text-[11.5px] font-medium text-slate-500"><span className="w-2 h-2 rounded-sm bg-slate-500" />Son test</div>
@@ -418,19 +530,23 @@ export default function ControlDetailPage() {
                             {/* Sağ ray */}
                             <div className="space-y-4">
                                 <div className="border border-slate-200 rounded-xl p-4">
-                                    <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3">Süreç sorumluları</h3>
+                                    <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Süreç sorumluları</h3>
+                                    {/* Test kontrolcüleri yıl bazlıdır (Dönem Kontrolü); ana kontroldeki eski alanlar artık yazılmıyor. */}
+                                    <p className="text-[11px] text-slate-400 mb-2">
+                                        {ownerScope ? <>{ownerScope.year} dönem kontrolü{ownerScope.year !== currentYear && ' (bu yıl kapsamda değil)'}</> : 'Hiçbir yılda kapsamda değil'}
+                                    </p>
                                     {([
-                                        ['Kontrol sahibi (assignee)', control.owner?.name, control.owner?.department],
-                                        ['Test eden (icra sorumlusu)', control.testPerformer?.name, undefined],
-                                        ['Onaycı / 2. kontrolcü', control.reviewer?.name, undefined],
-                                    ] as Array<[string, string | undefined, string | undefined]>).map(([label, name, sub]) => (
+                                        ['Kayıt sahibi', control.owner?.name, control.owner?.department, false],
+                                        ['Sorumlu (1. kontrolcü)', personName(ownerScope?.assignee), ownerScope?.assignee?.department ?? undefined, !!ownerScope],
+                                        ['Onaycı (2. kontrolcü)', personName(ownerScope?.secondController), ownerScope?.secondController?.department ?? undefined, !!ownerScope],
+                                    ] as Array<[string, string | null | undefined, string | undefined, boolean]>).map(([label, name, sub, assignable]) => (
                                         <div key={label} className="flex items-center justify-between gap-3 py-2 border-t first:border-t-0 border-slate-100">
                                             <div className="min-w-0">
                                                 <p className="text-[11px] text-slate-500">{label}</p>
-                                                <p className={`text-sm truncate ${name ? 'font-semibold text-slate-900' : 'text-slate-400'}`}>{name || 'Atanmamış'}</p>
+                                                <p className={`text-sm truncate ${name ? 'font-semibold text-slate-900' : 'text-amber-700'}`}>{name || 'Atanmamış'}</p>
                                                 {name && sub && <p className="text-[11px] text-slate-400 truncate">{sub}</p>}
                                             </div>
-                                            {!name && <Link href={`/controls/${control.id}/edit`} className="text-xs font-semibold text-blue-600 hover:underline shrink-0">Ata</Link>}
+                                            {!name && assignable && ownerScope && <Link href={`/controls/agenda/${ownerScope.id}`} className="text-xs font-semibold text-blue-600 hover:underline shrink-0">Ata</Link>}
                                         </div>
                                     ))}
                                 </div>
@@ -441,7 +557,9 @@ export default function ControlDetailPage() {
                                         ['Son test', formatDate(control.lastTestDate), ''],
                                         ['Sonraki test', nextPlannedDate, nextTest?.overdue ? 'text-red-600' : 'text-blue-600'],
                                         ['Kalan süre', nextTest ? relDays(nextTest.days) : '—', nextTest?.overdue ? 'text-red-600' : ''],
-                                        ['Sıklık', frequencyLabel[control.frequency] || control.frequency, ''],
+                                        ['Sıklık (ana kontrol)', frequencyLabel[control.frequency] || control.frequency, ''],
+                                        // Dönem kontrolünün sıklığı ana kontrolden farklı olabilir (yıl bazlı periyodiklik değişikliği).
+                                        ...(ownerScope ? [[`${ownerScope.year} dönem sıklığı`, frequencyLabel[ownerScope.frequency] || ownerScope.frequency, ownerScope.frequency !== control.frequency ? 'text-amber-700' : '']] : []),
                                     ] as Array<[string, string, string]>).map(([k, v, cls]) => (
                                         <div key={k} className="flex justify-between py-1.5"><span className="text-slate-500">{k}</span><span className={`font-semibold text-slate-900 ${cls}`}>{v}</span></div>
                                     ))}
@@ -451,13 +569,34 @@ export default function ControlDetailPage() {
                                     <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3">Organizasyonel uyum</h3>
                                     <div className="flex justify-between py-1.5"><span className="text-slate-500">Genel Müdür Yardımcılığı</span><span className="font-semibold text-slate-900">{control.gmy || '—'}</span></div>
                                     <div className="flex justify-between py-1.5"><span className="text-slate-500">İlgili Direktörlük</span><span className="font-semibold text-slate-900">{control.directorate || '—'}</span></div>
-                                    <div className="flex justify-between items-center py-1.5"><span className="text-slate-500">Durum</span>
-                                        <StatusBadge variant={control.displayStatus === 'AKTIF' ? 'success' : 'neutral'}>{control.displayStatus === 'AKTIF' ? 'Aktif Kontrol' : 'Pasif Kontrol'}</StatusBadge>
+                                    <div className="flex justify-between items-center py-1.5"><span className="text-slate-500">Envanter durumu</span>
+                                        <StatusBadge variant={control.inventoryStatus === 'ACTIVE' ? 'success' : 'neutral'}>{control.inventoryStatus === 'ACTIVE' ? 'Aktif' : 'Pasif'}</StatusBadge>
                                     </div>
+                                    <div className="flex justify-between items-center py-1.5"><span className="text-slate-500">{currentYear} kapsamı</span>
+                                        <StatusBadge variant={control.displayStatus === 'AKTIF' ? 'success' : 'neutral'}>{control.displayStatus === 'AKTIF' ? 'Kapsamda' : 'Kapsam dışı'}</StatusBadge>
+                                    </div>
+                                </div>
+
+                                <div className="border border-slate-200 rounded-xl p-4 text-sm">
+                                    <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Mevzuat maddeleri ({control.regulations.length})</h3>
+                                    {control.regulations.length === 0 ? (
+                                        <p className="text-slate-400 text-[13px]">Eşlenmiş mevzuat maddesi yok.</p>
+                                    ) : (
+                                        <ul className="space-y-1.5">
+                                            {control.regulations.map(r => (
+                                                <li key={r.id} className="text-[13px] leading-snug">
+                                                    <span className="font-mono text-[11px] font-bold text-slate-600">{r.regulationCode} m.{r.articleCode}</span>
+                                                    <span className="text-slate-700"> {r.title}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
                                 </div>
                             </div>
                         </div>
                     )}
+
+                    {activeTab === 'history' && <ControlHistoryPanel key={dataVersion} controlId={control.id} />}
 
                     {/* Tab: Yıllık Kapsam */}
                     {activeTab === 'yearScope' && (
@@ -491,11 +630,18 @@ export default function ControlDetailPage() {
                                                         {risk.riskId}
                                                     </span>
                                                     <p className="text-sm font-bold text-slate-800 pt-1 group-hover:text-blue-600 transition-colors">{risk.name}</p>
-                                                    <p className="text-[11px] text-slate-400">{risk.category}</p>
+                                                    {risk.category && <p className="text-[11px] text-slate-400">{risk.category}</p>}
                                                 </div>
-                                                <span className={`w-8 h-8 flex items-center justify-center rounded-lg font-bold text-white text-xs tabular-nums ${risk.score >= 15 ? 'bg-rose-500' : risk.score >= 10 ? 'bg-amber-500' : 'bg-emerald-500'}`}>
-                                                    {risk.score}
-                                                </span>
+                                                <div className="flex gap-1.5 shrink-0">
+                                                    {([['Doğal', risk.inherent], ['Artık', risk.residual]] as Array<[string, number | null]>).map(([label, v]) => (
+                                                        <div key={label} className="text-center" title={`${label} risk puanı`}>
+                                                            <span className={`w-9 h-8 flex items-center justify-center rounded-lg font-bold text-xs tabular-nums ${v === null ? 'bg-slate-100 text-slate-400' : `text-white ${v >= 15 ? 'bg-rose-500' : v >= 10 ? 'bg-amber-500' : 'bg-emerald-500'}`}`}>
+                                                                {v ?? '—'}
+                                                            </span>
+                                                            <span className="text-[10px] text-slate-400">{label}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             </div>
                                         </Link>
                                     ))}
@@ -520,45 +666,82 @@ export default function ControlDetailPage() {
 
                             {control.linkedFindings.length === 0 ? (
                                 <EmptyState
-                                    title="Açık Bulgu Bulunmuyor"
-                                    description="Harika! Bu kontrol faaliyeti için son testlerde herhangi bir bulgu tespit edilmemiştir."
+                                    title="Bu kontrolde bulgu yok"
+                                    description="Bu kontrolün testlerinden açılmış bir bulgu bulunmuyor."
                                     icon={<svg className="w-12 h-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
                                 />
                             ) : (
-                                <div className="space-y-6">
-                                    {control.linkedFindings.map(finding => (
-                                        <div key={finding.id} className="border border-slate-200 rounded-xl p-5 bg-white shadow-sm space-y-4">
-                                            <div className="flex items-start justify-between pb-3 border-b border-slate-100 flex-wrap gap-2">
-                                                <div>
+                                <div className="space-y-4" data-testid="control-findings">
+                                    {control.linkedFindings.map(finding => {
+                                        const res = findingResolutionConfig[finding.resolutionStatus];
+                                        const open = isFindingOpen(finding);
+                                        return (
+                                            <div key={finding.id} className={`border rounded-xl p-5 bg-white shadow-sm ${open ? 'border-slate-200' : 'border-slate-100 opacity-80'}`}>
+                                                <div className="flex items-start justify-between flex-wrap gap-2">
+                                                    <div className="min-w-0">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <Link href={`/findings/${finding.id}`} className="font-mono text-xs font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-100 hover:underline">
+                                                                {finding.findingId}
+                                                            </Link>
+                                                            {severityConfig[finding.severity] && <StatusBadge variant={severityConfig[finding.severity].variant}>{severityConfig[finding.severity].label}</StatusBadge>}
+                                                            {res && <StatusBadge variant={res.variant}>{res.label}</StatusBadge>}
+                                                            <span className="text-[11px] text-slate-500">{findingWorkflowLabel[finding.workflowStatus] ?? finding.workflowStatus}</span>
+                                                        </div>
+                                                        <p className="text-sm font-bold text-slate-800 mt-2">{finding.summary || finding.description}</p>
+                                                        {finding.summary && finding.description && <p className="text-[13px] text-slate-600 mt-1 line-clamp-2">{finding.description}</p>}
+                                                        <p className="text-[11px] text-slate-400 mt-1">Hedef çözüm tarihi: {formatDate(finding.targetResolutionDate)}</p>
+                                                    </div>
                                                     <div className="flex items-center gap-2">
-                                                        <span className="font-mono text-xs font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-100">
-                                                            {finding.findingId}
-                                                        </span>
-                                                        {severityConfig[finding.severity] && (
-                                                            <StatusBadge variant={severityConfig[finding.severity].variant}>
-                                                                {severityConfig[finding.severity].label}
-                                                            </StatusBadge>
+                                                        <Link href={`/findings/${finding.id}`} className="text-xs font-semibold text-blue-600 hover:underline">Detay</Link>
+                                                        {open && (
+                                                            <Button variant="outline" size="sm" onClick={() => { setEditFindingContext(finding); setIsEditFindingOpen(true); }}>Düzenle</Button>
                                                         )}
                                                     </div>
-                                                    <p className="text-sm font-bold text-slate-800 mt-2">{finding.description}</p>
-                                                    <p className="text-[11px] text-slate-400 mt-0.5">SLA Çözüm Tarihi: {formatDate(finding.targetResolutionDate)}</p>
                                                 </div>
-                                                <div className="flex items-center gap-2">
-                                                    <StatusBadge variant="neutral">{finding.status}</StatusBadge>
-                                                    <Button
-                                                        variant="outline" size="sm"
-                                                        onClick={() => {
-                                                            setEditFindingContext(finding);
-                                                            setIsEditFindingOpen(true);
-                                                        }}
-                                                        icon={<svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>}
-                                                    >
-                                                        Düzenle
-                                                    </Button>
+                                                <div className="mt-3 border-t border-slate-100 pt-3">
+                                                    <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Aksiyonlar ({finding.actions?.length ?? 0})</p>
+                                                    {(finding.actions ?? []).length === 0 ? (
+                                                        <p className="text-[13px] text-slate-400">Aksiyon planı yok.</p>
+                                                    ) : (
+                                                        <ul className="divide-y divide-slate-100 border border-slate-100 rounded-lg">
+                                                            {finding.actions.map(a => {
+                                                                const st = actionStatusConfig[a.status];
+                                                                return (
+                                                                    <li key={a.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px]">
+                                                                        <Link href={`/actions/${a.id}`} className="font-mono text-[11px] font-bold text-blue-700 hover:underline">{a.actionId}</Link>
+                                                                        <span className="text-slate-700 truncate flex-1 min-w-[160px]">{a.description}</span>
+                                                                        <span className="text-[11px] text-slate-500">{a.owner ? `${a.owner.firstName} ${a.owner.lastName}` : 'Sorumlu yok'}</span>
+                                                                        <span className="text-[11px] text-slate-500">Termin: {formatDate(a.dueDate)}</span>
+                                                                        {st ? <StatusBadge variant={st.variant}>{st.label}</StatusBadge> : <span className="text-[11px] text-slate-500">{a.status}</span>}
+                                                                    </li>
+                                                                );
+                                                            })}
+                                                        </ul>
+                                                    )}
                                                 </div>
                                             </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
+                                </div>
+                            )}
+
+                            {control.linkedOtherFindings.length > 0 && (
+                                <div className="pt-2" data-testid="control-linked-other-findings">
+                                    <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-1">Testlere bağlanan diğer bulgular ({control.linkedOtherFindings.length})</h4>
+                                    <p className="text-[12px] text-slate-500 mb-2">Bu kontrolün testlerinde mükerrer bulgu açmak yerine ilişkilendirilen, başka kontrollere ait bulgular.</p>
+                                    <ul className="divide-y divide-slate-100 border border-slate-200 rounded-xl bg-white">
+                                        {control.linkedOtherFindings.map(f => (
+                                            <li key={f.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
+                                                <Link href={`/findings/${f.id}`} className="font-mono text-xs font-bold text-violet-700 hover:underline">{f.findingId}</Link>
+                                                <span className="text-slate-800 truncate flex-1 min-w-[160px]">{f.summary || '—'}</span>
+                                                {f.control && <Link href={`/controls/${f.control.id}`} className="text-[11px] text-slate-500 hover:underline">Kontrol: {f.control.controlId}</Link>}
+                                                <span className="text-[11px] text-slate-500">{findingResolutionConfig[f.resolutionStatus]?.label ?? f.resolutionStatus}</span>
+                                                <span className="text-[11px] text-slate-500">Test: {f.viaTests.map((t, i) => (
+                                                    <span key={t.id}>{i > 0 && ', '}<Link href={`/controls/testing/${t.id}`} className="font-mono hover:underline">{t.testNo}</Link></span>
+                                                ))}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
                                 </div>
                             )}
                         </div>
@@ -568,16 +751,16 @@ export default function ControlDetailPage() {
                     {activeTab === 'tests' && (
                         <div className="space-y-6">
                             <div className="flex justify-between items-center pb-3 border-b border-slate-100">
-                                <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Otomatik Üretilen Yıllık Planlı Test Kayıtları (Test Records)</h3>
-                                <Button variant="primary" size="sm" onClick={() => router.push('/controls/testing')}>
-                                    Test Workspace&apos;e Git
+                                <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Yıllık plandan üretilen dönem testleri</h3>
+                                <Button variant="primary" size="sm" onClick={() => router.push(`/controls/testing?search=${encodeURIComponent(control.controlId)}`)}>
+                                    Kontrol Testi listesinde aç
                                 </Button>
                             </div>
 
                             {control.linkedTestRecords.length === 0 ? (
                                 <EmptyState
                                     title="Planlanmış Test Bulunmuyor"
-                                    description="Bu periyodik kontrol için henüz otomatik planlı test kaydı üretilmemiştir. Sıklık durumunu aktif yapın."
+                                    description="Bu kontrol için dönem testi yok. Testler, kontrol bir yılın kapsamına alınıp Yıllık Plan uygulandığında üretilir."
                                     icon={<svg className="w-12 h-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>}
                                 />
                             ) : (
@@ -585,64 +768,58 @@ export default function ControlDetailPage() {
                                     <table className="w-full border-collapse text-left">
                                         <thead>
                                             <tr className="bg-slate-50 border-b border-slate-200">
-                                                <th className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Test ID</th>
-                                                <th className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Sıklık/Dönem</th>
-                                                <th className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Planlanan Tarih</th>
-                                                <th className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Atanan Kullanıcı</th>
+                                                <th className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Test no</th>
+                                                <th className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Dönem</th>
+                                                <th className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Planlanan</th>
+                                                <th className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Sorumlu / 2. kontrolcü</th>
                                                 <th className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Durum</th>
-                                                <th className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Bulgu Durumu</th>
                                                 <th className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Sonuç</th>
                                                 <th className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">İşlem</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100 text-sm">
-                                            {control.linkedTestRecords.map(tr => (
-                                                <tr key={tr.id} className="hover:bg-slate-50/50 transition-colors">
-                                                    <td className="px-3 py-3 font-mono text-xs font-bold text-slate-600">
-                                                        {tr.testNo}
-                                                    </td>
-                                                    <td className="px-3 py-3 font-medium text-slate-700">
-                                                        {frequencyLabel[control.frequency] || control.frequency}
-                                                    </td>
-                                                    <td className="px-3 py-3 text-slate-500">
-                                                        {formatDate(tr.dueDate)}
-                                                    </td>
+                                            {control.linkedTestRecords.map(tr => {
+                                                const stage = testStageConfig[tr.rawStatus];
+                                                return (
+                                                <tr key={tr.id} className="hover:bg-slate-50/50 transition-colors" data-testid="control-test-row">
+                                                    <td className="px-3 py-3 font-mono text-xs font-bold text-slate-600">{tr.testNo}</td>
                                                     <td className="px-3 py-3 text-slate-700">
-                                                        {control.owner?.name || 'Atanmamış'}
-                                                    </td>
-                                                    <td className="px-3 py-3">
-                                                        {testStatusConfig[tr.status] ? (
-                                                            <StatusBadge variant={testStatusConfig[tr.status].variant}>
-                                                                {testStatusConfig[tr.status].label}
-                                                            </StatusBadge>
-                                                        ) : (
-                                                            <span className="text-xs text-slate-500">{tr.status}</span>
+                                                        {tr.periodLabel ?? (
+                                                            <>{frequencyLabel[control.frequency] || control.frequency}{tr.year !== null && <span className="text-[11px] text-slate-400"> · {tr.year}</span>}</>
                                                         )}
                                                     </td>
+                                                    <td className={`px-3 py-3 ${tr.overdue ? 'text-red-600 font-semibold' : 'text-slate-500'}`}>
+                                                        {formatDate(tr.dueDate)}
+                                                        {tr.overdue && <span className="block text-[11px]">Gecikmiş</span>}
+                                                    </td>
+                                                    <td className="px-3 py-3 text-[13px]">
+                                                        <span className={tr.assignee ? 'text-slate-800' : 'text-amber-700'}>{tr.assignee ?? 'Atanmamış'}</span>
+                                                        <span className="block text-[11px] text-slate-500">2.: {tr.secondController ?? 'Atanmamış'}</span>
+                                                    </td>
                                                     <td className="px-3 py-3">
-                                                        <StatusBadge variant={tr.hasFinding ? 'critical' : 'neutral'}>
-                                                            {tr.hasFinding ? 'Bulgu Var' : 'Bulgu Yok'}
-                                                        </StatusBadge>
+                                                        <div className="flex flex-col items-start gap-1">
+                                                            {stage ? <StatusBadge variant={stage.variant}>{stage.label}</StatusBadge> : <span className="text-xs text-slate-500">{tr.rawStatus}</span>}
+                                                            {tr.deletionRequested && <StatusBadge variant="critical">Silme talebi onayda</StatusBadge>}
+                                                        </div>
                                                     </td>
                                                     <td className="px-3 py-3">
                                                         {tr.testResult ? (
                                                             <StatusBadge variant={tr.testResult === 'EFFECTIVE' ? 'success' : 'critical'}>
-                                                                {tr.testResult === 'EFFECTIVE' ? 'Etkin' : 'Etkin Değil'}
+                                                                {tr.testResult === 'EFFECTIVE' ? 'Bulgu yok' : 'Bulgu var'}
                                                             </StatusBadge>
                                                         ) : (
-                                                            <span className="text-slate-400 italic text-xs">—</span>
+                                                            <span className="text-slate-400 text-xs">—</span>
                                                         )}
+                                                        {tr.findingLinkCount > 0 && <span className="block text-[11px] text-violet-700 mt-1">{tr.findingLinkCount} bağlı bulgu</span>}
                                                     </td>
                                                     <td className="px-3 py-3 text-right">
-                                                        <Button
-                                                            variant="outline" size="sm"
-                                                            onClick={() => router.push(`/controls/testing/${tr.id}`)}
-                                                        >
-                                                            Teste Git
+                                                        <Button variant="outline" size="sm" onClick={() => router.push(`/controls/testing/${tr.id}`)}>
+                                                            Teste git
                                                         </Button>
                                                     </td>
                                                 </tr>
-                                            ))}
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
@@ -651,6 +828,23 @@ export default function ControlDetailPage() {
                     )}
                 </div>
             </div>
+
+            <Modal open={statusConfirm} onClose={() => !statusBusy && setStatusConfirm(false)} size="md"
+                title={control.inventoryStatus === 'ACTIVE' ? 'Kontrolü pasifleştir' : 'Kontrolü aktifleştir'}
+                description={control.inventoryStatus === 'ACTIVE'
+                    ? 'Pasif kontrol envanterde kalır ve yeni yıl planlarına önerilmez. Geçmiş yıl kapsamları, testler ve bulgular etkilenmez.'
+                    : 'Kontrol yeniden envanterde aktif olur ve yıllık plana alınabilir.'}
+                footer={<div className="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setStatusConfirm(false)} disabled={statusBusy}>Vazgeç</Button>
+                    <Button variant={control.inventoryStatus === 'ACTIVE' ? 'danger' : 'success'} size="sm" loading={statusBusy} onClick={toggleStatus}>
+                        {control.inventoryStatus === 'ACTIVE' ? 'Pasifleştir' : 'Aktifleştir'}
+                    </Button>
+                </div>}>
+                <p className="text-sm text-slate-700"><b className="font-mono">{control.controlId}</b> · {control.name}</p>
+                {control.inventoryStatus === 'ACTIVE' && activeScopeYears.length > 0 && (
+                    <p className="text-[13px] text-amber-700 mt-2">Kontrol şu yılların kapsamında: {activeScopeYears.join(', ')}. Pasifleştirmek bu kapsamları kaldırmaz; gerekiyorsa Yıllık Kapsam sekmesinden ayrıca çıkarma talebi oluşturun.</p>
+                )}
+            </Modal>
 
             <CreateFindingModal
                 isOpen={isCreateFindingOpen}
