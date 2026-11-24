@@ -18,6 +18,7 @@ interface Action {
     id: string;
     actionId: string;
     description: string;
+    title?: string | null; // manuel aksiyon planı başlığı
     source: string;
     status: string;
     approvalState?: string | null;
@@ -224,12 +225,20 @@ function ActionsContent() {
         {
             key: 'description', header: 'Açıklama', defaultWidth: 250,
             filter: { type: 'text', placeholder: 'Açıklama ara...', fn: (a: Action, v) => a.description.toLowerCase().includes(v.toLowerCase()) },
-            render: (a) => <span className="font-medium text-slate-800 truncate block max-w-[230px]" title={a.description}>{a.description}</span>,
+            render: (a) => (
+                <span className="block max-w-[230px]" title={a.description}>
+                    {a.title && <span className="block font-semibold text-slate-900 truncate">{a.title}</span>}
+                    <span className={`block truncate ${a.title ? 'text-xs text-slate-500' : 'font-medium text-slate-800'}`}>{a.description}</span>
+                </span>
+            ),
         },
         {
             key: 'source', header: 'Kaynak', defaultWidth: 110,
-            filter: { type: 'select', options: Object.entries(sourceLabels).map(([k, v]) => ({ value: k, label: v })), fn: (a: Action, v) => a.source === v },
-            render: (a) => <span className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded-md">{sourceLabels[a.source] || a.source}</span>,
+            // Kaynak: bulgu kaynaklı veya manuel (bulgudan bağımsız) aksiyon planı.
+            filter: { type: 'select', options: [{ value: 'FINDING', label: 'Bulgu' }, { value: 'MANUAL', label: 'Manuel' }], fn: (a: Action, v) => (a.finding ? 'FINDING' : 'MANUAL') === v },
+            render: (a) => a.finding
+                ? <span className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded-md">Bulgu</span>
+                : <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-1 rounded-md">Manuel</span>,
         },
         {
             key: 'owner', header: 'Sorumlu', defaultWidth: 150,
@@ -289,7 +298,7 @@ function ActionsContent() {
                 if (fu) {
                     const label = fu.status === 'ONAYLANDI' ? 'Onaylandı' : fu.status === 'TAMAMLANDI' ? 'Onay bekliyor' : fu.status === 'DEVAM_EDIYOR' ? 'Devam ediyor' : 'Bekliyor';
                     return (
-                        <Link href={a.finding ? `/findings/${a.finding.id}` : '/follow-ups'} className="flex flex-col hover:underline" onClick={e => e.stopPropagation()}>
+                        <Link href={`/follow-ups/${fu.id}`} className="flex flex-col hover:underline" onClick={e => e.stopPropagation()}>
                             <span className="font-mono text-[11px] font-bold text-amber-700">{fu.followUpId}</span>
                             <span className="text-[11px] text-slate-500">{label}</span>
                         </Link>
@@ -465,6 +474,9 @@ function ActionsContent() {
                                 {selectedRows.size} Seçili için silme talebi
                             </Button>
                         )}
+                        <Link href="/actions/new/manual">
+                            <Button variant="outline">Manuel Aksiyon Planı</Button>
+                        </Link>
                         <Link href="/actions/new">
                             <Button variant="primary" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}>
                                 Yeni Aksiyon

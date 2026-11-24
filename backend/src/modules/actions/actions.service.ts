@@ -189,6 +189,19 @@ export class ActionsService {
         };
     }
 
+    /** Manuel aksiyon planı (bulgudan bağımsız) — ortak domain servisi (AuditsService). */
+    async createManual(data: any, userId: string) {
+        return this.audits.createManualAction(data, userId);
+    }
+
+    /** Manuel aksiyon taslağı düzenleme: yalnız bulgusuz aksiyonda; maker-checker kuralları updateAction'da. */
+    async updateManual(id: string, data: any, userId: string) {
+        const a = await this.prisma.action.findUnique({ where: { id }, select: { findingId: true } });
+        if (!a) throw new NotFoundException('Aksiyon bulunamadı');
+        if (a.findingId) throw new BadRequestException('Bulgu kaynaklı aksiyon bulgu ekranından düzenlenir.');
+        return this.audits.updateAction(null, id, data, userId);
+    }
+
     async create(data: any, userId: string) {
         // Veri modeli: Action.findingId ZORUNLU. `/actions` ve `/findings/:id/actions`
         // aynı ortak domain kuralından geçer (Madde 2). Yalnız riske bağlı, findingId

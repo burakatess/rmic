@@ -65,6 +65,9 @@ describe('SearchService', () => {
             OR: [
                 { directorateId: { in: ['d1'] }, workflowStatus: { not: 'TASLAK' } },
                 { assigneeId: 'u1' },
+                // Maker-checker: bulgunun kontrolcüleri değerlendirecekleri kaydı görür.
+                { firstControllerId: 'u1' },
+                { secondControllerId: 'u1' },
             ],
         });
     });

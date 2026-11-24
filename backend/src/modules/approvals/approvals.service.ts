@@ -19,7 +19,7 @@ export interface PendingApprovalItem {
     recordId: string;
     code: string;
     description: string | null;
-    finding: { id: string; findingId: string; summary: string | null };
+    finding: { id: string; findingId: string; summary: string | null } | null; // manuel aksiyon/takipte boş
     requestedBy: { id: string; name: string } | null;
     requestedAt: Date;
     reason: string | null;
@@ -30,7 +30,7 @@ export interface ApprovalDecisionItem {
     kind: DecisionKind;
     recordId: string;
     code: string;
-    finding: { id: string; findingId: string; summary: string | null };
+    finding: { id: string; findingId: string; summary: string | null } | null;
     reason: string | null;
     date: Date;
     link: string;
@@ -82,27 +82,30 @@ export class ApprovalsService {
             : [];
         const byId = new Map(users.map(u => [u.id, userName(u)]));
         const link = (findingId: string) => `/findings/${findingId}`;
+        // Aksiyon/takip kendi detay ekranına gider (manuel kayıtlarda bulgu yoktur).
+        const actionLink = (id: string) => `/actions/${id}`;
+        const fuLink = (id: string) => `/follow-ups/${id}`;
 
         const items: PendingApprovalItem[] = [
             ...actionApprovals.map(a => ({
                 kind: 'ACTION_APPROVAL' as const, recordId: a.id, code: a.actionId, description: a.description,
                 finding: a.finding, requestedBy: userName(a.firstController), requestedAt: a.submittedAt ?? a.updatedAt,
-                reason: null, link: link(a.finding.id),
+                reason: null, link: actionLink(a.id),
             })),
             ...actionDeletions.map(a => ({
                 kind: 'ACTION_DELETION' as const, recordId: a.id, code: a.actionId, description: a.description,
                 finding: a.finding, requestedBy: (a.deletionRequestedById && byId.get(a.deletionRequestedById)) || null,
-                requestedAt: a.deletionRequestedAt!, reason: a.deletionReason, link: link(a.finding.id),
+                requestedAt: a.deletionRequestedAt!, reason: a.deletionReason, link: actionLink(a.id),
             })),
             ...fuApprovals.map(f => ({
                 kind: 'FOLLOWUP_APPROVAL' as const, recordId: f.id, code: f.followUpId, description: f.explanation,
                 finding: f.finding, requestedBy: (f.evaluatorId && byId.get(f.evaluatorId)) || null,
-                requestedAt: f.evaluatedAt ?? f.updatedAt, reason: null, link: link(f.finding.id),
+                requestedAt: f.evaluatedAt ?? f.updatedAt, reason: null, link: fuLink(f.id),
             })),
             ...fuDeletions.map(f => ({
                 kind: 'FOLLOWUP_DELETION' as const, recordId: f.id, code: f.followUpId, description: null,
                 finding: f.finding, requestedBy: (f.deletionRequestedById && byId.get(f.deletionRequestedById)) || null,
-                requestedAt: f.deletionRequestedAt!, reason: f.deletionReason, link: link(f.finding.id),
+                requestedAt: f.deletionRequestedAt!, reason: f.deletionReason, link: fuLink(f.id),
             })),
         ];
         return items.sort((a, b) => +new Date(a.requestedAt) - +new Date(b.requestedAt));

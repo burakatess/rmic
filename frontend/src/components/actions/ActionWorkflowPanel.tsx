@@ -89,15 +89,17 @@ export function ActionWorkflowPanel({ action, onChanged }: { action: ActionWorkf
     const step = currentStep(action);
     const deleted = !!action.deletedAt;
     const followUps = action.followUps ?? [];
-    const findingLink = action.finding ? `/findings/${action.finding.id}` : null;
 
     const run = async () => {
-        if (!op || !action.finding) return;
+        if (!op) return;
         const t = OP_TEXT[op];
         if (t.needsReason && !reason.trim()) { showError('Gerekçe gerekli', 'Lütfen gerekçe yazın.'); return; }
         setSaving(true);
         try {
-            const res = await api.findingActionOp(action.finding.id, action.id, op, t.needsReason ? reason.trim() : undefined);
+            // Silme kararı ortak silme talebi ucundan (manuel aksiyonda bulgu yok); diğerleri bulgu ucundan.
+            const res = op === 'delete-approve' || op === 'delete-reject'
+                ? await api.decideDeletion('ACTION', action.id, op === 'delete-approve', t.needsReason ? reason.trim() : undefined) as { createdFollowUp?: { followUpId: string } }
+                : action.finding ? await api.findingActionOp(action.finding.id, action.id, op, t.needsReason ? reason.trim() : undefined) : null;
             const created = op === 'approve' ? res?.createdFollowUp?.followUpId : null;
             success('Kaydedildi', created ? `Aksiyon onaylandı; takip çalışması ${created} oluşturuldu.` : `${t.title}: tamamlandı.`);
             setOp(null); setReason('');
@@ -203,16 +205,14 @@ export function ActionWorkflowPanel({ action, onChanged }: { action: ActionWorkf
                             const st = f.deletedAt ? { label: 'Silindi', variant: 'neutral' as BV } : FU_STATUS[f.status] ?? { label: f.status, variant: 'neutral' as BV };
                             return (
                                 <li key={f.id} className={`flex flex-wrap items-center gap-3 py-2.5 ${f.deletedAt || f.status === 'IPTAL' ? 'opacity-60' : ''}`}>
-                                    <span className="font-mono text-xs font-bold text-slate-700">{f.followUpId}</span>
+                                    <Link href={`/follow-ups/${f.id}`} className="font-mono text-xs font-bold text-blue-700 hover:underline" data-testid="followup-link">{f.followUpId}</Link>
                                     <StatusBadge variant={st.variant}>{st.label}</StatusBadge>
                                     {f.result && <span className="text-xs text-slate-600">Sonuç: {RESULT[f.result] ?? f.result}</span>}
                                     {f.deletionRequestedAt && !f.deletedAt && <span className="text-xs text-red-600">Silme onayı bekliyor</span>}
                                     <span className="text-xs text-slate-500">Planlanan: {fmt(f.plannedDate)}</span>
-                                    {findingLink && (
-                                        <Link href={`${findingLink}#followup-${f.id}`} className="ml-auto text-xs font-semibold text-blue-600 hover:underline">
-                                            Takibi aç →
-                                        </Link>
-                                    )}
+                                    <Link href={`/follow-ups/${f.id}`} className="ml-auto text-xs font-semibold text-blue-600 hover:underline">
+                                        Takip detayı →
+                                    </Link>
                                 </li>
                             );
                         })}

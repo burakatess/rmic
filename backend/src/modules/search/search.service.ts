@@ -84,13 +84,13 @@ export class SearchService {
                 select: { id: true, findingId: true, summary: true, description: true, directorateRel: { select: { name: true } } }, take,
             }).then(rows => rows.map(r => this.result('finding', r.id, r.findingId, r.summary ?? r.description, this.context(r.description, r.directorateRel?.name), `/findings/${r.id}`))) : [],
             selected(GlobalSearchCategory.ACTION) ? this.prisma.action.findMany({
-                where: { AND: [sAction], OR: [{ actionId: contains }, { description: contains }, { directorate: { name: contains } }] },
+                where: { AND: [sAction], OR: [{ actionId: contains }, { title: contains }, { description: contains }, { directorate: { name: contains } }] },
                 select: { id: true, actionId: true, description: true, directorate: { select: { name: true } }, finding: { select: { findingId: true } } }, take,
-            }).then(rows => rows.map(r => this.result('action', r.id, r.actionId, r.description, this.context(`Bulgu: ${r.finding.findingId}`, r.directorate?.name), `/actions/${r.id}`))) : [],
+            }).then(rows => rows.map(r => this.result('action', r.id, r.actionId, r.description, this.context(r.finding ? `Bulgu: ${r.finding.findingId}` : 'Manuel aksiyon planı', r.directorate?.name), `/actions/${r.id}`))) : [],
             selected(GlobalSearchCategory.FOLLOW_UP) ? this.prisma.findingFollowUp.findMany({
                 where: { AND: [sFollowUp], OR: [{ followUpId: contains }, { explanation: contains }, { currentStatusDetail: contains }, { directorate: { name: contains } }] },
                 select: { id: true, followUpId: true, explanation: true, currentStatusDetail: true, findingId: true, directorate: { select: { name: true } }, finding: { select: { findingId: true } } }, take,
-            }).then(rows => rows.map(r => this.result('follow-up', r.id, r.followUpId, r.explanation ?? r.currentStatusDetail ?? `Takip ${r.followUpId}`, this.context(`Bulgu: ${r.finding.findingId}`, r.directorate?.name), `/findings/${r.findingId}?tab=takip&followUpId=${r.id}`))) : [],
+            }).then(rows => rows.map(r => this.result('follow-up', r.id, r.followUpId, r.explanation ?? r.currentStatusDetail ?? `Takip ${r.followUpId}`, this.context(r.finding ? `Bulgu: ${r.finding.findingId}` : 'Manuel aksiyon takibi', r.directorate?.name), `/follow-ups/${r.id}`))) : [],
         ]);
 
         const foldedQuery = this.fold(query);

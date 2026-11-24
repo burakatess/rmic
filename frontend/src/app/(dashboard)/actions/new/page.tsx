@@ -128,7 +128,7 @@ export default function NewActionPage() {
                     <div className="flex items-center justify-between">
                         <div>
                             <h1 className="text-xl font-bold text-slate-900">Yeni Düzeltici Aksiyon</h1>
-                            <p className="text-sm text-slate-500 mt-0.5">Bir bulguya bağlı düzeltici aksiyon oluşturun</p>
+                            <p className="text-sm text-slate-500 mt-0.5">Bir bulguya bağlı düzeltici aksiyon oluşturun · <Link href="/actions/new/manual" className="text-blue-600 hover:underline">Bulgudan bağımsız manuel aksiyon planı oluştur →</Link></p>
                         </div>
                         <div className="flex items-center gap-2">
                             <Link href="/actions">

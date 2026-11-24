@@ -81,11 +81,11 @@ export class WorkflowService {
             }
             case 'FOLLOW_UP': {
                 const scopeW = followUpWhere(ctx);
-                const f = await this.prisma.findingFollowUp.findFirst({ where: { AND: [{ id }, scopeW ?? {}] }, include: { finding: { select: { id: true, findingId: true, summary: true } } } });
+                const f = await this.prisma.findingFollowUp.findFirst({ where: { AND: [{ id }, scopeW ?? {}] }, include: { finding: { select: { id: true, findingId: true, summary: true } }, action: { select: { actionId: true, title: true } } } });
                 if (!f || f.deletedAt) throw new NotFoundException('Takip çalışması bulunamadı');
                 const [a, c, ev] = await this.users([f.assigneeId, f.secondControllerId, f.evaluatorId]);
                 return {
-                    entityType: type, entityId: id, code: f.followUpId, title: f.finding.summary || f.finding.findingId, href: `/findings/${f.finding.id}?followUpId=${id}`,
+                    entityType: type, entityId: id, code: f.followUpId, title: f.finding?.summary || f.finding?.findingId || f.action?.title || f.action?.actionId || f.followUpId, href: `/follow-ups/${id}`,
                     stage: followUpStage(f.status), rawStatus: f.status, assignee: a, checker: c, submittedBy: f.status === 'TAMAMLANDI' ? ev : null,
                     plannedDate: f.plannedDate, updatedAt: f.updatedAt, extra: f,
                 };
@@ -104,10 +104,10 @@ export class WorkflowService {
             case 'ACTION': {
                 const a = await this.prisma.action.findUnique({ where: { id } });
                 if (!a) throw new NotFoundException('Aksiyon bulunamadı');
-                if (a.findingId && (await this.scope.findingAccess(ctx, a.findingId)) === null && a.ownerId !== ctx.userId) throw new NotFoundException('Aksiyon bulunamadı');
+                await this.scope.assertActionAccess(ctx, id);
                 const [fc, sc] = await this.users([a.firstControllerId, a.secondControllerId]);
                 return {
-                    entityType: type, entityId: id, code: a.actionId, title: a.description.slice(0, 120), href: `/actions/${id}`,
+                    entityType: type, entityId: id, code: a.actionId, title: a.title || a.description.slice(0, 120), href: `/actions/${id}`,
                     stage: actionStage(a), rawStatus: a.approvalState, assignee: fc, checker: sc, submittedBy: a.approvalState === 'ONAY_BEKLIYOR' ? fc : null,
                     plannedDate: a.dueDate, updatedAt: a.updatedAt, extra: a,
                 };
@@ -402,11 +402,11 @@ export class WorkflowService {
             const fw = followUpWhere(ctx);
             const rows = await this.prisma.findingFollowUp.findMany({
                 where: { AND: [{ deletedAt: null }, fw ?? {}, mine ? { OR: [{ assigneeId: me }, { secondControllerId: me }] } : {}] },
-                include: { finding: { select: { id: true, findingId: true, summary: true } } }, orderBy: { plannedDate: 'asc' }, take: 2000,
+                include: { finding: { select: { id: true, findingId: true, summary: true } }, action: { select: { actionId: true, title: true } } }, orderBy: { plannedDate: 'asc' }, take: 2000,
             });
             const people = await this.peopleMap(rows.flatMap(r => [r.assigneeId, r.secondControllerId]));
             for (const r of rows) items.push({
-                entityType: 'FOLLOW_UP', entityId: r.id, code: r.followUpId, title: r.finding.summary || r.finding.findingId, href: `/findings/${r.finding.id}?followUpId=${r.id}`,
+                entityType: 'FOLLOW_UP', entityId: r.id, code: r.followUpId, title: r.finding?.summary || r.finding?.findingId || r.action?.title || r.action?.actionId || r.followUpId, href: `/follow-ups/${r.id}`,
                 stage: followUpStage(r.status), rawStatus: r.status, assignee: people(r.assigneeId), checker: people(r.secondControllerId), submittedBy: null, plannedDate: r.plannedDate, updatedAt: r.updatedAt,
                 flags: [...(isFollowUpOverdue(r) ? ['GECIKMIS' as const] : []), ...(r.deletionRequestedAt ? ['SILME_TALEBI' as const] : [])],
             });
@@ -436,7 +436,7 @@ export class WorkflowService {
             const people = await this.peopleMap(visible.flatMap(r => [r.firstControllerId, r.secondControllerId]));
             const now = new Date();
             for (const r of visible) items.push({
-                entityType: 'ACTION', entityId: r.id, code: r.actionId, title: r.description.slice(0, 120), href: `/actions/${r.id}`,
+                entityType: 'ACTION', entityId: r.id, code: r.actionId, title: r.title || r.description.slice(0, 120), href: `/actions/${r.id}`,
                 stage: actionStage(r), rawStatus: r.approvalState, assignee: people(r.firstControllerId), checker: people(r.secondControllerId), submittedBy: null, plannedDate: r.dueDate, updatedAt: r.updatedAt,
                 flags: [...(r.status !== 'KAPATILDI' && r.dueDate < now ? ['GECIKMIS' as const] : []), ...(r.deletionRequestedAt ? ['SILME_TALEBI' as const] : [])],
             });

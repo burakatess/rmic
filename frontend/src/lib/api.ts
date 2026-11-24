@@ -65,6 +65,30 @@ export interface WorkflowDecisionItem {
     link: string;
 }
 
+type PersonRef = { id: string; firstName: string; lastName: string } | null;
+/** Takip çalışması detayı (GET /follow-ups/:id) — kaynak aksiyon planı doğrudan okunur. */
+export interface FollowUpDetail {
+    id: string; followUpId: string; status: string; approvalStatus: string | null; result: string | null; resolutionOutcome: string | null;
+    plannedDate: string | null; testDate: string | null; newFollowUpDate: string | null; explanation: string | null; currentStatusDetail: string | null;
+    birimCevabi: string | null; internalControlAssessment: string | null; notes: string | null; rejectionReason: string | null; revertReason: string | null;
+    deletedAt: string | null; deletionRequestedAt: string | null; deletionReason: string | null; findingId: string | null; actionId: string | null;
+    assigneeId: string | null; secondControllerId: string | null; evaluatedAt: string | null; approvedAt: string | null; createdAt: string;
+    manual: boolean;
+    action: {
+        id: string; actionId: string; title: string | null; description: string; status: string; approvalState: string; dueDate: string; completedAt: string | null;
+        responsibleDepartment: string | null; findingId: string | null; deletedAt: string | null; owner: PersonRef; firstController: PersonRef; secondController: PersonRef;
+    } | null;
+    finding: { id: string; findingId: string; summary: string | null; description: string; severity: string; status: string; workflowStatus: string } | null;
+    previousFollowUp: { id: string; followUpId: string; status: string } | null;
+    nextFollowUp: { id: string; followUpId: string; status: string } | null;
+    directorate: { id: string; name: string } | null;
+    attachments: Array<{ id: string; fileName: string; originalName: string; displayName: string | null; description: string | null; mimeType: string; sizeBytes: number; createdAt: string }>;
+    assignee: { id: string; name: string } | null; secondController: { id: string; name: string } | null;
+    evaluator: { id: string; name: string } | null; approver: { id: string; name: string } | null;
+    history: Array<{ id: string; operation: string | null; explanation: string | null; at: string; by: string | null }>;
+    capabilities: { canEvaluate: boolean; canAssignSecondController: boolean };
+}
+
 /** Kontrol değişiklik geçmişi satırı (GET /controls/:id/history). */
 export interface ControlHistoryEntry {
     id: string;
@@ -803,6 +827,19 @@ class ApiClient {
         return this.request(`/actions/${id}`, { method: 'DELETE', body: { reason } });
     }
 
+    /** Manuel aksiyon planı (bulgudan bağımsız): taslak oluşur; onayda takip çalışması açılır. */
+    async createManualAction(data: {
+        title: string; description: string; ownerId: string; dueDate: string; status?: 'BEKLIYOR' | 'DEVAM_EDIYOR';
+        firstControllerId: string; secondControllerId: string; directorateId?: string; notes?: string; riskId?: string; controlId?: string;
+    }) {
+        return this.request<{ id: string; actionId: string }>('/actions/manual', { method: 'POST', body: data });
+    }
+
+    /** Manuel aksiyon taslağı düzenleme (1. kontrolcü; taslak/reddedilmiş iken). */
+    async updateManualAction(id: string, data: { title?: string; description?: string; ownerId?: string; dueDate?: string; status?: string; responsibleDepartment?: string; notes?: string; secondControllerId?: string }) {
+        return this.request(`/actions/${id}/manual`, { method: 'PUT', body: data });
+    }
+
     async createStandaloneAction(data: unknown) {
         return this.request('/actions', { method: 'POST', body: data });
     }
@@ -1066,11 +1103,20 @@ class ApiClient {
         });
     }
 
-    async updateFollowUp(findingId: string, followUpId: string, data: unknown) {
-        return this.request(`/findings/${findingId}/follow-ups/${followUpId}`, {
+    /** Bulgu kaynaklı takipte bulgu uçları; manuel aksiyon takibinde (findingId=null) genel takip ucu. */
+    async updateFollowUp(findingId: string | null, followUpId: string, data: unknown) {
+        return this.request(findingId ? `/findings/${findingId}/follow-ups/${followUpId}` : `/follow-ups/${followUpId}`, {
             method: 'PUT',
             body: data
         });
+    }
+
+    async getFollowUpDetail(id: string) {
+        return this.request<FollowUpDetail>(`/follow-ups/${id}`);
+    }
+
+    async revertFollowUpGeneric(id: string, reason: string) {
+        return this.request(`/follow-ups/${id}/revert`, { method: 'POST', body: { reason } });
     }
 
     async deleteFollowUp(findingId: string, followUpId: string) {
@@ -1224,8 +1270,8 @@ class ApiClient {
         return this.request(`/findings/${findingId}/follow-ups/${followUpId}/assignee`, { method: 'POST', body });
     }
 
-    async assignSecondController(findingId: string, followUpId: string, body: { secondControllerId: string; reason: string }) {
-        return this.request(`/findings/${findingId}/follow-ups/${followUpId}/second-controller`, { method: 'POST', body });
+    async assignSecondController(findingId: string | null, followUpId: string, body: { secondControllerId: string; reason: string }) {
+        return this.request(findingId ? `/findings/${findingId}/follow-ups/${followUpId}/second-controller` : `/follow-ups/${followUpId}/second-controller`, { method: 'POST', body });
     }
 
     async reopenFinding(findingId: string, reason: string) {

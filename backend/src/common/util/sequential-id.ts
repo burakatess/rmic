@@ -41,6 +41,8 @@ export function formatRecordId(
 
 const FINDING_NO = /^B-(\d{4})-(\d{4,})$/;
 const ACTION_NO = /^A-(\d{4})-(\d{4,})-(\d{2,})$/;
+// Manuel (bulgudan bağımsız) aksiyon planı: AM-2026-0001 → takipleri T-AM-2026-0001-01
+const MANUAL_ACTION_NO = /^AM-(\d{4})-(\d{4,})$/;
 
 export function detectionYear(date: Date): number {
   return Number(
@@ -79,10 +81,21 @@ export async function nextFollowUpNo(
   actionInternalId: string,
   actionNo: string,
 ): Promise<string> {
+  const manual = MANUAL_ACTION_NO.exec(actionNo);
+  if (manual) {
+    const seq = await nextCounterValue(db, `followup:${actionInternalId}`);
+    return `T-AM-${manual[1]}-${manual[2]}-${seq.toString().padStart(2, '0')}`;
+  }
   const match = ACTION_NO.exec(actionNo);
   if (!match) throw new Error(`Geçersiz parent aksiyon numarası: ${actionNo}`);
   const sequence = await nextCounterValue(db, `followup:${actionInternalId}`);
   return `T-${match[1]}-${match[2]}-${match[3]}-${sequence.toString().padStart(2, '0')}`;
+}
+
+/** Manuel aksiyon planı numarası (yıllık sayaç): AM-2026-0001. */
+export async function nextManualActionNo(db: RawClient, at = new Date()): Promise<string> {
+  const year = detectionYear(at);
+  return formatRecordId('AM', await nextCounterValue(db, `manual-action:${year}`), year);
 }
 
 // ─── Geriye dönük: P2002-retry sarmalayıcı (sequence-dışı çağrılar için) ──────

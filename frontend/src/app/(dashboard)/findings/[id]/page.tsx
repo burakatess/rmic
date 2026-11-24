@@ -921,12 +921,11 @@ export default function FindingDetailPage() {
                                                     {relFU.length === 0 ? <span className="text-xs text-slate-400">Henüz yok</span> : relFU.map(fu => {
                                                         const fuCfg = followUpStatusConfig[fu.status] || { label: fu.status, variant: 'neutral' as BV };
                                                         return (
-                                                            <button key={fu.id} type="button"
-                                                                onClick={() => { setSelectedFollowUp(fu); setFollowUpOpen(true); setActiveTab('takip'); }}
+                                                            <Link key={fu.id} href={`/follow-ups/${fu.id}`}
                                                                 className="flex items-center gap-1.5 h-8 px-2.5 bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-lg text-xs transition-colors">
                                                                 <span className="font-mono text-blue-700 font-semibold">{fu.followUpId}</span>
                                                                 <span className="text-slate-600">{fuCfg.label}</span>
-                                                            </button>
+                                                            </Link>
                                                         );
                                                     })}
                                                 </div>
@@ -989,11 +988,9 @@ export default function FindingDetailPage() {
                                             <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50 border-b border-slate-100">
                                                 <div>
                                                     <div className="flex items-center gap-2 flex-wrap">
-                                                        <button type="button"
-                                                            onClick={() => { setSelectedFollowUp(fu); setFollowUpOpen(true); }}
-                                                            className="font-mono text-sm font-bold text-blue-700 hover:underline">
+                                                        <Link href={`/follow-ups/${fu.id}`} className="font-mono text-sm font-bold text-blue-700 hover:underline">
                                                             {fu.followUpId}
-                                                        </button>
+                                                        </Link>
                                                         <StatusBadge variant={fuCfg.variant}>{fuCfg.label}</StatusBadge>
                                                         {fuDeletionPending && <StatusBadge variant="critical" dot>Silme onayı bekliyor</StatusBadge>}
                                                         {resOutCfg && <StatusBadge variant={resOutCfg.variant} dot>{resOutCfg.label}</StatusBadge>}

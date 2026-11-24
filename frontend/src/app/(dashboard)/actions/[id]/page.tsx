@@ -115,9 +115,10 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
                     { label: action.actionId },
                 ]}
                 entityId={action.actionId}
-                title="Aksiyon Detayı"
+                title={action.title || 'Aksiyon Detayı'}
                 badges={
                     <>
+                        {!action.finding && <StatusBadge variant="warning">Manuel aksiyon planı</StatusBadge>}
                         <StatusBadge variant={statusCfg.variant}>{statusCfg.label}</StatusBadge>
                         {action.deletedAt ? <StatusBadge variant="neutral">Silindi</StatusBadge>
                             : action.approvalState && action.approvalState !== 'ONAYLANDI' && (
@@ -137,7 +138,7 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
                 actions={
                     <div className="flex items-center gap-2">
                         {canComplete && <Button variant="success" size="sm" onClick={() => setCompleteOpen(true)}>Aksiyonu Tamamla</Button>}
-                        {caps.canEdit && action.finding?.id && (
+                        {caps.canEdit && (
                             <Button variant="primary" size="sm" onClick={() => setEditOpen(true)}
                                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>}
                             >
@@ -187,6 +188,13 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
                 </DetailSection>
 
                 <ActionWorkflowPanel action={action} onChanged={load} />
+
+                {/* Kaynak: manuel aksiyon planında bulgu yoktur. */}
+                {!action.finding && (
+                    <DetailSection title="Kaynak">
+                        <p className="text-sm text-slate-700">Manuel aksiyon planı — herhangi bir bulgudan bağımsız oluşturuldu. Onay ve takip süreci bulgu kaynaklı aksiyonlarla aynıdır.</p>
+                    </DetailSection>
+                )}
 
                 {/* Bağlı bulgu */}
                 {action.finding && (

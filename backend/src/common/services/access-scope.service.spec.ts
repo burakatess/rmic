@@ -51,6 +51,9 @@ describe('AccessScopeService — kayıt kapsamı politikası', () => {
             OR: [
                 { directorateId: { in: ['dir-A', 'dir-B'] }, workflowStatus: { not: 'TASLAK' } },
                 { assigneeId: 'u-1' },
+                // Maker-checker: bulgunun kontrolcüleri değerlendirecekleri kaydı görür.
+                { firstControllerId: 'u-1' },
+                { secondControllerId: 'u-1' },
             ],
         });
     });

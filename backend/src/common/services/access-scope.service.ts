@@ -78,15 +78,32 @@ export function findingFullWhere(ctx: AccessContext): Prisma.FindingWhereInput |
         OR: [
             { directorateId: inUnits(ctx), workflowStatus: { not: 'TASLAK' } },
             { assigneeId: ctx.userId },
+            // Maker-checker: bulgunun 1./2. kontrolcüsü onaylayacağı/değerlendireceği kaydı görmelidir
+            // (ör. kapanış değerlendirmesi); kapsam açıkken aksi halde iş kilitlenir.
+            { firstControllerId: ctx.userId },
+            { secondControllerId: ctx.userId },
         ],
     };
 }
 
-/** Aksiyon: bağlı bulgunun kapsamı veya aksiyonun sorumlusu. */
+/**
+ * Aksiyon: bağlı bulgunun kapsamı veya aksiyonun sorumlusu. Manuel aksiyon planında (bulgusuz)
+ * aksiyonun birimi veya 1./2. kontrolcüsü.
+ */
 export function actionWhere(ctx: AccessContext): Prisma.ActionWhereInput | null {
     if (isOrg(ctx, 'action')) return null;
     const full = findingFullWhere({ ...ctx, orgModules: new Set() })!;
-    return { OR: [{ finding: full }, { ownerId: ctx.userId }] };
+    return {
+        OR: [
+            { finding: full },
+            { ownerId: ctx.userId },
+            // Aksiyonun 1./2. kontrolcüsü (onaya gönderen / onaylayan) her durumda görür.
+            { firstControllerId: ctx.userId },
+            { secondControllerId: ctx.userId },
+            // Manuel aksiyon planı (bulgusuz): aksiyonun birimi.
+            { findingId: null, directorateId: inUnits(ctx) },
+        ],
+    };
 }
 
 /** Takip: bağlı bulgu kapsamı, kendi aksiyonunun takipleri veya doğrudan görev atamaları. */
@@ -97,6 +114,8 @@ export function followUpWhere(ctx: AccessContext): Prisma.FindingFollowUpWhereIn
         OR: [
             { finding: full },
             { action: { ownerId: ctx.userId } },
+            // Manuel aksiyon planının takibi: aksiyonun birimi/kontrolcüleri.
+            { findingId: null, action: { OR: [{ directorateId: inUnits(ctx) }, { firstControllerId: ctx.userId }, { secondControllerId: ctx.userId }] } },
             { assigneeId: ctx.userId },
             { evaluatorId: ctx.userId },
             { secondControllerId: ctx.userId },
