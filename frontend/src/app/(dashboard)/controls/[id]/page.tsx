@@ -240,13 +240,21 @@ export default function ControlDetailPage() {
         return [...control.linkedTests].sort((a, b) => new Date(b.testDate).getTime() - new Date(a.testDate).getTime())[0];
     }, [control]);
 
-    const nextPlannedDate = useMemo(() => {
-        if (!control || control.linkedTestRecords.length === 0) return '—';
-        const pending = control.linkedTestRecords.filter(tr => tr.status === 'PENDING' || tr.status === 'IN_PROGRESS');
-        if (pending.length === 0) return '—';
-        const sorted = [...pending].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
-        return formatDate(sorted[0].dueDate);
+    const recentTests = useMemo(() => (control ? [...control.linkedTests].sort((a, b) => new Date(b.testDate).getTime() - new Date(a.testDate).getTime()).slice(0, 6) : []), [control]);
+
+    // Sıradaki açık test: gecikmiş testler de dâhildir (önceden atlanıyor, "—" görünüyordu).
+    const nextTest = useMemo(() => {
+        if (!control) return null;
+        const open = control.linkedTestRecords.filter(tr => tr.status === 'PENDING' || tr.status === 'IN_PROGRESS' || tr.status === 'OVERDUE');
+        if (open.length === 0) return null;
+        const first = [...open].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())[0];
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const due = new Date(first.dueDate); due.setHours(0, 0, 0, 0);
+        const days = Math.round((due.getTime() - today.getTime()) / 86400000);
+        return { id: first.id, date: formatDate(first.dueDate), days, overdue: first.status === 'OVERDUE' || days < 0 };
     }, [control]);
+    const nextPlannedDate = nextTest?.date ?? '—';
+    const relDays = (d: number) => (d < 0 ? `${Math.abs(d)} gün gecikmiş` : d === 0 ? 'bugün' : `${d} gün sonra`);
 
     if (loading) {
         return (
@@ -318,52 +326,27 @@ export default function ControlDetailPage() {
                 }
             />
 
-            {/* Quick Status Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center gap-4">
-                    <span className="w-10 h-10 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center flex-shrink-0">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                        </svg>
-                    </span>
-                    <div className="min-w-0">
-                        <p className="text-xs font-medium text-slate-500">Kapsamdaki Yıllar</p>
-                        <p className="text-2xl font-bold tabular-nums text-slate-800 truncate">
-                            {activeScopeYears.length > 0 ? activeScopeYears.join(', ') : <span className="text-slate-400 font-medium text-lg">Hiçbir yılda kapsamda değil</span>}
-                        </p>
-                    </div>
+            {/* Hızlı durum kartları */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+                <div className="bg-white rounded-xl border border-slate-200 px-4 py-3.5">
+                    <div className="flex items-center gap-2 text-[11.5px] font-medium text-slate-500"><span className="w-2 h-2 rounded-sm bg-blue-600" />Kontrol kodu &amp; sıklığı</div>
+                    <p className="text-lg font-bold text-slate-900 mt-1.5 leading-tight break-words">{control.controlId}</p>
+                    <p className="text-[11.5px] text-slate-500 mt-0.5">{frequencyLabel[control.frequency] || control.frequency} · Ana kontrol · {activeScopeYears.length > 0 ? `${activeScopeYears.join(', ')} kapsamında` : 'hiçbir yılda kapsamda değil'}</p>
                 </div>
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center gap-4">
-                    <span className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${hasFinding ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                        {hasFinding ? (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                            </svg>
-                        ) : (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                        )}
-                    </span>
-                    <div className="min-w-0">
-                        <p className="text-xs font-medium text-slate-500">Mevcut Bulgu Durumu</p>
-                        <p className={`text-2xl font-bold tabular-nums truncate ${hasFinding ? 'text-rose-700' : 'text-emerald-700'}`}>
-                            {hasFinding ? `${control.linkedFindings.length} Açık Bulgu` : 'Bulgu Bulunmuyor'}
-                        </p>
-                    </div>
+                <div className="bg-white rounded-xl border border-slate-200 px-4 py-3.5">
+                    <div className="flex items-center gap-2 text-[11.5px] font-medium text-slate-500"><span className={`w-2 h-2 rounded-sm ${hasFinding ? 'bg-rose-600' : 'bg-emerald-600'}`} />Mevcut bulgu durumu</div>
+                    <p className={`text-xl font-bold mt-1.5 truncate ${hasFinding ? 'text-rose-700' : 'text-emerald-700'}`}>{hasFinding ? `${control.linkedFindings.length} açık bulgu` : 'Bulgu bulunmuyor'}</p>
+                    <p className="text-[11.5px] text-slate-500 mt-0.5">{control.linkedFindings.length} açık bulgu · {control.linkedFindings.reduce((n, f) => n + (f.actions?.length ?? 0), 0)} aksiyon</p>
                 </div>
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center gap-4">
-                    <span className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                    </span>
-                    <div className="min-w-0">
-                        <p className="text-xs font-medium text-slate-500">Son / Sonraki Test Tarihi</p>
-                        <p className="text-2xl font-bold tabular-nums text-slate-800 truncate">
-                            {formatDate(control.lastTestDate)} <span className="text-slate-400 font-normal">/</span> <span className="text-blue-600">{nextPlannedDate}</span>
-                        </p>
-                    </div>
+                <div className="bg-white rounded-xl border border-slate-200 px-4 py-3.5">
+                    <div className="flex items-center gap-2 text-[11.5px] font-medium text-slate-500"><span className="w-2 h-2 rounded-sm bg-slate-500" />Son test</div>
+                    <p className="text-xl font-bold text-slate-900 mt-1.5">{formatDate(control.lastTestDate)}</p>
+                    <p className="text-[11.5px] text-slate-500 mt-0.5">Sonuç: {effCfg?.label ?? 'Test edilmedi'}</p>
+                </div>
+                <div className="bg-white rounded-xl border border-slate-200 px-4 py-3.5">
+                    <div className="flex items-center gap-2 text-[11.5px] font-medium text-slate-500"><span className={`w-2 h-2 rounded-sm ${nextTest?.overdue ? 'bg-red-600' : 'bg-blue-600'}`} />Sonraki test</div>
+                    <p className={`text-xl font-bold mt-1.5 ${nextTest?.overdue ? 'text-red-600' : 'text-blue-600'}`}>{nextPlannedDate}</p>
+                    <p className={`text-[11.5px] mt-0.5 ${nextTest?.overdue ? 'text-red-500' : 'text-slate-500'}`}>{nextTest ? relDays(nextTest.days) : 'Planlı açık test yok'}</p>
                 </div>
             </div>
 
@@ -376,93 +359,100 @@ export default function ControlDetailPage() {
                 <div className="p-6">
                     {/* Tab 1: Özet ve Kapsam */}
                     {activeTab === 'summary' && (
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                            <div className="md:col-span-2 space-y-6">
-
-                                {/* 1. Kontrol Tanımı */}
-                                <div>
-                                    <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-2.5">Kontrol Tanımı (Kapsam)</h3>
-                                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
-                                        <p className="text-sm font-semibold text-slate-700 leading-relaxed">{control.description || 'Tanım girilmemiş.'}</p>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-2 space-y-5">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="border border-slate-200 rounded-xl p-4">
+                                        <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Kontrol tanımı (kapsam)</h3>
+                                        <p className="text-sm text-slate-800 leading-relaxed">{control.description || <span className="text-slate-400">Tanım girilmemiş.</span>}</p>
+                                    </div>
+                                    <div className="border border-slate-200 rounded-xl p-4">
+                                        <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Mehaz (yasal / düzenleyici dayanak)</h3>
+                                        <p className="text-sm text-slate-800 leading-relaxed">{control.mehaz || <span className="text-slate-400">Mehaz referansı tanımlanmamış.</span>}</p>
                                     </div>
                                 </div>
 
-                                {/* 2. Mehaz (Açıklama) */}
-                                <div>
-                                    <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-2.5">Mehaz (Yasal / Düzenleyici Dayanak)</h3>
-                                    <div className="bg-blue-50/20 border border-blue-100 rounded-xl p-5">
-                                        <p className="text-sm font-semibold text-slate-700 leading-relaxed">{control.mehaz || 'Mehaz referansı tanımlanmamış.'}</p>
+                                <div className={`rounded-xl border p-4 ${latestTest?.result === 'EFFECTIVE' ? 'bg-emerald-50 border-emerald-200' : latestTest?.result === 'INEFFECTIVE' ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
+                                    <div className="flex items-center gap-2 mb-1.5">
+                                        <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Son kontrol sonucu</h3>
+                                        {latestTest && effectivenessConfig[latestTest.result] && <StatusBadge variant={effectivenessConfig[latestTest.result].variant}>{effectivenessConfig[latestTest.result].label}</StatusBadge>}
+                                        {latestTest && <span className="text-xs text-slate-500">{formatDate(latestTest.testDate)}</span>}
                                     </div>
+                                    {latestTest ? (
+                                        <>
+                                            <p className="text-sm text-slate-800">{latestTest.notes || 'Detaylı kanıt açıklaması eklenmemiş.'}</p>
+                                            {latestTest.findings && <p className="text-xs font-semibold text-rose-700 mt-2">Hata/Bulgu: {latestTest.findings}</p>}
+                                        </>
+                                    ) : <p className="text-sm text-slate-500">Bu kontrol için henüz tamamlanmış bir test kaydı yok.</p>}
                                 </div>
 
-                                {/* 3. Son Kontrol Sonucu */}
                                 <div>
-                                    <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-2.5">Son Kontrol Sonucu (Değerlendirme)</h3>
-                                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
-                                        {latestTest ? (
-                                            <div className="space-y-2">
-                                                <div className="flex items-center gap-2">
-                                                    {effectivenessConfig[latestTest.result] && (
-                                                        <StatusBadge variant={effectivenessConfig[latestTest.result].variant}>
-                                                            {effectivenessConfig[latestTest.result].label}
-                                                        </StatusBadge>
-                                                    )}
-                                                    <span className="text-xs text-slate-400">Tarih: {formatDate(latestTest.testDate)}</span>
-                                                </div>
-                                                <p className="text-sm font-semibold text-slate-700 italic mt-2">
-                                                    &quot;{latestTest.notes || 'Detaylı kanıt açıklaması eklenmemiş.'}&quot;
-                                                </p>
-                                                {latestTest.findings && (
-                                                    <p className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded mt-2.5">
-                                                        Hata/Bulgu: {latestTest.findings}
-                                                    </p>
-                                                )}
-                                            </div>
-                                        ) : (
-                                            <p className="text-sm text-slate-400 italic">Bu kontrol için henüz tamamlanmış bir operasyonel test kaydı bulunmuyor.</p>
-                                        )}
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Son test geçmişi</h3>
+                                        <button type="button" onClick={() => setActiveTab('tests')} className="text-xs text-blue-600 hover:underline">Tümü ({control.linkedTestRecords.length})</button>
                                     </div>
+                                    {recentTests.length === 0 ? (
+                                        <p className="text-sm text-slate-400 border border-dashed border-slate-200 rounded-xl p-4">Tamamlanmış test yok.</p>
+                                    ) : (
+                                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                                            <table className="w-full text-sm">
+                                                <thead><tr className="bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500">
+                                                    <th className="px-3 py-2 font-semibold">Tarih</th><th className="px-3 py-2 font-semibold">Test eden</th><th className="px-3 py-2 font-semibold">Sonuç</th><th className="px-3 py-2 font-semibold">Bulgu</th>
+                                                </tr></thead>
+                                                <tbody>
+                                                    {recentTests.map(t => (
+                                                        <tr key={t.id} className="border-t border-slate-100">
+                                                            <td className="px-3 py-2.5 font-medium text-slate-800">{formatDate(t.testDate)}</td>
+                                                            <td className="px-3 py-2.5 text-slate-600">{t.tester}</td>
+                                                            <td className="px-3 py-2.5">{effectivenessConfig[t.result] ? <StatusBadge variant={effectivenessConfig[t.result].variant}>{effectivenessConfig[t.result].label}</StatusBadge> : <span className="text-slate-400">—</span>}</td>
+                                                            <td className="px-3 py-2.5 text-slate-600">{t.findings || 'Yok'}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
-                            {/* Sağ Blok: Sorumluluk ve Uyum */}
-                            <div className="space-y-6">
-                                <div>
-                                    <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-3">Süreç Sorumluları</h3>
-                                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
-                                        <div>
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Kontrol Sahibi (Assignee)</p>
-                                            <p className="font-bold text-sm text-slate-800 mt-0.5">{control.owner?.name || 'Atanmamış'}</p>
-                                            {control.owner?.department && <p className="text-xs text-slate-400 mt-0.5">{control.owner.department}</p>}
+                            {/* Sağ ray */}
+                            <div className="space-y-4">
+                                <div className="border border-slate-200 rounded-xl p-4">
+                                    <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3">Süreç sorumluları</h3>
+                                    {([
+                                        ['Kontrol sahibi (assignee)', control.owner?.name, control.owner?.department],
+                                        ['Test eden (icra sorumlusu)', control.testPerformer?.name, undefined],
+                                        ['Onaycı / 2. kontrolcü', control.reviewer?.name, undefined],
+                                    ] as Array<[string, string | undefined, string | undefined]>).map(([label, name, sub]) => (
+                                        <div key={label} className="flex items-center justify-between gap-3 py-2 border-t first:border-t-0 border-slate-100">
+                                            <div className="min-w-0">
+                                                <p className="text-[11px] text-slate-500">{label}</p>
+                                                <p className={`text-sm truncate ${name ? 'font-semibold text-slate-900' : 'text-slate-400'}`}>{name || 'Atanmamış'}</p>
+                                                {name && sub && <p className="text-[11px] text-slate-400 truncate">{sub}</p>}
+                                            </div>
+                                            {!name && <Link href={`/controls/${control.id}/edit`} className="text-xs font-semibold text-blue-600 hover:underline shrink-0">Ata</Link>}
                                         </div>
-                                        <div className="border-t border-slate-200/60 pt-3">
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Test Eden (İcra Sorumlusu)</p>
-                                            <p className="font-bold text-sm text-slate-800 mt-0.5">{control.testPerformer?.name || 'Belirlenmemiş'}</p>
-                                        </div>
-                                        <div className="border-t border-slate-200/60 pt-3">
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Onaycı / 2. Kontrolcü</p>
-                                            <p className="font-bold text-sm text-slate-800 mt-0.5">{control.reviewer?.name || 'Atanmamış'}</p>
-                                        </div>
-                                    </div>
+                                    ))}
                                 </div>
 
-                                <div>
-                                    <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-3">Organizasyonel Uyum</h3>
-                                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3.5 text-sm">
-                                        <div className="flex justify-between">
-                                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Genel Müdür Yardımcılığı:</span>
-                                            <span className="font-bold text-slate-700 text-xs">{control.gmy || 'Genel'}</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">İlgili Direktörlük:</span>
-                                            <span className="font-bold text-slate-700 text-xs">{control.directorate || 'BT Ağ Yönetimi'}</span>
-                                        </div>
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Durum:</span>
-                                            <StatusBadge variant={control.displayStatus === 'AKTIF' ? 'success' : 'neutral'}>
-                                                {control.displayStatus === 'AKTIF' ? 'Aktif Kontrol' : 'Pasif Kontrol'}
-                                            </StatusBadge>
-                                        </div>
+                                <div className="border border-slate-200 rounded-xl p-4 text-sm">
+                                    <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3">Test takvimi</h3>
+                                    {([
+                                        ['Son test', formatDate(control.lastTestDate), ''],
+                                        ['Sonraki test', nextPlannedDate, nextTest?.overdue ? 'text-red-600' : 'text-blue-600'],
+                                        ['Kalan süre', nextTest ? relDays(nextTest.days) : '—', nextTest?.overdue ? 'text-red-600' : ''],
+                                        ['Sıklık', frequencyLabel[control.frequency] || control.frequency, ''],
+                                    ] as Array<[string, string, string]>).map(([k, v, cls]) => (
+                                        <div key={k} className="flex justify-between py-1.5"><span className="text-slate-500">{k}</span><span className={`font-semibold text-slate-900 ${cls}`}>{v}</span></div>
+                                    ))}
+                                </div>
+
+                                <div className="border border-slate-200 rounded-xl p-4 text-sm">
+                                    <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3">Organizasyonel uyum</h3>
+                                    <div className="flex justify-between py-1.5"><span className="text-slate-500">Genel Müdür Yardımcılığı</span><span className="font-semibold text-slate-900">{control.gmy || '—'}</span></div>
+                                    <div className="flex justify-between py-1.5"><span className="text-slate-500">İlgili Direktörlük</span><span className="font-semibold text-slate-900">{control.directorate || '—'}</span></div>
+                                    <div className="flex justify-between items-center py-1.5"><span className="text-slate-500">Durum</span>
+                                        <StatusBadge variant={control.displayStatus === 'AKTIF' ? 'success' : 'neutral'}>{control.displayStatus === 'AKTIF' ? 'Aktif Kontrol' : 'Pasif Kontrol'}</StatusBadge>
                                     </div>
                                 </div>
                             </div>
