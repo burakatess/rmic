@@ -58,7 +58,7 @@ export class AuditsService {
                 },
                 skip,
                 take: limit,
-                orderBy: { createdAt: 'desc' },
+                orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
             }),
             this.prisma.auditPlan.count({ where }),
         ]);
@@ -186,7 +186,7 @@ export class AuditsService {
                 },
                 skip,
                 take: limit,
-                orderBy: { createdAt: 'desc' },
+                orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
             }),
             this.prisma.auditExecution.count({ where }),
         ]);
@@ -2887,7 +2887,7 @@ export class AuditsService {
                 },
                 skip,
                 take: limit,
-                orderBy: { createdAt: 'desc' },
+                orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
             }),
             this.prisma.findingFollowUp.count({ where }),
         ]);

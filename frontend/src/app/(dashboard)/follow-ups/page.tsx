@@ -188,7 +188,7 @@ export default function FollowUpsPage() {
     }, [activeFilters, searchQuery, quickFilter, page]);
 
     useEffect(() => { load(); }, [load]);
-    useEffect(() => { api.getUserOptions({ limit: 500 }).then(r => setUsers(r.data)).catch(() => setUsers([])); }, []);
+    useEffect(() => { api.getAllUserOptions().then(r => setUsers(r.data)).catch(() => setUsers([])); }, []);
 
     // ── KPIs ─────────────────────────────────────────────────────────────────
 

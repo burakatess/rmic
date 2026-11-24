@@ -61,7 +61,7 @@ export class RiskControlsService {
                     },
                     _count: { select: { risks: true, actions: true } },
                 },
-                orderBy: { createdAt: 'desc' },
+                orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
             }),
             this.prisma.riskControl.count({ where }),
         ]);

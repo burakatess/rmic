@@ -509,7 +509,7 @@ function RiskInventoryContent() {
             // risk analisti) /admin/users'a erişemez — bu 403 listeyi boşaltmamalı.
             const [risksRes, usersRes, catsRes, dirRes, gmyRes] = await Promise.all([
                 // Liste istemci tarafında filtrelenir; sunucu varsayılanı 20 kayıtla sınırlıydı.
-                api.getRisks({ limit: 500 }) as Promise<any>,
+                api.getRisks() as Promise<any>,
                 (api.getUserChoices() as Promise<any>).catch(() => []),
                 ((api.getRiskCategories?.() as Promise<any>) ?? Promise.resolve([])).catch(() => []),
                 api.getDirectorates({ isActive: 'true' }).catch(() => []) as Promise<any>,

@@ -50,7 +50,7 @@ export default function FindingRiskMappingPage() {
         setLoading(true);
         try {
             const [f, r, d] = await Promise.all([
-                api.getFindings({ limit: 500 }),
+                api.getFindings(),
                 api.getRisks(),
                 api.getDirectorates({ isActive: 'true' }),
             ]);

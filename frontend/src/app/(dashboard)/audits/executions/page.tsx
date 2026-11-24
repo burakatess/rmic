@@ -51,7 +51,7 @@ export default function AuditExecutionsPage() {
         setLoading(true);
         setError(null);
         try {
-            const res: any = await api.getAuditExecutions({ limit: 200 });
+            const res: any = await api.getAuditExecutions();
             setExecutions((res.data || []).map(mapExecution));
         } catch {
             setError('Denetim uygulamaları yüklenemedi.');

@@ -37,7 +37,8 @@ export interface ApprovalDecisionItem {
 }
 
 const RECENT_DAYS = 7;
-const LIMIT = 200;
+// Üst sınır YOK: bekleyen işler ve kararlar gerçek iş kuyruğudur (kontrolcünün atandığı kayıtlar);
+// sınır, 200'ü aşan kuyrukta işleri sessizce gizlerdi. Kararlar zaten 7 gün + düzeltme bekleyen retlerle sınırlı.
 
 const findingSelect = { select: { id: true, findingId: true, summary: true } } as const;
 const userName = (u?: { id: string; firstName: string | null; lastName: string | null } | null) =>
@@ -56,22 +57,18 @@ export class ApprovalsService {
                     id: true, actionId: true, description: true, submittedAt: true, updatedAt: true, finding: findingSelect,
                     firstController: { select: { id: true, firstName: true, lastName: true } },
                 },
-                take: LIMIT,
             }),
             this.prisma.action.findMany({
                 where: { secondControllerId: userId, deletionRequestedAt: { not: null }, deletedAt: null },
                 select: { id: true, actionId: true, description: true, deletionRequestedAt: true, deletionRequestedById: true, deletionReason: true, finding: findingSelect },
-                take: LIMIT,
             }),
             this.prisma.findingFollowUp.findMany({
                 where: { secondControllerId: userId, status: 'TAMAMLANDI', approvalStatus: 'BEKLIYOR', result: { not: null }, deletedAt: null },
                 select: { id: true, followUpId: true, explanation: true, evaluatorId: true, evaluatedAt: true, updatedAt: true, result: true, finding: findingSelect },
-                take: LIMIT,
             }),
             this.prisma.findingFollowUp.findMany({
                 where: { secondControllerId: userId, deletionRequestedAt: { not: null }, deletedAt: null },
                 select: { id: true, followUpId: true, deletionRequestedAt: true, deletionRequestedById: true, deletionReason: true, finding: findingSelect },
-                take: LIMIT,
             }),
         ]);
 
@@ -150,7 +147,6 @@ export class ApprovalsService {
                     ],
                 },
                 select: actionSelect,
-                take: LIMIT,
             }),
             this.prisma.findingFollowUp.findMany({
                 where: {
@@ -164,7 +160,6 @@ export class ApprovalsService {
                     ],
                 },
                 select: fuSelect,
-                take: LIMIT,
             }),
         ]);
 
