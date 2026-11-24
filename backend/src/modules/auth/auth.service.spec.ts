@@ -5,6 +5,7 @@ import { UnauthorizedException, ConflictException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../../prisma';
+import { LdapService } from '../ldap/ldap.service';
 
 // Mock bcrypt
 jest.mock('bcrypt', () => ({
@@ -17,6 +18,7 @@ describe('AuthService', () => {
     let service: AuthService;
     let prisma: Record<string, any>;
     let jwtService: JwtService;
+    let ldap: { authenticate: jest.Mock; settingsOf: jest.Mock };
 
     const mockUser = {
         id: 'user-1',
@@ -29,10 +31,14 @@ describe('AuthService', () => {
     };
 
     beforeEach(async () => {
+        const findUser = jest.fn();
         prisma = {
             user: {
-                findUnique: jest.fn(),
+                // validateUser e-posta için findFirst (büyük/küçük harf duyarsız) kullanır; aynı sahte.
+                findUnique: findUser,
+                findFirst: findUser,
                 create: jest.fn(),
+                update: jest.fn().mockResolvedValue({}),
             },
             refreshToken: {
                 findUnique: jest.fn(),
@@ -48,6 +54,7 @@ describe('AuthService', () => {
         const module: TestingModule = await Test.createTestingModule({
             providers: [
                 AuthService,
+                { provide: LdapService, useValue: (ldap = { authenticate: jest.fn(), settingsOf: jest.fn().mockReturnValue({}) }) },
                 { provide: PrismaService, useValue: withTx(prisma) },
                 {
                     provide: JwtService,
@@ -87,9 +94,10 @@ describe('AuthService', () => {
             const result = await service.validateUser('admin@grc.com', 'password123');
 
             expect(result).toEqual(mockUser);
-            expect(prisma.user.findUnique).toHaveBeenCalledWith({
-                where: { email: 'admin@grc.com' },
-                include: { role: true },
+            // E-posta büyük/küçük harf duyarsız eşlenir.
+            expect(prisma.user.findFirst).toHaveBeenCalledWith({
+                where: { email: { equals: 'admin@grc.com', mode: 'insensitive' } },
+                include: { role: true, ldapConnection: true },
             });
         });
 
@@ -118,7 +126,7 @@ describe('AuthService', () => {
             const logged = prisma.auditLog.create.mock.calls[0][0].data;
             expect(logged).toEqual(expect.objectContaining({
                 action: 'LOGIN_FAILED', entityType: 'User', entityId: 'user-1',
-                newValue: { reason: 'INVALID_PASSWORD', email: 'a***@grc.com' },
+                newValue: { reason: 'INVALID_PASSWORD', authSource: 'LOCAL', email: 'a***@grc.com' },
             }));
             expect(JSON.stringify(logged)).not.toContain('Yanlis-Parola!');
             expect(JSON.stringify(logged)).not.toContain('admin@grc.com');
@@ -129,7 +137,7 @@ describe('AuthService', () => {
             prisma.auditLog.create.mockRejectedValueOnce(new Error('db down'));
             await expect(service.validateUser('x@y.com', 'p')).rejects.toThrow(UnauthorizedException);
             expect(prisma.auditLog.create.mock.calls[0][0].data).toEqual(expect.objectContaining({
-                action: 'LOGIN_FAILED', entityId: 'UNKNOWN', newValue: { reason: 'UNKNOWN_USER', email: 'x***@y.com' },
+                action: 'LOGIN_FAILED', entityId: 'UNKNOWN', newValue: { reason: 'UNKNOWN_USER', authSource: 'LOCAL', email: 'x***@y.com' },
             }));
         });
 
@@ -311,6 +319,36 @@ describe('AuthService', () => {
             const log = prisma.auditLog.create.mock.calls[0][0].data;
             expect(log).toEqual(expect.objectContaining({ action: 'CHANGE_PASSWORD', newValue: { event: 'CHANGE_PASSWORD', revokedSessions: 3 } }));
             expect(JSON.stringify(log)).not.toContain('Yeni-Parola-456!');
+        });
+    });
+
+    describe('LDAP kullanıcısı', () => {
+        const ldapUser = { ...mockUser, id: 'u-l', email: 'ayse@kurum.local', authSource: 'LDAP', ldapUsername: 'ayse', ldapDn: 'uid=ayse,ou=people,dc=k', ldapConnection: { id: 'c1', isActive: true } };
+
+        it('şifre LDAP\'ta doğrulanır, yerel bcrypt denenmez; kullanıcı adıyla da girilir', async () => {
+            prisma.user.findFirst.mockResolvedValue(ldapUser);
+            ldap.authenticate.mockResolvedValue({ ok: true, dn: ldapUser.ldapDn, entry: {} });
+            await expect(service.validateUser('ayse', 'Dizin!123')).resolves.toMatchObject({ id: 'u-l' });
+            expect(ldap.authenticate).toHaveBeenCalledWith({}, 'ayse', 'Dizin!123', ldapUser.ldapDn);
+            expect(bcrypt.compare).not.toHaveBeenCalled();
+        });
+
+        it('LDAP yanlış şifre veya sunucu erişilemez → aynı 401; nedeni denetim izinde', async () => {
+            prisma.user.findFirst.mockResolvedValue(ldapUser);
+            ldap.authenticate.mockResolvedValueOnce({ ok: false, reason: 'INVALID_PASSWORD' });
+            await expect(service.validateUser('ayse', 'x')).rejects.toThrow(UnauthorizedException);
+            ldap.authenticate.mockResolvedValueOnce({ ok: false, reason: 'UNAVAILABLE' });
+            await expect(service.validateUser('ayse', 'x')).rejects.toThrow(UnauthorizedException);
+            const reasons = prisma.auditLog.create.mock.calls.map((c: any[]) => c[0].data.newValue.reason);
+            expect(reasons).toEqual(['INVALID_PASSWORD', 'LDAP_UNAVAILABLE']);
+        });
+
+        it('pasif LDAP bağlantısındaki kullanıcı giremez; LDAP kullanıcısı şifresini uygulamadan değiştiremez', async () => {
+            prisma.user.findFirst.mockResolvedValue({ ...ldapUser, ldapConnection: { id: 'c1', isActive: false } });
+            await expect(service.validateUser('ayse', 'x')).rejects.toThrow(UnauthorizedException);
+            expect(ldap.authenticate).not.toHaveBeenCalled();
+            prisma.user.findUnique.mockResolvedValue(ldapUser);
+            await expect(service.changePassword('u-l', { currentPassword: 'a', newPassword: 'b' })).rejects.toThrow('LDAP');
         });
     });
 });

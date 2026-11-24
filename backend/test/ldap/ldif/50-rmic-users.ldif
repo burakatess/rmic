@@ -1,0 +1,37 @@
+# Test dizini: dc=rmic,dc=test — yalnız izole e2e testleri içindir (gerçek kişi verisi yok).
+dn: dc=rmic,dc=test
+objectClass: dcObject
+objectClass: organization
+dc: rmic
+o: RMIC Test
+
+dn: ou=people,dc=rmic,dc=test
+objectClass: organizationalUnit
+ou: people
+
+dn: uid=ayse.ldap,ou=people,dc=rmic,dc=test
+objectClass: inetOrgPerson
+uid: ayse.ldap
+cn: Ayşe Dizin
+givenName: Ayşe
+sn: Dizin
+mail: ayse.ldap@rmic.test
+departmentNumber: Bilgi Güvenliği
+userPassword: Dizin!2026
+
+dn: uid=mehmet.ldap,ou=people,dc=rmic,dc=test
+objectClass: inetOrgPerson
+uid: mehmet.ldap
+cn: Mehmet Dizin
+givenName: Mehmet
+sn: Dizin
+mail: mehmet.ldap@rmic.test
+userPassword: Dizin!2026
+
+dn: uid=noemail.ldap,ou=people,dc=rmic,dc=test
+objectClass: inetOrgPerson
+uid: noemail.ldap
+cn: Postasız Kişi
+givenName: Postasız
+sn: Kişi
+userPassword: Dizin!2026

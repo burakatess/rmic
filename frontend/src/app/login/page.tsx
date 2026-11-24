@@ -91,8 +91,10 @@ export default function LoginPage() {
                 <div className="bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-2xl">
                     <form onSubmit={handleSubmit} className="space-y-5">
                         <Input
-                            label="E-posta Adresi"
-                            type="email"
+                            label="E-posta veya kullanıcı adı"
+                            type="text"
+                            autoComplete="username"
+                            hint="LDAP kullanıcıları kurum kullanıcı adı ve şifresiyle girebilir."
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             placeholder="ornek@sirket.com"

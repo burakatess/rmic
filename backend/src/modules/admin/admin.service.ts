@@ -25,7 +25,7 @@ export class AdminService {
 
         const users = await this.prisma.user.findMany({
             where,
-            include: { role: true, directorateMemberships: { select: { directorateId: true } } },
+            include: { role: true, directorateMemberships: { select: { directorateId: true } }, ldapConnection: { select: { id: true, name: true } } },
             orderBy: { createdAt: 'desc' },
         });
 
@@ -205,6 +205,9 @@ export class AdminService {
     }
 
     async resetPassword(id: string, newPassword: string, resetBy: string) {
+        const target = await this.prisma.user.findUnique({ where: { id }, select: { authSource: true } });
+        if (!target) throw new NotFoundException('User not found');
+        if (target.authSource === 'LDAP') throw new BadRequestException('LDAP kullanıcısının şifresi kurum dizininde yönetilir; uygulamadan sıfırlanamaz.');
         const passwordHash = await bcrypt.hash(newPassword, 10);
         await this.prisma.$transaction(async (tx) => {
             await tx.user.update({ where: { id }, data: { passwordHash } });

@@ -71,3 +71,6 @@ scratchpad/
 
 # /brag tanıtım videosu çıktıları (yerel)
 brag-output*/
+
+# Yerel test LDAP sertifikaları (setup-ldap-test.sh üretir)
+backend/test/ldap/certs/

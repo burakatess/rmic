@@ -40,6 +40,14 @@ describe('E2E (Auth Flow & Risks)', () => {
           }
           return null;
         }),
+        // Giriş e-postayı büyük/küçük harf duyarsız findFirst ile arar (LDAP kullanıcı adı da desteklenir).
+        findFirst: jest.fn().mockImplementation(({ where }) => {
+          const e = where?.email?.equals ?? where?.email;
+          if (typeof e === 'string' && e.toLowerCase() === 'admin@grc.com') {
+            return { id: 'e2e-user-1', email: 'admin@grc.com', passwordHash, firstName: 'Admin', lastName: 'E2E', isActive: true, authSource: 'LOCAL', role: { id: 'r1', name: 'SYSTEM_ADMIN', permissions: [] } };
+          }
+          return null;
+        }),
       },
       refreshToken: {
         create: jest.fn().mockResolvedValue({}),

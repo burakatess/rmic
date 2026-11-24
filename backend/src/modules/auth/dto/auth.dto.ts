@@ -1,13 +1,16 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { MaxLength, IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
 
 export class LoginDto {
-    @IsEmail()
-    @IsNotEmpty()
-    email: string;
-
+    /** E-posta veya (LDAP kullanıcıları için) dizin kullanıcı adı. Alan adı geriye uyumluluk için `email`. */
     @IsString()
     @IsNotEmpty()
-    @MinLength(6)
+    @MaxLength(320)
+    email: string;
+
+    // Şifre kuralı (uzunluk) şifre belirlenirken uygulanır; LDAP şifresi kurum politikasına tabidir.
+    @IsString()
+    @IsNotEmpty()
+    @MaxLength(512)
     password: string;
 }
 
