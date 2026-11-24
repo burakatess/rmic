@@ -10,6 +10,7 @@ import {
 } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
 import { AnnualPlanStepper, PlanDecisionDialog, PlanDecisionHistory } from '@/components/controls/AnnualPlanLifecycle';
+import { PendingApprovalNotice } from '@/components/approvals/PendingApprovalNotice';
 import { AnnualPlanAssignmentDecisions, hasUnresolvedPlanConflicts } from '@/components/controls/AnnualPlanAssignmentDecisions';
 import { PermissionGate } from '@/components/auth';
 import { useToast } from '@/components/ui/Toast';
@@ -696,6 +697,17 @@ function AnnualPlanPageContent() {
                     {workspace.decisionNote && (workspace.draftStatus === 'CHANGES_REQUESTED' || workspace.draftStatus === 'APPROVED' || workspace.draftStatus === 'PENDING_APPROVAL') && (
                         <p className="text-xs text-slate-600"><span className="font-semibold">Son karar notu:</span> {workspace.decisionNote}</p>
                     )}
+                </div>
+            )}
+            {workspace?.draftStatus === 'PENDING_APPROVAL' && workspace.pendingApproval && (
+                <div className="mb-5">
+                    <PendingApprovalNotice
+                        title={`${year} Yıllık Planı onay bekliyor`}
+                        waitingFor={workspace.pendingApproval.approvers}
+                        sentBy={workspace.pendingApproval.submittedBy?.name}
+                        sentAt={workspace.pendingApproval.submittedAt}
+                        hint="Planı gönderen kişi kendi planını onaylayamaz; yetkili başka bir yönetici onaylar."
+                    />
                 </div>
             )}
             {workspace && <PlanDecisionHistory year={year} refreshKey={`${workspace.draftStatus}:${workspace.draftRevision}:${workspace.draftLastAppliedAt ?? ''}`} />}

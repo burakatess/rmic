@@ -13,6 +13,7 @@ import { useToast } from '@/components/ui/Toast';
 import { PermissionGate, useAuth } from '@/components/auth';
 import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import AddActionModal from '@/components/modals/AddActionModal';
+import { PendingApprovalNotice } from '@/components/approvals/PendingApprovalNotice';
 import { FindingFollowUpModal } from '@/components/modals/FindingFollowUpModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -50,7 +51,7 @@ const NO_FINDING_CAPS: FindingCapabilities = {
 const NO_ACTION_CAPS: ActionCapabilities = { canEdit: false, canComplete: false, canExtend: false, canManageAttachments: false };
 interface FollowUp {
     id: string; followUpId: string; status: string; actionId?: string | null;
-    assigneeId?: string | null; secondControllerId?: string | null; approvalStatus?: string | null; evaluatorId?: string | null;
+    assigneeId?: string | null; secondControllerId?: string | null; secondController?: Person | null; evaluatedAt?: string | null; approvalStatus?: string | null; evaluatorId?: string | null;
     result?: string | null; resolutionOutcome?: string | null; newFollowUpDate?: string | null;
     explanation?: string | null; rejectionReason?: string | null; birimCevabi?: string | null; currentStatusDetail?: string | null;
     internalControlAssessment?: string | null; targetResolutionDate?: string | null;
@@ -1001,6 +1002,16 @@ export default function FindingDetailPage() {
                                                         {fu.newFollowUpDate && <span className="text-amber-600">Yeni: {fmt(fu.newFollowUpDate)}</span>}
                                                         <span>{fmtDatetime(fu.createdAt)}</span>
                                                     </div>
+                                                    {(isPendingApproval || fuDeletionPending) && !fuDeleted && (
+                                                        <div className="mt-2.5 max-w-xl">
+                                                            <PendingApprovalNotice
+                                                                testId={fuDeletionPending ? 'pending-deletion' : 'pending-approval'}
+                                                                title={fuDeletionPending ? 'Silme talebi onay bekliyor' : 'Takip değerlendirmesi onay bekliyor'}
+                                                                waitingFor={fu.secondController ? [{ name: personName(fu.secondController), role: '2. kontrolcü' }] : []}
+                                                                sentAt={(fuDeletionPending ? fu.deletionRequestedAt : fu.evaluatedAt) ?? null}
+                                                            />
+                                                        </div>
+                                                    )}
                                                 </div>
                                                 <div className="flex items-center gap-2">
                                                     {isPendingApproval && fu.secondControllerId === user?.id && (
