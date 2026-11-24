@@ -48,7 +48,7 @@ describe('E2E — Denetim izi bağlamı ve sayfalama', () => {
         expect(log!.ipAddress).toBeTruthy();
         expect(log!.ipAddress).not.toBe('203.0.113.99'); // güvenilmeyen proxy başlığı
         expect(log!.entityId).toBe(adminId);
-        expect(log!.newValue).toEqual({ reason: 'INVALID_PASSWORD', email: 'a***@e2e.local' });
+        expect(log!.newValue).toEqual({ reason: 'INVALID_PASSWORD', authSource: 'LOCAL', email: 'a***@e2e.local' });
         expect(JSON.stringify(log)).not.toContain('Yanlis-Parola-123');
     });
 

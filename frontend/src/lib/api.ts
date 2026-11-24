@@ -65,6 +65,19 @@ export interface WorkflowDecisionItem {
     link: string;
 }
 
+/** LDAP bağlantısı (servis hesabı şifresi asla dönmez; yalnız tanımlı mı). */
+export interface LdapConnection {
+    id: string; name: string; host: string; protocol: 'LDAP' | 'LDAPS'; port: number; startTls: boolean; tlsRejectUnauthorized: boolean;
+    caCertificate: string | null; baseDn: string; bindDn: string | null; hasBindPassword: boolean; userFilter: string;
+    usernameAttribute: string; emailAttribute: string; firstNameAttribute: string; lastNameAttribute: string; departmentAttribute: string | null;
+    timeoutMs: number; isActive: boolean; lastTestAt: string | null; lastTestOk: boolean | null; lastTestMessage: string | null; userCount?: number;
+}
+export type LdapConnectionInput = Omit<LdapConnection, 'id' | 'hasBindPassword' | 'lastTestAt' | 'lastTestOk' | 'lastTestMessage' | 'userCount' | 'caCertificate' | 'bindDn' | 'departmentAttribute'> & {
+    caCertificate?: string; bindDn?: string; departmentAttribute?: string; bindPassword?: string; clearBindPassword?: boolean;
+};
+export interface LdapDirectoryUser { dn: string; username: string; email: string | null; firstName: string; lastName: string; department: string | null; alreadyExists: boolean; existingUserId: string | null }
+export interface LdapTestResult { ok: boolean; message: string; ms: number }
+
 type PersonRef = { id: string; firstName: string; lastName: string } | null;
 /** Takip çalışması detayı (GET /follow-ups/:id) — kaynak aksiyon planı doğrudan okunur. */
 export interface FollowUpDetail {
@@ -1109,6 +1122,33 @@ class ApiClient {
             method: 'PUT',
             body: data
         });
+    }
+
+    // ── LDAP (yalnız sistem yöneticisi) ─────────────────────────────────────
+    async getLdapConnections() {
+        return this.request<LdapConnection[]>('/admin/ldap-connections');
+    }
+    async createLdapConnection(data: LdapConnectionInput) {
+        return this.request<LdapConnection>('/admin/ldap-connections', { method: 'POST', body: data });
+    }
+    async updateLdapConnection(id: string, data: LdapConnectionInput) {
+        return this.request<LdapConnection>(`/admin/ldap-connections/${id}`, { method: 'PUT', body: data });
+    }
+    async deleteLdapConnection(id: string) {
+        return this.request(`/admin/ldap-connections/${id}`, { method: 'DELETE' });
+    }
+    async testLdapConnection(id: string) {
+        return this.request<LdapTestResult>(`/admin/ldap-connections/${id}/test`, { method: 'POST' });
+    }
+    /** Kaydetmeden, formdaki ayarlarla test (şifre boşsa kayıtlı bağlantının şifresi). */
+    async testLdapDraft(data: LdapConnectionInput & { connectionId?: string }) {
+        return this.request<LdapTestResult>('/admin/ldap-connections/test', { method: 'POST', body: data });
+    }
+    async searchLdapDirectory(id: string, q: string) {
+        return this.request<LdapDirectoryUser[]>(`/admin/ldap-connections/${id}/search${buildQuery({ q })}`);
+    }
+    async createLdapUser(data: { connectionId: string; username: string; roleId: string; department?: string }) {
+        return this.request<{ id: string; email: string }>('/admin/users/ldap', { method: 'POST', body: data });
     }
 
     async getFollowUpDetail(id: string) {

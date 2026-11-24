@@ -21,6 +21,13 @@ model User {
   lastName     String
   department   String?
   isActive     Boolean  @default(true)
+  // Kimlik kaynağı: LOCAL (bcrypt şifre) veya LDAP (şifre dizinde doğrulanır; passwordHash kullanılmaz).
+  // LDAP kullanıcıları yönetici tarafından dizinden seçilerek eklenir (ilk girişte otomatik oluşturma yok).
+  authSource       AuthSource      @default(LOCAL)
+  ldapConnection   LdapConnection? @relation(fields: [ldapConnectionId], references: [id], onDelete: SetNull)
+  ldapConnectionId String?
+  ldapDn           String? // dizindeki ayırt edici ad (son bilinen)
+  ldapUsername     String? // girişte kullanılan dizin kullanıcı adı (uid / sAMAccountName)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -63,6 +70,8 @@ model User {
   findingsAsSecondController Finding[]         @relation("FindingSecondController")
   actionsAsFirstController   Action[]          @relation("ActionFirstController")
   actionsAsSecondController  Action[]          @relation("ActionSecondController")
+
+  @@unique([ldapConnectionId, ldapUsername])
 }
 
 model Role {
@@ -3290,4 +3299,48 @@ model WorkflowTransition {
   createdAt  DateTime @default(now())
 
   @@index([entityType, entityId, createdAt])
+}
+
+
+enum AuthSource {
+  LOCAL
+  LDAP
+}
+
+enum LdapProtocol {
+  LDAP // düz metin (varsayılan port 389); StartTLS ile şifrelenebilir
+  LDAPS // TLS üzerinde LDAP (varsayılan port 636)
+}
+
+/// LDAP / Active Directory bağlantısı. Birden fazla tanımlanabilir; LDAP kullanıcısı eklendiği
+/// bağlantıya bağlıdır. Servis hesabı şifresi AES-256-GCM ile şifreli saklanır (SETTINGS_ENCRYPTION_KEY)
+/// ve API yanıtlarında asla dönmez.
+model LdapConnection {
+  id                    String       @id @default(cuid())
+  name                  String       @unique
+  host                  String
+  protocol              LdapProtocol @default(LDAPS)
+  port                  Int          @default(636)
+  startTls              Boolean      @default(false) // yalnız LDAP protokolünde
+  tlsRejectUnauthorized Boolean      @default(true) // sertifika doğrulaması (kapatmak yalnız test içindir)
+  caCertificate         String?      @db.Text // kurum içi CA (PEM), isteğe bağlı
+  baseDn                String
+  bindDn                String? // servis hesabı (dizinde arama için); boşsa anonim
+  bindPasswordEnc       String?      @db.Text
+  // Kullanıcı arama filtresi; {{username}} yer tutucusu kaçışlanarak doldurulur.
+  userFilter            String       @default("(&(objectClass=person)(|(uid={{username}})(sAMAccountName={{username}})(mail={{username}})))")
+  usernameAttribute     String       @default("uid")
+  emailAttribute        String       @default("mail")
+  firstNameAttribute    String       @default("givenName")
+  lastNameAttribute     String       @default("sn")
+  departmentAttribute   String?      @default("department")
+  timeoutMs             Int          @default(8000)
+  isActive              Boolean      @default(true)
+  lastTestAt            DateTime?
+  lastTestOk            Boolean?
+  lastTestMessage       String?
+  createdById           String?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  users                 User[]
 }

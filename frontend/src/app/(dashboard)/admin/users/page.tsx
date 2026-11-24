@@ -8,6 +8,7 @@ import {
 } from '@/components/ui';
 import type { ColumnDef, AdvancedFilterField } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
+import { LdapUserImport } from '@/components/admin/LdapUserImport';
 
 interface User {
     id: string;
@@ -22,6 +23,9 @@ interface User {
         name: string;
     };
     directorateMemberships?: { directorateId: string }[];
+    authSource?: 'LOCAL' | 'LDAP';
+    ldapUsername?: string | null;
+    ldapConnection?: { id: string; name: string } | null;
 }
 
 interface Role {
@@ -55,9 +59,14 @@ export default function UsersPage() {
     const [search, setSearch] = useState('');
     const [roleFilter, setRoleFilter] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
+    // Kimlik kaynağı (Yerel / LDAP) ve LDAP bağlantısı süzgeçleri.
+    const [sourceFilter, setSourceFilter] = useState('');
+    const [connectionFilter, setConnectionFilter] = useState('');
     const [page, setPage] = useState(1);
     const pageSize = 20;
     const [showModal, setShowModal] = useState(false);
+    // Yeni kullanıcı iki yöntemle: yerel (şifre uygulamada) veya LDAP (dizinden seçilir).
+    const [createMode, setCreateMode] = useState<'LOCAL' | 'LDAP'>('LOCAL');
     const [editingUser, setEditingUser] = useState<User | null>(null);
     const [deletingUser, setDeletingUser] = useState<User | null>(null);
     const [deleting, setDeleting] = useState(false);
@@ -213,13 +222,24 @@ export default function UsersPage() {
             const q = search.toLowerCase();
             if (!u.email.toLowerCase().includes(q) &&
                 !u.firstName.toLowerCase().includes(q) &&
-                !u.lastName.toLowerCase().includes(q)) return false;
+                !u.lastName.toLowerCase().includes(q) &&
+                !(u.ldapUsername ?? '').toLowerCase().includes(q)) return false;
         }
         if (roleFilter && u.role.id !== roleFilter) return false;
         if (statusFilter === 'active' && !u.isActive) return false;
         if (statusFilter === 'passive' && u.isActive) return false;
+        if (sourceFilter && (u.authSource ?? 'LOCAL') !== sourceFilter) return false;
+        if (connectionFilter && u.ldapConnection?.id !== connectionFilter) return false;
         return true;
-    }), [users, search, roleFilter, statusFilter]);
+    }), [users, search, roleFilter, statusFilter, sourceFilter, connectionFilter]);
+
+    // Listede kullanılan LDAP bağlantıları (süzgeç seçenekleri).
+    const ldapConnections = useMemo(() => {
+        const m = new Map<string, string>();
+        users.forEach(u => { if (u.ldapConnection) m.set(u.ldapConnection.id, u.ldapConnection.name); });
+        return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1], 'tr'));
+    }, [users]);
+    const ldapCount = users.filter(u => u.authSource === 'LDAP').length;
 
     const paginated = useMemo(
         () => filteredUsers.slice((page - 1) * pageSize, page * pageSize),
@@ -242,9 +262,24 @@ export default function UsersPage() {
                 { value: 'passive', label: 'Pasif' },
             ],
         },
+        {
+            type: 'select', key: 'source', label: 'Kaynak',
+            value: sourceFilter,
+            onChange: (v) => { setSourceFilter(v); if (v !== 'LDAP') setConnectionFilter(''); setPage(1); },
+            options: [
+                { value: 'LOCAL', label: 'Yerel' },
+                { value: 'LDAP', label: 'LDAP' },
+            ],
+        },
+        ...(ldapConnections.length > 0 ? [{
+            type: 'select' as const, key: 'ldapConnection', label: 'LDAP bağlantısı',
+            value: connectionFilter,
+            onChange: (v: string) => { setConnectionFilter(v); if (v) setSourceFilter('LDAP'); setPage(1); },
+            options: ldapConnections.map(([id, name]) => ({ value: id, label: name })),
+        }] : []),
     ];
 
-    const clearAll = () => { setSearch(''); setRoleFilter(''); setStatusFilter(''); setPage(1); };
+    const clearAll = () => { setSearch(''); setRoleFilter(''); setStatusFilter(''); setSourceFilter(''); setConnectionFilter(''); setPage(1); };
 
     const columns: ColumnDef<User>[] = [
         {
@@ -261,6 +296,12 @@ export default function UsersPage() {
         {
             key: 'email', header: 'E-posta', defaultWidth: 220,
             render: (u) => <span className="text-sm text-slate-600">{u.email}</span>,
+        },
+        {
+            key: 'source', header: 'Kaynak', defaultWidth: 150,
+            render: (u) => u.authSource === 'LDAP'
+                ? <span className="flex flex-col"><StatusBadge variant="info">LDAP</StatusBadge><span className="text-[11px] text-slate-500 mt-0.5 truncate" title={u.ldapUsername ?? ''}>{u.ldapConnection?.name ?? 'bağlantı silindi'} · {u.ldapUsername}</span></span>
+                : <StatusBadge variant="neutral">Yerel</StatusBadge>,
         },
         {
             key: 'department', header: 'Departman', defaultWidth: 150,
@@ -282,7 +323,7 @@ export default function UsersPage() {
             key: 'ops', header: 'İşlemler', defaultWidth: 150,
             render: (u) => (
                 <div className="flex items-center gap-1">
-                    <button
+                    {u.authSource !== 'LDAP' && <button
                         onClick={() => { setResettingPasswordUser(u); setNewPassword(''); }}
                         className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                         title="Şifre Sıfırla" aria-label="Şifre Sıfırla"
@@ -290,7 +331,7 @@ export default function UsersPage() {
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                         </svg>
-                    </button>
+                    </button>}
                     <button
                         onClick={() => handleEditClick(u)}
                         className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
@@ -346,7 +387,7 @@ export default function UsersPage() {
             />
 
             {/* KPI'lar */}
-            <KpiGrid columns={4}>
+            <KpiGrid columns={5}>
                 <KpiCard title="Toplam Kullanıcı" value={users.length} variant="default" />
                 <KpiCard title="Aktif" value={users.filter(u => u.isActive).length} variant="success"
                     active={statusFilter === 'active'}
@@ -354,7 +395,10 @@ export default function UsersPage() {
                 <KpiCard title="Pasif" value={users.filter(u => !u.isActive).length} variant="critical"
                     active={statusFilter === 'passive'}
                     onClick={() => { setStatusFilter(statusFilter === 'passive' ? '' : 'passive'); setPage(1); }} />
-                <KpiCard title="Rol Sayısı" value={roles.length} variant="primary" />
+                <KpiCard title="LDAP Kullanıcısı" value={ldapCount} variant="primary"
+                    active={sourceFilter === 'LDAP'}
+                    onClick={() => { setSourceFilter(sourceFilter === 'LDAP' ? '' : 'LDAP'); setConnectionFilter(''); setPage(1); }} />
+                <KpiCard title="Rol Sayısı" value={roles.length} variant="default" />
             </KpiGrid>
 
             {/* Filtre paneli */}
@@ -363,7 +407,7 @@ export default function UsersPage() {
                 onSearchChange={(v) => { setSearch(v); setPage(1); }}
                 searchPlaceholder="Kullanıcı ara..."
                 fields={advancedFields}
-                activeCount={[roleFilter, statusFilter].filter(Boolean).length}
+                activeCount={[roleFilter, statusFilter, sourceFilter, connectionFilter].filter(Boolean).length}
                 onClearAll={clearAll}
             />
 
@@ -383,7 +427,19 @@ export default function UsersPage() {
             />
 
             {/* Create User Modal */}
-            <Modal open={showModal} onClose={() => setShowModal(false)} title="Yeni Kullanıcı">
+            <Modal open={showModal} onClose={() => setShowModal(false)} title="Yeni Kullanıcı" size="lg">
+                <div role="tablist" aria-label="Kullanıcı ekleme yöntemi" className="grid grid-cols-2 gap-1 p-1 mb-4 bg-slate-100 rounded-lg">
+                    {([['LOCAL', 'Yerel kullanıcı', 'Şifre uygulamada tutulur'], ['LDAP', "LDAP'tan ekle", 'Kurum dizininden seçilir']] as const).map(([k, l, d]) => (
+                        <button key={k} type="button" role="tab" aria-selected={createMode === k} onClick={() => setCreateMode(k)}
+                            className={`rounded-md px-3 py-2 text-left transition-colors ${createMode === k ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
+                            <span className="block text-sm font-semibold">{l}</span>
+                            <span className="block text-[11px]">{d}</span>
+                        </button>
+                    ))}
+                </div>
+                {createMode === 'LDAP' ? (
+                    <LdapUserImport roles={roles} roleLabel={(n) => roleLabels[n] || n} onCancel={() => setShowModal(false)} onCreated={() => { setShowModal(false); loadData(); }} />
+                ) : (
                 <form onSubmit={handleCreateUser} className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -457,6 +513,7 @@ export default function UsersPage() {
                         <Button type="submit" variant="primary">Oluştur</Button>
                     </div>
                 </form>
+                )}
             </Modal>
 
             {/* Edit User Modal */}

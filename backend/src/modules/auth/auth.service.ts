@@ -1,9 +1,11 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma';
 import { LoginDto, RegisterDto, TokenResponseDto } from './dto';
+import { LdapService } from '../ldap/ldap.service';
 
 @Injectable()
 export class AuthService {
@@ -11,22 +13,49 @@ export class AuthService {
         private prisma: PrismaService,
         private jwtService: JwtService,
         private configService: ConfigService,
+        private ldap: LdapService,
     ) { }
 
-    async validateUser(email: string, password: string) {
-        const user = await this.prisma.user.findUnique({
-            where: { email },
-            include: { role: true },
-        });
+    /**
+     * Giriş: tanımlayıcı e-posta veya (LDAP kullanıcısı için) dizin kullanıcı adıdır.
+     * - LOCAL: bcrypt ile yerel şifre.
+     * - LDAP : şifre kullanıcının bağlı olduğu LDAP bağlantısında bind ile doğrulanır; yerel şifre
+     *   hiç denenmez. Yalnız yöneticinin eklediği LDAP kullanıcıları girebilir (otomatik oluşturma yok).
+     * Hata yanıtı her durumda aynıdır (kullanıcı/kaynak bilgisi sızdırılmaz); ayrıntı denetim izinde.
+     */
+    async validateUser(identifier: string, password: string) {
+        const id = identifier.trim();
+        const user = (id.includes('@') ? await this.prisma.user.findFirst({ where: { email: { equals: id, mode: 'insensitive' } }, include: { role: true, ldapConnection: true } }) : null)
+            ?? await this.prisma.user.findFirst({ where: { authSource: 'LDAP', ldapUsername: { equals: id, mode: 'insensitive' } }, include: { role: true, ldapConnection: true } });
 
         if (!user || !user.isActive) {
-            await this.logFailedLogin(email, user ? 'INACTIVE_USER' : 'UNKNOWN_USER', user?.id);
+            await this.logFailedLogin(id, user ? 'INACTIVE_USER' : 'UNKNOWN_USER', user?.id);
             throw new UnauthorizedException('Invalid credentials');
+        }
+
+        if (user.authSource === 'LDAP') {
+            const conn = user.ldapConnection;
+            if (!conn || !conn.isActive || !user.ldapUsername) {
+                await this.logFailedLogin(id, 'LDAP_CONNECTION_INACTIVE', user.id);
+                throw new UnauthorizedException('Invalid credentials');
+            }
+            let result;
+            try { result = await this.ldap.authenticate(this.ldap.settingsOf(conn), user.ldapUsername, password, user.ldapDn); }
+            catch { result = { ok: false as const, reason: 'UNAVAILABLE' as const }; }
+            if (!result.ok) {
+                await this.logFailedLogin(id, result.reason === 'INVALID_PASSWORD' ? 'INVALID_PASSWORD' : result.reason === 'USER_NOT_FOUND' ? 'LDAP_USER_NOT_FOUND' : 'LDAP_UNAVAILABLE', user.id, 'LDAP');
+                throw new UnauthorizedException('Invalid credentials');
+            }
+            if (result.dn !== user.ldapDn) {
+                // Dizinde taşınan kullanıcının güncel DN'i (bir sonraki girişte servis araması başarısızsa yedek).
+                await this.prisma.user.update({ where: { id: user.id }, data: { ldapDn: result.dn } }).catch(() => undefined);
+            }
+            return user;
         }
 
         const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
         if (!isPasswordValid) {
-            await this.logFailedLogin(email, 'INVALID_PASSWORD', user.id);
+            await this.logFailedLogin(id, 'INVALID_PASSWORD', user.id);
             throw new UnauthorizedException('Invalid credentials');
         }
 
@@ -38,7 +67,12 @@ export class AuthService {
      * e-posta yalnız maskeli tutulur (KVKK — entityId olarak kullanılmaz). IP/UA merkezi
      * istek bağlamından eklenir. Log hatası girişin yanıtını değiştirmez.
      */
-    private async logFailedLogin(email: string, reason: 'UNKNOWN_USER' | 'INACTIVE_USER' | 'INVALID_PASSWORD', userId?: string) {
+    private async logFailedLogin(
+        email: string,
+        reason: 'UNKNOWN_USER' | 'INACTIVE_USER' | 'INVALID_PASSWORD' | 'LDAP_USER_NOT_FOUND' | 'LDAP_UNAVAILABLE' | 'LDAP_CONNECTION_INACTIVE',
+        userId?: string,
+        authSource: 'LOCAL' | 'LDAP' = 'LOCAL',
+    ) {
         try {
             await this.prisma.auditLog.create({
                 data: {
@@ -46,7 +80,7 @@ export class AuthService {
                     action: 'LOGIN_FAILED',
                     entityType: 'User',
                     entityId: userId ?? 'UNKNOWN',
-                    newValue: { reason, email: maskEmail(email) },
+                    newValue: { reason, authSource, email: email.includes('@') ? maskEmail(email) : `${email.slice(0, 2)}***` },
                 },
             });
         } catch {
@@ -212,6 +246,9 @@ export class AuthService {
         if (!user) {
             throw new UnauthorizedException('Kullanıcı bulunamadı');
         }
+        if (user.authSource === 'LDAP') {
+            throw new BadRequestException('Şifreniz kurum dizininde (LDAP) yönetilir; uygulamadan değiştirilemez.');
+        }
 
         const isValid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
         if (!isValid) {
@@ -240,10 +277,12 @@ export class AuthService {
     }
 
     private async generateTokens(user: any): Promise<TokenResponseDto> {
+        // jti: aynı saniyede iki giriş aynı JWT'yi üretiyordu → RefreshToken.token tekil kısıtı 500 veriyordu.
         const payload = {
             sub: user.id,
             email: user.email,
             role: user.role.name,
+            jti: randomUUID(),
         };
 
         const accessToken = this.jwtService.sign(payload, {
@@ -276,6 +315,7 @@ export class AuthService {
                     action: 'LOGIN',
                     entityType: 'User',
                     entityId: user.id,
+                    newValue: { authSource: user.authSource ?? 'LOCAL' },
                 },
             });
         });

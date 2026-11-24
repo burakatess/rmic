@@ -14,6 +14,7 @@ import { ActionsModule } from './modules/actions/actions.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { LdapModule } from './modules/ldap/ldap.module';
 import { RiskEntryModule } from './modules/risk-entry/risk-entry.module';
 import { RiskManagementControlsModule } from './modules/risk-management-controls/risk-management-controls.module';
 import { TestsModule } from './modules/tests/tests.module';
@@ -61,6 +62,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     ApprovalsModule,
     ComplianceModule,
     AdminModule,
+    LdapModule,
     RiskEntryModule,
     RiskManagementControlsModule,
     TestsModule,
