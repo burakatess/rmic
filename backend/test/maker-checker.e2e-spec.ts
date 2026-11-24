@@ -195,4 +195,66 @@ describe('E2E — Kontrolcü zinciri ve maker-checker', () => {
             expect(res.body.message).toContain('onayı geri');
         });
     });
+    describe('Onay iş kutusu (Onaylarım) ve bildirimler', () => {
+        it('bekleyen aksiyon onayı ve silme talepleri yalnız atanmış ikinci kontrolcünün kutusunda; karar sonrası düşer', async () => {
+            const fId = await newFinding({ firstControllerId: id.maker, secondControllerId: id.checker2 });
+            const before = (await http().get('/workflow-approvals/count').set(as('checker2')).expect(200)).body.count as number;
+            const a = (await addAction(fId).expect(201)).body;
+            await actionOp(fId, a.id, 'submit', 'maker').expect(201);
+
+            const box = (await http().get('/workflow-approvals').set(as('checker2')).expect(200)).body;
+            expect(box.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'ACTION_APPROVAL', recordId: a.id, finding: expect.objectContaining({ id: fId }) })]));
+            expect((await http().get('/workflow-approvals/count').set(as('checker2')).expect(200)).body.count).toBe(before + 1);
+            const other = (await http().get('/workflow-approvals').set(as('checker')).expect(200)).body;
+            expect(other.items.some((i: any) => i.recordId === a.id)).toBe(false);
+
+            const bell = (await http().get('/notifications').set(as('checker2')).expect(200)).body;
+            expect(bell.some((n: any) => n.type === 'APPROVAL_PENDING' && n.id.includes(a.id))).toBe(true);
+
+            // Ret → birinci kontrolcüye karar bildirimi; ikinci kontrolcünün kutusundan düşer.
+            await actionOp(fId, a.id, 'reject', 'checker2', { reason: 'Kapsam eksik' }).expect(201);
+            expect((await http().get('/workflow-approvals/count').set(as('checker2')).expect(200)).body.count).toBe(before);
+            const makerBox = (await http().get('/workflow-approvals').set(as('maker')).expect(200)).body;
+            expect(makerBox.decisions).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'ACTION_REJECTED', recordId: a.id, reason: 'Kapsam eksik' })]));
+            const makerBell = (await http().get('/notifications').set(as('maker')).expect(200)).body;
+            expect(makerBell.some((n: any) => n.type === 'APPROVAL_DECISION' && n.id.includes(a.id))).toBe(true);
+
+            // /actions listesinden silme: gerekçesiz 400; gerekçeli talep ikinci kontrolcünün kutusuna düşer.
+            await http().delete(`/actions/${a.id}`).set(as('maker')).send({}).expect(400);
+            await http().delete(`/actions/${a.id}`).set(as('maker')).send({ reason: 'Mükerrer aksiyon' }).expect(200);
+            const list = (await http().get('/actions').query({ awaitingMe: 'true' }).set(as('checker2')).expect(200)).body.data;
+            expect(list.map((x: any) => x.id)).toContain(a.id);
+            const box2 = (await http().get('/workflow-approvals').set(as('checker2')).expect(200)).body;
+            expect(box2.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'ACTION_DELETION', recordId: a.id, reason: 'Mükerrer aksiyon' })]));
+            await actionOp(fId, a.id, 'delete-approve', 'checker2').expect(201);
+            expect((await http().get('/workflow-approvals/count').set(as('checker2')).expect(200)).body.count).toBe(before);
+            const decided = (await http().get('/workflow-approvals').set(as('maker')).expect(200)).body.decisions;
+            expect(decided).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'ACTION_DELETED', recordId: a.id })]));
+        });
+
+        it('aksiyon detayı kontrolcüleri ve onaydan sonra oluşan takip çalışmasını döndürür; liste son takibi gösterir', async () => {
+            const fId = await newFinding();
+            const a = (await addAction(fId).expect(201)).body;
+            let detail = (await http().get(`/actions/${a.id}`).set(as('maker')).expect(200)).body;
+            expect(detail).toMatchObject({ approvalState: 'TASLAK', followUps: [], firstController: { id: id.maker }, secondController: { id: id.checker } });
+            expect(detail.capabilities).toMatchObject({ canSubmit: true, canApprove: false });
+            await actionOp(fId, a.id, 'submit', 'maker').expect(201);
+            expect((await http().get(`/actions/${a.id}`).set(as('checker')).expect(200)).body.capabilities.canApprove).toBe(true);
+            const ok = (await actionOp(fId, a.id, 'approve', 'checker').expect(201)).body;
+            detail = (await http().get(`/actions/${a.id}`).set(as('maker')).expect(200)).body;
+            expect(detail.followUps).toEqual([expect.objectContaining({ id: ok.createdFollowUp.id, followUpId: ok.createdFollowUp.followUpId, status: 'BEKLIYOR' })]);
+            const list = (await http().get('/actions').query({ findingId: fId }).set(as('maker')).expect(200)).body.data;
+            expect(list.find((x: any) => x.id === a.id).followUps[0].followUpId).toBe(ok.createdFollowUp.followUpId);
+        });
+
+        it('aksiyon listesi onay durumu filtresi beyaz listeyle çalışır', async () => {
+            const fId = await newFinding();
+            const a = (await addAction(fId).expect(201)).body;
+            const drafts = (await http().get('/actions').query({ approvalState: 'TASLAK', limit: 100 }).set(as('admin')).expect(200)).body.data;
+            expect(drafts.every((x: any) => x.approvalState === 'TASLAK')).toBe(true);
+            expect(drafts.map((x: any) => x.id)).toContain(a.id);
+            // Bilinmeyen değer filtre olarak uygulanmaz (500 yerine yok sayılır).
+            await http().get('/actions').query({ approvalState: 'DROP TABLE' }).set(as('admin')).expect(200);
+        });
+    });
 });

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import api from '@/lib/api';
 import { Button, Input, Textarea, Select } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
+import { useAuth } from '@/components/auth';
 
 interface Finding {
     id: string;
@@ -14,6 +15,9 @@ interface Finding {
     description: string;
     severity: string;
     relatedDepartment: string | null;
+    firstControllerId?: string | null;
+    secondControllerId?: string | null;
+    firstController?: { firstName: string; lastName: string } | null;
 }
 
 interface User {
@@ -26,6 +30,9 @@ interface User {
 export default function NewActionPage() {
     const router = useRouter();
     const { success, error: showError } = useToast();
+    const { user } = useAuth();
+    const [approvers, setApprovers] = useState<User[]>([]);
+    const [sendToApproval, setSendToApproval] = useState(true);
 
     const [findings, setFindings] = useState<Finding[]>([]);
     const [users, setUsers] = useState<User[]>([]);
@@ -39,6 +46,7 @@ export default function NewActionPage() {
         dueDate: '',
         responsibleDepartment: '',
         notes: '',
+        secondControllerId: '',
     });
 
     useEffect(() => {
@@ -52,6 +60,7 @@ export default function NewActionPage() {
                 const uList = Array.isArray(usersRes) ? usersRes : (usersRes.data || usersRes.users || []);
                 setFindings(fList);
                 setUsers(uList);
+                api.getApproverChoices().then(a => setApprovers(a as unknown as User[])).catch(() => setApprovers([]));
             } catch {
                 showError('Hata', 'Veriler yüklenemedi.');
             } finally {
@@ -74,15 +83,27 @@ export default function NewActionPage() {
 
         setSaving(true);
         try {
-            await api.createAction(form.findingId, {
+            const created = await api.createAction(form.findingId, {
                 description: form.description,
                 ownerId: form.ownerId,
                 dueDate: form.dueDate,
                 responsibleDepartment: form.responsibleDepartment || undefined,
                 notes: form.notes || undefined,
-            });
-            success('Oluşturuldu', 'Aksiyon başarıyla kaydedildi.');
-            router.push('/actions');
+                ...(form.secondControllerId ? { secondControllerId: form.secondControllerId } : {}),
+            }) as { id: string; actionId: string; secondControllerId?: string | null };
+            // Maker-checker: aksiyon taslak oluşur; takip çalışması 2. kontrolcü onayından sonra açılır.
+            let submitted = false;
+            if (sendToApproval && created.secondControllerId) {
+                try { await api.findingActionOp(form.findingId, created.id, 'submit'); submitted = true; }
+                catch (err) { showError('Onaya gönderilemedi', (err as Error).message); }
+            }
+            success(
+                submitted ? 'Aksiyon onaya gönderildi' : 'Aksiyon taslak olarak kaydedildi',
+                submitted
+                    ? `${created.actionId} 2. kontrolcü onayında. Onaylanınca takip çalışması hedef tarihte oluşur.`
+                    : `${created.actionId} taslak. Detay sayfasından 2. kontrolcü onayına gönderebilirsiniz; takip çalışması onaydan sonra oluşur.`,
+            );
+            router.push(`/actions/${created.id}`);
         } catch (err: any) {
             showError('Hata', err?.message || 'Aksiyon oluşturulamadı.');
         } finally {
@@ -91,6 +112,8 @@ export default function NewActionPage() {
     };
 
     const selectedFinding = findings.find(f => f.id === form.findingId);
+    const notFirstController = !!selectedFinding?.firstControllerId && !!user && selectedFinding.firstControllerId !== user.id;
+    const effectiveSecond = form.secondControllerId || selectedFinding?.secondControllerId || '';
 
     return (
         <div className="min-h-full bg-slate-50/60">
@@ -254,6 +277,39 @@ export default function NewActionPage() {
                                         placeholder="Ek notlar veya açıklamalar…"
                                     />
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* Kontrolcüler ve onay (maker-checker) */}
+                        <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+                            <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide mb-4 flex items-center gap-2">
+                                <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-600 text-xs font-bold flex items-center justify-center">3</span>
+                                Kontrolcüler ve Onay
+                            </h2>
+                            <ol className="text-xs text-slate-600 space-y-1 mb-4 list-decimal pl-4">
+                                <li>Aksiyonu bulgunun <b>1. kontrolcüsü</b> girer (taslak).</li>
+                                <li>2. kontrolcü onayına gönderilir; 2. kontrolcü onaylar veya gerekçeyle reddeder.</li>
+                                <li>Onayla birlikte aksiyonun <b>takip çalışması</b> hedef tarihte otomatik oluşur.</li>
+                            </ol>
+                            {notFirstController && (
+                                <p className="text-xs text-red-700 bg-red-50 rounded-lg px-3 py-2 mb-3">
+                                    Bu bulgunun 1. kontrolcüsü siz değilsiniz{selectedFinding?.firstController ? ` (${selectedFinding.firstController.firstName} ${selectedFinding.firstController.lastName})` : ''}; aksiyonu yalnızca 1. kontrolcü girebilir.
+                                </p>
+                            )}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label htmlFor="new-action-second" className="block text-xs font-semibold text-slate-600 mb-1.5">2. Kontrolcü (onaylayan)</label>
+                                    <select id="new-action-second" value={effectiveSecond} onChange={set('secondControllerId')}
+                                        className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                        <option value="">{selectedFinding ? '— Bulgudaki 2. kontrolcü —' : '-- Önce bulgu seçin --'}</option>
+                                        {approvers.filter(u => u.id !== selectedFinding?.firstControllerId).map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+                                    </select>
+                                    <p className="text-[11px] text-slate-400 mt-1">Varsayılan bulgudaki 2. kontrolcüdür; değiştirilebilir.</p>
+                                </div>
+                                <label className="flex items-start gap-2 text-sm text-slate-700 md:pt-6">
+                                    <input type="checkbox" checked={sendToApproval} onChange={e => setSendToApproval(e.target.checked)} className="mt-0.5" />
+                                    <span>Kaydettikten sonra 2. kontrolcü onayına gönder<span className="block text-[11px] text-slate-400">İşaretlemezseniz taslak kalır; detay sayfasından gönderebilirsiniz.</span></span>
+                                </label>
                             </div>
                         </div>
 

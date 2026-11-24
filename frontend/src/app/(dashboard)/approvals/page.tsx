@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
 import {
@@ -10,6 +10,8 @@ import {
 import type { ColumnDef, ActiveFilterChip, AdvancedFilterField } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/components/auth';
+import { useSearchParams } from 'next/navigation';
+import { WorkflowApprovalsPanel } from '@/components/approvals/WorkflowApprovalsPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -231,12 +233,15 @@ function ApprovalDetailModal({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function ApprovalsPage() {
+function ApprovalsContent() {
     const { error: showError } = useToast();
     const { user } = useAuth();
     const [items, setItems] = useState<PendingApproval[]>([]);
     const [loading, setLoading] = useState(true);
     const [detailId, setDetailId] = useState<string | null>(null);
+    const searchParams = useSearchParams();
+    const [tab, setTab] = useState<'workflow' | 'tests'>(searchParams.get('tab') === 'tests' ? 'tests' : 'workflow');
+    const [workflowCount, setWorkflowCount] = useState<number | null>(null);
 
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
@@ -367,6 +372,20 @@ export default function ApprovalsPage() {
                 breadcrumbs={[{ label: 'Onaylarım' }]}
             />
 
+            <div role="tablist" aria-label="Onay türü" className="flex gap-1 border-b border-slate-200">
+                {([['workflow', 'Aksiyon & Takip', workflowCount], ['tests', 'Kontrol Testleri', loading ? null : items.length]] as const).map(([key, label, count]) => (
+                    <button key={key} role="tab" type="button" aria-selected={tab === key}
+                        onClick={() => { setTab(key); window.history.replaceState(null, '', key === 'tests' ? '?tab=tests' : window.location.pathname); }}
+                        className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px ${tab === key ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                        {label}{count !== null ? ` (${count})` : ''}
+                    </button>
+                ))}
+            </div>
+
+            {tab === 'workflow' && <WorkflowApprovalsPanel onCountChange={setWorkflowCount} />}
+
+            {tab === 'tests' && (<>
+
             {/* KPI'lar */}
             <KpiGrid columns={3}>
                 <KpiCard title="Bekleyen Onay" value={items.length} variant="default"
@@ -422,6 +441,8 @@ export default function ApprovalsPage() {
                 }
             />
 
+            </>)}
+
             {detailId && (
                 <ApprovalDetailModal
                     id={detailId}
@@ -430,5 +451,13 @@ export default function ApprovalsPage() {
                 />
             )}
         </PageShell>
+    );
+}
+
+export default function ApprovalsPage() {
+    return (
+        <Suspense fallback={null}>
+            <ApprovalsContent />
+        </Suspense>
     );
 }

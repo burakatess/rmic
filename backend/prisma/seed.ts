@@ -563,6 +563,8 @@ async function main() {
             status: aStat as any, dueDate,
             completedAt: aStat === 'KAPATILDI' ? pastDate(randInt(1, 15)) : null,
             notes: 'Aksiyon öncelikli takip edilmektedir.', controlId: f.controlId,
+            // Örnek veri: maker-checker öncesi akışı temsil eder — onaylı başlar (migration 20261118100000 ile aynı).
+            approvalState: 'ONAYLANDI', approvedAt: new Date(),
         }});
         actions.push(a1);
 
@@ -573,6 +575,7 @@ async function main() {
                 ownerId: randOf(managers).id,
                 directorateId: f.directorateId,
                 status: 'BEKLIYOR', dueDate: futureDate(randInt(60, 180)), controlId: f.controlId,
+                approvalState: 'ONAYLANDI', approvedAt: new Date(),
             }});
             actions.push(a2);
         }

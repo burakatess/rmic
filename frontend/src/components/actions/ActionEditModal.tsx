@@ -21,6 +21,8 @@ interface ActionEditModalProps {
         responsibleDepartment?: string | null;
         owner?: { id: string; firstName: string; lastName: string };
         finding?: { id: string; findingId: string };
+        firstControllerId?: string | null;
+        secondControllerId?: string | null;
     } | null;
 }
 
@@ -39,6 +41,7 @@ export default function ActionEditModal({ isOpen, onClose, onSuccess, action }: 
     const { success: toastSuccess, error: toastError } = useToast();
     const [loading, setLoading] = useState(false);
     const [users, setUsers] = useState<UserOption[]>([]);
+    const [approvers, setApprovers] = useState<UserOption[]>([]);
 
     const [form, setForm] = useState({
         description: '',
@@ -47,12 +50,14 @@ export default function ActionEditModal({ isOpen, onClose, onSuccess, action }: 
         dueDate: '',
         status: 'BEKLIYOR',
         notes: '',
+        secondControllerId: '',
     });
 
     useEffect(() => {
         if (!isOpen || !action) return;
 
         api.getUserChoices().then((u: any[]) => setUsers(u || [])).catch(() => setUsers([]));
+        api.getApproverChoices().then(u => setApprovers(u || [])).catch(() => setApprovers([]));
 
         setForm({
             description: action.description || '',
@@ -61,6 +66,7 @@ export default function ActionEditModal({ isOpen, onClose, onSuccess, action }: 
             dueDate: action.dueDate ? new Date(action.dueDate).toISOString().split('T')[0] : '',
             status: STATUS_OPTIONS.some(s => s.value === action.status) ? action.status : 'BEKLIYOR',
             notes: action.notes || '',
+            secondControllerId: action.secondControllerId || '',
         });
     }, [isOpen, action]);
 
@@ -92,6 +98,8 @@ export default function ActionEditModal({ isOpen, onClose, onSuccess, action }: 
                 dueDate: form.dueDate,
                 status: form.status,
                 notes: form.notes.trim() || null,
+                // Maker-checker: ikinci kontrolcü taslak aşamasında değiştirilebilir (birinci kontrolcüyle aynı olamaz — backend).
+                ...(form.secondControllerId && form.secondControllerId !== (action.secondControllerId || '') ? { secondControllerId: form.secondControllerId } : {}),
             });
             toastSuccess('Başarılı', `${action.actionId} numaralı aksiyon güncellendi.`);
             onSuccess();
@@ -147,6 +155,16 @@ export default function ActionEditModal({ isOpen, onClose, onSuccess, action }: 
                             {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                         </select>
                     </div>
+                </div>
+
+                <div>
+                    <label htmlFor="edit-second-controller" className={labelCls}>2. Kontrolcü (onaylayan)</label>
+                    <select id="edit-second-controller" value={form.secondControllerId}
+                        onChange={e => setForm(f => ({ ...f, secondControllerId: e.target.value }))} className={inputCls}>
+                        <option value="">Seçiniz...</option>
+                        {approvers.filter(u => u.id !== action.firstControllerId).map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+                    </select>
+                    <p className="text-xs text-slate-400 mt-1">Onaya gönderilen aksiyonu bu kişi onaylar; takip çalışması onaydan sonra oluşur.</p>
                 </div>
 
                 <div>
