@@ -24,12 +24,15 @@ export class GmysService {
 
     async create(dto: CreateGmyDto, userId: string) {
         if (dto.responsibleUserId) await this.assertActiveUser(dto.responsibleUserId);
-        const created = await this.write(() => this.prisma.gmy.create({
-            data: { name: dto.name.trim(), code: dto.code?.trim() || null, responsibleUserId: dto.responsibleUserId || null },
-            select: LIST_SELECT,
+        // GMY + denetim kaydı tek işlemde.
+        return this.write(() => this.prisma.$transaction(async (tx) => {
+            const created = await tx.gmy.create({
+                data: { name: dto.name.trim(), code: dto.code?.trim() || null, responsibleUserId: dto.responsibleUserId || null },
+                select: LIST_SELECT,
+            });
+            await this.log(userId, 'CREATE', created.id, null, created, tx);
+            return created;
         }));
-        await this.log(userId, 'CREATE', created.id, null, created);
-        return created;
     }
 
     async update(id: string, dto: UpdateGmyDto, userId: string) {
@@ -52,9 +55,9 @@ export class GmysService {
             if (name !== undefined && name !== existing.name) {
                 await tx.risk.updateMany({ where: { gmyId: id }, data: { ilgiliGmy: name } });
             }
+            await this.log(userId, 'UPDATE', id, existing, g, tx);
             return g;
         }));
-        await this.log(userId, 'UPDATE', id, existing, updated);
         return updated;
     }
 
@@ -74,13 +77,10 @@ export class GmysService {
         }
     }
 
-    private async log(userId: string, action: string, entityId: string, oldValue: unknown, newValue: unknown) {
-        try {
-            await this.prisma.auditLog.create({
-                data: { userId, action, entityType: 'Gmy', entityId, oldValue: (oldValue ?? undefined) as Prisma.InputJsonValue, newValue: newValue as Prisma.InputJsonValue },
-            });
-        } catch {
-            // Denetim izi hatası ana işlemi geri almaz (mevcut desen).
-        }
+    /** Denetim kaydı ana işlemle AYNI işlemde yazılır (db = işlem istemcisi). */
+    private async log(userId: string, action: string, entityId: string, oldValue: unknown, newValue: unknown, db: Prisma.TransactionClient) {
+        await db.auditLog.create({
+            data: { userId, action, entityType: 'Gmy', entityId, oldValue: (oldValue ?? undefined) as Prisma.InputJsonValue, newValue: newValue as Prisma.InputJsonValue },
+        });
     }
 }

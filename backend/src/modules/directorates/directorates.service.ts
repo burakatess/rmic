@@ -35,36 +35,42 @@ export class DirectoratesService {
     }
 
     async create(data: CreateDirectorateDto, userId?: string) {
-        const created = await this.prisma.directorate.create({
-            data: { name: data.name.trim(), code: data.code?.trim() || null, gmy: data.gmy?.trim() || null, isActive: true },
-        }).catch(e => this.rethrowUnique(e));
-        await this.audit(userId, 'CREATE', created.id, undefined, created);
-        return created;
+        return this.prisma.$transaction(async (tx) => {
+            const created = await tx.directorate.create({
+                data: { name: data.name.trim(), code: data.code?.trim() || null, gmy: data.gmy?.trim() || null, isActive: true },
+            }).catch(e => this.rethrowUnique(e));
+            await this.audit(userId, 'CREATE', created.id, undefined, created, tx);
+            return created;
+        });
     }
 
     async update(id: string, data: UpdateDirectorateDto, userId?: string) {
         const existing = await this.prisma.directorate.findUnique({ where: { id } });
         if (!existing) throw new NotFoundException('Direktörlük bulunamadı');
-        const updated = await this.prisma.directorate.update({
-            where: { id },
-            data: {
-                ...(data.name !== undefined && { name: data.name.trim() }),
-                ...(data.code !== undefined && { code: data.code.trim() || null }),
-                ...(data.gmy !== undefined && { gmy: data.gmy.trim() || null }),
-                ...(data.isActive !== undefined && { isActive: data.isActive }),
-            },
-        }).catch(e => this.rethrowUnique(e));
-        await this.audit(userId, 'UPDATE', id, existing, updated);
-        return updated;
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.directorate.update({
+                where: { id },
+                data: {
+                    ...(data.name !== undefined && { name: data.name.trim() }),
+                    ...(data.code !== undefined && { code: data.code.trim() || null }),
+                    ...(data.gmy !== undefined && { gmy: data.gmy.trim() || null }),
+                    ...(data.isActive !== undefined && { isActive: data.isActive }),
+                },
+            }).catch(e => this.rethrowUnique(e));
+            await this.audit(userId, 'UPDATE', id, existing, updated, tx);
+            return updated;
+        });
     }
 
     async delete(id: string, userId?: string) {
         const existing = await this.prisma.directorate.findUnique({ where: { id } });
         if (!existing) throw new NotFoundException('Direktörlük bulunamadı');
         // Soft delete — sadece pasif yap
-        const updated = await this.prisma.directorate.update({ where: { id }, data: { isActive: false } });
-        await this.audit(userId, 'DEACTIVATE', id, existing, updated);
-        return updated;
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.directorate.update({ where: { id }, data: { isActive: false } });
+            await this.audit(userId, 'DEACTIVATE', id, existing, updated, tx);
+            return updated;
+        });
     }
 
     /** Ad/kod tekil — Prisma P2002 kullanıcıya okunur mesaj olarak döner. */
@@ -75,11 +81,11 @@ export class DirectoratesService {
         throw e;
     }
 
-    /** Denetim kaydı ana işlemi düşürmez (fire-and-forget deseni). */
-    private async audit(userId: string | undefined, action: string, entityId: string, oldValue?: unknown, newValue?: unknown) {
+    /** Denetim kaydı ana işlemle AYNI işlemde yazılır (db = işlem istemcisi). */
+    private async audit(userId: string | undefined, action: string, entityId: string, oldValue?: unknown, newValue?: unknown, db: Prisma.TransactionClient | PrismaService = this.prisma) {
         if (!userId) return;
-        await this.prisma.auditLog.create({
+        await db.auditLog.create({
             data: { userId, action, entityType: 'Directorate', entityId, oldValue: oldValue as Prisma.InputJsonValue, newValue: newValue as Prisma.InputJsonValue },
-        }).catch(() => undefined);
+        });
     }
 }

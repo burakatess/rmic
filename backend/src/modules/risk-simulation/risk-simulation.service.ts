@@ -164,23 +164,27 @@ export class RiskSimulationService {
 
     async createSimulation(dto: CreateRiskSimulationDto, userId: string) {
         const simulationId = formatRecordId('SIM', await nextCounterValue(this.prisma, 'risk-simulation'));
-        const sim = await this.prisma.riskSimulation.create({
-            data: { simulationId, name: dto.name, description: dto.description, createdById: userId },
+        return this.prisma.$transaction(async (tx) => {
+            const sim = await tx.riskSimulation.create({
+                data: { simulationId, name: dto.name, description: dto.description, createdById: userId },
+            });
+            await tx.auditLog.create({
+                data: { userId, action: 'CREATE', entityType: 'RiskSimulation', entityId: sim.id, newValue: sim },
+            });
+            return sim;
         });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'CREATE', entityType: 'RiskSimulation', entityId: sim.id, newValue: sim },
-        });
-        return sim;
     }
 
     async updateSimulation(id: string, dto: UpdateRiskSimulationDto, userId: string) {
         const existing = await this.prisma.riskSimulation.findUnique({ where: { id } });
         if (!existing) throw new NotFoundException('Risk simülasyonu bulunamadı');
-        const updated = await this.prisma.riskSimulation.update({ where: { id }, data: dto });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'RiskSimulation', entityId: id, oldValue: existing, newValue: updated },
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.riskSimulation.update({ where: { id }, data: dto });
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'RiskSimulation', entityId: id, oldValue: existing, newValue: updated },
+            });
+            return updated;
         });
-        return updated;
     }
 
     // ─── Scenario ──────────────────────────────────────────────────────────
@@ -317,11 +321,13 @@ export class RiskSimulationService {
             data.residualIsOverridden = false;
         }
 
-        const updated = await this.prisma.riskSimulationScenario.update({ where: { id: scenarioId }, data, include: SCENARIO_INCLUDE });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'RiskSimulationScenario', entityId: scenarioId, oldValue: existing, newValue: updated },
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.riskSimulationScenario.update({ where: { id: scenarioId }, data, include: SCENARIO_INCLUDE });
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'RiskSimulationScenario', entityId: scenarioId, oldValue: existing, newValue: updated },
+            });
+            return updated;
         });
-        return updated;
     }
 
     /** Senaryoyu OLUŞTURULDUĞU ANDAKİ kendi başlangıç durumuna döndürür — gerçek
@@ -403,11 +409,13 @@ export class RiskSimulationService {
         data.sourceCapturedVersion = risk.version;
         data.sourceCapturedAt = new Date();
 
-        const updated = await this.prisma.riskSimulationScenario.update({ where: { id: scenarioId }, data, include: SCENARIO_INCLUDE });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'REFRESH_FROM_INVENTORY', entityType: 'RiskSimulationScenario', entityId: scenarioId, oldValue: { fields: preview.fields, accepted: acceptFields } },
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.riskSimulationScenario.update({ where: { id: scenarioId }, data, include: SCENARIO_INCLUDE });
+            await tx.auditLog.create({
+                data: { userId, action: 'REFRESH_FROM_INVENTORY', entityType: 'RiskSimulationScenario', entityId: scenarioId, oldValue: { fields: preview.fields, accepted: acceptFields } },
+            });
+            return updated;
         });
-        return updated;
     }
 
     // ─── Controls ──────────────────────────────────────────────────────────
@@ -437,14 +445,16 @@ export class RiskSimulationService {
             where: { scenarioId }, _max: { sortOrder: true },
         });
         const nextSortOrder = (maxSortOrder._max.sortOrder ?? -1) + 1;
-        const control = await this.prisma.riskSimulationControl.create({
-            data: { scenarioId, ...dto, sortOrder: nextSortOrder },
+        return this.prisma.$transaction(async (tx) => {
+            const control = await tx.riskSimulationControl.create({
+                data: { scenarioId, ...dto, sortOrder: nextSortOrder },
+            });
+            await tx.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } });
+            await tx.auditLog.create({
+                data: { userId, action: 'CREATE', entityType: 'RiskSimulationControl', entityId: control.id, newValue: control },
+            });
+            return control;
         });
-        await this.prisma.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'CREATE', entityType: 'RiskSimulationControl', entityId: control.id, newValue: control },
-        });
-        return control;
     }
 
     async updateControl(scenarioId: string, controlId: string, dto: UpdateScenarioControlDto, userId: string) {
@@ -454,12 +464,14 @@ export class RiskSimulationService {
             const exists = await this.prisma.controlTest.findUnique({ where: { id: dto.ktsSourceTestId }, select: { id: true } });
             if (!exists) throw new BadRequestException('Geçersiz test kaydı: seçilen kontrol testi bulunamadı');
         }
-        const updated = await this.prisma.riskSimulationControl.update({ where: { id: controlId }, data: dto });
-        await this.prisma.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'RiskSimulationControl', entityId: controlId, oldValue: existing, newValue: updated },
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.riskSimulationControl.update({ where: { id: controlId }, data: dto });
+            await tx.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } });
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'RiskSimulationControl', entityId: controlId, oldValue: existing, newValue: updated },
+            });
+            return updated;
         });
-        return updated;
     }
 
     async removeControl(scenarioId: string, controlId: string, userId: string) {
@@ -468,15 +480,15 @@ export class RiskSimulationService {
         // Kaldırılan kontrolün ağırlığı DİĞER kontrollere otomatik dağıtılmaz —
         // boşalan pay "kontrolsüz pay" olarak ayrı kalır (motor bunu weightCheck
         // ile hesaplar); kullanıcı isterse ayrı "Yeniden Dağıt" eylemini çağırır.
-        await this.prisma.$transaction([
-            this.prisma.riskSimulationAction.deleteMany({ where: { targetControlSimId: controlId } }),
-            this.prisma.riskSimulationControl.delete({ where: { id: controlId } }),
-            this.prisma.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } }),
-        ]);
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'DELETE', entityType: 'RiskSimulationControl', entityId: controlId, oldValue: existing },
+        return this.prisma.$transaction(async (tx) => {
+            await tx.riskSimulationAction.deleteMany({ where: { targetControlSimId: controlId } });
+            await tx.riskSimulationControl.delete({ where: { id: controlId } });
+            await tx.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } });
+            await tx.auditLog.create({
+                data: { userId, action: 'DELETE', entityType: 'RiskSimulationControl', entityId: controlId, oldValue: existing },
+            });
+            return { deleted: true };
         });
-        return { deleted: true };
     }
 
     async redistributeWeights(scenarioId: string, weights: Record<string, number>, userId: string) {
@@ -486,12 +498,12 @@ export class RiskSimulationService {
             if (!ids.has(id)) throw new BadRequestException(`Geçersiz kontrol id: ${id}`);
         }
         const oldValue = controls.map(c => ({ id: c.id, weight: c.weight }));
-        await this.prisma.$transaction([
-            ...Object.entries(weights).map(([id, weight]) => this.prisma.riskSimulationControl.update({ where: { id }, data: { weight } })),
-            this.prisma.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } }),
-        ]);
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'REDISTRIBUTE_WEIGHTS', entityType: 'RiskSimulationScenario', entityId: scenarioId, oldValue, newValue: weights },
+        await this.prisma.$transaction(async (tx) => {
+            for (const [id, weight] of Object.entries(weights)) await tx.riskSimulationControl.update({ where: { id }, data: { weight } });
+            await tx.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } });
+            await tx.auditLog.create({
+                data: { userId, action: 'REDISTRIBUTE_WEIGHTS', entityType: 'RiskSimulationScenario', entityId: scenarioId, oldValue, newValue: weights },
+            });
         });
         return this.getScenario(scenarioId);
     }
@@ -505,47 +517,53 @@ export class RiskSimulationService {
         if (dto.effectMode === 'TARGET_KEP' && !dto.targetKepReason) {
             throw new BadRequestException('Hedef KEP girişleri için gerekçe zorunludur.');
         }
-        const action = await this.prisma.riskSimulationAction.create({ data: { scenarioId, ...dto } });
-        await this.prisma.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'CREATE', entityType: 'RiskSimulationAction', entityId: action.id, newValue: action },
+        return this.prisma.$transaction(async (tx) => {
+            const action = await tx.riskSimulationAction.create({ data: { scenarioId, ...dto } });
+            await tx.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } });
+            await tx.auditLog.create({
+                data: { userId, action: 'CREATE', entityType: 'RiskSimulationAction', entityId: action.id, newValue: action },
+            });
+            return action;
         });
-        return action;
     }
 
     async updateAction(scenarioId: string, actionId: string, dto: UpdateScenarioActionDto, userId: string) {
         const existing = await this.prisma.riskSimulationAction.findFirst({ where: { id: actionId, scenarioId } });
         if (!existing) throw new NotFoundException('Senaryo aksiyonu bulunamadı');
-        const updated = await this.prisma.riskSimulationAction.update({ where: { id: actionId }, data: dto });
-        await this.prisma.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'RiskSimulationAction', entityId: actionId, oldValue: existing, newValue: updated },
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.riskSimulationAction.update({ where: { id: actionId }, data: dto });
+            await tx.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } });
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'RiskSimulationAction', entityId: actionId, oldValue: existing, newValue: updated },
+            });
+            return updated;
         });
-        return updated;
     }
 
     async toggleAction(scenarioId: string, actionId: string, isApplied: boolean, userId: string) {
         const existing = await this.prisma.riskSimulationAction.findFirst({ where: { id: actionId, scenarioId } });
         if (!existing) throw new NotFoundException('Senaryo aksiyonu bulunamadı');
-        const updated = await this.prisma.riskSimulationAction.update({ where: { id: actionId }, data: { isApplied } });
-        await this.prisma.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } });
-        await this.prisma.auditLog.create({
-            data: { userId, action: isApplied ? 'APPLY' : 'UNAPPLY', entityType: 'RiskSimulationAction', entityId: actionId },
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.riskSimulationAction.update({ where: { id: actionId }, data: { isApplied } });
+            await tx.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } });
+            await tx.auditLog.create({
+                data: { userId, action: isApplied ? 'APPLY' : 'UNAPPLY', entityType: 'RiskSimulationAction', entityId: actionId },
+            });
+            return updated;
         });
-        return updated;
     }
 
     async removeAction(scenarioId: string, actionId: string, userId: string) {
         const existing = await this.prisma.riskSimulationAction.findFirst({ where: { id: actionId, scenarioId } });
         if (!existing) throw new NotFoundException('Senaryo aksiyonu bulunamadı');
-        await this.prisma.$transaction([
-            this.prisma.riskSimulationAction.delete({ where: { id: actionId } }),
-            this.prisma.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } }),
-        ]);
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'DELETE', entityType: 'RiskSimulationAction', entityId: actionId, oldValue: existing },
+        return this.prisma.$transaction(async (tx) => {
+            await tx.riskSimulationAction.delete({ where: { id: actionId } });
+            await tx.riskSimulationScenario.update({ where: { id: scenarioId }, data: { contentVersion: { increment: 1 } } });
+            await tx.auditLog.create({
+                data: { userId, action: 'DELETE', entityType: 'RiskSimulationAction', entityId: actionId, oldValue: existing },
+            });
+            return { deleted: true };
         });
-        return { deleted: true };
     }
 
     // ─── Hesaplama (canlı önizleme VE kayıt/aktarım sırasında yeniden hesaplama) ──

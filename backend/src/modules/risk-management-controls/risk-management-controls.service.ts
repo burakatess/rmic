@@ -150,21 +150,23 @@ export class RiskManagementControlsService {
             automationLevel: data.automationLevel || 3,
         });
 
-        const created = await this.prisma.riskManagementControl.create({
-            data: {
-                controlCode,
-                name: data.name,
-                description: data.description || '',
-                effectiveness: data.effectiveness || 3,
-                frequency: data.frequency || 3,
-                automationLevel: data.automationLevel || 3,
-                controlScore,
-                ownerId: userId,
-                isActive: data.isActive ?? true,
-            },
+        return this.prisma.$transaction(async (tx) => {
+            const created = await tx.riskManagementControl.create({
+                data: {
+                    controlCode,
+                    name: data.name,
+                    description: data.description || '',
+                    effectiveness: data.effectiveness || 3,
+                    frequency: data.frequency || 3,
+                    automationLevel: data.automationLevel || 3,
+                    controlScore,
+                    ownerId: userId,
+                    isActive: data.isActive ?? true,
+                },
+            });
+            await tx.auditLog.create({ data: { userId, action: 'CREATE', entityType: 'RiskManagementControl', entityId: created.id, newValue: { controlCode, name: created.name } } });
+            return created;
         });
-        await this.prisma.auditLog.create({ data: { userId, action: 'CREATE', entityType: 'RiskManagementControl', entityId: created.id, newValue: { controlCode, name: created.name } } }).catch(() => undefined);
-        return created;
     }
 
     async update(id: string, data: UpdateRiskManagementControlDto, userId: string) {
@@ -176,29 +178,33 @@ export class RiskManagementControlsService {
             automationLevel: data.automationLevel ?? existing.automationLevel,
         });
 
-        const updated = await this.prisma.riskManagementControl.update({
-            where: { id },
-            data: {
-                name: data.name,
-                description: data.description,
-                effectiveness: data.effectiveness,
-                frequency: data.frequency,
-                automationLevel: data.automationLevel,
-                controlScore,
-                isActive: data.isActive,
-            },
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.riskManagementControl.update({
+                where: { id },
+                data: {
+                    name: data.name,
+                    description: data.description,
+                    effectiveness: data.effectiveness,
+                    frequency: data.frequency,
+                    automationLevel: data.automationLevel,
+                    controlScore,
+                    isActive: data.isActive,
+                },
+            });
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'RiskManagementControl', entityId: id, oldValue: { effectiveness: existing.effectiveness, frequency: existing.frequency, automationLevel: existing.automationLevel, isActive: existing.isActive }, newValue: { ...data, controlScore } as object },
+            });
+            return updated;
         });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'RiskManagementControl', entityId: id, oldValue: { effectiveness: existing.effectiveness, frequency: existing.frequency, automationLevel: existing.automationLevel, isActive: existing.isActive }, newValue: { ...data, controlScore } as object },
-        }).catch(() => undefined);
-        return updated;
     }
 
     async delete(id: string, userId?: string) {
         const existing = await this.findOne(id); // Check exists
-        const deleted = await this.prisma.riskManagementControl.delete({ where: { id } });
-        if (userId) await this.prisma.auditLog.create({ data: { userId, action: 'DELETE', entityType: 'RiskManagementControl', entityId: id, oldValue: { controlCode: existing.controlCode, name: existing.name } } }).catch(() => undefined);
-        return deleted;
+        return this.prisma.$transaction(async (tx) => {
+            const deleted = await tx.riskManagementControl.delete({ where: { id } });
+            if (userId) await tx.auditLog.create({ data: { userId, action: 'DELETE', entityType: 'RiskManagementControl', entityId: id, oldValue: { controlCode: existing.controlCode, name: existing.name } } });
+            return deleted;
+        });
     }
 
     // Risk Mapping Operations
@@ -313,17 +319,19 @@ export class RiskManagementControlsService {
         await this.findOne(controlId);
 
         // Testi yapan oturumdaki kullanıcıdır (istemciden "tester" kabul edilmez).
-        const test = await this.prisma.rMControlTest.create({
-            data: {
-                controlId,
-                testDate: toDateField(data.testDate) ?? new Date(),
-                tester: userId,
-                result: data.result,
-                notes: data.notes,
-            },
+        return this.prisma.$transaction(async (tx) => {
+            const test = await tx.rMControlTest.create({
+                data: {
+                    controlId,
+                    testDate: toDateField(data.testDate) ?? new Date(),
+                    tester: userId,
+                    result: data.result,
+                    notes: data.notes,
+                },
+            });
+            await tx.auditLog.create({ data: { userId, action: 'CREATE', entityType: 'RMControlTest', entityId: test.id, newValue: { controlId, result: test.result } } });
+            return test;
         });
-        await this.prisma.auditLog.create({ data: { userId, action: 'CREATE', entityType: 'RMControlTest', entityId: test.id, newValue: { controlId, result: test.result } } }).catch(() => undefined);
-        return test;
     }
 
     async getTests(controlId: string) {

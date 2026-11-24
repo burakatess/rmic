@@ -12,6 +12,7 @@ jest.mock('bcrypt', () => ({
     hash: jest.fn(),
 }));
 
+import { withTx } from '../../common/testing/with-tx';
 describe('AuthService', () => {
     let service: AuthService;
     let prisma: Record<string, any>;
@@ -47,7 +48,7 @@ describe('AuthService', () => {
         const module: TestingModule = await Test.createTestingModule({
             providers: [
                 AuthService,
-                { provide: PrismaService, useValue: prisma },
+                { provide: PrismaService, useValue: withTx(prisma) },
                 {
                     provide: JwtService,
                     useValue: {

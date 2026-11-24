@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { AuditsService } from './audits.service';
+import { withTx } from '../../common/testing/with-tx';
 
 describe('Kanıt bağlantı metadata bütünlüğü', () => {
   const base = () => {
@@ -14,7 +15,7 @@ describe('Kanıt bağlantı metadata bütünlüğü', () => {
       findingFollowUp: { findFirst: jest.fn() },
       findingStatusHistory: { create: jest.fn().mockResolvedValue({}) },
     };
-    return { prisma, service: new AuditsService(prisma) };
+    return { prisma, service: new AuditsService(withTx(prisma)) };
   };
 
   it('görünen ad/açıklama değişir; fiziksel dosya ve başka bağlantılar değişmez', async () => {

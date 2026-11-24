@@ -122,10 +122,10 @@ export class MethodologyService {
         };
     }
 
-    private async repin(simulationId: string, methodologyId: string) {
-        await this.prisma.riskSimulationScenario.updateMany({ where: { simulationId }, data: { methodologyVersionId: methodologyId, contentVersion: { increment: 1 } } });
+    private async repin(simulationId: string, methodologyId: string, db: Prisma.TransactionClient | PrismaService = this.prisma) {
+        await db.riskSimulationScenario.updateMany({ where: { simulationId }, data: { methodologyVersionId: methodologyId, contentVersion: { increment: 1 } } });
         // Artık kullanılmayan deneme sürümleri temizlenir.
-        await this.prisma.simulationMethodology.deleteMany({ where: { trialSimulationId: simulationId, isTrial: true, id: { not: methodologyId }, scenarios: { none: {} } } });
+        await db.simulationMethodology.deleteMany({ where: { trialSimulationId: simulationId, isTrial: true, id: { not: methodologyId }, scenarios: { none: {} } } });
     }
 
     async setTrial(simulationId: string, settings: MethodologySettingsDto, note: string | undefined, userId: string) {
@@ -134,12 +134,14 @@ export class MethodologyService {
         if (sim.mode !== 'WORKSPACE') throw new BadRequestException('Deneme ayarı yalnız simülasyon çalışma alanında kullanılabilir.');
         const active = await this.active();
         const config = settingsToConfig(settings, active.version ?? 0);
-        const trial = await this.prisma.simulationMethodology.create({
-            data: { version: null, isTrial: true, trialSimulationId: simulationId, basedOnVersion: active.version, config: config as unknown as Prisma.InputJsonValue, changeNote: note ?? null, createdById: userId },
-        });
-        await this.repin(simulationId, trial.id);
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'SIM_METHODOLOGY_TRIAL', entityType: 'RiskSimulation', entityId: simulationId, newValue: { methodologyId: trial.id, basedOnVersion: active.version, note: note ?? null, config } as unknown as Prisma.InputJsonValue },
+        await this.prisma.$transaction(async (tx) => {
+            const trial = await tx.simulationMethodology.create({
+                data: { version: null, isTrial: true, trialSimulationId: simulationId, basedOnVersion: active.version, config: config as unknown as Prisma.InputJsonValue, changeNote: note ?? null, createdById: userId },
+            });
+            await this.repin(simulationId, trial.id, tx);
+            await tx.auditLog.create({
+                data: { userId, action: 'SIM_METHODOLOGY_TRIAL', entityType: 'RiskSimulation', entityId: simulationId, newValue: { methodologyId: trial.id, basedOnVersion: active.version, note: note ?? null, config } as unknown as Prisma.InputJsonValue },
+            });
         });
         return this.forSimulation(simulationId);
     }
@@ -147,8 +149,10 @@ export class MethodologyService {
     /** Simülasyonu güncel resmî sürüme bağlar (deneme ayarını kaldırır). */
     async useOfficial(simulationId: string, userId: string) {
         const active = await this.active();
-        await this.repin(simulationId, active.id);
-        await this.prisma.auditLog.create({ data: { userId, action: 'SIM_METHODOLOGY_OFFICIAL', entityType: 'RiskSimulation', entityId: simulationId, newValue: { version: active.version } } });
+        await this.prisma.$transaction(async (tx) => {
+            await this.repin(simulationId, active.id, tx);
+            await tx.auditLog.create({ data: { userId, action: 'SIM_METHODOLOGY_OFFICIAL', entityType: 'RiskSimulation', entityId: simulationId, newValue: { version: active.version } } });
+        });
         return this.forSimulation(simulationId);
     }
 

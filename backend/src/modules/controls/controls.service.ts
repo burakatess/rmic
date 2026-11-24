@@ -158,7 +158,9 @@ export class ControlsService {
 
         let control: any;
         try {
-            control = await this.prisma.control.create({
+            // Kayıt + denetim kaydı tek işlemde (kayıt yazılıp denetim izi kaybolamaz).
+            control = await this.prisma.$transaction(async (tx) => {
+              const created = await tx.control.create({
                 data: {
                     ...rest,
                     controlId,
@@ -177,6 +179,11 @@ export class ControlsService {
                     owner: { select: { id: true, firstName: true, lastName: true, email: true } },
                     directorateRel: { select: { id: true, name: true, code: true } },
                 },
+              });
+              await tx.auditLog.create({
+                data: { userId, action: 'CREATE', entityType: 'Control', entityId: created.id, newValue: created },
+              });
+              return created;
             });
         } catch (error) {
             // Ön kontrol kullanıcıya erken ve açık geri bildirim sağlar; bu yakalama
@@ -192,10 +199,6 @@ export class ControlsService {
             }
             throw error;
         }
-
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'CREATE', entityType: 'Control', entityId: control.id, newValue: control },
-        });
 
         // Not: Task üretimi artık burada tetiklenmiyor. Kontrol kalıcı ana envanterdir;
         // tasklar yalnızca bir yılın kapsamına alındığında (ControlScopeService.addScope)
@@ -255,42 +258,48 @@ export class ControlsService {
         const definitionChanged = VERSION_FIELDS.some(f => updateData[f] !== undefined && updateData[f] !== (existing as any)[f]);
         if (definitionChanged) updateData.version = { increment: 1 };
 
-        const control = await this.prisma.control.update({
-            where: { id },
-            data: updateData,
-            include: {
-                owner: { select: { id: true, firstName: true, lastName: true, email: true } },
-                directorateRel: { select: { id: true, name: true, code: true } },
-            },
-        });
+        return this.prisma.$transaction(async (tx) => {
+            const control = await tx.control.update({
+                where: { id },
+                data: updateData,
+                include: {
+                    owner: { select: { id: true, firstName: true, lastName: true, email: true } },
+                    directorateRel: { select: { id: true, name: true, code: true } },
+                },
+            });
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'Control', entityId: id, oldValue: existing, newValue: control },
-        });
+            await tx.auditLog.create({
+                data: { userId, action: 'UPDATE', entityType: 'Control', entityId: id, oldValue: existing, newValue: control },
+            });
 
-        return control;
+            return control;
+        });
     }
 
     async activate(id: string, userId: string) {
-        const control = await this.prisma.control.update({
-            where: { id },
-            data: { status: 'ACTIVE' },
+        return this.prisma.$transaction(async (tx) => {
+            const control = await tx.control.update({
+                where: { id },
+                data: { status: 'ACTIVE' },
+            });
+            await tx.auditLog.create({
+                data: { userId, action: 'ACTIVATE', entityType: 'Control', entityId: id },
+            });
+            return control;
         });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'ACTIVATE', entityType: 'Control', entityId: id },
-        });
-        return control;
     }
 
     async passivate(id: string, userId: string) {
-        const control = await this.prisma.control.update({
-            where: { id },
-            data: { status: 'PASSIVE' },
+        return this.prisma.$transaction(async (tx) => {
+            const control = await tx.control.update({
+                where: { id },
+                data: { status: 'PASSIVE' },
+            });
+            await tx.auditLog.create({
+                data: { userId, action: 'PASSIVATE', entityType: 'Control', entityId: id },
+            });
+            return control;
         });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'PASSIVATE', entityType: 'Control', entityId: id },
-        });
-        return control;
     }
 
     async mapRisk(controlId: string, riskId: string, mappingType = 'PRIMARY') {
@@ -501,13 +510,15 @@ export class ControlsService {
         if (dto.findingStatus !== undefined) data.findingStatus = dto.findingStatus;
         if (dto.stepObservations !== undefined) data.stepObservations = dto.stepObservations;
 
-        const updated = await this.prisma.controlTest.update({ where: { id: testId }, data });
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.controlTest.update({ where: { id: testId }, data });
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'SAVE_DRAFT', entityType: 'ControlTest', entityId: testId },
+            await tx.auditLog.create({
+                data: { userId, action: 'SAVE_DRAFT', entityType: 'ControlTest', entityId: testId },
+            });
+
+            return updated;
         });
-
-        return updated;
     }
 
     async createTest(controlId: string, data: CreateControlTestDto, userId: string) {
@@ -530,27 +541,29 @@ export class ControlsService {
         // AD_HOC/manuel testler de aynı (kontrol,yıl) sayacından çeker — madde 13:
         // "plansız testler de bu kodu kullanacaksa aynı benzersiz sayaçtan yararlansın".
         const testNo = await nextTestCode(this.prisma, controlId, control.controlId, plannedDate.getFullYear());
-        const test = await this.prisma.controlTest.create({
-            data: {
-                testNo,
-                controlId,
-                plannedDate,
-                summary: data.summary || null,
-                description: data.description || null,
-                assigneeId: data.assigneeId || null,
-                secondControllerId: data.secondControllerId || null,
-                directorateId: data.directorateId || null,
-                sprint: data.sprint || null,
-                isAutoGenerated: false,
-                status: 'BEKLIYOR',
-            },
-        });
+        return this.prisma.$transaction(async (tx) => {
+            const test = await tx.controlTest.create({
+                data: {
+                    testNo,
+                    controlId,
+                    plannedDate,
+                    summary: data.summary || null,
+                    description: data.description || null,
+                    assigneeId: data.assigneeId || null,
+                    secondControllerId: data.secondControllerId || null,
+                    directorateId: data.directorateId || null,
+                    sprint: data.sprint || null,
+                    isAutoGenerated: false,
+                    status: 'BEKLIYOR',
+                },
+            });
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'CREATE', entityType: 'ControlTest', entityId: test.id, newValue: test },
-        });
+            await tx.auditLog.create({
+                data: { userId, action: 'CREATE', entityType: 'ControlTest', entityId: test.id, newValue: test },
+            });
 
-        return test;
+            return test;
+        });
     }
 
     // ─── ControlTest Kanıt Ekleri ─────────────────────────────────────────────
@@ -593,12 +606,14 @@ export class ControlsService {
         if (test.status === 'ONAYLANDI') throw new BadRequestException('Onaylanmış testin kanıtları değiştirilemez.');
         const old = await this.prisma.controlTestAttachment.findFirst({ where: { id: attachmentId, controlTestId: testId } });
         if (!old) throw new NotFoundException('Ek bulunamadı');
-        const updated = await this.prisma.controlTestAttachment.update({ where: { id: attachmentId }, data: {
-            displayName: dto.displayName !== undefined ? (dto.displayName.trim() || old.originalName) : undefined,
-            description: dto.description !== undefined ? (dto.description.trim() || null) : undefined,
-        } });
-        await this.prisma.auditLog.create({ data: { userId, action: 'FILE_METADATA_UPDATED', entityType: 'ControlTestAttachment', entityId: attachmentId, oldValue: { displayName: old.displayName, description: old.description }, newValue: { displayName: updated.displayName, description: updated.description } } });
-        return updated;
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.controlTestAttachment.update({ where: { id: attachmentId }, data: {
+                displayName: dto.displayName !== undefined ? (dto.displayName.trim() || old.originalName) : undefined,
+                description: dto.description !== undefined ? (dto.description.trim() || null) : undefined,
+            } });
+            await tx.auditLog.create({ data: { userId, action: 'FILE_METADATA_UPDATED', entityType: 'ControlTestAttachment', entityId: attachmentId, oldValue: { displayName: old.displayName, description: old.description }, newValue: { displayName: updated.displayName, description: updated.description } } });
+            return updated;
+        });
     }
 
     async removeControlTestAttachment(testId: string, attachmentId: string, userId: string) {
@@ -613,11 +628,13 @@ export class ControlsService {
         });
         if (!att) throw new NotFoundException('Ek bulunamadı');
 
-        await this.prisma.controlTestAttachment.delete({ where: { id: attachmentId } });
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'FILE_DELETED', entityType: 'ControlTestAttachment', entityId: attachmentId },
+        return this.prisma.$transaction(async (tx) => {
+            await tx.controlTestAttachment.delete({ where: { id: attachmentId } });
+            await tx.auditLog.create({
+                data: { userId, action: 'FILE_DELETED', entityType: 'ControlTestAttachment', entityId: attachmentId },
+            });
+            return { success: true };
         });
-        return { success: true };
     }
 
     async startTest(testId: string, userId: string) {

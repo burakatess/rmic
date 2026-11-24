@@ -73,27 +73,29 @@ export class AuthService {
         const passwordHash = await bcrypt.hash(registerDto.password, 10);
 
         // Create user
-        const user = await this.prisma.user.create({
-            data: {
-                email: registerDto.email,
-                passwordHash,
-                firstName: registerDto.firstName,
-                lastName: registerDto.lastName,
-                department: registerDto.department,
-                roleId: registerDto.roleId,
-            },
-            include: { role: true },
-        });
-
-        // Log the action
-        await this.prisma.auditLog.create({
-            data: {
-                userId: user.id,
-                action: 'CREATE',
-                entityType: 'User',
-                entityId: user.id,
-                newValue: { email: user.email, firstName: user.firstName, lastName: user.lastName },
-            },
+        // Kullanıcı + denetim kaydı tek işlemde.
+        const user = await this.prisma.$transaction(async (tx) => {
+            const created = await tx.user.create({
+                data: {
+                    email: registerDto.email,
+                    passwordHash,
+                    firstName: registerDto.firstName,
+                    lastName: registerDto.lastName,
+                    department: registerDto.department,
+                    roleId: registerDto.roleId,
+                },
+                include: { role: true },
+            });
+            await tx.auditLog.create({
+                data: {
+                    userId: created.id,
+                    action: 'CREATE',
+                    entityType: 'User',
+                    entityId: created.id,
+                    newValue: { email: created.email, firstName: created.firstName, lastName: created.lastName },
+                },
+            });
+            return created;
         });
 
         return this.generateTokens(user);
@@ -139,26 +141,28 @@ export class AuthService {
     }
 
     async logout(userId: string, refreshToken?: string): Promise<void> {
-        if (refreshToken) {
-            // Delete specific refresh token
-            await this.prisma.refreshToken.deleteMany({
-                where: { token: refreshToken },
-            });
-        } else {
-            // Delete all refresh tokens for user
-            await this.prisma.refreshToken.deleteMany({
-                where: { userId },
-            });
-        }
+        return this.prisma.$transaction(async (tx) => {
+            if (refreshToken) {
+                // Delete specific refresh token
+                await tx.refreshToken.deleteMany({
+                    where: { token: refreshToken },
+                });
+            } else {
+                // Delete all refresh tokens for user
+                await tx.refreshToken.deleteMany({
+                    where: { userId },
+                });
+            }
 
-        // Log the action
-        await this.prisma.auditLog.create({
-            data: {
-                userId,
-                action: 'LOGOUT',
-                entityType: 'User',
-                entityId: userId,
-            },
+            // Log the action
+            await tx.auditLog.create({
+                data: {
+                    userId,
+                    action: 'LOGOUT',
+                    entityType: 'User',
+                    entityId: userId,
+                },
+            });
         });
     }
 
@@ -177,28 +181,30 @@ export class AuthService {
     }
 
     async updateProfile(userId: string, dto: { firstName: string; lastName: string; department?: string }) {
-        const user = await this.prisma.user.update({
-            where: { id: userId },
-            data: {
-                firstName: dto.firstName,
-                lastName: dto.lastName,
-                department: dto.department ?? null,
-            },
-            include: { role: true },
-        });
+        return this.prisma.$transaction(async (tx) => {
+            const user = await tx.user.update({
+                where: { id: userId },
+                data: {
+                    firstName: dto.firstName,
+                    lastName: dto.lastName,
+                    department: dto.department ?? null,
+                },
+                include: { role: true },
+            });
 
-        await this.prisma.auditLog.create({
-            data: {
-                userId,
-                action: 'UPDATE',
-                entityType: 'User',
-                entityId: userId,
-                newValue: { firstName: dto.firstName, lastName: dto.lastName, department: dto.department },
-            },
-        });
+            await tx.auditLog.create({
+                data: {
+                    userId,
+                    action: 'UPDATE',
+                    entityType: 'User',
+                    entityId: userId,
+                    newValue: { firstName: dto.firstName, lastName: dto.lastName, department: dto.department },
+                },
+            });
 
-        const { passwordHash, ...result } = user;
-        return result;
+            const { passwordHash, ...result } = user;
+            return result;
+        });
     }
 
     async changePassword(userId: string, dto: { currentPassword: string; newPassword: string }) {
@@ -254,22 +260,24 @@ export class AuthService {
         const expiresAt = new Date();
         expiresAt.setDate(expiresAt.getDate() + 7);
 
-        await this.prisma.refreshToken.create({
-            data: {
-                token: refreshToken,
-                userId: user.id,
-                expiresAt,
-            },
-        });
+        await this.prisma.$transaction(async (tx) => {
+            await tx.refreshToken.create({
+                data: {
+                    token: refreshToken,
+                    userId: user.id,
+                    expiresAt,
+                },
+            });
 
-        // Log login
-        await this.prisma.auditLog.create({
-            data: {
-                userId: user.id,
-                action: 'LOGIN',
-                entityType: 'User',
-                entityId: user.id,
-            },
+            // Log login
+            await tx.auditLog.create({
+                data: {
+                    userId: user.id,
+                    action: 'LOGIN',
+                    entityType: 'User',
+                    entityId: user.id,
+                },
+            });
         });
 
         return {

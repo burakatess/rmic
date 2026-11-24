@@ -141,14 +141,16 @@ export class WorkspaceTestService {
         await this.assertWorkspace(simulationId);
         const baseline = await this.snapshot(simulationId);
         try {
-            const test = await this.prisma.riskSimulationTest.create({
-                data: { simulationId, name, activeFor: simulationId, baseline: baseline as unknown as Prisma.InputJsonValue, startedById: userId },
-                select: { id: true, name: true, status: true, startedAt: true },
+            return await this.prisma.$transaction(async (tx) => {
+                const test = await tx.riskSimulationTest.create({
+                    data: { simulationId, name, activeFor: simulationId, baseline: baseline as unknown as Prisma.InputJsonValue, startedById: userId },
+                    select: { id: true, name: true, status: true, startedAt: true },
+                });
+                await tx.auditLog.create({
+                    data: { userId, action: 'SIM_TEST_START', entityType: 'RiskSimulationTest', entityId: test.id, newValue: { simulationId, name, riskCount: baseline.scenarios.length } },
+                });
+                return test;
             });
-            await this.prisma.auditLog.create({
-                data: { userId, action: 'SIM_TEST_START', entityType: 'RiskSimulationTest', entityId: test.id, newValue: { simulationId, name, riskCount: baseline.scenarios.length } },
-            });
-            return test;
         } catch (e) {
             if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
                 throw new ConflictException('Bu çalışma alanında zaten devam eden bir simülasyon testi var.');
@@ -161,13 +163,15 @@ export class WorkspaceTestService {
         const test = await this.getTest(simulationId, testId);
         if (test.status !== 'ACTIVE') throw new BadRequestException('Bu test zaten bitirilmiş.');
         const finalState = await this.snapshot(simulationId);
-        const updated = await this.prisma.riskSimulationTest.update({
-            where: { id: testId },
-            data: { status: 'FINISHED', activeFor: null, finalState: finalState as unknown as Prisma.InputJsonValue, finishedById: userId, finishedAt: new Date() },
-            select: { id: true, name: true, status: true, startedAt: true, finishedAt: true },
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.riskSimulationTest.update({
+                where: { id: testId },
+                data: { status: 'FINISHED', activeFor: null, finalState: finalState as unknown as Prisma.InputJsonValue, finishedById: userId, finishedAt: new Date() },
+                select: { id: true, name: true, status: true, startedAt: true, finishedAt: true },
+            });
+            await tx.auditLog.create({ data: { userId, action: 'SIM_TEST_FINISH', entityType: 'RiskSimulationTest', entityId: testId, newValue: { simulationId } } });
+            return updated;
         });
-        await this.prisma.auditLog.create({ data: { userId, action: 'SIM_TEST_FINISH', entityType: 'RiskSimulationTest', entityId: testId, newValue: { simulationId } } });
-        return updated;
     }
 
     /** Simülasyon verisini testin başlangıç anına döndürür (risk girdileri ve kontroller). */

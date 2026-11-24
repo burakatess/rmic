@@ -125,26 +125,28 @@ export class ComplianceService {
 
     // Risk-Article Mapping
     async mapRiskToArticle(riskId: string, articleId: string, userId?: string) {
-        const mapping = await this.prisma.riskRegulation.create({
-            data: {
-                riskId,
-                articleId,
-            },
-        });
-
-        if (userId) {
-            await this.prisma.auditLog.create({
+        return this.prisma.$transaction(async (tx) => {
+            const mapping = await tx.riskRegulation.create({
                 data: {
-                    userId,
-                    action: 'MAP',
-                    entityType: 'RiskRegulation',
-                    entityId: mapping.id,
-                    newValue: { riskId, articleId },
+                    riskId,
+                    articleId,
                 },
             });
-        }
 
-        return mapping;
+            if (userId) {
+                await tx.auditLog.create({
+                    data: {
+                        userId,
+                        action: 'MAP',
+                        entityType: 'RiskRegulation',
+                        entityId: mapping.id,
+                        newValue: { riskId, articleId },
+                    },
+                });
+            }
+
+            return mapping;
+        });
     }
 
     async unmapRiskFromArticle(riskId: string, articleId: string) {
@@ -155,26 +157,28 @@ export class ComplianceService {
 
     // Control-Article Mapping
     async mapControlToArticle(controlId: string, articleId: string, userId?: string) {
-        const mapping = await this.prisma.controlRegulation.create({
-            data: {
-                controlId,
-                articleId,
-            },
-        });
-
-        if (userId) {
-            await this.prisma.auditLog.create({
+        return this.prisma.$transaction(async (tx) => {
+            const mapping = await tx.controlRegulation.create({
                 data: {
-                    userId,
-                    action: 'MAP',
-                    entityType: 'ControlRegulation',
-                    entityId: mapping.id,
-                    newValue: { controlId, articleId },
+                    controlId,
+                    articleId,
                 },
             });
-        }
 
-        return mapping;
+            if (userId) {
+                await tx.auditLog.create({
+                    data: {
+                        userId,
+                        action: 'MAP',
+                        entityType: 'ControlRegulation',
+                        entityId: mapping.id,
+                        newValue: { controlId, articleId },
+                    },
+                });
+            }
+
+            return mapping;
+        });
     }
 
     async unmapControlFromArticle(controlId: string, articleId: string) {

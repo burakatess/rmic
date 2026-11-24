@@ -288,57 +288,61 @@ export class ActionsService {
 
         const action = await this.findOne(id);
 
-        const review = await this.prisma.effectivenessReview.create({
-            data: {
-                actionId: id,
-                riskScoreBefore: data.riskScoreBefore,
-                riskScoreAfter: data.riskScoreAfter,
-                controlEffectiveness: data.controlEffectiveness,
-                isEffective: data.isEffective,
-                reviewedBy: userId,
-                notes: data.notes,
-            },
-        });
+        return this.prisma.$transaction(async (tx) => {
+            const review = await tx.effectivenessReview.create({
+                data: {
+                    actionId: id,
+                    riskScoreBefore: data.riskScoreBefore,
+                    riskScoreAfter: data.riskScoreAfter,
+                    controlEffectiveness: data.controlEffectiveness,
+                    isEffective: data.isEffective,
+                    reviewedBy: userId,
+                    notes: data.notes,
+                },
+            });
 
-        // Update action status
-        await this.prisma.action.update({
-            where: { id },
-            data: { status: data.isEffective ? 'CLOSED' : 'COMPLETED' },
-        });
+            // Update action status
+            await tx.action.update({
+                where: { id },
+                data: { status: data.isEffective ? 'CLOSED' : 'COMPLETED' },
+            });
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'EFFECTIVENESS_REVIEW', entityType: 'Action', entityId: id, newValue: review },
-        });
+            await tx.auditLog.create({
+                data: { userId, action: 'EFFECTIVENESS_REVIEW', entityType: 'Action', entityId: id, newValue: review },
+            });
 
-        return review;
+            return review;
+        });
     }
 
     async approveEffectivenessReview(id: string, userId: string) {
-        const review = await this.prisma.effectivenessReview.update({
-            where: { actionId: id },
-            data: {
-                managementApproval: true,
-                approvedBy: userId,
-                approvedAt: new Date(),
-            },
-        });
-
-        // If approved and effective, update the related risk's residual score
-        const action = await this.findOne(id);
-        if (review.isEffective && action.riskId) {
-            await this.prisma.risk.update({
-                where: { id: action.riskId },
+        return this.prisma.$transaction(async (tx) => {
+            const review = await tx.effectivenessReview.update({
+                where: { actionId: id },
                 data: {
-                    residualRiskScore: review.riskScoreAfter,
-                    isAboveAppetite: false, // Will be recalculated
+                    managementApproval: true,
+                    approvedBy: userId,
+                    approvedAt: new Date(),
                 },
             });
-        }
 
-        await this.prisma.auditLog.create({
-            data: { userId, action: 'APPROVAL', entityType: 'EffectivenessReview', entityId: review.id, newValue: review },
+            // If approved and effective, update the related risk's residual score
+            const action = await this.findOne(id);
+            if (review.isEffective && action.riskId) {
+                await tx.risk.update({
+                    where: { id: action.riskId },
+                    data: {
+                        residualRiskScore: review.riskScoreAfter,
+                        isAboveAppetite: false, // Will be recalculated
+                    },
+                });
+            }
+
+            await tx.auditLog.create({
+                data: { userId, action: 'APPROVAL', entityType: 'EffectivenessReview', entityId: review.id, newValue: review },
+            });
+
+            return review;
         });
-
-        return review;
     }
 }

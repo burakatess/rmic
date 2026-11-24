@@ -226,9 +226,11 @@ export class WorkspaceService {
             });
             return;
         }
-        await this.prisma.riskSimulation.delete({ where: { id } });
-        await this.prisma.simulationMethodology.deleteMany({ where: { trialSimulationId: id, isTrial: true, scenarios: { none: {} } } });
-        await this.prisma.auditLog.create({ data: { userId: actor.id, action: 'DELETE', entityType: 'RiskSimulation', entityId: id, oldValue: { reason: 'Güncel simülatör yenilendi' } } });
+        return this.prisma.$transaction(async (tx) => {
+            await tx.riskSimulation.delete({ where: { id } });
+            await tx.simulationMethodology.deleteMany({ where: { trialSimulationId: id, isTrial: true, scenarios: { none: {} } } });
+            await tx.auditLog.create({ data: { userId: actor.id, action: 'DELETE', entityType: 'RiskSimulation', entityId: id, oldValue: { reason: 'Güncel simülatör yenilendi' } } });
+        });
     }
 
     /** Güncel simülatörü adıyla kaydeder; devam eden simülasyon testi bitirilip raporu dondurulur. */
@@ -239,13 +241,15 @@ export class WorkspaceService {
         if (sim.draftOwnerId !== actor.id) throw new ForbiddenException('Yalnız kendi güncel simülatörünüzü kaydedebilirsiniz.');
         const active = await this.prisma.riskSimulationTest.findUnique({ where: { activeFor: id }, select: { id: true } });
         if (active) await this.tests.finish(id, active.id, actor.id);
-        const saved = await this.prisma.riskSimulation.update({
-            where: { id }, data: { isDraft: false, draftOwnerId: null, name: dto.name, description: dto.description ?? null },
+        return this.prisma.$transaction(async (tx) => {
+            const saved = await tx.riskSimulation.update({
+                where: { id }, data: { isDraft: false, draftOwnerId: null, name: dto.name, description: dto.description ?? null },
+            });
+            await tx.auditLog.create({
+                data: { userId: actor.id, action: 'SIM_SAVE', entityType: 'RiskSimulation', entityId: id, newValue: { simulationId: saved.simulationId, name: saved.name, finishedTestId: active?.id ?? null } },
+            });
+            return saved;
         });
-        await this.prisma.auditLog.create({
-            data: { userId: actor.id, action: 'SIM_SAVE', entityType: 'RiskSimulation', entityId: id, newValue: { simulationId: saved.simulationId, name: saved.name, finishedTestId: active?.id ?? null } },
-        });
-        return saved;
     }
 
     /** Toplu silme. Envantere aktarım yapılmış simülasyonlar denetim izi için silinmez. */
