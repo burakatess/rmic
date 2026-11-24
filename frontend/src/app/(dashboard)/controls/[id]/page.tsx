@@ -11,6 +11,7 @@ import {
 } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { CreateFindingModal } from '@/components/modals/CreateFindingModal';
+import { FREQUENCY_LABELS } from '@/lib/control-labels';
 import ControlScopePanel from '@/components/controls/ControlScopePanel';
 
 interface User {
@@ -106,10 +107,7 @@ const severityConfig: Record<string, { label: string; variant: BV }> = {
     LOW: { label: 'Düşük', variant: 'low' },
 };
 
-const frequencyLabel: Record<string, string> = {
-    DAILY: 'Günlük', WEEKLY: 'Haftalık', MONTHLY: 'Aylık',
-    QUARTERLY: '3 Aylık', SEMI_ANNUAL: '6 Aylık', ANNUAL: 'Yıllık', AD_HOC: 'Arızi',
-};
+const frequencyLabel = FREQUENCY_LABELS;
 
 const testStatusConfig: Record<string, { label: string; variant: BV }> = {
     PENDING: { label: 'Bekliyor', variant: 'neutral' },
@@ -272,6 +270,7 @@ export default function ControlDetailPage() {
     }
 
     const hasFinding = control.linkedFindings.length > 0;
+    const activeScopeYears = control.yearScopes.filter((sc) => sc.status === 'ACTIVE').map((sc) => sc.year as number).sort((a, b) => a - b);
     const effCfg = effectivenessConfig[control.effectivenessStatus];
 
     const tabs = [
@@ -300,9 +299,9 @@ export default function ControlDetailPage() {
                 }
                 meta={
                     <>
-                        <span>{control.controlId} master kontrolü detay analizi ve operasyonel akışı</span>
-                        {control.owner?.name && <span>Sahip: {control.owner.name}</span>}
+                        <span>Sahip: {control.owner?.name || 'Atanmamış'}</span>
                         <span>Sıklık: {frequencyLabel[control.frequency] || control.frequency}</span>
+                        {control.directorate && <span>Direktörlük: {control.directorate}</span>}
                     </>
                 }
                 actions={
@@ -328,9 +327,9 @@ export default function ControlDetailPage() {
                         </svg>
                     </span>
                     <div className="min-w-0">
-                        <p className="text-xs font-medium text-slate-500">Kontrol Kodu & Sıklığı</p>
+                        <p className="text-xs font-medium text-slate-500">Kapsamdaki Yıllar</p>
                         <p className="text-2xl font-bold tabular-nums text-slate-800 truncate">
-                            {control.controlId} <span className="text-slate-400 font-normal">—</span> {frequencyLabel[control.frequency] || control.frequency}
+                            {activeScopeYears.length > 0 ? activeScopeYears.join(', ') : <span className="text-slate-400 font-medium text-lg">Hiçbir yılda kapsamda değil</span>}
                         </p>
                     </div>
                 </div>

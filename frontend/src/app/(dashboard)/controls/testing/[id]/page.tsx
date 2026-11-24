@@ -14,6 +14,7 @@ import { ReasonModal } from '@/components/controls/ReasonModal';
 import { RichTextArea, MarkdownLiteView } from '@/components/controls/RichTextArea';
 import { ResizableSplit } from '@/components/controls/ResizableSplit';
 import { EvidenceList, type EvidenceItem } from '@/components/controls/EvidenceList';
+import { frequencyText } from '@/lib/control-labels';
 import { EvidencePreview } from '@/components/controls/EvidencePreview';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -479,7 +480,7 @@ export default function ControlTestDetailPage() {
                         </div>
                         <div>
                             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Periyodiklik</p>
-                            <p className="text-slate-700 font-semibold">{control.frequency}</p>
+                            <p className="text-slate-700 font-semibold">{frequencyText(control.frequency)}</p>
                         </div>
                     </div>
                 </div>
@@ -720,7 +721,7 @@ export default function ControlTestDetailPage() {
                     )}
                 </div>
                 <p className="text-lg font-bold text-slate-800 leading-snug">
-                    {control.controlId} — {control.name}
+                    {control.name}
                 </p>
                 <div className="flex flex-wrap items-center gap-2 mt-1.5">
                     <Link href={`/controls/${control.id}`} target="_blank" className="text-[11px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded px-2 py-0.5 hover:underline">

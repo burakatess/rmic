@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
+import { frequencyText } from '@/lib/control-labels';
 import api from '@/lib/api';
 
 // Types
@@ -296,7 +297,7 @@ export default function ControlRiskMappingPage() {
                                             <div className="flex items-center gap-2.5 text-xs text-slate-400">
                                                 <span>🏢 {control.ownerUnit}</span>
                                                 <span>•</span>
-                                                <span>⏱️ {control.frequency}</span>
+                                                <span>⏱️ {frequencyText(control.frequency)}</span>
                                                 <span>•</span>
                                                 <span>GMY: {control.scope}</span>
                                             </div>
