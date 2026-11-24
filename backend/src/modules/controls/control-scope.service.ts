@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ConflictException, 
 import { PrismaService } from '../../prisma';
 import { AccessScopeService } from '../../common/services/access-scope.service';
 import { controllerIneligibility } from '../../common/services/controller-eligibility';
-import { computeScopePeriods, computeMonthGroup, monthNumbersToLabels, ScopePeriod } from './control-period.util';
+import { computeScopePeriods, computeMonthGroup, monthNumbersToLabels, scopeMonthsFor, ScopePeriod } from './control-period.util';
 import { AddScopeDto, BulkAddScopeDto, ChangePeriodicityDto, CopyScopeDto, RemoveScopeDto } from './dto/control-scope.dto';
 import { nextTestCode } from './test-code.util';
 import { computePeriodCode } from './period-code.util';
@@ -173,9 +173,8 @@ export class ControlScopeService {
             // Periyodik sıklıklar (QUARTERLY/SEMI_ANNUAL/ANNUAL) için referenceMonth
             // varsa selectedMonths İSTEMCİDEN GÜVENİLMEZ — backend kendi hesaplar
             // (madde 21: istemciden gelen keyfi ay listesine güvenme).
-            const selectedMonths = referenceMonth != null && ['QUARTERLY', 'SEMI_ANNUAL', 'ANNUAL'].includes(frequency)
-                ? monthNumbersToLabels(computeMonthGroup(frequency, referenceMonth))
-                : (dto.selectedMonths ?? control.selectedMonths);
+            // Periyodik + referans ayı yoksa sabit test takvimi (scopeMonthsFor).
+            const selectedMonths = scopeMonthsFor(frequency, referenceMonth, dto.selectedMonths ?? control.selectedMonths);
             const controlDate = dto.controlDate ? new Date(dto.controlDate) : control.controlDate;
             const includePastPeriods = dto.includePastPeriods ?? false;
             const periods = this.computePeriodsForScope(frequency, year, selectedMonths, controlDate, includePastPeriods, referenceMonth);
@@ -297,13 +296,15 @@ export class ControlScopeService {
             const existing = await this.prisma.controlYearScope.findUnique({ where: { controlId_year: { controlId: src.controlId, year: dto.toYear } } });
             if (existing) { skipped++; continue; }
 
-            const periods = this.computePeriodsForScope(src.frequency, dto.toYear, src.selectedMonths, src.controlDate, false);
+            // Referans ay da kopyalandığı için dönemler onunla hesaplanır; aylar tek kaynaktan.
+            const copiedMonths = scopeMonthsFor(src.frequency, src.referenceMonth, src.selectedMonths);
+            const periods = this.computePeriodsForScope(src.frequency, dto.toYear, copiedMonths, src.controlDate, false, src.referenceMonth);
 
             await this.prisma.$transaction(async (tx) => {
                 const scope = await tx.controlYearScope.create({
                     data: {
                         controlId: src.controlId, year: dto.toYear, frequency: src.frequency,
-                        referenceMonth: src.referenceMonth, selectedMonths: src.selectedMonths, controlDate: src.controlDate,
+                        referenceMonth: src.referenceMonth, selectedMonths: copiedMonths, controlDate: src.controlDate,
                         addedById: userId, copiedFromYear: dto.fromYear,
                         code: computePeriodCode(src.control.controlId, dto.toYear),
                         controlVersion: src.control.version,
@@ -395,9 +396,7 @@ export class ControlScopeService {
 
         const newFrequency = dto.frequency || scope.frequency;
         const newReferenceMonth = dto.referenceMonth !== undefined ? dto.referenceMonth : scope.referenceMonth;
-        const newSelectedMonths = newReferenceMonth != null && ['QUARTERLY', 'SEMI_ANNUAL', 'ANNUAL'].includes(newFrequency)
-            ? monthNumbersToLabels(computeMonthGroup(newFrequency, newReferenceMonth))
-            : (dto.selectedMonths ?? scope.selectedMonths);
+        const newSelectedMonths = scopeMonthsFor(newFrequency, newReferenceMonth, dto.selectedMonths ?? scope.selectedMonths);
         const newPeriods = computeScopePeriods(newFrequency, year, { selectedMonths: newSelectedMonths, controlDate: scope.controlDate, referenceMonth: newReferenceMonth });
         const newKeys = new Set(newPeriods.map(p => p.periodKey));
 

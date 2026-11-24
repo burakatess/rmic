@@ -138,6 +138,11 @@ function ViewToggle({ view, onChange }: { view: ViewMode; onChange: (v: ViewMode
 export default function PeriodControlsPage() {
     const [view, setView] = useState<ViewMode>('list'); // Madde 13: varsayılan görünüm Liste
     const [filters, setFilters] = useState<Filters>(emptyFilters);
+    // Kapsam: İşlerim (atandığım/ikinci kontrolcüsü olduğum) · Birimim · Tümü (kurum geneli).
+    // Seçenekler yetkiye göre backend'den; yetkisiz kapsam istenirse backend İşlerim'e düşer.
+    const [scope, setScope] = useState<'MINE' | 'UNIT' | 'ORG'>('MINE');
+    const [appliedScope, setAppliedScope] = useState<'MINE' | 'UNIT' | 'ORG' | null>(null);
+    const [scopeOptions, setScopeOptions] = useState<{ unit: { available: boolean }; org: { available: boolean } } | null>(null);
     const [years, setYears] = useState<number[]>([]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const [users, setUsers] = useState<any[]>([]);
@@ -169,6 +174,8 @@ export default function PeriodControlsPage() {
             onlyPendingApproval: params.get('onlyPendingApproval') === 'true',
             onlyWithFindings: params.get('onlyWithFindings') === 'true',
         }));
+        const urlScope = params.get('scope');
+        if (urlScope === 'UNIT' || urlScope === 'ORG' || urlScope === 'MINE') setScope(urlScope);
         const urlPage = Number(params.get('page'));
         if (Number.isInteger(urlPage) && urlPage > 0) setPage(urlPage);
         setUrlReady(true);
@@ -178,6 +185,7 @@ export default function PeriodControlsPage() {
         if (!urlReady) return;
         const params = new URLSearchParams();
         params.set('year', filters.year);
+        if (scope !== 'MINE') params.set('scope', scope);
         if (filters.month) params.set('month', filters.month);
         if (filters.search) params.set('search', filters.search);
         if (filters.directorateId) params.set('directorateId', filters.directorateId);
@@ -189,7 +197,7 @@ export default function PeriodControlsPage() {
         if (filters.onlyWithFindings) params.set('onlyWithFindings', 'true');
         if (page > 1) params.set('page', String(page));
         window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
-    }, [filters, page, urlReady]);
+    }, [filters, page, urlReady, scope]);
 
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [testsByScope, setTestsByScope] = useState<Map<string, TaskRow[]>>(new Map());
@@ -207,6 +215,7 @@ export default function PeriodControlsPage() {
 
     useEffect(() => {
         api.getScopeYears().then(r => setYears(r.years)).catch(() => { });
+        api.getDashboardScopeOptions().then(o => setScopeOptions(o)).catch(() => setScopeOptions(null));
         api.getUserOptions({ limit: 500 }).then(r => setUsers(r.data)).catch(() => { });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         api.getDirectorates({ isActive: 'true' }).then((r: any) => setDirectorates(Array.isArray(r) ? r : [])).catch(() => { });
@@ -221,6 +230,7 @@ export default function PeriodControlsPage() {
     }), [filters.year, filters.frequency, filters.assigneeId]);
 
     const periodQuery = useMemo(() => ({
+        scope,
         year: filters.year || String(new Date().getFullYear()),
         page: String(page), pageSize: String(pageSize),
         ...(filters.month && { month: filters.month }),
@@ -232,7 +242,7 @@ export default function PeriodControlsPage() {
         ...(filters.onlyOverdue && { onlyOverdue: 'true' }),
         ...(filters.onlyPendingApproval && { onlyPendingApproval: 'true' }),
         ...(filters.onlyWithFindings && { onlyWithFindings: 'true' }),
-    }), [filters, page]);
+    }), [filters, page, scope]);
 
     // Filtre değişince (ör. URL'deki yıl varsayılan yılın yerine geçtiğinde) önceki istek
     // geç dönebilir; yalnız EN SON isteğin sonucu yazılır, eski yanıt yenisini ezmez.
@@ -261,6 +271,7 @@ export default function PeriodControlsPage() {
             if (seq !== rowsSeq.current) return;
             setRows(r.data || []);
             setTotalCount(r.totalCount || 0);
+            setAppliedScope((r as { appliedScope?: 'MINE' | 'UNIT' | 'ORG' }).appliedScope ?? null);
         } catch (err) {
             if (seq !== rowsSeq.current) return;
             setRowsError(err instanceof Error ? err.message : 'Dönem kontrolleri yüklenemedi.');
@@ -317,6 +328,24 @@ export default function PeriodControlsPage() {
 
             {/* Filtreler */}
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4 mb-5 flex flex-wrap items-end gap-3">
+                {view === 'list' && (
+                    <div>
+                        <span id="period-scope-label" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Kapsam</span>
+                        <div role="group" aria-labelledby="period-scope-label" className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+                            {([['MINE', 'İşlerim', true], ['UNIT', 'Birimim', !!scopeOptions?.unit.available], ['ORG', 'Tümü', !!scopeOptions?.org.available]] as const).map(([key, label, available]) => (
+                                <button key={key} type="button" disabled={!available} aria-pressed={scope === key}
+                                    title={available ? undefined : 'Bu kapsam için yetkiniz yok'}
+                                    onClick={() => { setScope(key); setPage(1); }}
+                                    className={`px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${scope === key ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                        {appliedScope && appliedScope !== scope && (
+                            <p className="text-[11px] text-amber-700 mt-1">Bu kapsam için yetkiniz yok; İşlerim gösteriliyor.</p>
+                        )}
+                    </div>
+                )}
                 <div>
                     <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Yıl</label>
                     <select value={filters.year} onChange={(e) => setFilter('year', e.target.value)} className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white">

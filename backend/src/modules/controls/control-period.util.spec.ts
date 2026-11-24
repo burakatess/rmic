@@ -111,3 +111,19 @@ describe('computeScopePeriods — referenceMonth ile genişletme', () => {
         expect(adhoc[0].targetDate).toEqual(new Date(2026, 3, 15));
     });
 });
+
+describe('scopeMonthsFor — dönem kaydının uygulama ayları (tek kaynak)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { scopeMonthsFor } = require('./control-period.util');
+    it('referans ayı olmayan periyodik kontrol sabit test takvimini alır; eski ay listesi kopyalanmaz', () => {
+        expect(scopeMonthsFor('QUARTERLY', null, ['Mart', 'Eylül'])).toEqual(['Mart', 'Haziran', 'Eylül', 'Aralık']);
+        expect(scopeMonthsFor('SEMI_ANNUAL', null, ['Mart', 'Eylül'])).toEqual(['Haziran', 'Aralık']);
+        expect(scopeMonthsFor('ANNUAL', undefined, [])).toEqual(['Aralık']);
+    });
+    it('referans ay varsa ay grubu; diğer sıklıklarda verilen aylar korunur', () => {
+        expect(scopeMonthsFor('QUARTERLY', 1, ['Mart'])).toEqual(['Ocak', 'Nisan', 'Temmuz', 'Ekim']);
+        expect(scopeMonthsFor('SEMI_ANNUAL', 8, [])).toEqual(['Şubat', 'Ağustos']);
+        expect(scopeMonthsFor('AD_HOC', null, ['Mayıs'])).toEqual(['Mayıs']);
+        expect(scopeMonthsFor('MONTHLY', null, null)).toEqual([]);
+    });
+});
