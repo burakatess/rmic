@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
 const EMAIL = 'playwright-admin@e2e.local';
 const PASSWORD = 'TestE2E1234!';
@@ -141,8 +141,17 @@ test('ay ve direktörlük filtresiyle ekrandaki bulgular Excel dışa aktarımı
     const workbookPath = await download.path();
     expect(workbookPath).not.toBeNull();
 
-    const workbook = XLSX.readFile(workbookPath!);
-    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(workbook.Sheets['1-Tespit Edilen Bulgular']);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(workbookPath!);
+    const sheet = workbook.getWorksheet('1-Tespit Edilen Bulgular');
+    expect(sheet).toBeDefined();
+    const headers = (sheet!.getRow(1).values as unknown[]).slice(1).map(v => String(v ?? ''));
+    const rows: Record<string, string>[] = [];
+    sheet!.eachRow((row, n) => {
+        if (n === 1) return;
+        const vals = (row.values as unknown[]).slice(1);
+        rows.push(Object.fromEntries(headers.map((h, i) => [h, String(vals[i] ?? '')])));
+    });
     expect(rows.map(row => row['Bulgu No']).sort()).toEqual(['2026.BT.PW01', '2026.BT.PW02']);
     expect(rows.every(row => row['Direktörlük'] === 'Playwright Test Direktörlüğü')).toBe(true);
 });

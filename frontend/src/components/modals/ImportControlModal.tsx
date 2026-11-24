@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { read, utils, writeFile } from 'xlsx';
+import { addAoaSheet, downloadWorkbook, newWorkbook, readWorkbook, sheetToObjects } from '@/lib/xlsx-io';
 import { Button, DataTable } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
 
@@ -123,103 +123,65 @@ export default function ImportControlModal({ isOpen, onClose, onImportSuccess }:
         };
     };
 
-    const handleFileUpload = (file: File) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const bstr = e.target?.result;
-                const workbook = read(bstr, { type: 'binary' });
-                const sheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[sheetName];
-                const json = utils.sheet_to_json<Record<string, string>>(worksheet, { raw: false, defval: '' });
+    const handleFileUpload = async (file: File) => {
+        try {
+            const workbook = await readWorkbook(file);
+            const worksheet = workbook.worksheets[0];
+            if (!worksheet) throw new Error('Sayfa yok');
+            // Satır numarası Excel'deki gerçek satırdır (başlık 1, ilk veri 2) — hata mesajları buna göre.
+            const json = sheetToObjects(worksheet) as Record<string, string>[];
 
-                const parsed = json.map((row, idx) => validateRow(row, idx + 2));
-                
-                // Duplicate check
-                const seen = new Set();
-                parsed.forEach(p => {
-                    if (p.summary) {
-                        if (seen.has(p.summary)) {
-                            p.validationStatus = 'INVALID';
-                            p.errorMessage = (p.errorMessage ? p.errorMessage + ' ' : '') + 'Mükerrer Kontrol No.';
-                        } else {
-                            seen.add(p.summary);
-                        }
+            const parsed = json.map((row, idx) => validateRow(row, idx + 2));
+
+            // Duplicate check
+            const seen = new Set();
+            parsed.forEach(p => {
+                if (p.summary) {
+                    if (seen.has(p.summary)) {
+                        p.validationStatus = 'INVALID';
+                        p.errorMessage = (p.errorMessage ? p.errorMessage + ' ' : '') + 'Mükerrer Kontrol No.';
+                    } else {
+                        seen.add(p.summary);
                     }
-                });
+                }
+            });
 
-                setData(parsed);
-                setStep('preview');
-            } catch (err) {
-                alert('Dosya okunurken bir hata oluştu. Geçerli bir Excel dosyası yükleyin.');
-            }
-        };
-        reader.readAsBinaryString(file);
+            setData(parsed);
+            setStep('preview');
+        } catch {
+            alert('Dosya okunurken bir hata oluştu. Geçerli bir .xlsx dosyası yükleyin (eski .xls desteklenmez).');
+        }
     };
 
-    const handleDownloadTemplate = () => {
-        const wb = utils.book_new();
-        
-        // Header row
-        const wsData = [EXPECTED_COLUMNS];
-        // Add 10 empty template rows
-        for (let i = 0; i < 10; i++) {
-            wsData.push(EXPECTED_COLUMNS.map(() => ''));
-        }
-        const ws = utils.aoa_to_sheet(wsData);
-        
-        // Column widths
-        ws['!cols'] = [
-            { wch: 22 }, // Summary
-            { wch: 35 }, // Description
-            { wch: 20 }, // Mehaz
-            { wch: 35 }, // Test Adımları
-            { wch: 12 }, // GMY
-            { wch: 22 }, // Direktörlük
-            { wch: 16 }, // Sıklık
-            { wch: 30 }, // Aylar
-            { wch: 18 }, // İletişim
-            { wch: 18 }, // Assignee
-            { wch: 25 }, // Not
-            { wch: 18 }, // 2. Kontrolcü
-            { wch: 16 }, // Due Date
-        ];
+    const handleDownloadTemplate = async () => {
+        const wb = await newWorkbook();
 
-        // Light-blue header styling
-        const headerStyle = {
-            fill: { fgColor: { rgb: 'D6EAF8' } },
-            font: { bold: true, color: { rgb: '1B4F72' }, sz: 11 },
-            alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
-            border: {
-                top: { style: 'thin', color: { rgb: 'A9CCE3' } },
-                bottom: { style: 'thin', color: { rgb: 'A9CCE3' } },
-                left: { style: 'thin', color: { rgb: 'A9CCE3' } },
-                right: { style: 'thin', color: { rgb: 'A9CCE3' } },
-            }
-        };
+        // Başlık + 10 boş şablon satırı; sütun genişlikleri: Summary, Description, Mehaz, Test Adımları, GMY,
+        // Direktörlük, Sıklık, Aylar, İletişim, Assignee, Not, 2. Kontrolcü, Due Date.
+        const wsData: unknown[][] = [EXPECTED_COLUMNS];
+        for (let i = 0; i < 10; i++) wsData.push(EXPECTED_COLUMNS.map(() => ''));
+        const ws = addAoaSheet(wb, 'Kontroller', wsData, { widths: [22, 35, 20, 35, 12, 22, 16, 30, 18, 18, 25, 18, 16] });
 
-        // Apply header styles
-        EXPECTED_COLUMNS.forEach((_, colIdx) => {
-            const cellRef = utils.encode_cell({ r: 0, c: colIdx });
-            if (!ws[cellRef]) ws[cellRef] = { v: EXPECTED_COLUMNS[colIdx], t: 's' };
-            ws[cellRef].s = headerStyle;
+        // Açık mavi başlık biçimi
+        const border = { style: 'thin' as const, color: { argb: 'FFA9CCE3' } };
+        ws.getRow(1).eachCell(cell => {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6EAF8' } };
+            cell.font = { bold: true, color: { argb: 'FF1B4F72' }, size: 11 };
+            cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+            cell.border = { top: border, bottom: border, left: border, right: border };
         });
 
-        // Data validation lists — add a hidden "Listeler" sheet for dropdowns
-        const listsWs = utils.aoa_to_sheet([
+        // Açılır liste kaynakları için "Listeler" sayfası
+        addAoaSheet(wb, 'Listeler', [
             ['Sıklık', 'GMY', 'Aylar'],
             ...Array.from({ length: Math.max(FREQUENCIES.length, GMY_LIST.length, MONTHS.length) }, (_, i) => [
                 FREQUENCIES[i] || '',
                 GMY_LIST[i] || '',
                 MONTHS[i] || '',
-            ])
-        ]);
-        listsWs['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 12 }];
+            ]),
+        ], { widths: [12, 12, 12] });
 
-        utils.book_append_sheet(wb, ws, 'Kontroller');
-        utils.book_append_sheet(wb, listsWs, 'Listeler');
-
-        writeFile(wb, 'Kontrol_Sablona_Yukleme.xlsx');
+        await downloadWorkbook(wb, 'Kontrol_Sablona_Yukleme.xlsx');
     };
 
     const handleImport = async () => {
@@ -305,7 +267,7 @@ export default function ImportControlModal({ isOpen, onClose, onImportSuccess }:
                                     <p className="text-slate-400 text-sm mb-4">veya bilgisayarınızdan seçin (.xlsx, .xls)</p>
                                     <input 
                                         type="file" 
-                                        accept=".xlsx, .xls" 
+                                        accept=".xlsx" 
                                         className="hidden" 
                                         ref={fileInputRef} 
                                         onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])} 

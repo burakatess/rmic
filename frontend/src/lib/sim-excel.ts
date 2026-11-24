@@ -1,8 +1,10 @@
-import { read, utils, writeFile, SSF, type WorkBook, type WorkSheet } from 'xlsx';
+import type { CellValue, Workbook, Worksheet } from 'exceljs';
+import { addAoaSheet, cellText, downloadWorkbook, newWorkbook, readWorkbook as readXlsx } from '@/lib/xlsx-io';
 
 /*
  * Risk simülasyonu ↔ GRC Excel tabloları. Excel dosyaları TARAYICIDA okunur/yazılır; sunucuya
- * yalnız alan adlarına eşlenmiş, temizlenmiş satırlar gider (sunucu xlsx ayrıştırmaz).
+ * yalnız alan adlarına eşlenmiş, temizlenmiş satırlar gider (sunucu Excel dosyası ayrıştırmaz).
+ * Excel kütüphanesi ExcelJS'tir (SheetJS/xlsx bilinen açıkları nedeniyle 2026-11'de değiştirildi).
  * Kolon sırası GRC dışa aktarımıyla aynıdır; simülasyon girdileri için GRC'de olmayan dört ek
  * kolon (Onaylı, KTS, Ağırlık, Etki Alanı) Kontrol tablosunun sonuna eklenir.
  */
@@ -117,10 +119,10 @@ function headerIndex(cols: SimCol[]) {
     return m;
 }
 
-export async function readWorkbook(file: File): Promise<WorkBook> {
+export async function readWorkbook(file: File): Promise<Workbook> {
     if (file.size > MAX_FILE) throw new Error('Dosya 10 MB sınırını aşıyor.');
     if (!/\.xlsx$/i.test(file.name)) throw new Error('Yalnız .xlsx dosyası yüklenebilir.');
-    return read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+    return readXlsx(file);
 }
 
 function toText(v: unknown): string | null {
@@ -146,14 +148,19 @@ function toBool(v: unknown): boolean | null | 'invalid' {
     if (['0', 'hayir', 'h', 'false', 'yok', 'no', 'onaysiz', 'iptal'].includes(s)) return false;
     return 'invalid';
 }
+/** Excel seri günü (1900 sistemi) → UTC takvim bileşenleri. 25569 = 1970-01-01. */
+function serialToUtc(n: number): Date | null {
+    if (!Number.isFinite(n) || n < 1 || n > 2958465) return null;
+    return new Date(Math.round((n - 25569) * 86400000));
+}
 function toIsoDate(v: unknown): string | null | 'invalid' {
     if (v === null || v === undefined || v === '') return null;
-    // Tarih kolonları gün olarak saklanır: SheetJS yerel saat dilimi dönüşümünde saniyelik kayma
-    // üretebiliyor; yerel takvim günü alınır.
-    if (v instanceof Date) return Number.isNaN(v.getTime()) ? 'invalid' : new Date(Date.UTC(v.getFullYear(), v.getMonth(), v.getDate())).toISOString();
+    // ExcelJS tarih hücrelerini UTC anı olarak verir (gün sınırı UTC gece yarısı) — UTC takvim günü
+    // alınır; yerel bileşenler kullanılırsa pozitif UTC farkında (Türkiye) tarih bir gün geri kayar.
+    if (v instanceof Date) return Number.isNaN(v.getTime()) ? 'invalid' : new Date(Date.UTC(v.getUTCFullYear(), v.getUTCMonth(), v.getUTCDate(), v.getUTCHours(), v.getUTCMinutes())).toISOString();
     if (typeof v === 'number') {
-        const d = SSF.parse_date_code(v);
-        return d ? new Date(Date.UTC(d.y, d.m - 1, d.d, d.H, d.M, Math.floor(d.S))).toISOString() : 'invalid';
+        const d = serialToUtc(v);
+        return d ? d.toISOString() : 'invalid';
     }
     const s = String(v).trim();
     const tr = /^(\d{1,2})[./](\d{1,2})[./](\d{4})(?:\s+(\d{1,2}):(\d{2}))?/.exec(s);
@@ -162,39 +169,52 @@ function toIsoDate(v: unknown): string | null | 'invalid' {
     return Number.isNaN(t) ? 'invalid' : new Date(t).toISOString();
 }
 
-/** Çalışma kitabında, belirtilen anahtar başlığı (Risk ID / Kontrol ID) içeren sayfayı bulur. */
-function findSheet(wb: WorkBook, kind: 'Risk' | 'Kontrol'): { ws: WorkSheet; name: string; headerRow: number } | null {
+/** Hücrenin ham değeri (formül → sonucu, zengin metin/bağlantı → metin; tarih ve sayı korunur). */
+function rawValue(v: CellValue): unknown {
+    if (v === null || v === undefined) return undefined;
+    if (v instanceof Date || typeof v === 'number' || typeof v === 'boolean') return v;
+    if (typeof v === 'object') {
+        const o = v as unknown as Record<string, unknown>;
+        if ('result' in o) return rawValue(o.result as CellValue);
+        if ('error' in o) return undefined;
+        return cellText(v);
+    }
+    return v;
+}
+
+/** Çalışma kitabında, belirtilen anahtar başlığı (Risk ID / Kontrol ID) içeren sayfayı bulur. headerRow 1 tabanlıdır. */
+function findSheet(wb: Workbook, kind: 'Risk' | 'Kontrol'): { ws: Worksheet; name: string; headerRow: number } | null {
     const want = kind === 'Risk' ? 'risk id' : 'kontrol id';
     const avoid = kind === 'Risk' ? 'kontrol id' : null;
-    for (const name of wb.SheetNames) {
-        const ws = wb.Sheets[name];
-        if (!ws['!ref']) continue;
-        const range = utils.decode_range(ws['!ref']);
-        for (let r = range.s.r; r <= Math.min(range.e.r, range.s.r + 10); r++) {
+    for (const ws of wb.worksheets) {
+        if (ws.rowCount === 0) continue;
+        for (let r = 1; r <= Math.min(ws.rowCount, 11); r++) {
             const heads: string[] = [];
-            for (let ci = range.s.c; ci <= range.e.c; ci++) {
-                const cell = ws[utils.encode_cell({ r, c: ci })];
-                if (cell?.v !== undefined) heads.push(normHeader(String(cell.v)));
+            const row = ws.getRow(r);
+            for (let ci = 1; ci <= ws.columnCount; ci++) {
+                const v = rawValue(row.getCell(ci).value);
+                if (v !== undefined) heads.push(normHeader(String(v)));
             }
-            if (heads.includes(want) && (!avoid || !heads.includes(avoid))) return { ws, name, headerRow: r };
+            if (heads.includes(want) && (!avoid || !heads.includes(avoid))) return { ws, name: ws.name, headerRow: r };
         }
     }
     return null;
 }
 
-export function parseSheet(wb: WorkBook, kind: 'Risk' | 'Kontrol'): ParsedSheet {
+export function parseSheet(wb: Workbook, kind: 'Risk' | 'Kontrol'): ParsedSheet {
     const cols = kind === 'Risk' ? RISK_COLUMNS : CONTROL_COLUMNS;
     const found = findSheet(wb, kind);
     if (!found) throw new Error(kind === 'Risk' ? 'Dosyada "Risk ID" başlıklı bir Risk tablosu bulunamadı.' : 'Dosyada "Kontrol ID" başlıklı bir Kontrol tablosu bulunamadı.');
     const { ws, name, headerRow } = found;
-    const range = utils.decode_range(ws['!ref']!);
     const idx = headerIndex(cols);
     const colMap: { ci: number; col: SimCol }[] = [];
     const seenKeys = new Set<string>();
-    for (let ci = range.s.c; ci <= range.e.c; ci++) {
-        const cell = ws[utils.encode_cell({ r: headerRow, c: ci })];
-        if (cell?.v === undefined) continue;
-        const h = String(cell.v);
+    const lastCol = ws.columnCount;
+    const lastRow = ws.rowCount;
+    for (let ci = 1; ci <= lastCol; ci++) {
+        const hv = rawValue(ws.getRow(headerRow).getCell(ci).value);
+        if (hv === undefined) continue;
+        const h = String(hv);
         const col = idx.get(normHeader(h)) ?? idx.get(normHeader(stripParen(h)));
         if (col && !seenKeys.has(col.key!)) { colMap.push({ ci, col }); seenKeys.add(col.key!); }
     }
@@ -204,13 +224,13 @@ export function parseSheet(wb: WorkBook, kind: 'Risk' | 'Kontrol'): ParsedSheet 
     const rows: Record<string, unknown>[] = [];
     const idKey = kind === 'Risk' ? 'riskId' : 'kontrolId';
 
-    for (let r = headerRow + 1; r <= range.e.r; r++) {
-        const row: Record<string, unknown> = { rowNumber: r + 1 };
+    for (let r = headerRow + 1; r <= lastRow; r++) {
+        const row: Record<string, unknown> = { rowNumber: r };
         let any = false;
         const rowIssues: string[] = [];
         for (const { ci, col } of colMap) {
-            const cell = ws[utils.encode_cell({ r, c: ci })];
-            const v = cell?.v;
+            const cell = ws.getRow(r).getCell(ci);
+            const v = rawValue(cell.value);
             if (v === undefined || v === null || v === '') continue;
             any = true;
             const key = col.key!;
@@ -227,7 +247,7 @@ export function parseSheet(wb: WorkBook, kind: 'Risk' | 'Kontrol'): ParsedSheet 
                 }
                 case 'num': case 'percent': {
                     let n = toNumber(v);
-                    if (n !== 'invalid' && n !== null && col.type === 'percent' && typeof v === 'number' && cell?.z && String(cell.z).includes('%')) n = n * 100;
+                    if (n !== 'invalid' && n !== null && col.type === 'percent' && typeof v === 'number' && cell.numFmt && String(cell.numFmt).includes('%')) n = n * 100;
                     const max = key === 'kts' ? 100 : key === 'agirlik' ? 100 : 25;
                     if (n === 'invalid' || (n !== null && (n < 0 || n > max))) { rowIssues.push(`${col.header}: "${toText(v)}" geçersiz (0–${max}); boş alındı.`); break; }
                     row[key] = n === null ? null : Math.round(n * 10000) / 10000;
@@ -257,7 +277,7 @@ export function parseSheet(wb: WorkBook, kind: 'Risk' | 'Kontrol'): ParsedSheet 
         if (kind === 'Risk' && row.flagForIT === null) row.flagForIT = false;
         rows.push(row);
         const id = (row[idKey] as string) ?? null;
-        rowIssues.forEach(message => issues.push({ sheet: kind, row: r + 1, id, message }));
+        rowIssues.forEach(message => issues.push({ sheet: kind, row: r, id, message }));
     }
     return { rows, issues, sheetName: name, missingHeaders };
 }
@@ -276,30 +296,30 @@ function cellValue(col: SimCol, row: Record<string, unknown>): unknown {
     return v;
 }
 
-function dataSheet(cols: SimCol[], rows: Record<string, unknown>[]) {
-    const ws = utils.aoa_to_sheet([cols.map(col => col.header), ...rows.map(r => cols.map(col => cellValue(col, r)))], { cellDates: true, dateNF: 'dd"."mm"."yyyy' } /* SheetJS: çıplak nokta saniye kesri sanılır */);
-    ws['!cols'] = cols.map(col => ({ wch: col.type === 'longtext' ? 48 : Math.max(12, Math.min(32, col.header.length + 2)) }));
-    ws['!autofilter'] = { ref: utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(rows.length, 1), c: cols.length - 1 } }) };
+function addDataSheet(wb: Workbook, name: string, cols: SimCol[], rows: Record<string, unknown>[]) {
+    const widths = cols.map(col => (col.type === 'longtext' ? 48 : Math.max(12, Math.min(32, col.header.length + 2))));
+    const ws = addAoaSheet(wb, name, [cols.map(col => col.header), ...rows.map(r => cols.map(col => cellValue(col, r)))], { widths, autoFilter: true });
+    // Tarih kolonları gün.ay.yıl biçiminde (başlık satırı hariç).
+    cols.forEach((col, i) => { if (col.type === 'date') ws.getColumn(i + 1).numFmt = 'dd.mm.yyyy'; });
     return ws;
 }
 
-function helpSheet(cols: SimCol[], title: string, extra: string[]) {
+function addHelpSheet(wb: Workbook, cols: SimCol[], title: string, extra: string[]) {
     const aoa: unknown[][] = [[title], [], ...extra.map(l => [l]), [], ['Kolon', 'Tür', 'Nasıl doldurulur']];
     cols.forEach(col => aoa.push([col.header, KIND_LABEL[col.kind], col.help]));
-    const ws = utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 34 }, { wch: 40 }, { wch: 100 }];
+    // Başlık satırı (1) değil, bölüm başlığı kalın olsun; tablo başlığı ayrıca kalın.
+    const ws = addAoaSheet(wb, 'Açıklama', aoa, { widths: [34, 40, 100], boldHeader: true });
+    ws.getRow(aoa.length - cols.length).font = { bold: true };
     return ws;
 }
 
-function validValuesSheet() {
+function addValidValuesSheet(wb: Workbook) {
     const aoa: unknown[][] = [['Kolon', 'Parametre', 'Geçerli metin', 'Puan']];
     const header = (key: string) => CONTROL_COLUMNS.find(col => col.key === key)!.header;
     for (const [key, def] of Object.entries(P_TEXTS)) def.options.forEach(([text, pts]) => aoa.push([header(key), def.param, text, pts]));
     IMPACT_AREA_TEXTS.forEach(t => aoa.push(['Etki Alanı', '—', t, null]));
     aoa.push(['Onaylı', '—', '1 / Evet', null], ['Onaylı', '—', '0 / Hayır', null]);
-    const ws = utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 34 }, { wch: 10 }, { wch: 60 }, { wch: 8 }];
-    return ws;
+    return addAoaSheet(wb, 'Geçerli değerler', aoa, { widths: [34, 10, 60, 8] });
 }
 
 const COMMON_HELP = [
@@ -310,22 +330,22 @@ const COMMON_HELP = [
 
 const safeName = (s: string) => s.replace(/[^\p{L}\p{N}_-]+/gu, '_').slice(0, 60);
 
-export function downloadRiskWorkbook(rows: Record<string, unknown>[], baseName: string) {
-    const wb = utils.book_new();
-    utils.book_append_sheet(wb, dataSheet(RISK_COLUMNS, rows), 'Risk');
-    utils.book_append_sheet(wb, helpSheet(RISK_COLUMNS, 'Risk Excel\'i — Açıklama', COMMON_HELP), 'Açıklama');
-    writeFile(wb, `${safeName(baseName)}_Risk.xlsx`);
+export async function downloadRiskWorkbook(rows: Record<string, unknown>[], baseName: string) {
+    const wb = await newWorkbook();
+    addDataSheet(wb, 'Risk', RISK_COLUMNS, rows);
+    addHelpSheet(wb, RISK_COLUMNS, 'Risk Excel\'i — Açıklama', COMMON_HELP);
+    await downloadWorkbook(wb, `${safeName(baseName)}_Risk.xlsx`);
 }
 
-export function downloadControlWorkbook(rows: Record<string, unknown>[], baseName: string) {
-    const wb = utils.book_new();
-    utils.book_append_sheet(wb, dataSheet(CONTROL_COLUMNS, rows), 'Kontrol');
-    utils.book_append_sheet(wb, validValuesSheet(), 'Geçerli değerler');
-    utils.book_append_sheet(wb, helpSheet(CONTROL_COLUMNS, 'Kontrol Excel\'i — Açıklama', [
+export async function downloadControlWorkbook(rows: Record<string, unknown>[], baseName: string) {
+    const wb = await newWorkbook();
+    addDataSheet(wb, 'Kontrol', CONTROL_COLUMNS, rows);
+    addValidValuesSheet(wb);
+    addHelpSheet(wb, CONTROL_COLUMNS, 'Kontrol Excel\'i — Açıklama', [
         ...COMMON_HELP,
         'Son dört kolon (Onaylı, KTS, Ağırlık, Etki Alanı) GRC dışa aktarımında yoktur; simülasyon girdisidir.',
-    ]), 'Açıklama');
-    writeFile(wb, `${safeName(baseName)}_Kontrol.xlsx`);
+    ]);
+    await downloadWorkbook(wb, `${safeName(baseName)}_Kontrol.xlsx`);
 }
 
 export const downloadBlankRiskTemplate = () => downloadRiskWorkbook([], 'Bos_Sablon');
@@ -354,14 +374,14 @@ export interface TestReportData {
 const STATUS_TR = { added: 'Eklendi', deleted: 'Silindi', changed: 'Değişti' } as const;
 const DIR_TR = { down: 'Kalıntı düştü', up: 'Kalıntı yükseldi', same: 'Kalıntı aynı', unknown: 'Kalıntı bilinmiyor' } as const;
 const r2 = (v: number | null | undefined) => (v === null || v === undefined ? null : Math.round(v * 100) / 100);
-const sheet = (aoa: unknown[][], widths: number[]) => { const ws = utils.aoa_to_sheet(aoa); ws['!cols'] = widths.map(wch => ({ wch })); return ws; };
+const addSheet = (wb: Workbook, name: string, aoa: unknown[][], widths: number[]) => addAoaSheet(wb, name, aoa, { widths, boldHeader: false });
 const trDate = (v: string | null | undefined) => (v ? new Date(v).toLocaleString('tr-TR') : '—');
 
-export function downloadTestReport(rep: TestReportData) {
+export async function downloadTestReport(rep: TestReportData) {
     const s = rep.summary;
     const lv = ['Çok Yüksek', 'Yüksek', 'Orta', 'Düşük', 'Çok Düşük'];
-    const wb = utils.book_new();
-    utils.book_append_sheet(wb, sheet([
+    const wb = await newWorkbook();
+    addSheet(wb, 'Özet', [
         ['Risk Simülasyonu — Test raporu'], [],
         ['Simülasyon', `${rep.simulation.simulationId} · ${rep.simulation.name}`],
         ['Test', rep.test.name],
@@ -375,16 +395,16 @@ export function downloadTestReport(rep: TestReportData) {
         ['Kalıntı seviyesi', 'Başlangıç', rep.test.status === 'ACTIVE' ? 'Şimdi' : 'Bitiş'],
         ...lv.map(l => [l, s.distBefore[l] ?? 0, s.distAfter[l] ?? 0]),
         ['Hesaplanamayan', s.distBefore.unknown, s.distAfter.unknown],
-    ], [28, 40, 16]), 'Özet');
+    ], [28, 40, 16]);
 
-    utils.book_append_sheet(wb, sheet([
+    addSheet(wb, 'Risk farkları', [
         ['Risk ID', 'Risk tanımı', 'Durum', 'Sonuç etkisi',
             'Doğal puan (önce)', 'Doğal seviye (önce)', 'Bütünleşik puan (önce)', 'Bütünleşik seviye (önce)', 'Kalıntı puan (önce)', 'Kalıntı seviye (önce)',
             'Doğal puan (sonra)', 'Doğal seviye (sonra)', 'Bütünleşik puan (sonra)', 'Bütünleşik seviye (sonra)', 'Kalıntı puan (sonra)', 'Kalıntı seviye (sonra)'],
         ...rep.risks.map(r => [r.riskId, r.desc, STATUS_TR[r.status], DIR_TR[r.direction],
             r.before?.natural?.puan ?? null, r.before?.natural?.level ?? null, r2(r.before?.bkp?.value), r.before?.bkp?.level ?? null, r.before?.residual?.risk ?? null, r.before?.residual?.level ?? null,
             r.after?.natural?.puan ?? null, r.after?.natural?.level ?? null, r2(r.after?.bkp?.value), r.after?.bkp?.level ?? null, r.after?.residual?.risk ?? null, r.after?.residual?.level ?? null]),
-    ], [12, 48, 10, 18, 10, 12, 12, 14, 10, 12, 10, 12, 12, 14, 10, 12]), 'Risk farkları');
+    ], [12, 48, 10, 18, 10, 12, 12, 14, 10, 12, 10, 12, 12, 14, 10, 12]);
 
     const fields: unknown[][] = [['Risk ID', 'Risk tanımı', 'Kayıt türü', 'Kontrol ID', 'İşlem', 'Alan', 'Önce', 'Sonra']];
     for (const r of rep.risks) {
@@ -395,12 +415,24 @@ export function downloadTestReport(rep: TestReportData) {
             if (c.kepBefore !== c.kepAfter) fields.push([r.riskId, r.desc, 'Kontrol', c.name, 'Sonuç', 'Kontrol skoru', r2(c.kepBefore), r2(c.kepAfter)]);
         }
     }
-    utils.book_append_sheet(wb, sheet(fields, [12, 40, 10, 14, 10, 26, 40, 40]), 'Alan farkları');
+    addSheet(wb, 'Alan farkları', fields, [12, 40, 10, 14, 10, 26, 40, 40]);
 
-    utils.book_append_sheet(wb, sheet([
+    addSheet(wb, 'Değişiklik günlüğü', [
         ['Zaman', 'Kullanıcı', 'Kayıt türü', 'Kayıt', 'Risk ID', 'İşlem', 'Alan', 'Önce', 'Sonra'],
         ...rep.log.entries.map(e => [trDate(e.t), e.user, e.recordType, e.recordId, e.riskId, e.action, e.field, e.before, e.after]),
-    ], [18, 20, 10, 14, 12, 18, 24, 40, 40]), 'Değişiklik günlüğü');
+    ], [18, 20, 10, 14, 12, 18, 24, 40, 40]);
 
-    writeFile(wb, `${safeName(`${rep.simulation.simulationId}_Test_Raporu_${rep.test.name}`)}.xlsx`);
+    await downloadWorkbook(wb, `${safeName(`${rep.simulation.simulationId}_Test_Raporu_${rep.test.name}`)}.xlsx`);
+}
+
+/**
+ * İndirme işlevlerini hata yakalayarak çalıştırır (ExcelJS dinamik yükleme/yazma hatası sessiz kalmasın).
+ * Ayrıntı yalnız konsola; kullanıcıya genel mesaj verilir.
+ */
+export async function runDownload(fn: () => Promise<void>, onError: (message: string) => void): Promise<void> {
+    try { await fn(); }
+    catch (err) {
+        console.error('Excel indirme hatası:', err);
+        onError('Excel dosyası oluşturulamadı. Sayfayı yenileyip tekrar deneyin.');
+    }
 }

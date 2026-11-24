@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import api from '@/lib/api';
 import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import { LoadingState, ErrorState } from '@/components/ui';
-import { downloadTestReport, type TestReportData } from '@/lib/sim-excel';
+import { downloadTestReport, runDownload, type TestReportData } from '@/lib/sim-excel';
+import { useToast } from '@/components/ui/Toast';
 import { LevelBadge, DistributionBar, fmt } from './ws-ui';
 
 /*
@@ -70,6 +71,7 @@ function RiskDiffRow({ r, onOpen }: { r: RiskDiff; onOpen: (id: string) => void 
 export function TestReport({ simulationId, activeTestId, refreshKey, onOpenRisk }: {
     simulationId: string; activeTestId: string | null; refreshKey: number; onOpenRisk: (scenarioId: string) => void;
 }) {
+    const { error: showError } = useToast();
     const [tests, setTests] = useState<TestRow[] | null>(null);
     const [testId, setTestId] = useState<string | null>(null);
     const [report, setReport] = useState<Report | null>(null);
@@ -142,7 +144,7 @@ export function TestReport({ simulationId, activeTestId, refreshKey, onOpenRisk 
                     {report.test.startedBy ? ` · ${report.test.startedBy.firstName} ${report.test.startedBy.lastName}` : ''}
                     {' · '}{report.test.status === 'FINISHED' ? <>Bitiş <b className="text-slate-700">{dt(report.test.finishedAt)}</b></> : <>Karşılaştırma <b className="text-slate-700">{dt(report.comparedAt)}</b> (şimdiki durum)</>}
                 </div>
-                <button type="button" onClick={() => downloadTestReport(report)} className="ml-auto rounded-lg bg-teal-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-teal-800">Raporu indir (.xlsx)</button>
+                <button type="button" onClick={() => runDownload(() => downloadTestReport(report), m => showError('Hata', m))} className="ml-auto rounded-lg bg-teal-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-teal-800">Raporu indir (.xlsx)</button>
             </div>
             {s.methodChanged && <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-[13px] text-amber-800">Test süresince metodoloji sürümü değişti; farkların bir kısmı metodoloji değişikliğinden kaynaklanabilir.</div>}
 
