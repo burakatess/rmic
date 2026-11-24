@@ -94,7 +94,7 @@ export function CreateFindingModal({
         directorateId: '',
         responsiblePerson: '',
         status: 'IN_PROGRESS',
-        severity: 'HIGH',
+        severity: '',
         internalControlAssessment: '',
         currentStatusDetail: '',
         birimCevabi: '',
@@ -209,7 +209,7 @@ export function CreateFindingModal({
                     directorateId: initialDirectorateId,
                     responsiblePerson: initialResponsible,
                     status: 'IN_PROGRESS',
-                    severity: 'HIGH',
+                    severity: '', // bilinçli seçim zorunlu
                     internalControlAssessment: '',
                     currentStatusDetail: 'Bulgu açıldı. Aksiyon planı bekleniyor.',
                     birimCevabi: '',
@@ -286,6 +286,11 @@ export function CreateFindingModal({
 
         // Öngörülen Tamamlanma Tarihi artık bağlı aksiyonlardan hesaplanır — manuel
         // zorunluluk kontrolü kaldırıldı (Madde 4).
+
+        if (!formData.severity) {
+            showToastError('Hata', 'Önem derecesi seçilmelidir (KZ veya KD).');
+            return;
+        }
 
         // Actions validation for new findings
         if (!editContext) {
@@ -552,7 +557,7 @@ export function CreateFindingModal({
 
                     {/* Önem Derecesi */}
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Önem Derecesi</label>
+                        <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Önem Derecesi <span className="text-red-500">*</span></label>
                         <div className="grid grid-cols-2 gap-2">
                             {severityOptions.map(sev => (
                                 <button

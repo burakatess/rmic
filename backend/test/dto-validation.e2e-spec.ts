@@ -97,6 +97,9 @@ describe('E2E — DTO doğrulaması (eski serbest gövdeli uçlar)', () => {
         for (const extra of [{ closedDate: '2026-01-01' }, { workflowStatus: 'IPTAL' }, { resolutionStatus: 'KAPATILDI' }]) {
             await http().post('/findings').set(as('admin')).send({ ...base, ...extra }).expect(400);
         }
+        // Önem derecesi zorunlu: eksik veya geçersizse 400 (önceden eksik değer 500 veriyordu).
+        await http().post('/findings').set(as('admin')).send({ description: base.description }).expect(400);
+        await http().post('/findings').set(as('admin')).send({ ...base, severity: 'MEDIUM' }).expect(400);
         const res = await http().post('/findings').set(as('admin')).send(base);
         expect(res.status).toBeLessThan(300);
         const f = await prisma.finding.findUniqueOrThrow({ where: { id: res.body.id } });
