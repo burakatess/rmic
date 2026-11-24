@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import { PageShell, PageHeader, StatusBadge, LoadingState, EmptyState, Button, Modal } from '@/components/ui';
+import { PageShell, PageHeader, StatusBadge, LoadingState, EmptyState, Button, Modal, DetailSection, Field, FieldGrid, HistoryList } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { WorkflowBar } from '@/components/workflow/WorkflowBar';
 
@@ -32,11 +32,6 @@ const fmt = (d?: string | null) => {
     if (!d) return '—';
     const dt = new Date(d);
     return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('tr-TR');
-};
-const fmtDateTime = (d?: string | null) => {
-    if (!d) return '—';
-    const dt = new Date(d);
-    return isNaN(dt.getTime()) ? '—' : dt.toLocaleString('tr-TR');
 };
 
 export default function PeriodControlDetailPage() {
@@ -159,11 +154,10 @@ export default function PeriodControlDetailPage() {
                 <div className="mb-5"><WorkflowBar type="PERIOD_CONTROL" id={detail.scopeId} onChanged={() => load()} /></div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 space-y-6">
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+                <div className="xl:col-span-2 space-y-5">
                     {/* Kontrol Tanımı & Test Adımları (dönemin donmuş snapshot'ı) */}
-                    <div className="bg-white rounded-2xl border border-slate-200 p-5">
-                        <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-3">Kontrol Tanımı (Bu dönemde kullanılan sürüm)</h3>
+                    <DetailSection title="Kontrol tanımı" description="Bu dönemde kullanılan sürüm (dönemin donmuş kopyası)">
                         <p className="text-sm font-semibold text-slate-700 leading-relaxed whitespace-pre-wrap">{detail.snapshot?.description || detail.control.description || 'Tanım girilmemiş.'}</p>
                         {detail.snapshot?.testSteps && (
                             <div className="mt-4 pt-4 border-t border-slate-100">
@@ -177,24 +171,23 @@ export default function PeriodControlDetailPage() {
                                 <p className="text-sm text-slate-600">{detail.snapshot.mehaz}</p>
                             </div>
                         )}
-                    </div>
+                    </DetailSection>
 
                     {/* Takvim */}
-                    <div className="bg-white rounded-2xl border border-slate-200 p-5">
-                        <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-3">{detail.year} Yılı Takvimi</h3>
-                        <p className="text-sm text-slate-700"><span className="font-bold">{frequencyLabel[detail.frequency] || detail.frequency}</span> — Uygulama ayları: {describeMonths()}</p>
-                        {detail.copiedFromYear && <p className="text-xs text-slate-400 mt-1">Kaynak: {detail.copiedFromYear} yılından kopyalandı</p>}
-                    </div>
+                    <DetailSection title={`${detail.year} yılı takvimi`}>
+                        <FieldGrid cols={3}>
+                            <Field label="Sıklık">{frequencyLabel[detail.frequency] || detail.frequency}</Field>
+                            <Field label="Uygulama ayları">{describeMonths()}</Field>
+                            <Field label="Kaynak">{detail.copiedFromYear ? `${detail.copiedFromYear} yılından kopyalandı` : '—'}</Field>
+                        </FieldGrid>
+                    </DetailSection>
 
                     {/* Test Listesi */}
-                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-                        <div className="p-5 pb-0 flex items-center justify-between">
-                            <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Testler ({completedCount}/{activeTests.length} onaylandı)</h3>
-                        </div>
+                    <DetailSection title="Dönem testleri" count={activeTests.length} description={`${completedCount}/${activeTests.length} test onaylandı`} bodyClassName="p-0 overflow-x-auto">
                         {(detail.tests || []).length === 0 ? (
                             <p className="text-sm text-slate-400 p-5">Bu dönem için henüz test bulunmuyor.</p>
                         ) : (
-                            <table className="w-full text-sm mt-3">
+                            <table className="w-full text-sm">
                                 <thead className="bg-slate-50 border-y border-slate-200 text-left text-[10px] font-bold text-slate-400 uppercase">
                                     <tr>
                                         <th className="px-5 py-2">Test Kodu</th>
@@ -237,52 +230,34 @@ export default function PeriodControlDetailPage() {
                                 </tbody>
                             </table>
                         )}
-                    </div>
+                    </DetailSection>
                 </div>
 
-                <div className="space-y-6">
-                    <div className="bg-white rounded-2xl border border-slate-200 p-5">
-                        <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-3">Kontrolcüler</h3>
-                        <div className="space-y-3 text-sm">
-                            <div>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Atanan Kontrolcü</p>
-                                <p className="font-bold text-slate-800">{detail.assignee ? `${detail.assignee.firstName} ${detail.assignee.lastName}` : 'Atanmamış'}</p>
-                            </div>
-                            <div className="border-t border-slate-100 pt-3">
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">İkinci Kontrolcü</p>
-                                <p className="font-bold text-slate-800">{detail.secondController ? `${detail.secondController.firstName} ${detail.secondController.lastName}` : 'Atanmamış'}</p>
-                            </div>
-                        </div>
-                    </div>
+                <div className="space-y-5">
+                    <DetailSection title="Kontrolcüler">
+                        <FieldGrid cols={2}>
+                            <Field label="Sorumlu (1. kontrolcü)">{detail.assignee ? `${detail.assignee.firstName} ${detail.assignee.lastName}` : <span className="text-amber-700">Atanmamış</span>}</Field>
+                            <Field label="2. kontrolcü">{detail.secondController ? `${detail.secondController.firstName} ${detail.secondController.lastName}` : <span className="text-amber-700">Atanmamış</span>}</Field>
+                        </FieldGrid>
+                    </DetailSection>
 
                     {withFindings.length > 0 && (
-                        <div className="bg-white rounded-2xl border border-rose-200 p-5">
-                            <h3 className="text-xs font-extrabold text-rose-500 uppercase tracking-wider mb-3">İlgili Bulgular</h3>
+                        <DetailSection title="İlgili bulgular">
                             <div className="space-y-2">
                                 {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                                 {withFindings.flatMap((t: any) => (t.findings || []).map((f: any) => (
                                     <Link key={f.id} href={`/findings/${f.id}`} target="_blank" className="block text-xs font-mono font-bold text-rose-600 hover:underline">{f.findingId}</Link>
                                 )))}
                             </div>
-                        </div>
+                        </DetailSection>
                     )}
 
-                    <div className="bg-white rounded-2xl border border-slate-200 p-5">
-                        <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-3">Plan / Atama Değişiklik Geçmişi</h3>
-                        {(detail.history || []).length === 0 ? (
-                            <p className="text-xs text-slate-400">Kayıt bulunamadı.</p>
-                        ) : (
-                            <div className="space-y-2 max-h-80 overflow-y-auto">
-                                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                                {detail.history.map((h: any) => (
-                                    <div key={h.id} className="text-xs border-b border-slate-100 pb-2">
-                                        <span className="font-bold text-slate-700">{h.action}</span>
-                                        <span className="text-slate-400"> · {fmtDateTime(h.createdAt)} · {h.user ? `${h.user.firstName} ${h.user.lastName}` : 'Sistem'}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
+                    <DetailSection title="Plan / atama değişiklik geçmişi" count={(detail.history || []).length}>
+                        <div className="max-h-96 overflow-y-auto pr-1">
+                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                            <HistoryList empty="Kayıt bulunamadı." items={(detail.history || []).map((h: any) => ({ id: h.id, text: h.action, at: h.createdAt, by: h.user ? `${h.user.firstName} ${h.user.lastName}` : null }))} />
+                        </div>
+                    </DetailSection>
                 </div>
             </div>
 

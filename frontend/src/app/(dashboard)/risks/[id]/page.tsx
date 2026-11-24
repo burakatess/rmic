@@ -7,8 +7,7 @@ import api from '@/lib/api';
 import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import {
     EmptyState, LoadingState, DetailShell, DetailHeader, DetailSection,
-    Tabs, StatusBadge, Button,
-} from '@/components/ui';
+    Tabs, StatusBadge, Button, RecordCard, Field, FieldGrid } from '@/components/ui';
 
 // Types
 interface Risk {
@@ -673,6 +672,8 @@ export default function RiskDetailPage() {
                                         const findingStatusMap: Record<string, { label: string; variant: BV }> = {
                                             OPEN: { label: 'Açık', variant: 'info' },
                                             IN_PROGRESS: { label: 'İşlemde', variant: 'warning' },
+                                            PARTIALLY_CLOSED: { label: 'Kısmen kapatıldı', variant: 'info' },
+                                            PENDING_REVIEW: { label: 'Kapanış değerlendirmesinde', variant: 'warning' },
                                             RESOLVED: { label: 'Çözüldü', variant: 'success' },
                                             CLOSED: { label: 'Kapatıldı', variant: 'neutral' },
                                         };
@@ -680,28 +681,21 @@ export default function RiskDetailPage() {
                                         const status = findingStatusMap[finding.status] || findingStatusMap.OPEN;
 
                                         return (
-                                            <Link key={finding.id} href={`/findings/${finding.id}`} className="block">
-                                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 hover:bg-slate-100 transition-colors cursor-pointer group">
-                                                    <div className="flex items-start justify-between gap-4">
-                                                        <div className="flex-1">
-                                                            <div className="flex items-center gap-2 mb-2">
-                                                                <span className="text-sm font-mono text-slate-500 group-hover:text-blue-600">{finding.findingId}</span>
-                                                                <StatusBadge variant={severity.variant}>{severity.label}</StatusBadge>
-                                                                <StatusBadge variant={status.variant}>{status.label}</StatusBadge>
-                                                                {finding.directLink && <span className="text-[11px] font-semibold text-violet-700 bg-violet-50 rounded px-1.5 py-0.5">Doğrudan eşleştirme</span>}
-                                                            </div>
-                                                            <p className="text-sm text-slate-800 mb-2">{finding.description}</p>
-                                                            <div className="flex items-center gap-4 text-xs text-slate-500">
-                                                                {finding.controlId && <span>{finding.controlId} - {finding.controlName}</span>}
-                                                                <span>{finding.actionsCount} aksiyon</span>
-                                                            </div>
-                                                        </div>
-                                                        <div className="text-blue-600 group-hover:text-blue-700 text-sm">
-                                                            Detay →
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </Link>
+                                            <RecordCard key={finding.id} code={finding.findingId} href={`/findings/${finding.id}`} codeTone="danger"
+                                                tone={finding.status === 'CLOSED' ? 'success' : finding.directLink ? 'violet' : 'warning'}
+                                                badges={<>
+                                                    <StatusBadge variant={severity.variant}>{severity.label}</StatusBadge>
+                                                    <StatusBadge variant={status.variant}>{status.label}</StatusBadge>
+                                                    {finding.directLink && <span className="text-[11px] font-semibold text-violet-700 bg-violet-50 rounded px-1.5 py-0.5">Doğrudan eşleştirme</span>}
+                                                </>}
+                                                title={finding.description}
+                                                actions={<Link href={`/findings/${finding.id}`} className="text-xs font-semibold text-blue-600 hover:underline">Detay →</Link>}
+                                                fields={<FieldGrid cols={3}>
+                                                    <Field label="Kontrol">{finding.controlId ? `${finding.controlId} — ${finding.controlName}` : '—'}</Field>
+                                                    <Field label="Aksiyon">{finding.actionsCount}</Field>
+                                                    <Field label="İlişki">{finding.directLink ? 'Bulgu ekranından eşleştirildi' : 'Kontrol üzerinden'}</Field>
+                                                </FieldGrid>}
+                                            />
                                         );
                                     })}
                                 </div>

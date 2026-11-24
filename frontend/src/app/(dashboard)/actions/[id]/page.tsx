@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import {
-    DetailShell, DetailHeader, DetailSection, StatusBadge, Button,
+    DetailShell, DetailHeader, DetailSection, StatusBadge, Button, Field, FieldGrid,
     LoadingState, EmptyState, ConfirmDialog,
 } from '@/components/ui';
 import { classifyLoadError, type LoadError } from '@/lib/load-error';
@@ -157,30 +157,18 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
                 <DetailSection title="Aksiyon Bilgileri">
                     <div className="space-y-5">
                         <div>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Açıklama</p>
-                            <p className="text-sm text-slate-800 leading-relaxed">{action.description}</p>
+                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Açıklama</p>
+                            <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">{action.description}</p>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Sorumlu</p>
-                                <p className="text-sm text-slate-800">{action.owner ? `${action.owner.firstName} ${action.owner.lastName}` : '—'}</p>
-                            </div>
-                            <div>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Sorumlu Birim</p>
-                                <p className="text-sm text-slate-800">{action.responsibleDepartment ?? '—'}</p>
-                            </div>
-                            <div>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Hedef Tarih</p>
-                                <p className={`text-sm ${overdue ? 'text-red-600 font-bold' : 'text-slate-800'}`}>{fmt(action.dueDate)}</p>
-                            </div>
-                            <div>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Tamamlanma</p>
-                                <p className="text-sm text-slate-800">{fmt(action.completedAt)}</p>
-                            </div>
-                        </div>
+                        <FieldGrid>
+                            <Field label="Sorumlu">{action.owner ? `${action.owner.firstName} ${action.owner.lastName}` : '—'}</Field>
+                            <Field label="Sorumlu birim">{action.responsibleDepartment ?? '—'}</Field>
+                            <Field label="Hedef tarih"><span className={overdue ? 'text-red-600' : ''}>{fmt(action.dueDate)}</span></Field>
+                            <Field label="Tamamlanma">{fmt(action.completedAt)}</Field>
+                        </FieldGrid>
                         {action.notes && (
                             <div>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Notlar</p>
+                                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Notlar</p>
                                 <p className="text-sm text-slate-700 bg-slate-50 rounded-lg p-3">{action.notes}</p>
                             </div>
                         )}

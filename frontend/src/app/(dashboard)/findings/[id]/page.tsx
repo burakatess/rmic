@@ -15,6 +15,7 @@ import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import AddActionModal from '@/components/modals/AddActionModal';
 import { FindingFollowUpModal } from '@/components/modals/FindingFollowUpModal';
 import { RiskLinksPanel } from '@/components/risks/RiskLinksPanel';
+import { RecordCard, Field, FieldGrid, type RecordTone } from '@/components/ui';
 import { WorkflowBar } from '@/components/workflow/WorkflowBar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -61,6 +62,7 @@ interface FollowUp {
     revertReason?: string | null; revertedAt?: string | null;
     deletionRequestedAt?: string | null; deletionReason?: string | null; deletionRejectionReason?: string | null; deletedAt?: string | null;
     createdAt: string; updatedAt?: string;
+    deletionRequestedById?: string | null;
 }
 interface StatusLog { id: string; entryDate: string; text: string; authorName?: string | null }
 interface AuditEntry {
@@ -234,6 +236,9 @@ export default function FindingDetailPage() {
     const searchParams = useSearchParams();
     const { success, error: showError } = useToast();
     const { user } = useAuth();
+    // Silme kararı yönetici rolündedir; talep eden kendi talebine karar veremez (backend aynı kuralı uygular).
+    const canDecideDeletion = (rec: { deletionRequestedById?: string | null }) =>
+        ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER'].includes(user?.role?.name ?? '') && rec.deletionRequestedById !== user?.id;
 
     const [finding, setFinding] = useState<Finding | null>(null);
     const [auditTrail, setAuditTrail] = useState<AuditEntry[]>([]);
@@ -813,34 +818,22 @@ export default function FindingDetailPage() {
                                     const op = (o: Parameters<typeof api.findingActionOp>[2], okTitle: string, okText: string, reason?: string) =>
                                         runOp(() => api.findingActionOp(finding.id, action.id, o, reason), okTitle, okText);
                                     // Sol şerit rengi durumu tek bakışta verir.
-                                    const accent = isDeleted ? 'border-l-slate-300' : aOverdue ? 'border-l-red-500'
-                                        : action.status === 'KAPATILDI' ? 'border-l-emerald-500'
-                                        : action.status === 'TAMAMLANDI' ? 'border-l-blue-500'
-                                        : action.status === 'DEVAM_EDIYOR' ? 'border-l-amber-400'
-                                        : action.status === 'YETERSIZ' ? 'border-l-orange-500' : 'border-l-slate-300';
-                                    const fields: Array<[string, React.ReactNode]> = [
-                                        ['Sorumlu', action.owner ? `${action.owner.firstName} ${action.owner.lastName}` : '—'],
-                                        ['Birim', action.responsibleDepartment || '—'],
-                                        ['Hedef tarih', <span key="d" className={aOverdue ? 'text-red-600' : ''}>{fmt(action.dueDate)}{action.completedAt && <span className="block text-xs font-medium text-emerald-600">Kapandı: {fmt(action.completedAt)}</span>}</span>],
-                                        ['Kontrolcüler', action.firstController || action.secondController
-                                            ? `${personName(action.firstController)} · ${personName(action.secondController)}`
-                                            : <span key="k" className="text-amber-700">Atanmamış</span>],
-                                    ];
+                                    // Sol şerit rengi durumu tek bakışta verir (ortak RecordCard).
+                                    const tone: RecordTone = isDeleted ? 'neutral' : aOverdue ? 'danger'
+                                        : action.status === 'KAPATILDI' ? 'success'
+                                        : action.status === 'TAMAMLANDI' ? 'info'
+                                        : action.status === 'DEVAM_EDIYOR' ? 'progress'
+                                        : action.status === 'YETERSIZ' ? 'warning' : 'neutral';
                                     return (
-                                        <article key={action.id} className={`bg-white border border-slate-200 border-l-4 ${accent} rounded-xl shadow-sm overflow-hidden ${isDeleted ? 'opacity-60' : ''}`}>
-                                            <div className="p-4 lg:p-5">
-                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                                    <div className="min-w-0">
-                                                        <div className="flex items-center gap-2 flex-wrap">
-                                                            <Link href={`/actions/${action.id}`} className="font-mono text-sm text-orange-600 font-semibold hover:underline">{action.actionId}</Link>
-                                                            {isDeleted ? <StatusBadge variant="neutral">Silindi</StatusBadge> : <StatusBadge variant={sCfg.variant}>{sCfg.label}</StatusBadge>}
-                                                            {!isDeleted && apCfg && <StatusBadge variant={apCfg.variant} dot>{apCfg.label}</StatusBadge>}
-                                                            {deletionPending && <StatusBadge variant="critical" dot>Silme onayı bekliyor</StatusBadge>}
-                                                            {aOverdue && !isDeleted && <StatusBadge variant="critical" dot>Gecikmiş</StatusBadge>}
-                                                        </div>
-                                                        <h3 className="mt-2 text-base font-semibold text-slate-900 leading-snug break-words">{action.description}</h3>
-                                                    </div>
-                                                        <div className="flex items-center gap-2 flex-wrap sm:justify-end">
+                                        <RecordCard key={action.id} code={action.actionId} href={`/actions/${action.id}`} tone={tone} codeTone="progress" muted={isDeleted}
+                                            badges={<>
+                                                {isDeleted ? <StatusBadge variant="neutral">Silindi</StatusBadge> : <StatusBadge variant={sCfg.variant}>{sCfg.label}</StatusBadge>}
+                                                {!isDeleted && apCfg && <StatusBadge variant={apCfg.variant} dot>{apCfg.label}</StatusBadge>}
+                                                {deletionPending && <StatusBadge variant="critical" dot>Silme onayı bekliyor</StatusBadge>}
+                                                {aOverdue && !isDeleted && <StatusBadge variant="critical" dot>Gecikmiş</StatusBadge>}
+                                            </>}
+                                            title={action.description}
+                                            actions={<>
                                                         {aCaps.canSubmit && (
                                                             <Button variant="primary" size="sm" onClick={() => op('submit', 'Onaya gönderildi', `${action.actionId} ikinci kontrolcünün onayına gönderildi.`).catch(() => {})}>
                                                                 2. kontrolcü onayına gönder
@@ -884,29 +877,16 @@ export default function FindingDetailPage() {
                                                                 Düzenle
                                                             </Button>
                                                         )}
-                                                    </div>
-                                                </div>
-
-                                                <dl className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-3 max-w-6xl">
-                                                    {fields.map(([k, v]) => (
-                                                        <div key={k} className="min-w-0">
-                                                            <dt className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{k}</dt>
-                                                            <dd className="mt-0.5 text-sm font-semibold text-slate-900 break-words">{v}</dd>
-                                                        </div>
-                                                    ))}
-                                                </dl>
-                                                {action.notes && <p className="text-sm text-slate-700 mt-4 bg-slate-50 rounded-lg px-3 py-2.5 border border-slate-100 whitespace-pre-wrap">{action.notes}</p>}
-                                                {(action.rejectionReason || action.revertReason || action.deletionReason || action.deletionRejectionReason) && (
-                                                    <div className="mt-3 space-y-2">
-                                                        {action.approvalState === 'REDDEDILDI' && action.rejectionReason && <ReasonBox tone="red" title="Ret gerekçesi" text={action.rejectionReason} />}
-                                                        {action.approvalState === 'TASLAK' && action.revertedAt && action.revertReason && <ReasonBox tone="amber" title="Onay geri alındı" text={action.revertReason} />}
-                                                        {(deletionPending || isDeleted) && action.deletionReason && <ReasonBox tone="slate" title={isDeleted ? 'Silme gerekçesi' : 'Silme talebi'} text={action.deletionReason} />}
-                                                        {!deletionPending && !isDeleted && action.deletionRejectionReason && <ReasonBox tone="slate" title="Silme talebi reddedildi" text={action.deletionRejectionReason} />}
-                                                    </div>
-                                                )}
-                                            </div>
-                                            {/* Alt şerit: ekler + bağlı takip çalışmaları */}
-                                            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 lg:px-5 py-3 bg-slate-50/70 border-t border-slate-100">
+                                            </>}
+                                            fields={<FieldGrid>
+                                                <Field label="Sorumlu">{action.owner ? `${action.owner.firstName} ${action.owner.lastName}` : '—'}</Field>
+                                                <Field label="Birim">{action.responsibleDepartment || '—'}</Field>
+                                                <Field label="Hedef tarih"><span className={aOverdue ? 'text-red-600' : ''}>{fmt(action.dueDate)}{action.completedAt && <span className="block text-xs font-medium text-emerald-600">Kapandı: {fmt(action.completedAt)}</span>}</span></Field>
+                                                <Field label="Kontrolcüler">{action.firstController || action.secondController
+                                                    ? `${personName(action.firstController)} · ${personName(action.secondController)}`
+                                                    : <span className="text-amber-700">Atanmamış</span>}</Field>
+                                            </FieldGrid>}
+                                            footer={<>
                                                 <FileUpload
                                                     inline
                                                     attachmentKind="action"
@@ -930,8 +910,18 @@ export default function FindingDetailPage() {
                                                         );
                                                     })}
                                                 </div>
-                                            </div>
-                                        </article>
+                                            </>}
+                                        >
+                                                {action.notes && <p className="text-sm text-slate-700 mt-4 bg-slate-50 rounded-lg px-3 py-2.5 border border-slate-100 whitespace-pre-wrap">{action.notes}</p>}
+                                                {(action.rejectionReason || action.revertReason || action.deletionReason || action.deletionRejectionReason) && (
+                                                    <div className="mt-3 space-y-2">
+                                                        {action.approvalState === 'REDDEDILDI' && action.rejectionReason && <ReasonBox tone="red" title="Ret gerekçesi" text={action.rejectionReason} />}
+                                                        {action.approvalState === 'TASLAK' && action.revertedAt && action.revertReason && <ReasonBox tone="amber" title="Onay geri alındı" text={action.revertReason} />}
+                                                        {(deletionPending || isDeleted) && action.deletionReason && <ReasonBox tone="slate" title={isDeleted ? 'Silme gerekçesi' : 'Silme talebi'} text={action.deletionReason} />}
+                                                        {!deletionPending && !isDeleted && action.deletionRejectionReason && <ReasonBox tone="slate" title="Silme talebi reddedildi" text={action.deletionRejectionReason} />}
+                                                    </div>
+                                                )}
+                                        </RecordCard>
                                     );
                                 })}
                             </div>
@@ -985,7 +975,7 @@ export default function FindingDetailPage() {
                                     const resOutCfg = fu.resolutionOutcome ? resolutionConfig[fu.resolutionOutcome] : null;
                                     const linkedAction = finding.actions.find(a => a.id === fu.actionId);
                                     return (
-                                        <div id={`follow-up-${fu.id}`} key={fu.id} className={`bg-white border rounded-xl shadow-sm overflow-hidden scroll-mt-24 ${searchParams.get('followUpId') === fu.id ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'}`}>
+                                        <div id={`follow-up-${fu.id}`} key={fu.id} className={`bg-white border border-l-4 ${fuDeleted || fu.status === 'IPTAL' ? 'border-l-slate-300 opacity-70' : isApproved ? 'border-l-emerald-500' : isPendingApproval ? 'border-l-blue-500' : isRevisionRequired ? 'border-l-orange-500' : fu.status === 'DEVAM_EDIYOR' ? 'border-l-amber-400' : 'border-l-slate-300'} rounded-xl shadow-sm overflow-hidden scroll-mt-24 ${searchParams.get('followUpId') === fu.id ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'}`}>
                                             <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50 border-b border-slate-100">
                                                 <div>
                                                     <div className="flex items-center gap-2 flex-wrap">
@@ -1020,10 +1010,10 @@ export default function FindingDetailPage() {
                                                         <Button variant="secondary" size="sm" onClick={() => askReason({ title: `${fu.followUpId} — onayı geri al`, label: 'Onayı geri alma gerekçesi', confirm: 'Onayı geri al', danger: true,
                                                             onSubmit: (r) => fuOp('revert', 'Onay geri alındı', 'Takip birinci kontrolcünün düzenlemesine döndü; onayın sonuçları geri alındı.', r) })}>Onayı geri al</Button>
                                                     )}
-                                                    {fuDeletionPending && isChecker && (
+                                                    {fuDeletionPending && canDecideDeletion(fu) && (
                                                         <Button variant="danger" size="sm" onClick={() => fuOp('delete-approve', 'Silindi', `${fu.followUpId} silindi.`).catch(() => {})}>Silmeyi onayla</Button>
                                                     )}
-                                                    {fuDeletionPending && isChecker && (
+                                                    {fuDeletionPending && canDecideDeletion(fu) && (
                                                         <Button variant="secondary" size="sm" onClick={() => askReason({ title: `${fu.followUpId} — silme talebini reddet`, label: 'Ret gerekçesi', confirm: 'Silme talebini reddet',
                                                             onSubmit: (r) => fuOp('delete-reject', 'Silme reddedildi', 'Takip çalışması korunuyor.', r) })}>Silmeyi reddet</Button>
                                                     )}
