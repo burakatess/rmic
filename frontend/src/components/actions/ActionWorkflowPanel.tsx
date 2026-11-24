@@ -109,14 +109,12 @@ export function ActionWorkflowPanel({ action, onChanged }: { action: ActionWorkf
 
     const open = (o: Op) => { setReason(''); setOp(o); };
     const buttons: Array<[Op, string, 'primary' | 'outline' | 'danger']> = [];
-    if (caps.canSubmit) buttons.push(['submit', '2. kontrolcü onayına gönder', 'primary']);
-    if (caps.canApprove) buttons.push(['approve', 'Onayla', 'primary'], ['reject', 'Reddet', 'outline']);
-    if (caps.canRevert) buttons.push(['revert', 'Onayı geri al', 'outline']);
+    // Gönder / onayla / iade / geri al / silme talebi üstteki iş akışı çubuğundadır (tek yer).
+    // Burada yalnız yöneticinin silme kararı kalır (Onaylarım > Silme Talepleri ile aynı işlem).
     if (caps.canDecideDelete) buttons.push(['delete-approve', 'Silmeyi onayla', 'danger'], ['delete-reject', 'Silme talebini reddet', 'outline']);
-    if (caps.canRequestDelete) buttons.push(['delete-request', 'Silme talebi', 'outline']);
 
     const nextHint = deleted ? 'Bu aksiyon silindi; kayıt tarihçe için korunuyor.'
-        : action.deletionRequestedAt ? 'Silme talebi 2. kontrolcünün kararını bekliyor.'
+        : action.deletionRequestedAt ? 'Silme talebi yöneticinin (talep eden hariç) kararını bekliyor.'
             : state === 'TASLAK' ? 'Aksiyon taslak. Birinci kontrolcü onaya gönderince 2. kontrolcünün kutusuna düşer; takip çalışması onaydan sonra oluşur.'
                 : state === 'REDDEDILDI' ? 'Aksiyon reddedildi. Gerekçeye göre düzenleyip yeniden onaya gönderin.'
                     : state === 'ONAY_BEKLIYOR' ? '2. kontrolcünün onayı bekleniyor. Onaylanınca takip çalışması hedef tarihte oluşur.'
@@ -126,7 +124,7 @@ export function ActionWorkflowPanel({ action, onChanged }: { action: ActionWorkf
 
     return (
         <>
-            <DetailSection title="İş Akışı">
+            <DetailSection title="Onay ve yürütme durumu">
                 <div className="space-y-4">
                     <ol className="grid grid-cols-5 gap-2" aria-label="Aksiyon akış adımları">
                         {STEPS.map((label, i) => {
@@ -156,11 +154,11 @@ export function ActionWorkflowPanel({ action, onChanged }: { action: ActionWorkf
                             sentBy={name(action.firstController)} sentAt={action.submittedAt}
                         />
                     )}
-                    {!deleted && action.secondController && action.deletionRequestedAt && (
+                    {!deleted && action.deletionRequestedAt && (
                         <PendingApprovalNotice
                             testId="pending-deletion"
                             title="Silme talebi onay bekliyor"
-                            waitingFor={[{ name: name(action.secondController), role: '2. kontrolcü' }]}
+                            waitingFor={[{ name: 'Yönetici (Risk ve Kontrol Yöneticisi / Sistem Yöneticisi)', role: 'talep eden hariç' }]}
                             sentAt={action.deletionRequestedAt}
                         />
                     )}

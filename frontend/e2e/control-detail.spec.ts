@@ -7,8 +7,9 @@ import { test, expect, type Page, type APIRequestContext } from '@playwright/tes
  */
 const API = 'http://127.0.0.1:3099/api';
 const PASSWORD = 'TestE2E1234!';
-const YEAR = new Date().getFullYear();
-const CONTROL_NAME = 'E2E Plan Akışı Kontrolü';
+const YEAR = new Date().getFullYear() + 2; // diğer testlerin (yıllık plan, bu yıl) satır sayılarını etkilemesin
+// Kendi kontrolünü oluşturur: paralel çalışan diğer Playwright dosyalarının kontrollerine dokunmaz.
+const CONTROL_NAME = `E2E Detay Ekranı Kontrolü ${Date.now()}`;
 const SHOT_DIR = process.env.SHOT_DIR;
 
 async function login(page: Page, email: string): Promise<string> {
@@ -41,16 +42,15 @@ test('kontrol detayı: yıl bazlı sorumlular, test planı, değişiklik geçmi�
     const mgrToken = (await json<{ accessToken: string }>(await request.post(`${API}/auth/login`, { data: { email: 'playwright-manager@e2e.local', password: PASSWORD } }))).accessToken;
     const me = await json<{ id: string }>(await request.get(`${API}/auth/me`, { headers: auth(token) }));
     const mgr = await json<{ id: string }>(await request.get(`${API}/auth/me`, { headers: auth(mgrToken) }));
-    const list = await json<{ data: Array<{ id: string; name: string; controlId: string }> }>(
-        await request.get(`${API}/controls`, { headers: auth(token), params: { search: CONTROL_NAME, limit: '50' } }));
-    const control = list.data.find(c => c.name === CONTROL_NAME)!;
-    expect(control).toBeTruthy();
+    const control = await json<{ id: string; controlId: string }>(await request.post(`${API}/controls`, {
+        headers: auth(token), data: { name: CONTROL_NAME, description: 'Detay ekranı Playwright kontrolü', frequency: 'MONTHLY' },
+    }));
 
     // Bu yılın kapsamı: 1. kontrolcü yönetici, 2. kontrolcü admin (zaten varsa dokunulmaz).
     const scopeRes = await request.post(`${API}/controls/${control.id}/scope`, {
         headers: auth(token), data: { years: [YEAR], frequency: 'QUARTERLY', assigneeId: mgr.id, secondControllerId: me.id, includePastPeriods: true },
     });
-    expect([200, 201, 400, 409]).toContain(scopeRes.status());
+    expect([200, 201]).toContain(scopeRes.status());
     // Geçmişte alan farkı görünsün.
     await json(await request.put(`${API}/controls/${control.id}`, { headers: auth(token), data: { notes: `Detay ekranı notu ${Date.now()}` } }));
 

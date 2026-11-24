@@ -115,14 +115,13 @@ export class AuditsController {
         return this.auditsService.updateFinding(id, data, userId);
     }
 
-    // Yalnız TASLAK ve ilerleme kaydedilmemiş bulgu silinebilir (servis 409 döner);
-    // süreç başlamış bulgu için iptal akışı kullanılır.
+    // Bulgu doğrudan silinmez: silme talebi açılır, yönetici (talep eden hariç) onaylayınca bulgu
+    // iptal edilir (kayıt korunur). Gerekçe zorunludur. Karar: POST /deletion-requests/FINDING/:id/approve|reject
     @FindingWriteScope()
     @Delete('findings/:id')
-    @RequireAnyPermission('finding:delete', 'finding:delete:own')
-    async deleteFinding(@Param('id') id: string, @CurrentUser() user: AccessActor) {
-        const perms = Array.isArray(user.permissions) ? (user.permissions as string[]) : [];
-        return this.auditsService.deleteFinding(id, user.id, perms);
+    @RequireAnyPermission('finding:delete', 'finding:delete:own', 'finding:update')
+    async deleteFinding(@Param('id') id: string, @Body() body: WorkflowReasonDto, @CurrentUser('id') userId: string) {
+        return this.auditsService.requestFindingDeletion(id, body?.reason ?? '', userId);
     }
 
     // ─── Mutabakat Workflow Geçişleri ─────────────────────────────────────────
@@ -175,7 +174,8 @@ export class AuditsController {
         @Body() body: WorkflowReasonDto,
         @CurrentUser('id') userId: string,
     ) {
-        return this.auditsService.iptalEt(id, body.reason, userId);
+        // İptal = silme: yönetici onaylı talep açar (doğrudan iptal edilmez).
+        return this.auditsService.requestFindingDeletion(id, body.reason, userId);
     }
 
     // Onaylı kapanış — tüm aksiyonlar KAPATILDI + gerekçe (Madde 3).
@@ -187,6 +187,7 @@ export class AuditsController {
         @Body() body: WorkflowReasonDto,
         @CurrentUser('id') userId: string,
     ) {
+        // Artık doğrudan kapatmaz: kapanış değerlendirmesine gönderir (2. kontrolcü/yönetici onaylar).
         return this.auditsService.closeFinding(id, body?.reason, userId);
     }
 

@@ -9,7 +9,7 @@
  */
 export const STAGES = ['BEKLIYOR', 'DEVAM_EDIYOR', 'TAMAMLANDI', 'ONAYLANDI'] as const;
 export type Stage = typeof STAGES[number] | 'IPTAL';
-export type WorkflowEntityType = 'CONTROL_TEST' | 'FOLLOW_UP' | 'FINDING' | 'PERIOD_CONTROL';
+export type WorkflowEntityType = 'CONTROL_TEST' | 'FOLLOW_UP' | 'FINDING' | 'PERIOD_CONTROL' | 'ACTION';
 export type WorkflowAction = 'START' | 'COMPLETE' | 'APPROVE' | 'RETURN' | 'REVERT' | 'CANCEL' | 'REOPEN';
 
 export const STAGE_LABELS: Record<Stage, string> = {
@@ -19,6 +19,66 @@ export const ACTION_LABELS: Record<WorkflowAction, string> = {
     START: 'Başlat', COMPLETE: 'Tamamla ve 2. kontrolcüye ilet', APPROVE: 'Onayla', RETURN: 'İade et',
     REVERT: 'Önceki aşamaya geri al', CANCEL: 'İptal et', REOPEN: 'Yeniden aç',
 };
+
+/**
+ * Türe özel aşama tanımları (her modülün iş mantığı). Anahtarlar ortak dört aşamadır — Kanban sütunları
+ * ve komşuluk kuralları ortak kalır — ama her tür yalnız kendi kullandığı aşamaları kendi adıyla gösterir.
+ * - Bulgu: Açık → Kapanış Değerlendirmesinde → Kapatıldı. Açık kalmak onay istemez (Bekliyor aşaması yok).
+ * - Aksiyon planı: Taslak → 2. kontrolcü onayında → Onaylandı (aksiyon onayı bulgudan bağımsızdır).
+ */
+export const STAGE_DEFS: Record<WorkflowEntityType, Array<{ key: typeof STAGES[number]; label: string; hint: string }>> = {
+    CONTROL_TEST: [
+        { key: 'BEKLIYOR', label: 'Bekliyor', hint: 'Test henüz başlatılmadı' },
+        { key: 'DEVAM_EDIYOR', label: 'Devam Ediyor', hint: 'Sorumlu kullanıcı yürütüyor' },
+        { key: 'TAMAMLANDI', label: 'Tamamlandı', hint: '1. kontrolcü tamamladı, 2. kontrolcü onayında' },
+        { key: 'ONAYLANDI', label: 'Onaylandı', hint: '2. kontrolcü onayladı (nihai)' },
+    ],
+    FOLLOW_UP: [
+        { key: 'BEKLIYOR', label: 'Bekliyor', hint: 'Takip henüz başlatılmadı' },
+        { key: 'DEVAM_EDIYOR', label: 'Devam Ediyor', hint: 'Takip yürütülüyor' },
+        { key: 'TAMAMLANDI', label: 'Tamamlandı', hint: 'Değerlendirildi, 2. kontrolcü onayında' },
+        { key: 'ONAYLANDI', label: 'Onaylandı', hint: '2. kontrolcü onayladı (nihai)' },
+    ],
+    PERIOD_CONTROL: [
+        { key: 'BEKLIYOR', label: 'Bekliyor', hint: 'Dönemin testleri başlamadı' },
+        { key: 'DEVAM_EDIYOR', label: 'Devam Ediyor', hint: 'Dönem testleri yürütülüyor' },
+        { key: 'TAMAMLANDI', label: 'Tamamlandı', hint: '1. kontrolcü tamamladı, 2. kontrolcü onayında' },
+        { key: 'ONAYLANDI', label: 'Onaylandı', hint: '2. kontrolcü onayladı (nihai)' },
+    ],
+    FINDING: [
+        { key: 'DEVAM_EDIYOR', label: 'Açık', hint: 'Bulgu açık; aksiyonlar ve takipler yürütülüyor (onay gerekmez)' },
+        { key: 'TAMAMLANDI', label: 'Kapanış Değerlendirmesinde', hint: '1. kontrolcü kapanışa gönderdi; 2. kontrolcü/yönetici değerlendiriyor' },
+        { key: 'ONAYLANDI', label: 'Kapatıldı', hint: 'Kapanış onaylandı' },
+    ],
+    ACTION: [
+        { key: 'DEVAM_EDIYOR', label: 'Taslak', hint: '1. kontrolcü aksiyonu hazırlıyor' },
+        { key: 'TAMAMLANDI', label: '2. Kontrolcü Onayında', hint: 'Onaya gönderildi' },
+        { key: 'ONAYLANDI', label: 'Onaylandı', hint: '2. kontrolcü onayladı; takip çalışması oluştu' },
+    ],
+};
+
+/** Türün aşama adı (Kanban kartı, iş akışı çubuğu, geçmiş). */
+export function stageLabelFor(type: WorkflowEntityType, stage: Stage): string {
+    return STAGE_DEFS[type].find(d => d.key === stage)?.label ?? STAGE_LABELS[stage];
+}
+
+/** Türe özel eylem adları (ortak eylem anahtarıyla). */
+const TYPE_ACTION_LABELS: Partial<Record<WorkflowEntityType, Partial<Record<WorkflowAction, string>>>> = {
+    FINDING: { COMPLETE: 'Kapanış değerlendirmesine gönder', APPROVE: 'Kapanışı onayla', RETURN: 'İade et (açık kalsın)', REVERT: 'Önceki aşamaya geri al', CANCEL: 'Silme talebi' },
+    ACTION: { COMPLETE: '2. kontrolcü onayına gönder', APPROVE: 'Onayla', RETURN: 'Gerekçeyle iade et', REVERT: 'Onayı geri al', CANCEL: 'Silme talebi' },
+    FOLLOW_UP: { CANCEL: 'Silme talebi' },
+    PERIOD_CONTROL: { CANCEL: 'Silme talebi' },
+};
+export function actionLabelFor(type: WorkflowEntityType, action: WorkflowAction): string {
+    return TYPE_ACTION_LABELS[type]?.[action] ?? ACTION_LABELS[action];
+}
+
+/** Tür için geçerli eylem mi (türün kullanmadığı aşamaya giden geçiş yok sayılır). */
+export function nextStageFor(type: WorkflowEntityType, action: WorkflowAction, from: Stage): Stage | null {
+    const to = nextStage(action, from);
+    if (!to || to === 'IPTAL') return to;
+    return STAGE_DEFS[type].some(d => d.key === to) ? to : null;
+}
 
 /**
  * İzinli geçişler: yalnız komşu aşamalar. Bekliyor'dan Tamamlandı/Onaylandı'ya atlanamaz;
@@ -77,14 +137,23 @@ export function followUpStage(status: string): Stage {
     }
 }
 
-export function findingStage(workflowStatus: string): Stage {
-    switch (workflowStatus) {
-        case 'TASLAK': return 'BEKLIYOR';
-        case 'MUTABAKATA_GONDERILDI': return 'DEVAM_EDIYOR';
-        case 'IC_KONTROL_ONAYINA_GONDERILDI': return 'TAMAMLANDI';
-        case 'MUTABAKAT_YAPILDI': return 'ONAYLANDI';
-        default: return 'IPTAL';
-    }
+/**
+ * Bulgu yaşam döngüsü (mutabakat durumu artık aşama değil, bilgi alanıdır):
+ * iptal/silinmiş → IPTAL; CLOSED → Kapatıldı; PENDING_REVIEW → Kapanış Değerlendirmesinde; diğerleri → Açık.
+ */
+export function findingStage(f: { workflowStatus: string; status: string; deletedAt?: Date | null }): Stage {
+    if (f.workflowStatus === 'IPTAL' || f.deletedAt) return 'IPTAL';
+    if (f.status === 'CLOSED') return 'ONAYLANDI';
+    if (f.status === 'PENDING_REVIEW') return 'TAMAMLANDI';
+    return 'DEVAM_EDIYOR';
+}
+
+/** Aksiyon planının onay hattı (yürütme durumu ayrı: BEKLIYOR…KAPATILDI). */
+export function actionStage(a: { approvalState: string; status: string; deletedAt?: Date | null }): Stage {
+    if (a.deletedAt || a.status === 'IPTAL') return 'IPTAL';
+    if (a.approvalState === 'ONAYLANDI') return 'ONAYLANDI';
+    if (a.approvalState === 'ONAY_BEKLIYOR') return 'TAMAMLANDI';
+    return 'DEVAM_EDIYOR'; // TASLAK, REDDEDILDI
 }
 
 /** Dönem Kontrolü: onay alanları saklanır; Bekliyor/Devam Ediyor testlerin ilerleyişinden türetilir. */

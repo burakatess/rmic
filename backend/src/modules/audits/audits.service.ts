@@ -7,8 +7,7 @@ import { nextFindingNo, nextActionNo, nextFollowUpNo } from '../../common/util/s
 import { projectActionStatus, projectFindingStatus, projectFindingTiming, projectFollowUpStatus } from '../../common/workflow/workflow-projection';
 import { approachingFindingWhere, overdueFindingWhere, overdueFollowUpWhere } from '../../common/util/metric-definitions';
 import { personFieldWhere } from '../../common/util/person-filter';
-import { matchesPermission } from '../../common/util/permission-match';
-import { logTransition, findingStage, followUpStage, type WorkflowAction } from '../../common/workflow/workflow-stages';
+import { logTransition, followUpStage, type WorkflowAction } from '../../common/workflow/workflow-stages';
 import { parsePaging, safeOrderBy } from '../../common/util/list-query';
 
 // Takip değerlendirmesini onaylayabilecek roller (ikinci kontrolcü) — mutabakat
@@ -733,70 +732,7 @@ export class AuditsService {
     //  - finding:delete     : her taslak (durum/bağımlılık kuralları yine geçerli)
     //  - finding:delete:own : yalnız createdById === oturum sahibi olan taslak
     // Yetki/sahiplik yoksa 403; durum/bağımlılık engeli 409. Silme + denetim izi tek transaction.
-    async deleteFinding(id: string, userId: string, permissions: string[] = []) {
-        const canDeleteAny = matchesPermission(permissions, 'finding:delete');
-        const canDeleteOwn = matchesPermission(permissions, 'finding:delete:own');
-        if (!canDeleteAny && !canDeleteOwn) throw new ForbiddenException('Bulgu silme yetkiniz yok.');
-        return this.prisma.$transaction(async (tx) => {
-            const finding = await tx.finding.findUnique({
-                where: { id },
-                select: {
-                    id: true, findingId: true, description: true, workflowStatus: true, status: true, createdById: true,
-                    resolutionStatus: true, controlTestId: true, controlId: true,
-                    actions: { select: { id: true, actionId: true, status: true } },
-                    followUps: { select: { id: true, followUpId: true, status: true, approvalStatus: true } },
-                    _count: { select: { referencingTests: true, attachments: true } },
-                },
-            });
-            if (!finding) throw new NotFoundException('Bulgu bulunamadı');
-            const ownOnly = !canDeleteAny;
-            if (ownOnly && finding.createdById !== userId) {
-                throw new ForbiddenException('Yalnızca kendi oluşturduğunuz taslak bulguyu silebilirsiniz.');
-            }
-
-            const blockers = findingDeleteBlockers(finding);
-            if (blockers.length > 0) {
-                throw new ConflictException(
-                    `Bulgu silinemez: ${blockers.join(' ')} Süreç başlamış bulgular için "İptal Et" işlemini kullanın.`,
-                );
-            }
-
-            const followUpIds = finding.followUps.map(f => f.id);
-            if (followUpIds.length > 0) {
-                // FindingStatusHistory.followUpId cascade değil — bağı kopar (bkz. deleteFollowUp).
-                await tx.findingStatusHistory.updateMany({ where: { followUpId: { in: followUpIds } }, data: { followUpId: null } });
-                await tx.findingFollowUp.deleteMany({ where: { id: { in: followUpIds } } });
-            }
-            await tx.action.deleteMany({ where: { findingId: id } });
-            // Koşullu silme: kontrol ile silme arasında bulgu mutabakata gönderildiyse silme olmaz.
-            const deleted = await tx.finding.deleteMany({
-                where: { id, workflowStatus: 'TASLAK', ...(ownOnly ? { createdById: userId } : {}) },
-            });
-            if (deleted.count !== 1) {
-                throw new ConflictException('Bulgu bu sırada başka bir işlemle değiştirildi; silinmedi. Sayfayı yenileyip tekrar deneyin.');
-            }
-
-            await tx.auditLog.create({
-                data: {
-                    userId, action: 'DELETE', entityType: 'Finding', entityId: id,
-                    oldValue: {
-                        findingId: finding.findingId,
-                        description: finding.description,
-                        workflowStatus: finding.workflowStatus,
-                        status: finding.status,
-                        controlTestId: finding.controlTestId,
-                        controlId: finding.controlId,
-                        createdById: finding.createdById,
-                        deletedVia: ownOnly ? 'finding:delete:own' : 'finding:delete',
-                        deletedActions: finding.actions.map(a => a.actionId),
-                        deletedFollowUps: finding.followUps.map(f => f.followUpId),
-                        deletedAttachmentCount: finding._count.attachments,
-                    },
-                },
-            });
-            return { message: 'Bulgu silindi', findingId: finding.findingId };
-        });
-    }
+    // Doğrudan (onaysız) bulgu silme kaldırıldı: bkz. requestFindingDeletion + DeletionRequestsService.
 
     // ─── Mutabakat Workflow Geçişleri ─────────────────────────────────────────
 
@@ -826,14 +762,8 @@ export class AuditsService {
                 );
             }
 
-            {
-                const action: WorkflowAction = newStatus === 'IPTAL' ? 'CANCEL'
-                    : findingStage(newStatus) === 'ONAYLANDI' ? 'APPROVE'
-                        : findingStage(from) === 'TAMAMLANDI' && findingStage(newStatus) === 'DEVAM_EDIYOR' ? 'RETURN'
-                            : findingStage(from) === 'BEKLIYOR' ? 'START'
-                                : findingStage(from) === 'IPTAL' ? 'REOPEN' : 'COMPLETE';
-                await logTransition(tx, { entityType: 'FINDING', entityId: id, action, from: findingStage(from), to: findingStage(newStatus), userId, reason: note ?? null });
-            }
+            // Mutabakat (birim cevabı) durumu bilgi alanıdır; bulgunun iş akışı aşaması değildir
+            // (aşama: Açık → Kapanış Değerlendirmesinde → Kapatıldı). Geçmiş statü tarihçesinde tutulur.
             await tx.findingStatusHistory.create({
                 data: {
                     findingId: id,
@@ -926,15 +856,20 @@ export class AuditsService {
     }
 
     // Herhangi → IPTAL (yalnızca Business Owner / Admin)
-    async iptalEt(id: string, reason: string, userId: string) {
+    /**
+     * Bulguyu iptal eder (açık aksiyon/takipler de iptal). ARTIK yalnız yönetici onaylı silme talebinin
+     * onayından çağrılır (DeletionRequestsService) — doğrudan iptal ucu silme talebi açar.
+     * `db` verilirse çağıranın işlemi içinde çalışır (onay kaydı ile aynı transaction).
+     */
+    async iptalEt(id: string, reason: string, userId: string, db?: Prisma.TransactionClient) {
         if (!reason?.trim()) throw new BadRequestException('İptal gerekçesi zorunludur.');
-        const finding = await this.prisma.finding.findUnique({ where: { id }, select: { workflowStatus: true } });
+        const finding = await (db ?? this.prisma).finding.findUnique({ where: { id }, select: { workflowStatus: true } });
         if (!finding) throw new NotFoundException(`Finding ${id} not found`);
         if (finding.workflowStatus === 'IPTAL') {
             throw new BadRequestException('Bulgu zaten iptal edilmiş.');
         }
 
-        return this.prisma.$transaction(async (tx) => {
+        const run = async (tx: Prisma.TransactionClient) => {
             const [openActions, openFollowUps] = await Promise.all([
                 tx.action.findMany({
                     where: { findingId: id, status: { notIn: ['KAPATILDI', 'CLOSED', 'IPTAL'] } },
@@ -1009,78 +944,181 @@ export class AuditsService {
                 },
             });
             return updated;
-        });
+        };
+        return db ? run(db) : this.prisma.$transaction(run);
     }
 
-    // ── Onaylı kapanış (Madde 3) ─────────────────────────────────────────────
-    // Bulgu YALNIZCA buradan CLOSED olur. Koşullar:
-    //  - En az bir düzeltici aksiyon var (sıfır aksiyonlu bulgu "açık aksiyon yok"
-    //    diye otomatik kapanamaz).
-    //  - TÜM aksiyonlar KAPATILDI (onaylı kapanış). Yalnızca TAMAMLANDI/COMPLETED
-    //    yeterli değildir.
-    //  - closedDate SUNUCU üretir, resolutionStatus=KAPATILDI, status=CLOSED.
-    async closeFinding(id: string, reason: string, userId: string) {
-        const finding = await this.prisma.finding.findUnique({
+    // ── Bulgu kapanış değerlendirmesi ────────────────────────────────────────
+    // Yaşam döngüsü: Açık → Kapanış Değerlendirmesinde (status=PENDING_REVIEW) → Kapatıldı (CLOSED).
+    // Bulgunun açık kalması onay gerektirmez; aksiyon onayı bulguyu kapatmaz. Kapanış:
+    //  - 1. kontrolcü (veya yönetici) değerlendirme notuyla gönderir; 2. kontrolcü gönderemez.
+    //  - Ön koşul: en az bir aksiyon, tüm canlı aksiyonlar KAPATILDI, açık takip çalışması yok,
+    //    bekleyen silme talebi yok.
+    //  - 2. kontrolcü veya yönetici onaylar / gerekçeyle iade eder; gönderen kendi kapanışını onaylayamaz.
+    //  - Geri alma (yönetici): bir önceki aşamaya (Kapatıldı → Değerlendirme → Açık); aşama atlanmaz.
+
+    /** Kapanışı engelleyen nedenler (boşsa gönderilebilir). */
+    async findingClosureBlockers(id: string, db: PrismaLike = this.prisma): Promise<string[]> {
+        const [actions, openFus] = await Promise.all([
+            db.action.findMany({ where: { findingId: id, deletedAt: null, status: { not: 'IPTAL' } }, select: { actionId: true, status: true } }),
+            db.findingFollowUp.findMany({ where: { findingId: id, deletedAt: null, status: { notIn: ['ONAYLANDI', 'IPTAL'] } }, select: { followUpId: true } }),
+        ]);
+        const out: string[] = [];
+        if (actions.length === 0) out.push('Bulgunun düzeltici aksiyonu yok.');
+        const open = actions.filter(a => !['KAPATILDI', 'CLOSED'].includes(a.status));
+        if (open.length) out.push(`Kapatılmamış aksiyon: ${open.map(a => a.actionId).join(', ')}.`);
+        if (openFus.length) out.push(`Onaylanmamış takip çalışması: ${openFus.map(f => f.followUpId).join(', ')}.`);
+        return out;
+    }
+
+    private async loadFindingForClosure(id: string) {
+        const f = await this.prisma.finding.findUnique({
             where: { id },
-            select: { id: true, status: true, actions: { select: { status: true } } },
+            select: {
+                id: true, findingId: true, status: true, workflowStatus: true, deletedAt: true, deletionRequestedAt: true,
+                firstControllerId: true, secondControllerId: true, assigneeId: true, createdById: true,
+                closureSubmittedById: true, actions: { where: { status: { notIn: ['KAPATILDI', 'CLOSED', 'IPTAL'] }, deletedAt: null }, select: { id: true } },
+            },
         });
-        if (!finding) throw new NotFoundException(`Finding ${id} not found`);
-        if (finding.status === 'CLOSED') throw new BadRequestException('Bulgu zaten kapalı.');
-        if (!reason?.trim()) throw new BadRequestException('Kapanış gerekçesi zorunludur.');
-        if (finding.actions.length === 0) {
-            throw new BadRequestException(
-                'Düzeltici aksiyonu olmayan bulgu bu işlemden kapatılamaz — önce aksiyon tanımlayın.',
-            );
-        }
-        const CLOSED_ACTION = new Set(['KAPATILDI', 'CLOSED']);
-        const open = finding.actions.filter((a) => !CLOSED_ACTION.has(a.status));
-        if (open.length > 0) {
-            throw new BadRequestException(
-                `Bulgu kapatılamaz: ${open.length} aksiyon henüz onaylı biçimde kapatılmadı (KAPATILDI).`,
-            );
-        }
-        const closedDate = new Date();
+        if (!f) throw new NotFoundException('Bulgu bulunamadı');
+        if (f.workflowStatus === 'IPTAL' || f.deletedAt) throw new ConflictException('İptal edilmiş/silinmiş bulguda işlem yapılamaz.');
+        return f;
+    }
+
+    /** Açık durumdaki bulgunun durum değeri (iade/geri almada): kapalı aksiyon varsa kısmen kapatıldı. */
+    private async openStatusFor(id: string, db: PrismaLike) {
+        const closed = await db.action.count({ where: { findingId: id, deletedAt: null, status: { in: ['KAPATILDI', 'CLOSED'] } } });
+        return closed > 0
+            ? { status: 'PARTIALLY_CLOSED' as const, resolutionStatus: 'KISMEN_KAPATILDI' as const }
+            : { status: 'IN_PROGRESS' as const, resolutionStatus: 'DEVAM_EDIYOR' as const };
+    }
+
+    async submitFindingClosure(id: string, note: string, userId: string, isManager = false) {
+        if (!note?.trim()) throw new BadRequestException('Kapanış değerlendirmesi (gerekçe) zorunludur.');
+        const f = await this.loadFindingForClosure(id);
+        if (f.status === 'CLOSED' || f.status === 'PENDING_REVIEW') throw new ConflictException('Bulgu zaten kapanış değerlendirmesinde veya kapalı.');
+        if (f.deletionRequestedAt) throw new ConflictException('Silme talebi bekleyen bulgu kapanışa gönderilemez.');
+        const maker = f.firstControllerId ?? f.assigneeId ?? f.createdById;
+        if (f.secondControllerId === userId) throw new ForbiddenException('İkinci kontrolcü bulguyu kapanışa gönderemez; değerlendirmeyi o yapar.');
+        if (!isManager && maker && maker !== userId) throw new ForbiddenException('Bulguyu kapanışa yalnız 1. kontrolcüsü (veya yönetici) gönderebilir.');
+        const blockers = await this.findingClosureBlockers(id);
+        if (blockers.length) throw new BadRequestException(`Bulgu kapanışa gönderilemez: ${blockers.join(' ')}`);
+        const now = new Date();
         return this.prisma.$transaction(async (tx) => {
-            // Koşul UPDATE içinde: arada yeni açık aksiyon eklendiyse veya bulgu
-            // zaten kapandıysa kapanış yapılmaz.
             const res = await tx.finding.updateMany({
-                where: {
-                    id, status: { not: 'CLOSED' },
-                    actions: { some: {}, every: { status: { in: ['KAPATILDI', 'CLOSED'] } } },
-                },
-                data: { status: 'CLOSED', resolutionStatus: 'KAPATILDI', closedDate },
+                where: { id, status: { notIn: ['CLOSED', 'PENDING_REVIEW'] }, workflowStatus: { not: 'IPTAL' }, deletedAt: null, deletionRequestedAt: null },
+                data: { status: 'PENDING_REVIEW', closureSubmittedAt: now, closureSubmittedById: userId, closureNote: note.trim(), closureReturnReason: null, closureDecidedAt: null, closureDecidedById: null },
             });
-            if (res.count !== 1) {
-                throw new ConflictException('Bulgu veya aksiyonları bu sırada değişti; kapatılmadı. Sayfayı yenileyip tekrar deneyin.');
-            }
-            await this.appendStatusHistory(id, { explanation: `Bulgu kapatıldı. Gerekçe: ${reason}`, evaluator: userId }, userId, tx);
-            await tx.auditLog.create({
-                data: { userId, action: 'CLOSE', entityType: 'Finding', entityId: id, newValue: { status: 'CLOSED', closedDate, reason } },
-            });
+            if (res.count !== 1) throw new ConflictException('Bulgu bu sırada değişti; sayfayı yenileyin.');
+            if ((await this.findingClosureBlockers(id, tx)).length) throw new ConflictException('Bulgunun aksiyon/takipleri bu sırada değişti; kapanışa gönderilmedi.');
+            await logTransition(tx, { entityType: 'FINDING', entityId: id, action: 'COMPLETE', from: 'DEVAM_EDIYOR', to: 'TAMAMLANDI', userId, reason: note });
+            await this.appendStatusHistory(id, { explanation: `Kapanış değerlendirmesine gönderildi: ${note.trim()}`, evaluator: userId }, userId, tx);
+            await tx.auditLog.create({ data: { userId, action: 'FINDING_CLOSURE_SUBMIT', entityType: 'Finding', entityId: id, oldValue: { status: f.status }, newValue: { status: 'PENDING_REVIEW', note: note.trim() } } });
             return tx.finding.findUniqueOrThrow({ where: { id } });
         });
     }
 
-    // ── Yeniden açma (Madde 3) — gerekçeli, yetkili, loglanan ayrı işlem ──────
-    async reopenFinding(id: string, reason: string, userId: string) {
-        const finding = await this.prisma.finding.findUnique({ where: { id }, select: { id: true, status: true } });
-        if (!finding) throw new NotFoundException(`Finding ${id} not found`);
-        if (finding.status !== 'CLOSED') throw new BadRequestException('Yalnızca kapalı bulgu yeniden açılabilir.');
-        if (!reason?.trim()) throw new BadRequestException('Yeniden açma gerekçesi zorunludur.');
+    private assertClosureDecider(f: { secondControllerId: string | null; closureSubmittedById: string | null }, userId: string, isManager: boolean) {
+        if (f.closureSubmittedById === userId) throw new ForbiddenException('Kapanışa gönderen kişi kendi değerlendirmesini onaylayamaz veya iade edemez.');
+        if (!(f.secondControllerId === userId || isManager)) throw new ForbiddenException('Kapanışı yalnız bulgunun 2. kontrolcüsü veya yönetici değerlendirir.');
+    }
+
+    async approveFindingClosure(id: string, userId: string, isManager = false) {
+        const f = await this.loadFindingForClosure(id);
+        if (f.status !== 'PENDING_REVIEW') throw new ConflictException('Bulgu kapanış değerlendirmesinde değil.');
+        this.assertClosureDecider(f, userId, isManager);
+        const now = new Date();
         return this.prisma.$transaction(async (tx) => {
+            if ((await this.findingClosureBlockers(id, tx)).length) throw new ConflictException('Bulguda açık aksiyon/takip oluştu; kapanış onaylanamaz. İade edin.');
             const res = await tx.finding.updateMany({
-                where: { id, status: 'CLOSED' },
-                data: { status: 'IN_PROGRESS', resolutionStatus: 'DEVAM_EDIYOR', closedDate: null },
+                where: { id, status: 'PENDING_REVIEW' },
+                data: { status: 'CLOSED', resolutionStatus: 'KAPATILDI', closedDate: now, closureDecidedAt: now, closureDecidedById: userId },
             });
-            if (res.count !== 1) {
-                throw new ConflictException('Bulgu bu sırada yeniden açıldı veya değişti. Sayfayı yenileyip tekrar deneyin.');
-            }
-            await this.appendStatusHistory(id, { explanation: `Bulgu yeniden açıldı. Gerekçe: ${reason}`, evaluator: userId }, userId, tx);
-            await tx.auditLog.create({
-                data: { userId, action: 'REOPEN', entityType: 'Finding', entityId: id, newValue: { status: 'IN_PROGRESS', reason } },
-            });
+            if (res.count !== 1) throw new ConflictException('Bulgu bu sırada değişti; sayfayı yenileyin.');
+            await logTransition(tx, { entityType: 'FINDING', entityId: id, action: 'APPROVE', from: 'TAMAMLANDI', to: 'ONAYLANDI', userId });
+            await this.appendStatusHistory(id, { explanation: 'Kapanış değerlendirmesi onaylandı; bulgu kapatıldı.', evaluator: userId }, userId, tx);
+            await tx.auditLog.create({ data: { userId, action: 'CLOSE', entityType: 'Finding', entityId: id, newValue: { status: 'CLOSED', closedDate: now } } });
             return tx.finding.findUniqueOrThrow({ where: { id } });
         });
+    }
+
+    async returnFindingClosure(id: string, reason: string, userId: string, isManager = false) {
+        if (!reason?.trim()) throw new BadRequestException('İade gerekçesi zorunludur.');
+        const f = await this.loadFindingForClosure(id);
+        if (f.status !== 'PENDING_REVIEW') throw new ConflictException('Bulgu kapanış değerlendirmesinde değil.');
+        this.assertClosureDecider(f, userId, isManager);
+        return this.prisma.$transaction(async (tx) => {
+            const open = await this.openStatusFor(id, tx);
+            const res = await tx.finding.updateMany({
+                where: { id, status: 'PENDING_REVIEW' },
+                data: { ...open, closureReturnReason: reason.trim(), closureDecidedAt: new Date(), closureDecidedById: userId },
+            });
+            if (res.count !== 1) throw new ConflictException('Bulgu bu sırada değişti; sayfayı yenileyin.');
+            await logTransition(tx, { entityType: 'FINDING', entityId: id, action: 'RETURN', from: 'TAMAMLANDI', to: 'DEVAM_EDIYOR', userId, reason });
+            await this.appendStatusHistory(id, { explanation: `Kapanış iade edildi, bulgu açık kaldı: ${reason.trim()}`, evaluator: userId }, userId, tx);
+            await tx.auditLog.create({ data: { userId, action: 'FINDING_CLOSURE_RETURN', entityType: 'Finding', entityId: id, newValue: { ...open, reason: reason.trim() } } });
+            return tx.finding.findUniqueOrThrow({ where: { id } });
+        });
+    }
+
+    /** Yönetici geri alması: bir önceki aşamaya (Kapatıldı → Değerlendirmede, Değerlendirmede → Açık). */
+    async revertFindingStage(id: string, reason: string, userId: string) {
+        if (!reason?.trim()) throw new BadRequestException('Geri alma gerekçesi zorunludur.');
+        const f = await this.loadFindingForClosure(id);
+        return this.prisma.$transaction(async (tx) => {
+            if (f.status === 'CLOSED') {
+                const res = await tx.finding.updateMany({ where: { id, status: 'CLOSED' }, data: { status: 'PENDING_REVIEW', resolutionStatus: 'KISMEN_KAPATILDI', closedDate: null, closureDecidedAt: null, closureDecidedById: null } });
+                if (res.count !== 1) throw new ConflictException('Bulgu bu sırada değişti; sayfayı yenileyin.');
+                await logTransition(tx, { entityType: 'FINDING', entityId: id, action: 'REVERT', from: 'ONAYLANDI', to: 'TAMAMLANDI', userId, reason });
+                await this.appendStatusHistory(id, { explanation: `Kapanış geri alındı, bulgu yeniden değerlendirmede: ${reason.trim()}`, evaluator: userId }, userId, tx);
+                await tx.auditLog.create({ data: { userId, action: 'REOPEN', entityType: 'Finding', entityId: id, newValue: { status: 'PENDING_REVIEW', reason: reason.trim() } } });
+            } else if (f.status === 'PENDING_REVIEW') {
+                const open = await this.openStatusFor(id, tx);
+                const res = await tx.finding.updateMany({ where: { id, status: 'PENDING_REVIEW' }, data: { ...open, closureSubmittedAt: null, closureSubmittedById: null } });
+                if (res.count !== 1) throw new ConflictException('Bulgu bu sırada değişti; sayfayı yenileyin.');
+                await logTransition(tx, { entityType: 'FINDING', entityId: id, action: 'REVERT', from: 'TAMAMLANDI', to: 'DEVAM_EDIYOR', userId, reason });
+                await this.appendStatusHistory(id, { explanation: `Kapanış değerlendirmesi geri alındı, bulgu açık: ${reason.trim()}`, evaluator: userId }, userId, tx);
+                await tx.auditLog.create({ data: { userId, action: 'FINDING_CLOSURE_REVERT', entityType: 'Finding', entityId: id, newValue: { ...open, reason: reason.trim() } } });
+            } else {
+                throw new ConflictException('Açık bulgunun geri alınacak önceki aşaması yok.');
+            }
+            return tx.finding.findUniqueOrThrow({ where: { id } });
+        });
+    }
+
+    /**
+     * Bulgu silme talebi — talep kaydı silmez; yönetici (talep eden hariç) onaylayınca bulgu iptal edilir
+     * (DeletionRequestsService.approve). Rol ve kayıt kapsamı kontrolü çağıranda yapılır.
+     */
+    async requestFindingDeletion(id: string, reason: string, userId: string) {
+        if (!reason?.trim()) throw new BadRequestException('Silme gerekçesi zorunludur.');
+        const f = await this.prisma.finding.findUnique({ where: { id }, select: { id: true, workflowStatus: true, deletedAt: true, deletionRequestedAt: true, status: true } });
+        if (!f || f.deletedAt || f.workflowStatus === 'IPTAL') throw new NotFoundException('Bulgu bulunamadı');
+        if (f.deletionRequestedAt) throw new ConflictException('Bu bulgu için zaten bekleyen bir silme talebi var.');
+        if (f.status === 'PENDING_REVIEW') throw new ConflictException('Kapanış değerlendirmesindeki bulgu için silme talebi açılamaz; önce iade edilmeli.');
+        return this.prisma.$transaction(async (tx) => {
+            const res = await tx.finding.updateMany({
+                where: { id, deletionRequestedAt: null, deletedAt: null, workflowStatus: { not: 'IPTAL' } },
+                data: { deletionRequestedById: userId, deletionRequestedAt: new Date(), deletionReason: reason.trim(), deletionRejectionReason: null, deletionDecidedById: null, deletionDecidedAt: null },
+            });
+            if (res.count !== 1) throw new ConflictException('Kayıt bu sırada değişti; sayfayı yenileyin.');
+            await tx.findingStatusHistory.create({ data: { findingId: id, evaluator: userId, changeType: 'WORKFLOW_CHANGE', explanation: `Silme talebi (yönetici onayına): ${reason.trim()}` } });
+            await tx.auditLog.create({ data: { userId, action: 'DELETE_REQUEST', entityType: 'Finding', entityId: id, newValue: { reason: reason.trim() } } });
+            return { requested: true, message: 'Silme talebi yönetici onayına gönderildi; onaylanana kadar bulgu mevcut haliyle kalır.' };
+        });
+    }
+
+    /** Eski uç (POST workflow/kapat): artık doğrudan kapatmaz, kapanış değerlendirmesine gönderir. */
+    async closeFinding(id: string, reason: string, userId: string, isManager = true) {
+        return this.submitFindingClosure(id, reason, userId, isManager);
+    }
+
+    /** Eski uç (POST workflow/yeniden-ac): kapalı bulguyu bir aşama geri alır (değerlendirmeye). */
+    async reopenFinding(id: string, reason: string, userId: string) {
+        const f = await this.prisma.finding.findUnique({ where: { id }, select: { status: true } });
+        if (!f) throw new NotFoundException(`Finding ${id} not found`);
+        if (f.status !== 'CLOSED') throw new BadRequestException('Yalnızca kapalı bulgu yeniden açılabilir.');
+        return this.revertFindingStage(id, reason, userId);
     }
 
     // ─── Risk ↔ Finding Linking ───────────────────────────────────────────────
@@ -2161,6 +2199,7 @@ export class AuditsService {
             });
             if (claim.count !== 1) throw new ConflictException('Aksiyon bu sırada değişti; tekrar deneyin.');
             await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_SUBMITTED', userId, explanation: `${action.actionId} ikinci kontrolcü onayına gönderildi.` }, tx);
+            await logTransition(tx, { entityType: 'ACTION', entityId: actionId, action: 'COMPLETE', from: 'DEVAM_EDIYOR', to: 'TAMAMLANDI', userId });
             await tx.auditLog.create({ data: { userId, action: 'ACTION_SUBMIT', entityType: 'Action', entityId: actionId, newValue: { approvalState: 'ONAY_BEKLIYOR' } } });
             return tx.action.findUnique({ where: { id: actionId } });
         });
@@ -2183,6 +2222,7 @@ export class AuditsService {
             await this.recalculateFindingTargetDate(findingId, tx);
             const fuRow = await tx.findingFollowUp.findUnique({ where: { id: fu.id }, select: { followUpId: true } });
             await this.recordAuditTrail({ findingId, actionId, followUpId: fu.id, operation: 'ACTION_APPROVED', userId, explanation: `${action.actionId} onaylandı; takip çalışması ${fuRow?.followUpId ?? ''} oluşturuldu.` }, tx);
+            await logTransition(tx, { entityType: 'ACTION', entityId: actionId, action: 'APPROVE', from: 'TAMAMLANDI', to: 'ONAYLANDI', userId });
             await tx.auditLog.create({ data: { userId, action: 'ACTION_APPROVE', entityType: 'Action', entityId: actionId, newValue: { approvalState: 'ONAYLANDI', followUpId: fu.id } } });
             return { ...(await tx.action.findUnique({ where: { id: actionId } })), createdFollowUp: fuRow ? { id: fu.id, followUpId: fuRow.followUpId } : null };
         });
@@ -2197,6 +2237,7 @@ export class AuditsService {
             const claim = await tx.action.updateMany({ where: { id: actionId, approvalState: 'ONAY_BEKLIYOR' }, data: { approvalState: 'REDDEDILDI', rejectionReason: reason.trim() } });
             if (claim.count !== 1) throw new ConflictException('Aksiyon bu sırada değişti; tekrar deneyin.');
             await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_REJECTED', userId, explanation: `${action.actionId} reddedildi: ${reason.trim()}` }, tx);
+            await logTransition(tx, { entityType: 'ACTION', entityId: actionId, action: 'RETURN', from: 'TAMAMLANDI', to: 'DEVAM_EDIYOR', userId, reason });
             await tx.auditLog.create({ data: { userId, action: 'ACTION_REJECT', entityType: 'Action', entityId: actionId, newValue: { approvalState: 'REDDEDILDI', reason: reason.trim() } } });
             return tx.action.findUnique({ where: { id: actionId } });
         });
@@ -2231,6 +2272,7 @@ export class AuditsService {
                 findingId, actionId, operation: 'ACTION_APPROVAL_REVERTED', userId,
                 explanation: `${action.actionId} onayı geri alındı: ${reason.trim()}${followUps.length ? ` — iptal edilen takip: ${followUps.map(f => f.followUpId).join(', ')}` : ''}`,
             }, tx);
+            await logTransition(tx, { entityType: 'ACTION', entityId: actionId, action: 'REVERT', from: 'ONAYLANDI', to: 'DEVAM_EDIYOR', userId, reason });
             await tx.auditLog.create({ data: { userId, action: 'ACTION_REVERT', entityType: 'Action', entityId: actionId, oldValue: { approvalState: 'ONAYLANDI' }, newValue: { approvalState: 'TASLAK', reason: reason.trim(), cancelledFollowUps: followUps.map(f => f.id) } } });
             return tx.action.findUnique({ where: { id: actionId } });
         });
@@ -2243,7 +2285,6 @@ export class AuditsService {
         if (action.deletionRequestedAt) throw new ConflictException('Bu aksiyon için zaten bekleyen bir silme talebi var.');
         if (action.approvalState === 'ONAY_BEKLIYOR') throw new ConflictException('Onay bekleyen aksiyon için silme talebi açılamaz.');
         if (action.firstControllerId && action.firstControllerId !== userId) throw new ForbiddenException('Silme talebini yalnızca aksiyonun birinci kontrolcüsü açabilir.');
-        if (!action.secondControllerId) throw new BadRequestException('Silme talebi için aksiyonun ikinci kontrolcüsü atanmış olmalıdır.');
         return this.prisma.$transaction(async (tx) => {
             await tx.action.update({ where: { id: actionId }, data: { deletionRequestedById: userId, deletionRequestedAt: new Date(), deletionReason: reason.trim(), deletionRejectionReason: null } });
             await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_DELETE_REQUESTED', userId, explanation: `${action.actionId} için silme talebi: ${reason.trim()}` }, tx);
@@ -2255,11 +2296,12 @@ export class AuditsService {
     async decideActionDeletion(findingId: string, actionId: string, approve: boolean, reason: string | undefined, userId: string) {
         const action = await this.loadAction(findingId, actionId);
         if (!action.deletionRequestedAt || action.deletedAt) throw new ConflictException('Bu aksiyon için bekleyen silme talebi yok.');
-        this.requireSecondController(action, userId, 'aksiyonun');
+        // Silme kararı yönetici rolündedir (uç @Roles ile sınırlı); talep eden kendi talebine karar veremez.
+        if (action.deletionRequestedById === userId) throw new ForbiddenException('Kendi silme talebinize karar veremezsiniz.');
         if (!approve) {
             if (!reason?.trim()) throw new BadRequestException('Silme talebini reddetme gerekçesi zorunludur.');
             return this.prisma.$transaction(async (tx) => {
-                await tx.action.update({ where: { id: actionId }, data: { deletionRequestedAt: null, deletionRequestedById: null, deletionRejectionReason: reason.trim() } });
+                await tx.action.update({ where: { id: actionId }, data: { deletionRequestedAt: null, deletionRequestedById: null, deletionRejectionReason: reason.trim(), deletionDecidedById: userId, deletionDecidedAt: new Date() } });
                 await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_DELETE_REJECTED', userId, explanation: `${action.actionId} silme talebi reddedildi: ${reason.trim()}` }, tx);
                 await tx.auditLog.create({ data: { userId, action: 'ACTION_DELETE_REJECT', entityType: 'Action', entityId: actionId, newValue: { reason: reason.trim() } } });
                 return tx.action.findUnique({ where: { id: actionId } });
@@ -2267,13 +2309,14 @@ export class AuditsService {
         }
         return this.prisma.$transaction(async (tx) => {
             const now = new Date();
-            const claim = await tx.action.updateMany({ where: { id: actionId, deletedAt: null, deletionRequestedAt: { not: null } }, data: { status: 'IPTAL', deletedAt: now, deletedById: userId } });
+            const claim = await tx.action.updateMany({ where: { id: actionId, deletedAt: null, deletionRequestedAt: { not: null } }, data: { status: 'IPTAL', deletedAt: now, deletedById: userId, deletionDecidedById: userId, deletionDecidedAt: now } });
             if (claim.count !== 1) throw new ConflictException('Aksiyon bu sırada değişti; tekrar deneyin.');
             // Aksiyona bağlı takip çalışmaları da silinir (kayıt korunur).
             const fus = await tx.findingFollowUp.findMany({ where: { actionId, deletedAt: null }, select: { id: true, followUpId: true } });
             if (fus.length) await tx.findingFollowUp.updateMany({ where: { id: { in: fus.map(f => f.id) } }, data: { status: 'IPTAL', deletedAt: now, deletedById: userId, deletionReason: `Aksiyon silindi: ${action.deletionReason ?? ''}`.trim() } });
             await this.recalculateFindingTargetDate(findingId, tx);
             await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_DELETED', userId, explanation: `${action.actionId} silindi (talep: ${action.deletionReason ?? '—'})${fus.length ? ` — silinen takip: ${fus.map(f => f.followUpId).join(', ')}` : ''}` }, tx);
+            await logTransition(tx, { entityType: 'ACTION', entityId: actionId, action: 'CANCEL', from: action.approvalState === 'ONAYLANDI' ? 'ONAYLANDI' : action.approvalState === 'ONAY_BEKLIYOR' ? 'TAMAMLANDI' : 'DEVAM_EDIYOR', to: 'IPTAL', userId, reason: action.deletionReason });
             await tx.auditLog.create({ data: { userId, action: 'DELETE', entityType: 'Action', entityId: actionId, oldValue: action as any, newValue: { deletedAt: now, followUps: fus.map(f => f.id) } } });
             return tx.action.findUnique({ where: { id: actionId } });
         });
@@ -2389,7 +2432,6 @@ export class AuditsService {
         if (fu.status === 'TAMAMLANDI') throw new ConflictException('Onay bekleyen takip çalışması için silme talebi açılamaz.');
         if (fu.status === 'ONAYLANDI') throw new ConflictException('Onaylanmış takip çalışması silinemez; önce ikinci kontrolcünün onayı geri alması gerekir.');
         if (fu.assigneeId && fu.assigneeId !== userId) throw new ForbiddenException('Silme talebini yalnızca takibin birinci kontrolcüsü açabilir.');
-        if (!fu.secondControllerId) throw new BadRequestException('Silme talebi için takibin ikinci kontrolcüsü atanmış olmalıdır.');
         return this.prisma.$transaction(async (tx) => {
             await tx.findingFollowUp.update({ where: { id: followUpId }, data: { deletionRequestedById: userId, deletionRequestedAt: new Date(), deletionReason: reason.trim(), deletionRejectionReason: null } });
             await this.recordAuditTrail({ findingId, followUpId, operation: 'FOLLOWUP_DELETE_REQUESTED', userId, explanation: `${fu.followUpId} için silme talebi: ${reason.trim()}` }, tx);
@@ -2402,11 +2444,12 @@ export class AuditsService {
         const fu = await this.prisma.findingFollowUp.findFirst({ where: { id: followUpId, findingId } });
         if (!fu) throw new NotFoundException('Takip çalışması bulunamadı');
         if (!fu.deletionRequestedAt || fu.deletedAt) throw new ConflictException('Bu takip için bekleyen silme talebi yok.');
-        this.requireSecondController(fu, userId, 'takip çalışmasının');
+        // Silme kararı yönetici rolündedir (uç @Roles ile sınırlı); talep eden kendi talebine karar veremez.
+        if (fu.deletionRequestedById === userId) throw new ForbiddenException('Kendi silme talebinize karar veremezsiniz.');
         if (!approve) {
             if (!reason?.trim()) throw new BadRequestException('Silme talebini reddetme gerekçesi zorunludur.');
             return this.prisma.$transaction(async (tx) => {
-                await tx.findingFollowUp.update({ where: { id: followUpId }, data: { deletionRequestedAt: null, deletionRequestedById: null, deletionRejectionReason: reason.trim() } });
+                await tx.findingFollowUp.update({ where: { id: followUpId }, data: { deletionRequestedAt: null, deletionRequestedById: null, deletionRejectionReason: reason.trim(), deletionDecidedById: userId, deletionDecidedAt: new Date() } });
                 await this.recordAuditTrail({ findingId, followUpId, operation: 'FOLLOWUP_DELETE_REJECTED', userId, explanation: `${fu.followUpId} silme talebi reddedildi: ${reason.trim()}` }, tx);
                 await tx.auditLog.create({ data: { userId, action: 'FOLLOWUP_DELETE_REJECT', entityType: 'FindingFollowUp', entityId: followUpId, newValue: { reason: reason.trim() } } });
                 return tx.findingFollowUp.findUnique({ where: { id: followUpId } });
@@ -2416,7 +2459,7 @@ export class AuditsService {
             const now = new Date();
             const claim = await tx.findingFollowUp.updateMany({
                 where: { id: followUpId, deletedAt: null, deletionRequestedAt: { not: null }, status: { notIn: ['ONAYLANDI', 'TAMAMLANDI'] } },
-                data: { status: 'IPTAL', deletedAt: now, deletedById: userId },
+                data: { status: 'IPTAL', deletedAt: now, deletedById: userId, deletionDecidedById: userId, deletionDecidedAt: now },
             });
             if (claim.count !== 1) throw new ConflictException('Takip çalışması bu sırada değişti; silinmedi.');
             await this.recordAuditTrail({ findingId, followUpId, actionId: fu.actionId || undefined, operation: 'FOLLOWUP_DELETED', userId, explanation: `${fu.followUpId} silindi (talep: ${fu.deletionReason ?? '—'})` }, tx);
@@ -2465,21 +2508,17 @@ export class AuditsService {
         });
 
         // Onaylı kapanış = KAPATILDI (veya legacy CLOSED). Yalnız TAMAMLANDI yeterli değil.
+        // Bulgu ARTIK otomatik kapanmaz: tüm aksiyonlar kapansa da bulgu açık kalır ve
+        // 1. kontrolcü kapanış değerlendirmesine gönderir (2. kontrolcü/yönetici onaylar).
         const CLOSED = new Set(['KAPATILDI', 'CLOSED']);
+        const current = await db.finding.findUnique({ where: { id: findingId }, select: { status: true } });
+        if (current?.status === 'CLOSED' || current?.status === 'PENDING_REVIEW') return;
         if (actions.length > 0 && actions.every(a => CLOSED.has(a.status))) {
-            await db.finding.update({
-                where: { id: findingId },
-                data: { status: 'CLOSED', resolutionStatus: 'KAPATILDI', closedDate: new Date() },
-            });
-            // Aksiyondan bağımsız eski/genel takipler de açık bırakılmamalı;
-            // kapalı bulgu yeni çalışma kabul etmediği için bunlar artık uygulanamaz.
-            await db.findingFollowUp.updateMany({
-                where: { findingId, status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR', 'TAMAMLANDI'] } },
-                data: { status: 'IPTAL' },
-            });
-
+            if (current?.status !== 'PARTIALLY_CLOSED') {
+                await db.finding.update({ where: { id: findingId }, data: { status: 'PARTIALLY_CLOSED', resolutionStatus: 'KISMEN_KAPATILDI', closedDate: null } });
+            }
             await this.appendStatusHistory(findingId, {
-                explanation: 'Tüm düzeltici aksiyonlar başarıyla kapatıldığı için bulgu otomatik olarak kapatıldı.',
+                explanation: 'Tüm düzeltici aksiyonlar kapatıldı; bulgu açık ve kapanış değerlendirmesine gönderilebilir.',
                 evaluator: 'Sistem',
             }, userId, db);
         } else if (actions.some(a => CLOSED.has(a.status))) {
@@ -2941,14 +2980,3 @@ type FindingDeleteCandidate = {
 };
 
 /** deleteFinding için engel listesi (boşsa silinebilir). Saf fonksiyon — test edilir. */
-export function findingDeleteBlockers(f: FindingDeleteCandidate): string[] {
-    const blockers: string[] = [];
-    if (f.workflowStatus !== 'TASLAK') blockers.push(`Bulgu TASLAK değil (${f.workflowStatus}).`);
-    if (f.status === 'CLOSED' || f.resolutionStatus === 'KAPATILDI') blockers.push('Bulgu kapalı.');
-    const progressedActions = f.actions.filter(a => a.status !== 'BEKLIYOR').length;
-    if (progressedActions > 0) blockers.push(`${progressedActions} aksiyonda ilerleme kaydedilmiş.`);
-    const progressedFollowUps = f.followUps.filter(fu => fu.status !== 'BEKLIYOR' || (fu.approvalStatus && fu.approvalStatus !== 'BEKLIYOR')).length;
-    if (progressedFollowUps > 0) blockers.push(`${progressedFollowUps} takip çalışması başlamış veya onay sürecinde.`);
-    if (f._count.referencingTests > 0) blockers.push(`${f._count.referencingTests} kontrol testi bu bulguya referans veriyor.`);
-    return blockers;
-}

@@ -12,6 +12,7 @@ import { classifyLoadError, type LoadError } from '@/lib/load-error';
 import { useToast } from '@/components/ui/Toast';
 import ActionEditModal from '@/components/actions/ActionEditModal';
 import { ActionWorkflowPanel } from '@/components/actions/ActionWorkflowPanel';
+import { WorkflowBar } from '@/components/workflow/WorkflowBar';
 
 type BadgeVariant = 'neutral' | 'warning' | 'info' | 'success' | 'critical' | 'primary';
 
@@ -146,6 +147,9 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
                     </div>
                 }
             />
+
+            {/* İş akışı (onay hattı): Taslak → 2. Kontrolcü Onayında → Onaylandı — bulgunun yaşam döngüsünden bağımsız. */}
+            <div className="mb-5"><WorkflowBar type="ACTION" id={action.id} onChanged={load} refreshKey={`${action.approvalState}:${action.deletionRequestedAt ?? ''}:${action.status}`} /></div>
 
             <div className="space-y-6">
                 {/* Ana bilgiler */}

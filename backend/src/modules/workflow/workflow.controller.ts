@@ -5,7 +5,7 @@ import { JwtAuthGuard } from '../../common/guards';
 import type { AccessActor } from '../../common/services/access-scope.service';
 import { WorkflowService } from './workflow.service';
 import { DeletionRequestsService, type DeletionEntity } from './deletion-requests.service';
-import { DeletionDecisionDto, DeletionRequestDto, ENTITY_TYPE_VALUES, WorkflowBoardQueryDto, WorkflowMoveDto, WorkflowTransitionDto } from './dto/workflow.dto';
+import { DeletionDecisionDto, DeletionRequestDto, ENTITY_TYPE_VALUES, WorkflowBoardQueryDto, WorkflowMoveDto, WorkflowTransitionDto, DELETION_TYPES } from './dto/workflow.dto';
 import type { WorkflowEntityType } from '../../common/workflow/workflow-stages';
 
 /** Ortak iş akışı: durum, geçiş, Kanban ("İşlem Durumları") ve yönetici onaylı silme talepleri. */
@@ -70,7 +70,7 @@ export class WorkflowController {
     }
 
     private delType(t: string): DeletionEntity {
-        if (t !== 'CONTROL_TEST' && t !== 'PERIOD_CONTROL') throw new BadRequestException('Geçersiz kayıt türü.');
-        return t;
+        if (!(DELETION_TYPES as readonly string[]).includes(t)) throw new BadRequestException('Geçersiz kayıt türü.');
+        return t as DeletionEntity;
     }
 }

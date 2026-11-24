@@ -12,7 +12,7 @@ const COLUMN_STYLE: Record<string, string> = {
     BEKLIYOR: 'border-t-slate-400', DEVAM_EDIYOR: 'border-t-blue-500', TAMAMLANDI: 'border-t-amber-500', ONAYLANDI: 'border-t-emerald-500',
 };
 const TYPE_STYLE: Record<WorkflowEntityType, string> = {
-    CONTROL_TEST: 'bg-blue-50 text-blue-700', FOLLOW_UP: 'bg-violet-50 text-violet-700', FINDING: 'bg-orange-50 text-orange-700', PERIOD_CONTROL: 'bg-emerald-50 text-emerald-700',
+    CONTROL_TEST: 'bg-blue-50 text-blue-700', FOLLOW_UP: 'bg-violet-50 text-violet-700', FINDING: 'bg-orange-50 text-orange-700', PERIOD_CONTROL: 'bg-emerald-50 text-emerald-700', ACTION: 'bg-amber-50 text-amber-700',
 };
 const FLAG_LABEL: Record<string, { label: string; cls: string }> = {
     GECIKMIS: { label: 'Gecikmiş', cls: 'bg-red-50 text-red-700 border-red-200' },
@@ -83,10 +83,12 @@ export default function WorkflowBoardPage() {
             showError('Geçersiz geçiş', 'Aşamalar sırayla ilerler; bir aşama atlanamaz.');
             return;
         }
-        if (isBackward(item.stage, to)) { setReason(''); setReasonFor({ item, to }); return; }
+        // Geri yön gerekçe ister; bulgunun kapanışa gönderilmesi de kapanış değerlendirmesi ister.
+        if (isBackward(item.stage, to) || (item.entityType === 'FINDING' && to === 'TAMAMLANDI')) { setReason(''); setReasonFor({ item, to }); return; }
         doMove(item, to);
     };
 
+    const closureMove = !!reasonFor && reasonFor.item.entityType === 'FINDING' && reasonFor.to === 'TAMAMLANDI';
     const setF = (k: keyof typeof filters) => (v: string) => setFilters(p => ({ ...p, [k]: v }));
     const total = board?.columns.reduce((n, c) => n + c.total, 0) ?? 0;
 
@@ -96,7 +98,7 @@ export default function WorkflowBoardPage() {
                 <div>
                     <div className="text-xs text-slate-500 mb-1.5">İş Akışı / <span className="text-slate-900 font-medium">İşlem Durumları</span></div>
                     <h1 className="text-2xl font-bold tracking-tight text-slate-900">İşlem Durumları</h1>
-                    <p className="mt-1 text-sm text-slate-500">{total} işlem · Kartları sürükleyerek bir sonraki/önceki aşamaya taşıyın. Aşamalar atlanamaz; onay yalnız 2. kontrolcüdedir.</p>
+                    <p className="mt-1 text-sm text-slate-500">{total} işlem · Kartları sürükleyerek bir sonraki/önceki aşamaya taşıyın. Aşamalar atlanamaz; onaylar 2. kontrolcüdedir. Bulgu onaysız açık kalır, kapanış değerlendirmesiyle kapanır.</p>
                 </div>
                 {board?.canOrg && (
                     <div className="flex rounded-lg border border-slate-200 overflow-hidden" role="tablist">
@@ -158,11 +160,11 @@ export default function WorkflowBoardPage() {
                                     </div>
                                     <p className="font-semibold text-slate-900 leading-snug line-clamp-2">{item.title}</p>
                                     <div className="mt-2 text-[11.5px] text-slate-500 space-y-0.5">
-                                        <p>Sorumlu: <span className="text-slate-700">{item.assignee?.name ?? 'Atanmamış'}</span></p>
+                                        <p>{item.entityType === 'FINDING' || item.entityType === 'ACTION' ? '1. kontrolcü' : 'Sorumlu'}: <span className="text-slate-700">{item.assignee?.name ?? 'Atanmamış'}</span></p>
                                         <p>2. kontrolcü: <span className="text-slate-700">{item.checker?.name ?? 'Atanmamış'}</span></p>
                                     </div>
                                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                        <span className="text-[10.5px] font-medium text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">{col.label}</span>
+                                        <span className="text-[10.5px] font-medium text-slate-600 bg-slate-100 rounded px-1.5 py-0.5" data-testid="card-stage">{item.stageLabel ?? col.label}</span>
                                         {(item.flags ?? []).map(f => <span key={f} className={`text-[10.5px] font-semibold border rounded px-1.5 py-0.5 ${FLAG_LABEL[f].cls}`}>{FLAG_LABEL[f].label}</span>)}
                                         {fmtDate(item.plannedDate) && <span className="ml-auto text-[11px] text-slate-400">{fmtDate(item.plannedDate)}</span>}
                                     </div>
@@ -176,8 +178,8 @@ export default function WorkflowBoardPage() {
             </div>
 
             <Modal open={!!reasonFor} onClose={() => !busy && setReasonFor(null)} size="md"
-                title={reasonFor ? `${reasonFor.item.code}: ${reasonFor.to === 'DEVAM_EDIYOR' && reasonFor.item.stage === 'TAMAMLANDI' ? 'İade et' : 'Önceki aşamaya geri al'}` : ''}
-                description="Geri yönlü taşıma gerekçe ister ve durum geçmişine yazılır."
+                title={reasonFor ? `${reasonFor.item.code}: ${closureMove ? 'Kapanış değerlendirmesine gönder' : reasonFor.to === 'DEVAM_EDIYOR' && reasonFor.item.stage === 'TAMAMLANDI' ? 'İade et' : 'Önceki aşamaya geri al'}` : ''}
+                description={closureMove ? 'Kapanış değerlendirmenizi yazın; 2. kontrolcü veya yönetici onaylayınca bulgu kapanır.' : 'Geri yönlü taşıma gerekçe ister ve durum geçmişine yazılır.'}
                 footer={<div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => setReasonFor(null)} disabled={busy}>Vazgeç</Button>
                     <Button variant="primary" size="sm" loading={busy} disabled={!reason.trim()} onClick={() => reasonFor && doMove(reasonFor.item, reasonFor.to, reason.trim())}>Taşı</Button>

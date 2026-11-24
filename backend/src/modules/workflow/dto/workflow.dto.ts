@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, IsDateString, IsNotEmpty } from 'class-validator';
 
-export const ENTITY_TYPE_VALUES = ['CONTROL_TEST', 'FOLLOW_UP', 'FINDING', 'PERIOD_CONTROL'] as const;
+export const ENTITY_TYPE_VALUES = ['CONTROL_TEST', 'FOLLOW_UP', 'FINDING', 'PERIOD_CONTROL', 'ACTION'] as const;
 export const ACTION_VALUES = ['START', 'COMPLETE', 'APPROVE', 'RETURN', 'REVERT', 'CANCEL', 'REOPEN'] as const;
 export const STAGE_VALUES = ['BEKLIYOR', 'DEVAM_EDIYOR', 'TAMAMLANDI', 'ONAYLANDI'] as const;
 
@@ -27,8 +27,10 @@ export class WorkflowBoardQueryDto {
     @IsOptional() @Type(() => Number) @IsInt() @Min(2000) @Max(2100) year?: number;
 }
 
+export const DELETION_TYPES = ['CONTROL_TEST', 'PERIOD_CONTROL', 'FINDING', 'ACTION', 'FOLLOW_UP'] as const;
+
 export class DeletionRequestDto {
-    @IsIn(['CONTROL_TEST', 'PERIOD_CONTROL']) entityType: 'CONTROL_TEST' | 'PERIOD_CONTROL';
+    @IsIn(DELETION_TYPES) entityType: typeof DELETION_TYPES[number];
     @IsString() @IsNotEmpty() @MaxLength(64) entityId: string;
     @IsString() @IsNotEmpty() @MaxLength(2000) reason: string;
 }

@@ -733,10 +733,10 @@ class ApiClient {
     async getDeletionRequests() {
         return this.request<DeletionRequestRow[]>(`/deletion-requests`);
     }
-    async requestDeletion(entityType: 'CONTROL_TEST' | 'PERIOD_CONTROL', entityId: string, reason: string) {
+    async requestDeletion(entityType: DeletionRequestRow['type'], entityId: string, reason: string) {
         return this.request<{ requested: boolean; message: string }>(`/deletion-requests`, { method: 'POST', body: { entityType, entityId, reason } });
     }
-    async decideDeletion(entityType: 'CONTROL_TEST' | 'PERIOD_CONTROL', entityId: string, approve: boolean, reason?: string) {
+    async decideDeletion(entityType: DeletionRequestRow['type'], entityId: string, approve: boolean, reason?: string) {
         return this.request<unknown>(`/deletion-requests/${entityType}/${entityId}/${approve ? 'approve' : 'reject'}`, { method: 'POST', body: approve ? {} : { reason } });
     }
     async getTestFindingCandidates(testId: string, search?: string) {
@@ -798,7 +798,7 @@ class ApiClient {
         return this.request(`/actions/${id}`);
     }
 
-    /** Maker-checker: silme talebi açar (gerekçe zorunlu); ikinci kontrolcü onaylayınca "Silindi" olur. */
+    /** Maker-checker: silme talebi açar (gerekçe zorunlu); yönetici (talep eden hariç) onaylayınca "Silindi" olur. */
     async deleteAction(id: string, reason: string) {
         return this.request(`/actions/${id}`, { method: 'DELETE', body: { reason } });
     }

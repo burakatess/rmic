@@ -8,13 +8,8 @@ import { useToast } from '@/components/ui/Toast';
 import { PendingApprovalNotice } from '@/components/approvals/PendingApprovalNotice';
 import type { WorkflowActionKey, WorkflowEntityType, WorkflowState } from '@/types/workflow';
 
-const STAGE_ORDER = ['BEKLIYOR', 'DEVAM_EDIYOR', 'TAMAMLANDI', 'ONAYLANDI'] as const;
-const STAGE_HINT: Record<string, string> = {
-    BEKLIYOR: 'İşlem henüz başlatılmadı',
-    DEVAM_EDIYOR: 'Sorumlu kullanıcı yürütüyor',
-    TAMAMLANDI: '1. kontrolcü tamamladı, 2. kontrolcü onayında',
-    ONAYLANDI: '2. kontrolcü onayladı (nihai)',
-};
+// Aşama listesi türe özeldir ve sunucudan gelir (ör. bulgu: Açık → Kapanış Değerlendirmesinde → Kapatıldı;
+// aksiyon planı: Taslak → 2. Kontrolcü Onayında → Onaylandı).
 const fmt = (d: string) => new Date(d).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' });
 
 /**
@@ -42,7 +37,7 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
         setBusy(true);
         try {
             const res = await api.workflowTransition(type, id, action, r) as { deletionRequested?: boolean } | undefined;
-            success('Kaydedildi', res?.deletionRequested ? 'İptal, silme talebi olarak onaya gönderildi.' : 'Durum güncellendi.');
+            success('Kaydedildi', res?.deletionRequested ? 'Silme talebi yönetici onayına gönderildi.' : 'Durum güncellendi.');
             setPending(null); setReason('');
             load(); onChanged?.();
         } catch (e) {
@@ -56,7 +51,8 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
     if (!state) return <div className="h-16 rounded-xl bg-slate-100 animate-pulse" aria-hidden />;
 
     const cancelled = state.stage === 'IPTAL';
-    const idx = STAGE_ORDER.indexOf(state.stage as typeof STAGE_ORDER[number]);
+    const idx = state.stages.findIndex(st => st.key === state.stage);
+    const awaitingLabel = type === 'FINDING' ? 'kapanış değerlendirmesi' : 'onay';
     const buttons = state.actions.filter(a => a.action !== 'COMPLETE' || !a.formHref);
     const formAction = state.actions.find(a => a.action === 'COMPLETE' && a.formHref);
 
@@ -64,15 +60,15 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
         <section className="bg-white border border-slate-200 rounded-xl px-4 py-3" data-testid="workflow-bar" data-stage={state.stage} aria-label="İş akışı">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
                 <ol className="flex flex-wrap items-center gap-1.5 text-[12px]" aria-label="Aşamalar">
-                    {STAGE_ORDER.map((st, i) => {
+                    {state.stages.map((st, i) => {
                         const done = !cancelled && i < idx;
                         const now = !cancelled && i === idx;
                         return (
-                            <li key={st} className="flex items-center gap-1.5" aria-current={now ? 'step' : undefined} title={STAGE_HINT[st]}>
+                            <li key={st.key} className="flex items-center gap-1.5" aria-current={now ? 'step' : undefined} title={st.hint}>
                                 <span className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-semibold ${now ? 'bg-blue-600 text-white' : done ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>
-                                    {done ? '✓' : `${i + 1}`} {state.stages.find(s => s.key === st)?.label ?? st}
+                                    {done ? '✓' : `${i + 1}`} {st.label}
                                 </span>
-                                {i < STAGE_ORDER.length - 1 && <span className="text-slate-300" aria-hidden>›</span>}
+                                {i < state.stages.length - 1 && <span className="text-slate-300" aria-hidden>›</span>}
                             </li>
                         );
                     })}
@@ -81,7 +77,7 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
 
                 {!compact && (
                     <div className="text-[12px] text-slate-500 flex flex-wrap gap-x-3">
-                        <span>Sorumlu: <b className="text-slate-700">{state.assignee?.name ?? 'Atanmamış'}</b></span>
+                        <span>{type === 'FINDING' || type === 'ACTION' ? '1. kontrolcü' : 'Sorumlu'}: <b className="text-slate-700">{state.assignee?.name ?? 'Atanmamış'}</b></span>
                         <span>2. kontrolcü: <b className="text-slate-700">{state.checker?.name ?? 'Atanmamış'}</b></span>
                     </div>
                 )}
@@ -106,8 +102,8 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
             {state.stage === 'TAMAMLANDI' && (
                 <div className="mt-3">
                     <PendingApprovalNotice
-                        title={`${state.code} onay bekliyor`}
-                        waitingFor={state.checker ? [{ name: state.checker.name, role: '2. kontrolcü' }] : []}
+                        title={`${state.code} ${awaitingLabel} bekliyor`}
+                        waitingFor={state.checker ? [{ name: state.checker.name, role: type === 'FINDING' ? '2. kontrolcü (veya yönetici)' : '2. kontrolcü' }] : []}
                         sentBy={state.submittedBy?.name ?? null}
                         sentAt={state.history.find(h => h.to === 'TAMAMLANDI')?.at ?? null}
                     />
@@ -134,12 +130,15 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
                 </ul>
             )}
 
-            <Modal open={!!pending} onClose={() => !busy && setPending(null)} title={pending?.label} description="Gerekçe zorunludur ve durum geçmişine yazılır." size="md"
+            <Modal open={!!pending} onClose={() => !busy && setPending(null)} title={pending?.label} description={pending?.action === 'COMPLETE' && type === 'FINDING'
+                ? 'Kapanış değerlendirmenizi yazın; 2. kontrolcü veya yönetici onaylayınca bulgu kapanır. Durum geçmişine yazılır.'
+                : pending?.action === 'CANCEL' ? 'Kayıt silinmez; yönetici (talep eden hariç) onaylarsa silinir. Gerekçe zorunludur.'
+                : 'Gerekçe zorunludur ve durum geçmişine yazılır.'} size="md"
                 footer={<div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => setPending(null)} disabled={busy}>Vazgeç</Button>
                     <Button variant={pending?.action === 'CANCEL' ? 'danger' : 'primary'} size="sm" loading={busy} disabled={!reason.trim()} onClick={() => pending && run(pending.action, reason.trim())}>Onayla</Button>
                 </div>}>
-                <label htmlFor="wf-reason" className="block text-xs font-semibold text-slate-600 mb-1">Gerekçe *</label>
+                <label htmlFor="wf-reason" className="block text-xs font-semibold text-slate-600 mb-1">{pending?.action === 'COMPLETE' && type === 'FINDING' ? 'Kapanış değerlendirmesi *' : 'Gerekçe *'}</label>
                 <textarea id="wf-reason" value={reason} onChange={e => setReason(e.target.value)} rows={3} maxLength={2000} autoFocus
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
             </Modal>
