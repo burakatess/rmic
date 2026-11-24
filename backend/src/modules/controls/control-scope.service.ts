@@ -7,6 +7,7 @@ import { AddScopeDto, BulkAddScopeDto, ChangePeriodicityDto, CopyScopeDto, Remov
 import { nextTestCode } from './test-code.util';
 import { computePeriodCode } from './period-code.util';
 import { personFieldWhere } from '../../common/util/person-filter';
+import { isTestOverdue } from '../../common/util/metric-definitions';
 
 const LIVE_TASK_STATUSES_FREE = ['BEKLIYOR'];
 const LIVE_TASK_STATUSES_DECISION = ['DEVAM_EDIYOR', 'TAMAMLANDI', 'GERI_GONDERILDI'];
@@ -733,7 +734,7 @@ export class ControlScopeService {
             const active = scopeTasks.filter(t => ACTIVE_TASK_STATUSES.includes(t.status));
             const completed = scopeTasks.filter(t => t.status === 'ONAYLANDI');
             const pendingApproval = scopeTasks.filter(t => t.status === 'TAMAMLANDI');
-            const overdue = scopeTasks.filter(t => ['BEKLIYOR', 'DEVAM_EDIYOR', 'GERI_GONDERILDI'].includes(t.status) && t.plannedDate < now);
+            const overdue = scopeTasks.filter(t => isTestOverdue(t, now));
             const withFindings = scopeTasks.filter(t => t.findingStatus === 'BULGUSU_VAR');
             const nextTest = scopeTasks
                 .filter(t => ['BEKLIYOR', 'DEVAM_EDIYOR', 'GERI_GONDERILDI'].includes(t.status))

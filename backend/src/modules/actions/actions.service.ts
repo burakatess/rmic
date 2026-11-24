@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { PrismaService } from '../../prisma';
 import { AuditsService } from '../audits/audits.service';
 import { projectActionStatus } from '../../common/workflow/workflow-projection';
+import { overdueActionWhere } from '../../common/util/metric-definitions';
 import { parseMultiValue, personFieldWhere } from '../../common/util/person-filter';
 import { parsePaging, safeOrderBy } from '../../common/util/list-query';
 import { Prisma } from '@prisma/client';
@@ -49,8 +50,8 @@ export class ActionsService {
             where.status = statuses.length > 1 ? { in: statuses } : statuses[0];
         }
         if (overdue === 'true') {
-            where.dueDate = { lt: new Date() };
-            where.status = { notIn: ['KAPATILDI', 'CLOSED', 'IPTAL'] };
+            // Gecikme kuralı tek kaynaktan (metric-definitions.ts): onaylı, silinmemiş, sonuçlanmamış, termini geçmiş.
+            where.AND = [...(where.AND || []), overdueActionWhere()];
         } else if (/^\d{4}-\d{2}$/.test(dueMonth || '')) {
             const [year, month] = dueMonth.split('-').map(Number);
             where.dueDate = { gte: new Date(year, month - 1, 1), lt: new Date(year, month, 1) };
@@ -71,7 +72,7 @@ export class ActionsService {
         if (findingId) where.findingId = findingId;
         if (scope) where.AND = [...(where.AND || []), scope];
 
-        const [actions, total] = await Promise.all([
+        const [actions, total, overdueCount] = await Promise.all([
             this.prisma.action.findMany({
                 where,
                 include: {
@@ -86,17 +87,17 @@ export class ActionsService {
                 orderBy: safeOrderBy(sortBy, sortOrder, Prisma.ActionScalarFieldEnum, 'dueDate', 'asc'),
             }),
             this.prisma.action.count({ where }),
+            // KPI "Gecikmiş": mevcut süzgeçler altında TÜM sonuçtaki gecikmiş sayısı (yalnız açık sayfa değil).
+            this.prisma.action.count({ where: { AND: [where, overdueActionWhere()] } }),
         ]);
 
-        // Mark overdue actions
         const now = new Date();
-        const actionsWithOverdue = actions.map((action) => ({
-            ...action,
-            ...projectActionStatus(action.status, action.dueDate, now),
-            isOverdue: projectActionStatus(action.status, action.dueDate, now).timingStatus === 'GECIKMIS',
-        }));
+        const actionsWithOverdue = actions.map((action) => {
+            const projection = projectActionStatus(action.status, action.dueDate, now, action.approvalState);
+            return { ...action, ...projection, isOverdue: projection.timingStatus === 'GECIKMIS' };
+        });
 
-        return { data: actionsWithOverdue, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+        return { data: actionsWithOverdue, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) }, summary: { overdueCount } };
     }
 
     async findingIdOf(id: string): Promise<string | null> {
@@ -127,7 +128,8 @@ export class ActionsService {
             },
         });
         if (!action) throw new NotFoundException(`Action with ID ${id} not found`);
-        return { ...action, ...projectActionStatus(action.status, action.dueDate) };
+        const projection = projectActionStatus(action.status, action.dueDate, new Date(), action.approvalState);
+        return { ...action, ...projection, isOverdue: projection.timingStatus === 'GECIKMIS' };
     }
 
     async getRelations(id: string) {

@@ -21,6 +21,8 @@ interface Action {
     source: string;
     status: string;
     approvalState?: string | null;
+    isOverdue?: boolean;
+    timingStatus?: string;
     deletionRequestedAt?: string | null;
     secondControllerId?: string | null;
     followUps?: { id: string; followUpId: string; status: string; approvalStatus?: string | null }[];
@@ -78,14 +80,14 @@ const approvalLabels: Record<string, { label: string; variant: BadgeVariant }> =
 const CLOSED_STATUSES = ['TAMAMLANDI', 'KAPATILDI', 'COMPLETED', 'CLOSED'];
 const IN_PROGRESS_STATUSES = ['DEVAM_EDIYOR', 'IN_PROGRESS'];
 
+// Gecikme kararı sunucudadır (tek kaynak: metric-definitions); burada yalnız gün farkı gösterilir.
 const getDaysRemaining = (dueDate: string) => {
     const due = new Date(dueDate);
     const now = new Date();
     return Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 };
 
-const isOverdue = (a: Action) =>
-    a.status === 'OVERDUE' || (getDaysRemaining(a.dueDate) < 0 && !CLOSED_STATUSES.includes(a.status));
+const isOverdue = (a: Action) => a.isOverdue === true;
 
 const isInCurrentMonth = (a: Action) => {
     if (!a.dueDate) return false;
@@ -101,6 +103,7 @@ function ActionsContent() {
 
     const [actions, setActions] = useState<Action[]>([]);
     const [totalCount, setTotalCount] = useState(0);
+    const [overdueTotal, setOverdueTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [users, setUsers] = useState<Array<{ id: string; firstName: string; lastName: string; isActive?: boolean }>>([]);
     const [editAction, setEditAction] = useState<Action | null>(null);
@@ -162,13 +165,14 @@ function ActionsContent() {
             if (quickFilter === 'devam') quickParams.status = 'BEKLIYOR,DEVAM_EDIYOR,OPEN,IN_PROGRESS,YETERSIZ';
             if (quickFilter === 'tamamlanan') quickParams.status = 'TAMAMLANDI,COMPLETED,KAPATILDI,CLOSED';
             if (quickFilter === 'onayim') quickParams.awaitingMe = 'true';
-            const result = await api.getActions({ page, limit: pageSize, ...(searchQuery ? { search: searchQuery } : {}), ...(activeFilters.status ? { status: activeFilters.status } : {}), ...(activeFilters.source ? { source: activeFilters.source } : {}), ...(activeFilters.ownerIds ? { ownerIds: activeFilters.ownerIds } : {}), ...(activeFilters.approvalState ? { approvalState: activeFilters.approvalState } : {}), ...quickParams }) as { data: Action[]; pagination?: { total: number } };
+            const result = await api.getActions({ page, limit: pageSize, ...(searchQuery ? { search: searchQuery } : {}), ...(activeFilters.status ? { status: activeFilters.status } : {}), ...(activeFilters.source ? { source: activeFilters.source } : {}), ...(activeFilters.ownerIds ? { ownerIds: activeFilters.ownerIds } : {}), ...(activeFilters.approvalState ? { approvalState: activeFilters.approvalState } : {}), ...quickParams }) as { data: Action[]; pagination?: { total: number }; summary?: { overdueCount?: number } };
             setActions(result.data || []);
             setTotalCount(result.pagination?.total || 0);
+            setOverdueTotal(result.summary?.overdueCount ?? 0);
         } catch (error) {
             console.error('Failed to load actions:', error);
             showError('Hata', 'Aksiyonlar yüklenemedi.');
-            setActions([]); setTotalCount(0);
+            setActions([]); setTotalCount(0); setOverdueTotal(0);
         } finally {
             setLoading(false);
         }
@@ -205,7 +209,7 @@ function ActionsContent() {
     // KPIs
     const inProgress = actions.filter(quickFilterFns['devam']).length;
     const completed = actions.filter(quickFilterFns['tamamlanan']).length;
-    const overdue = actions.filter(quickFilterFns['geciken']).length;
+    const overdue = overdueTotal;
 
     const columns: ColumnDef<Action>[] = useMemo(() => [
         {
@@ -235,7 +239,7 @@ function ActionsContent() {
         {
             key: 'dueDate', header: 'Hedef Tarih', sortable: true, defaultWidth: 120,
             render: (a) => {
-                const overdueRow = getDaysRemaining(a.dueDate) < 0 && !CLOSED_STATUSES.includes(a.status);
+                const overdueRow = isOverdue(a);
                 return (
                     <span className={`text-sm ${overdueRow ? 'text-red-600 font-medium' : 'text-slate-600'}`}>
                         {new Date(a.dueDate).toLocaleDateString('tr-TR')}
@@ -247,11 +251,11 @@ function ActionsContent() {
             key: 'remainingDays', header: 'Kalan', defaultWidth: 110,
             render: (a) => {
                 const d = getDaysRemaining(a.dueDate);
-                const overdueRow = d < 0 && !CLOSED_STATUSES.includes(a.status);
+                const overdueRow = isOverdue(a);
                 if (CLOSED_STATUSES.includes(a.status)) return <span className="text-xs text-slate-400">—</span>;
                 return (
                     <span className={`text-xs ${overdueRow ? 'text-red-500' : d <= 7 ? 'text-amber-500' : 'text-slate-500'}`}>
-                        {overdueRow ? `${Math.abs(d)} gün gecikmiş` : `${d} gün kaldı`}
+                        {overdueRow ? `${Math.max(1, Math.abs(d))} gün gecikmiş` : `${d} gün kaldı`}
                     </span>
                 );
             },

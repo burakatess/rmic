@@ -15,6 +15,7 @@ import { useToast } from '@/components/ui/Toast';
 type BV = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'success' | 'warning' | 'neutral' | 'primary';
 
 interface ControlTest {
+    timingStatus?: string;
     id: string;
     testNo: string;
     controlId: string;
@@ -67,8 +68,7 @@ const MONTHS_TR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temm
 const MONTHS_SHORT = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
 
 /** Gecikmiş testi belirleyen tek predicate — panoyla aynı kural */
-const isOverdue = (t: ControlTest) =>
-    ['BEKLIYOR', 'DEVAM_EDIYOR'].includes(t.status) && new Date(t.plannedDate) < new Date();
+const isOverdue = (t: ControlTest) => t.timingStatus === 'GECIKMIS';
 
 const IconCalendar = ({ className = 'w-3.5 h-3.5' }: { className?: string }) => (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>

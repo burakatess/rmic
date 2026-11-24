@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
+import { overdueTestWhere } from '../../common/util/metric-definitions';
 
 // Aktif iş yükü/gecikme hesaplarına giren durumlar — iptal/kapsam dışı hariç.
 const ACTIVE_STATUSES = ['BEKLIYOR', 'DEVAM_EDIYOR', 'TAMAMLANDI', 'GERI_GONDERILDI', 'ONAYLANDI'];
@@ -44,8 +45,7 @@ export class ControlDashboardService {
             where.status = { notIn: CANCELLED_STATUSES };
         }
         if (query.overdue === 'true' || query.overdue === true) {
-            where.status = { in: ['BEKLIYOR', 'DEVAM_EDIYOR', 'GERI_GONDERILDI'] };
-            where.plannedDate = { lt: new Date() };
+            where.AND = [...(where.AND || []), overdueTestWhere()]; // tek kaynak: metric-definitions.ts
         }
 
         const controlCountWhere: any = { year, status: 'ACTIVE' };
@@ -62,13 +62,7 @@ export class ControlDashboardService {
         ] = await Promise.all([
             this.prisma.controlYearScope.findMany({ where: controlCountWhere, select: { controlId: true }, distinct: ['controlId'] }),
             this.prisma.controlTest.findMany({ where, select: { id: true, status: true, findingStatus: true, plannedDate: true, periodKey: true } }),
-            this.prisma.controlTest.count({
-                where: {
-                    ...where,
-                    status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR', 'GERI_GONDERILDI'] },
-                    plannedDate: { lt: new Date() },
-                },
-            }),
+            this.prisma.controlTest.count({ where: { AND: [where, overdueTestWhere()] } }),
             this.prisma.controlTest.groupBy({
                 by: ['findingStatus'],
                 where: { ...where, status: 'ONAYLANDI' },

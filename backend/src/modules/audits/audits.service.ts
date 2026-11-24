@@ -4,7 +4,8 @@ import { PrismaService } from '../../prisma';
 import { definedOnly, toDateField } from '../../common/util/dto-mapping';
 import { CreateAuditExecutionDto, CreateAuditPlanDto, UpdateAuditExecutionDto, UpdateAuditPlanDto } from './dto/audit-plan.dto';
 import { nextFindingNo, nextActionNo, nextFollowUpNo } from '../../common/util/sequential-id';
-import { projectActionStatus, projectFindingStatus, projectFollowUpStatus } from '../../common/workflow/workflow-projection';
+import { projectActionStatus, projectFindingStatus, projectFindingTiming, projectFollowUpStatus } from '../../common/workflow/workflow-projection';
+import { approachingFindingWhere, overdueFindingWhere, overdueFollowUpWhere } from '../../common/util/metric-definitions';
 import { personFieldWhere } from '../../common/util/person-filter';
 import { matchesPermission } from '../../common/util/permission-match';
 import { parsePaging, safeOrderBy } from '../../common/util/list-query';
@@ -276,16 +277,18 @@ export class AuditsService {
         if (resolutionStatus) where.resolutionStatus = resolutionStatus;
         const now = new Date();
         if (thisMonth === 'true') where.targetResolutionDate = { gte: new Date(now.getFullYear(), now.getMonth(), 1), lt: new Date(now.getFullYear(), now.getMonth() + 1, 1) };
-        if (delayStatus === 'OVERDUE') where.targetResolutionDate = { lt: now };
-        if (delayStatus === 'APPROACHING') where.targetResolutionDate = { gte: now, lte: new Date(now.getTime() + 14 * 86400000) };
-        if (delayStatus === 'ON_TIME') where.targetResolutionDate = { gt: new Date(now.getTime() + 14 * 86400000) };
+        // Gecikme/yaklaşan tek kaynaktan (metric-definitions.ts); kapalı/iptal bulgu gecikmiş sayılmaz.
+        // AND ile birleşir: `thisMonth` süzgecini ezmez.
+        if (delayStatus === 'OVERDUE') where.AND = [...(where.AND || []), overdueFindingWhere(now)];
+        if (delayStatus === 'APPROACHING') where.AND = [...(where.AND || []), approachingFindingWhere(now)];
+        if (delayStatus === 'ON_TIME') where.AND = [...(where.AND || []), { NOT: [overdueFindingWhere(now), approachingFindingWhere(now)] }];
         if (auditPlanId) where.auditExecution = { auditPlanId };
         const assigneeFilter = personFieldWhere('assigneeId', assigneeIds, currentUserId);
         if (assigneeFilter) where.AND = [...(where.AND || []), assigneeFilter];
         // Kayıt kapsamı (AccessScopeService) — filtrelerle birlikte AND'lenir; sayaç da aynı kapsamı kullanır.
         if (scope) where.AND = [...(where.AND || []), scope];
 
-        const [findings, total] = await Promise.all([
+        const [findings, total, overdueCount] = await Promise.all([
             this.prisma.finding.findMany({
                 where,
                 include: {
@@ -299,13 +302,16 @@ export class AuditsService {
                 orderBy: safeOrderBy(sortBy, sortOrder, Prisma.FindingScalarFieldEnum, 'createdAt', 'desc'),
             }),
             this.prisma.finding.count({ where }),
+            // KPI "Gecikmiş": mevcut süzgeçler/kapsam altında TÜM sonuçtaki gecikmiş sayısı (yalnız açık sayfa değil).
+            this.prisma.finding.count({ where: { AND: [where, overdueFindingWhere(now)] } }),
         ]);
 
         const data = findings.map(f => ({
             ...f,
             ...projectFindingStatus(f.workflowStatus, f.resolutionStatus, Array.from({ length: f._count.actions }, () => ({ status: 'UNKNOWN' }))),
+            ...projectFindingTiming(f, now),
         }));
-        return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+        return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) }, summary: { overdueCount } };
     }
 
     async createFinding(data: any, userId: string) {
@@ -617,8 +623,9 @@ export class AuditsService {
             ...finding,
             currentStatusSummary,
             ...projectFindingStatus(finding.workflowStatus, finding.resolutionStatus, finding.actions),
-            actions: finding.actions.map(action => ({ ...action, ...projectActionStatus(action.status, action.dueDate) })),
-            followUps: finding.followUps.map(followUp => ({ ...followUp, ...projectFollowUpStatus(followUp.status, followUp.approvalStatus) })),
+            ...projectFindingTiming(finding),
+            actions: finding.actions.map(action => ({ ...action, ...projectActionStatus(action.status, action.dueDate, new Date(), action.approvalState) })),
+            followUps: finding.followUps.map(followUp => ({ ...followUp, ...projectFollowUpStatus(followUp.status, followUp.approvalStatus, followUp.plannedDate, new Date(), followUp.deletedAt) })),
         };
     }
 
@@ -2832,8 +2839,8 @@ export class AuditsService {
         if (resolutionOutcome) where.resolutionOutcome = resolutionOutcome;
         if (newActionRequired === 'true') where.newActionRequired = true;
         if (overdue === 'true') {
-            where.AND = [...(where.AND || []), { plannedDate: { lt: new Date() } }];
-            where.status = { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] };
+            // Gecikme kuralı tek kaynaktan (metric-definitions.ts); `status` süzgeciyle AND ile kesişir.
+            where.AND = [...(where.AND || []), overdueFollowUpWhere()];
         }
 
         if (relatedDepartment) {
@@ -2867,7 +2874,7 @@ export class AuditsService {
         }
 
         if (scope) where.AND = [...(where.AND || []), scope];
-        const [followUps, total] = await Promise.all([
+        const [followUps, total, overdueCount] = await Promise.all([
             this.prisma.findingFollowUp.findMany({
                 where,
                 include: {
@@ -2890,9 +2897,16 @@ export class AuditsService {
                 orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
             }),
             this.prisma.findingFollowUp.count({ where }),
+            // KPI "Gecikmiş": mevcut süzgeçler altında TÜM sonuçtaki gecikmiş sayısı (yalnız açık sayfa değil).
+            this.prisma.findingFollowUp.count({ where: { AND: [where, overdueFollowUpWhere()] } }),
         ]);
 
-        return { data: followUps, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+        const now = new Date();
+        return {
+            data: followUps.map(f => ({ ...f, ...projectFollowUpStatus(f.status, f.approvalStatus, f.plannedDate, now, f.deletedAt) })),
+            pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+            summary: { overdueCount },
+        };
     }
 }
 

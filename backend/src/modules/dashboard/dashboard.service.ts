@@ -6,6 +6,7 @@ import { ApprovalsService } from '../approvals/approvals.service';
 import { matchesPermission } from '../../common/util/permission-match';
 import {
     CLOSED_ACTION_STATUSES, OPEN_TEST_STATUSES, OPEN_FOLLOWUP_STATUSES,
+    TERMINAL_ACTION_STATUSES, overdueActionWhere, overdueFollowUpWhere, overdueTestWhere,
 } from '../../common/util/metric-definitions';
 import { daysFromNowRangeIstanbul, startOfDayIstanbul } from '../../common/util/date-scope.util';
 import { DirectorateScopeService, ResolvedDirectorateScope } from '../../common/services/directorate-scope.service';
@@ -112,15 +113,14 @@ export class DashboardService {
         const scope = await this.resolve(userId, permissions, q);
         const access = resolveModuleAccess(permissions);
         const now = new Date();
-        const overdueThreshold = startOfDayIstanbul(now);
         const { start: weekStart, end: weekEnd } = daysFromNowRangeIstanbul(7);
 
         const [overdueTests, overdueActions, overdueFollowUps, dueTests, dueActions, dueFollowUps, criticalHighFindings, approvals] = await Promise.all([
-            access.tests ? this.prisma.controlTest.count({ where: { ...testScopeWhere(scope), status: { in: [...OPEN_TEST_STATUSES] }, plannedDate: { lt: overdueThreshold } } }) : Promise.resolve(null),
-            access.actions ? this.prisma.action.count({ where: { ...actionScopeWhere(scope), status: { notIn: [...CLOSED_ACTION_STATUSES] }, dueDate: { lt: overdueThreshold } } }) : Promise.resolve(null),
-            access.followUps ? this.prisma.findingFollowUp.count({ where: { ...followUpScopeWhere(scope), status: { in: [...OPEN_FOLLOWUP_STATUSES] }, plannedDate: { lt: overdueThreshold } } }) : Promise.resolve(null),
+            access.tests ? this.prisma.controlTest.count({ where: { AND: [testScopeWhere(scope), overdueTestWhere(now)] } }) : Promise.resolve(null),
+            access.actions ? this.prisma.action.count({ where: { AND: [actionScopeWhere(scope), overdueActionWhere(now)] } }) : Promise.resolve(null),
+            access.followUps ? this.prisma.findingFollowUp.count({ where: { AND: [followUpScopeWhere(scope), overdueFollowUpWhere(now)] } }) : Promise.resolve(null),
             access.tests ? this.prisma.controlTest.count({ where: { ...testScopeWhere(scope), status: { in: [...OPEN_TEST_STATUSES] }, plannedDate: { gte: weekStart, lte: weekEnd } } }) : Promise.resolve(null),
-            access.actions ? this.prisma.action.count({ where: { ...actionScopeWhere(scope), status: { notIn: [...CLOSED_ACTION_STATUSES] }, dueDate: { gte: weekStart, lte: weekEnd } } }) : Promise.resolve(null),
+            access.actions ? this.prisma.action.count({ where: { ...actionScopeWhere(scope), approvalState: 'ONAYLANDI', deletedAt: null, status: { notIn: [...TERMINAL_ACTION_STATUSES] as never }, dueDate: { gte: weekStart, lte: weekEnd } } }) : Promise.resolve(null),
             access.followUps ? this.prisma.findingFollowUp.count({ where: { ...followUpScopeWhere(scope), status: { in: [...OPEN_FOLLOWUP_STATUSES] }, plannedDate: { gte: weekStart, lte: weekEnd } } }) : Promise.resolve(null),
             access.findings ? this.prisma.finding.count({ where: { ...findingScopeWhere(scope), severity: { in: ['CRITICAL', 'HIGH'] }, status: { not: 'CLOSED' } } }) : Promise.resolve(null),
             this.getPendingApprovals(userId, permissions, userRole),

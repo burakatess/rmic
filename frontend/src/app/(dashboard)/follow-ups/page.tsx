@@ -24,6 +24,7 @@ import { useToast } from '@/components/ui/Toast';
 type BV = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'success' | 'warning' | 'neutral' | 'primary';
 
 interface FollowUp {
+    timingStatus?: string;
     id: string;
     followUpId: string;
     status: string;
@@ -91,11 +92,7 @@ const getDaysLeft = (d?: string | null) => {
     return Math.ceil((new Date(d).getTime() - Date.now()) / 86400000);
 };
 
-const isOverdue = (f: FollowUp) => {
-    if (f.status === 'ONAYLANDI' || f.status === 'TAMAMLANDI') return false;
-    const dl = getDaysLeft(f.plannedDate);
-    return dl !== null && dl < 0;
-};
+const isOverdue = (f: FollowUp) => f.timingStatus === 'GECIKMIS';
 
 const MONTHS = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
 const currentYear = new Date().getFullYear();
@@ -130,6 +127,7 @@ export default function FollowUpsPage() {
     const { success, error: showError } = useToast();
     const [followUps, setFollowUps] = useState<FollowUp[]>([]);
     const [totalCount, setTotalCount] = useState(0);
+    const [overdueTotal, setOverdueTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [users, setUsers] = useState<Array<{ id: string; firstName: string; lastName: string; isActive?: boolean }>>([]);
     const [searchQuery, setSearchQuery] = useState('');
@@ -175,12 +173,13 @@ export default function FollowUpsPage() {
             ['ownerIds', 'evaluatorIds', 'secondControllerIds', 'status', 'resolutionOutcome', 'severity', 'relatedDepartment', 'month', 'year'].forEach(key => { if (activeFilters[key] && activeFilters[key] !== 'all') query[key] = activeFilters[key]; });
             if (quickFilter === 'gecikmis') query.overdue = 'true';
             if (quickFilter === 'yeni-aksiyon') query.newActionRequired = 'true';
-            const res = await api.getAllFollowUps(query) as { data: FollowUp[]; pagination?: { total: number } };
+            const res = await api.getAllFollowUps(query) as { data: FollowUp[]; pagination?: { total: number }; summary?: { overdueCount?: number } };
             setFollowUps(res?.data || []);
             setTotalCount(res.pagination?.total || 0);
+            setOverdueTotal(res.summary?.overdueCount ?? 0);
         } catch {
             showError('Hata', 'Takip çalışmaları yüklenemedi.');
-            setFollowUps([]); setTotalCount(0);
+            setFollowUps([]); setTotalCount(0); setOverdueTotal(0);
         } finally {
             setLoading(false);
         }
@@ -197,10 +196,10 @@ export default function FollowUpsPage() {
         const bekliyor  = followUps.filter(f => f.status === 'BEKLIYOR').length;
         const devam     = followUps.filter(f => f.status === 'DEVAM_EDIYOR').length;
         const tamamlandi= followUps.filter(f => f.status === 'TAMAMLANDI' || f.status === 'ONAYLANDI').length;
-        const overdue   = followUps.filter(isOverdue).length;
+        const overdue   = overdueTotal;
         const yeniAksiyon = followUps.filter(f => f.newActionRequired).length;
         return { total, bekliyor, devam, tamamlandi, overdue, yeniAksiyon };
-    }, [followUps]);
+    }, [followUps, overdueTotal]);
 
     // ── Quick filter predicate'leri (KPI kartları) ────────────────────────────
 

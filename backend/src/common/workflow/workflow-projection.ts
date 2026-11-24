@@ -1,3 +1,5 @@
+import { APPROACHING_DAYS, isActionOverdue, isFindingOverdue, isFollowUpOverdue, isTestOverdue, overdueThreshold } from '../util/metric-definitions';
+
 export type DisplayStatus = {
     displayStatus: string;
     statusReason: string;
@@ -35,8 +37,8 @@ export function projectScopeStatus(scopeStatus: string, tasks: { status: string 
 }
 
 export function projectTestStatus(status: string, plannedDate: Date, now = new Date()): DisplayStatus {
-    const terminal = terminalTestStatuses.has(status);
-    const overdue = !terminal && plannedDate.getTime() < now.getTime();
+    // Gecikme kuralı metric-definitions.ts'teki tek tanımdan (açık testler; onay bekleyen/onaylı gecikmiş değil).
+    const overdue = isTestOverdue({ status, plannedDate }, now);
     return {
         displayStatus: status,
         statusReason: overdue ? 'Planlanan test tarihi geçti' : 'Kontrol testinin iş akışı durumu',
@@ -45,14 +47,21 @@ export function projectTestStatus(status: string, plannedDate: Date, now = new D
     };
 }
 
-export function projectActionStatus(status: string, dueDate: Date | null, now = new Date()): DisplayStatus {
+/**
+ * Aksiyon sunum durumu. `approvalState` verilirse onaysız (taslak/onay bekleyen/reddedilmiş) aksiyon
+ * gecikmiş sayılmaz — henüz iş yürütmüyor, takip çalışması da açılmamıştır.
+ */
+export function projectActionStatus(status: string, dueDate: Date | null, now = new Date(), approvalState?: string | null): DisplayStatus {
     const terminal = terminalActionStatuses.has(status);
     const workCompleted = completedActionStatuses.has(status);
-    const overdue = !!dueDate && !workCompleted && dueDate.getTime() < now.getTime();
-    const approaching = !!dueDate && !workCompleted && !overdue && dueDate.getTime() - now.getTime() <= 14 * 24 * 60 * 60 * 1000;
+    const approved = !approvalState || approvalState === 'ONAYLANDI';
+    const overdue = isActionOverdue({ status, dueDate, approvalState }, now);
+    const approaching = !!dueDate && approved && !workCompleted && !overdue && dueDate.getTime() - now.getTime() <= APPROACHING_DAYS * 24 * 60 * 60 * 1000;
     return {
         displayStatus: overdue ? 'GECIKMIS' : status,
-        statusReason: overdue ? 'Aksiyon termini geçti ve aksiyon kapanmadı' : terminal ? 'Aksiyon sonuçlanmış' : 'Aksiyon iş akışı devam ediyor',
+        statusReason: overdue ? 'Aksiyon termini geçti ve aksiyon kapanmadı'
+            : !approved ? 'Aksiyon henüz ikinci kontrolcü tarafından onaylanmadı'
+                : terminal ? 'Aksiyon sonuçlanmış' : 'Aksiyon iş akışı devam ediyor',
         timingStatus: !dueDate ? 'TARIHSIZ' : overdue ? 'GECIKMIS' : approaching ? 'YAKLASIYOR' : 'ZAMANINDA',
         nextAction: overdue ? 'AKSIYONU_GUNCELLE' : status === 'TAMAMLANDI' || status === 'COMPLETED' ? 'TAKIP_BASLAT' : null,
     };
@@ -73,13 +82,30 @@ export function projectFindingStatus(
     return { displayStatus: resolutionStatus, statusReason: 'Çözüm durumu aksiyon ve takip sonuçlarından türetilir', nextAction: resolutionStatus === 'KAPATILDI' ? null : 'AKSIYONLARI_IZLE' };
 }
 
-export function projectFollowUpStatus(status: string, approvalStatus: string | null): DisplayStatus {
-    if (status === 'IPTAL') return { displayStatus: 'IPTAL', statusReason: 'Takip çalışması iptal edilmiş', nextAction: null };
+export function projectFollowUpStatus(status: string, approvalStatus: string | null, plannedDate?: Date | null, now = new Date(), deletedAt?: Date | null): DisplayStatus {
+    const timing = plannedDate === undefined ? {} : {
+        timingStatus: (!plannedDate ? 'TARIHSIZ' : isFollowUpOverdue({ status, plannedDate, deletedAt }, now) ? 'GECIKMIS'
+            : status === 'IPTAL' || deletedAt || !['BEKLIYOR', 'DEVAM_EDIYOR'].includes(status) ? 'ZAMANINDA'
+                : plannedDate.getTime() - now.getTime() <= APPROACHING_DAYS * 86400000 ? 'YAKLASIYOR' : 'ZAMANINDA') as DisplayStatus['timingStatus'],
+    };
+    if (status === 'IPTAL') return { displayStatus: 'IPTAL', statusReason: 'Takip çalışması iptal edilmiş', nextAction: null, ...timing };
     if (status === 'TAMAMLANDI' && approvalStatus !== 'ONAYLANDI') {
-        return { displayStatus: 'ONAY_BEKLIYOR', statusReason: 'Takip değerlendirmesi ikinci kontrolcü onayı bekliyor', nextAction: 'TAKIBI_ONAYLA' };
+        return { displayStatus: 'ONAY_BEKLIYOR', statusReason: 'Takip değerlendirmesi ikinci kontrolcü onayı bekliyor', nextAction: 'TAKIBI_ONAYLA', ...timing };
     }
     if (status === 'ONAYLANDI' || approvalStatus === 'ONAYLANDI') {
-        return { displayStatus: 'ONAYLANDI', statusReason: 'Takip değerlendirmesi onaylanmış', nextAction: null };
+        return { displayStatus: 'ONAYLANDI', statusReason: 'Takip değerlendirmesi onaylanmış', nextAction: null, ...timing };
     }
-    return { displayStatus: status, statusReason: 'Bulgu takip çalışmasının iş akışı durumu', nextAction: status === 'BEKLIYOR' ? 'TAKIBI_BASLAT' : 'TAKIBE_DEVAM_ET' };
+    return { displayStatus: status, statusReason: 'Bulgu takip çalışmasının iş akışı durumu', nextAction: status === 'BEKLIYOR' ? 'TAKIBI_BASLAT' : 'TAKIBE_DEVAM_ET', ...timing };
+}
+
+/** Bulgu zamanlaması: hedef çözüm tarihine göre (kapalı/iptal bulgu gecikmiş sayılmaz). */
+export function projectFindingTiming(
+    f: { targetResolutionDate: Date | null; resolutionStatus?: string | null; workflowStatus?: string | null; status?: string | null },
+    now = new Date(),
+): { timingStatus: NonNullable<DisplayStatus['timingStatus']> } {
+    if (!f.targetResolutionDate) return { timingStatus: 'TARIHSIZ' };
+    if (isFindingOverdue(f, now)) return { timingStatus: 'GECIKMIS' };
+    const open = f.resolutionStatus !== 'KAPATILDI' && f.workflowStatus !== 'IPTAL' && f.status !== 'CLOSED';
+    const approaching = open && f.targetResolutionDate.getTime() >= overdueThreshold(now).getTime() && f.targetResolutionDate.getTime() - now.getTime() <= APPROACHING_DAYS * 86400000;
+    return { timingStatus: approaching ? 'YAKLASIYOR' : 'ZAMANINDA' };
 }

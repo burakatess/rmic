@@ -86,8 +86,7 @@ export default function ActionDetailPage({ params }: { params: Promise<{ id: str
     }
 
     const statusCfg = statusLabels[action.status] ?? { label: action.status, variant: 'neutral' as const };
-    const overdue = action.dueDate && new Date(action.dueDate) < new Date()
-        && !['TAMAMLANDI', 'KAPATILDI', 'COMPLETED', 'CLOSED'].includes(action.status);
+    const overdue = action.isOverdue === true; // sunucu kararı (tek kaynak)
     // Yetenekler backend'den (finding-capabilities.ts): rol + kapsam + sahiplik + durum.
     const caps: { canEdit?: boolean; canComplete?: boolean } = action.capabilities ?? {};
     const canComplete = !!caps.canComplete;

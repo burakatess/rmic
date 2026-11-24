@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
 import { DirectorateScopeService } from '../../common/services/directorate-scope.service';
 import { WorkflowHealthQueryDto } from './dto/workflow-health-query.dto';
+import { overdueActionWhere, overdueThreshold } from '../../common/util/metric-definitions';
 
 type HealthSeverity = 'CRITICAL' | 'WARNING' | 'INFO';
 type HealthItem = {
@@ -10,7 +11,6 @@ type HealthItem = {
     year?: number; directorateId?: string | null;
 };
 
-const OPEN_ACTIONS = ['BEKLIYOR', 'DEVAM_EDIYOR', 'YETERSIZ', 'OPEN', 'IN_PROGRESS', 'OVERDUE'];
 
 @Injectable()
 export class WorkflowHealthService {
@@ -57,7 +57,7 @@ export class WorkflowHealthService {
                 select: { id: true, findingId: true, summary: true, directorateId: true, actions: { where: { deletedAt: null, status: { not: 'IPTAL' as any } }, select: { id: true } } },
             }) : Promise.resolve([]),
             canViewActions ? this.prisma.action.findMany({
-                where: { ...actionWhere, ...liveActionWhere, status: { in: OPEN_ACTIONS as any }, dueDate: { lt: new Date() } },
+                where: { AND: [actionWhere, overdueActionWhere()] }, // tek kaynak: metric-definitions.ts
                 select: { id: true, actionId: true, description: true, dueDate: true, directorateId: true },
             }) : Promise.resolve([]),
             canViewActions ? this.prisma.action.findMany({
@@ -94,7 +94,7 @@ export class WorkflowHealthService {
                 nextAction: 'ATAMA_YAP', href: `/controls/annual-plan?year=${year}&tab=assignments`, year, directorateId: scope.control.directorateId,
             });
             for (const task of scope.tasks) {
-                if (task.status === 'BEKLIYOR' && task.plannedDate < new Date()) items.push({
+                if (task.status === 'BEKLIYOR' && task.plannedDate < overdueThreshold()) items.push({
                     code: 'TEST_OVERDUE_NOT_STARTED', severity: 'CRITICAL', entityType: 'CONTROL_TEST', entityId: task.id,
                     title: task.testNo, message: 'Planlanan tarihi geçen kontrol testi henüz başlamadı.', nextAction: 'TESTI_BASLAT', href: `/controls/testing/${task.id}`, year, directorateId: scope.control.directorateId,
                 });
