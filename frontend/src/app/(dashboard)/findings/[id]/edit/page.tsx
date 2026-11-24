@@ -85,8 +85,11 @@ export default function FindingEditPage() {
         testDate: '',
         attachment: '',
         assigneeId: '',
+        firstControllerId: '',
+        secondControllerId: '',
         sendEmail: true,
     });
+    const [approvers, setApprovers] = useState<User[]>([]);
 
     const [loadError, setLoadError] = useState<LoadError | null>(null);
 
@@ -97,6 +100,7 @@ export default function FindingEditPage() {
                 let userList: User[] = [];
                 try {
                     userList = await api.getUserChoices() as User[];
+                    try { setApprovers(await api.getApproverChoices() as User[]); } catch { setApprovers([]); }
                 } catch {
                     // Yetki yoksa boş liste — mock data kullanılmaz
                 }
@@ -140,6 +144,8 @@ export default function FindingEditPage() {
                         testDate: data.testDate ? new Date(data.testDate).toISOString().split('T')[0] : '',
                         attachment: data.attachment || '',
                         assigneeId: data.assigneeId || (data.assignee?.id || ''),
+                        firstControllerId: data.firstControllerId || data.firstController?.id || '',
+                        secondControllerId: data.secondControllerId || data.secondController?.id || '',
                         sendEmail: data.sendEmail ?? false,
                     });
                     setLoadedStatus(data.status || 'IN_PROGRESS');
@@ -254,6 +260,24 @@ export default function FindingEditPage() {
                                         <option key={c.id} value={c.id}>{c.controlId} - {c.name}</option>
                                     ))}
                                 </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">1. Kontrolcü</label>
+                                <select value={formData.firstControllerId} onChange={e => setFormData({ ...formData, firstControllerId: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white outline-none text-slate-700">
+                                    <option value="">Seçiniz...</option>
+                                    {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">2. Kontrolcü (onaylayan)</label>
+                                <select value={formData.secondControllerId} onChange={e => setFormData({ ...formData, secondControllerId: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white outline-none text-slate-700">
+                                    <option value="">Seçiniz...</option>
+                                    {approvers.filter(u => u.id !== formData.firstControllerId).map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+                                </select>
+                                <p className="mt-1 text-[10px] text-slate-400">Yeni aksiyonlar bu kontrolcüleri devralır.</p>
                             </div>
 
                             <div>

@@ -62,7 +62,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
     async function setupFinding(overrides: Record<string, any> = {}) {
         const directorate = await createTestDirectorate(prisma);
         const control = await createTestControl(prisma, { ownerId: adminUserId, directorateId: directorate.id });
-        const controlTest = await createTestControlTest(prisma, { controlId: control.id, assigneeId: adminUserId });
+        const controlTest = await createTestControlTest(prisma, { controlId: control.id, assigneeId: adminUserId, secondControllerId: managerUserId });
 
         const findingRes = await request(app.getHttpServer())
             .post('/findings')
@@ -81,7 +81,20 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
         return { findingId: findingRes.body.id, controlId: control.id, controlTestId: controlTest.id };
     }
 
-    async function addAction(findingId: string, overrides: Record<string, any> = {}) {
+    /** Maker-checker: birinci kontrolcü (admin) onaya gönderir, ikinci kontrolcü (manager) onaylar → takip açılır. */
+    async function approveAction(findingId: string, actionId: string) {
+        const a = await prisma.action.findUniqueOrThrow({ where: { id: actionId } });
+        if (!a.secondControllerId) {
+            await request(app.getHttpServer()).put(`/findings/${findingId}/actions/${actionId}`)
+                .set('Authorization', `Bearer ${adminToken}`).send({ secondControllerId: managerUserId }).expect(200);
+        }
+        await request(app.getHttpServer()).post(`/findings/${findingId}/actions/${actionId}/submit`)
+            .set('Authorization', `Bearer ${adminToken}`).expect(201);
+        const r = await request(app.getHttpServer()).post(`/findings/${findingId}/actions/${actionId}/approve`)
+            .set('Authorization', `Bearer ${managerToken}`).expect(201);
+        return r.body;
+    }
+    async function addAction(findingId: string, overrides: Record<string, any> = {}, opts: { approve?: boolean } = {}) {
         const dueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         const res = await request(app.getHttpServer())
             .post(`/findings/${findingId}/actions`)
@@ -93,7 +106,8 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 ...overrides,
             })
             .expect(201);
-        return res.body;
+        if (opts.approve === false) return res.body;
+        return { ...res.body, ...(await approveAction(findingId, res.body.id)) };
     }
 
     async function getFollowUpForAction(findingId: string, actionId: string) {
@@ -169,7 +183,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             const directorate = await createTestDirectorate(prisma);
             const control = await createTestControl(prisma, { ownerId: adminUserId, directorateId: directorate.id });
             controlId = control.id;
-            const controlTest = await createTestControlTest(prisma, { controlId: control.id, assigneeId: adminUserId });
+            const controlTest = await createTestControlTest(prisma, { controlId: control.id, assigneeId: adminUserId, secondControllerId: managerUserId });
             controlTestId = controlTest.id;
 
             // Testi başlat
@@ -274,6 +288,11 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 .expect(201);
             actionId = res.body.id;
             expect(res.body.status).toBe('BEKLIYOR');
+            // Aksiyon taslak oluşur; takip çalışması ikinci kontrolcü onayından önce açılmaz.
+            expect(res.body.approvalState).toBe('TASLAK');
+            expect(await prisma.findingFollowUp.count({ where: { actionId } })).toBe(0);
+            const approved = await approveAction(findingId, actionId);
+            expect(approved.approvalState).toBe('ONAYLANDI');
         });
 
         it('8. Aksiyon için otomatik FindingFollowUp oluşur', async () => {
@@ -317,7 +336,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
         async function setupFindingWithAction() {
             const directorate = await createTestDirectorate(prisma);
             const control = await createTestControl(prisma, { ownerId: adminUserId, directorateId: directorate.id });
-            const controlTest = await createTestControlTest(prisma, { controlId: control.id, assigneeId: adminUserId });
+            const controlTest = await createTestControlTest(prisma, { controlId: control.id, assigneeId: adminUserId, secondControllerId: managerUserId });
 
             const findingRes = await request(app.getHttpServer())
                 .post('/findings')
@@ -341,6 +360,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 .send({ description: 'Bağımsız senaryo aksiyonu — yeterli uzunlukta açıklama', ownerId: adminUserId, dueDate })
                 .expect(201);
             const aId = actionRes.body.id;
+            await approveAction(fId, aId);
 
             const followUps = await request(app.getHttpServer())
                 .get(`/findings/${fId}/follow-ups`)
@@ -375,9 +395,10 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             });
 
             const nextDate = new Date(Date.now() + 20 * 86400000).toISOString().split('T')[0];
-            await request(app.getHttpServer()).put(`/findings/${fId}/actions/${aId}`)
+            // Onaylı aksiyon düzenlenemez: sonraki takip, onaylı takipten yeni tarihle planlanır.
+            await request(app.getHttpServer()).put(`/findings/${fId}/follow-ups/${firstFollowUpId}`)
                 .set('Authorization', `Bearer ${adminToken}`)
-                .send({ dueDate: nextDate }).expect(200);
+                .send({ newFollowUpDate: nextDate, explanation: 'Düzeltme sürüyor; yeni takip tarihi.' }).expect(200);
             const followUps = await request(app.getHttpServer()).get(`/findings/${fId}/follow-ups`)
                 .set('Authorization', `Bearer ${adminToken}`).expect(200);
             const secondFollowUp = followUps.body.find((item: any) => item.actionId === aId && item.id !== firstFollowUpId);
@@ -403,14 +424,23 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 newFollowUpDate: deferredDate,
             });
 
+            // Onayda ertelenen tarih için yeni takip açılır, eskisine bağlanır; eski takibin Güncel
+            // Durumuna ve bulgunun Güncel Durum günlüğüne yeni kaydın tarihi ve kodu yazılır.
+            const successorFu = await prisma.findingFollowUp.findFirstOrThrow({ where: { previousFollowUpId: firstFollowUpId } });
+            expect(successorFu.actionId).toBe(aId);
+            expect(successorFu.plannedDate!.toISOString().split('T')[0]).toBe(deferredDate);
+            const sourceFu = await prisma.findingFollowUp.findUniqueOrThrow({ where: { id: firstFollowUpId } });
+            const trDate = successorFu.plannedDate!.toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' });
+            expect(sourceFu.currentStatusDetail).toContain('İlk doğrulamada ek süre gerektiği için takip ertelendi.');
+            expect(sourceFu.currentStatusDetail).toContain(`Aksiyon, ${trDate} tarihli ${successorFu.followUpId} kodlu Bulgu Takip Çalışması ile takip edilecek.`);
+            const logs = await prisma.findingStatusLog.findMany({ where: { findingId: fId } });
+            expect(logs.some(l => l.text.includes(`${successorFu.followUpId} kodlu Bulgu Takip Çalışması ile takip edilecek`))).toBe(true);
+
             let finding = await getFinding(fId);
             expect(finding.status).not.toBe('CLOSED');
             expect(finding.resolutionStatus).toBe('ERTELENDI');
             expect(new Date(finding.testDate).toISOString().split('T')[0]).toBe(deferredDate);
 
-            await request(app.getHttpServer()).put(`/findings/${fId}/actions/${aId}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ dueDate: deferredDate }).expect(200);
             const followUps = await request(app.getHttpServer()).get(`/findings/${fId}/follow-ups`)
                 .set('Authorization', `Bearer ${adminToken}`).expect(200);
             const nextFollowUp = followUps.body.find((item: any) => item.actionId === aId && item.id !== firstFollowUpId);
@@ -609,6 +639,17 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             expect(newAction).toBeDefined();
             expect(newAction.ownerId).toBe(otherUser.id);
             expect(newAction.directorateId).toBe(e2eDirectorateId);
+
+            // Yeni aksiyonun hedef tarihinde açılan takip eski takibe bağlanır; eski takibe not yazılır.
+            const successorFu = await prisma.findingFollowUp.findFirstOrThrow({ where: { previousFollowUpId: fuId } });
+            expect(successorFu.actionId).toBe(newAction.id);
+            expect(successorFu.plannedDate!.toISOString().split('T')[0]).toBe(dueDate);
+            const sourceFu = await prisma.findingFollowUp.findUniqueOrThrow({ where: { id: fuId } });
+            expect(sourceFu.newActionId).toBe(newAction.id);
+            const trDate = successorFu.plannedDate!.toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' });
+            expect(sourceFu.currentStatusDetail).toContain(`Yeni aksiyon ${newAction.actionId} oluşturuldu. Aksiyon, ${trDate} tarihli ${successorFu.followUpId} kodlu Bulgu Takip Çalışması ile takip edilecek.`);
+            const summary = await request(app.getHttpServer()).get(`/findings/${fId}`).set('Authorization', `Bearer ${adminToken}`).expect(200);
+            expect(JSON.stringify(summary.body)).toContain(`${successorFu.followUpId} kodlu takip çalışması ile takip edilecektir`);
         });
     });
 
@@ -659,7 +700,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
         it('BULGUSU_YOK: test TAMAMLANDI olur, bulgu oluşmaz (bulgu zorunluluğu yalnız BULGUSU_VAR için geçerli)', async () => {
             const directorate = await createTestDirectorate(prisma);
             const control = await createTestControl(prisma, { ownerId: adminUserId, directorateId: directorate.id });
-            const controlTest = await createTestControlTest(prisma, { controlId: control.id, assigneeId: adminUserId });
+            const controlTest = await createTestControlTest(prisma, { controlId: control.id, assigneeId: adminUserId, secondControllerId: managerUserId });
 
             await request(app.getHttpServer())
                 .patch(`/controls/tests/${controlTest.id}/start`)
@@ -682,7 +723,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
         it('BULGUSU_VAR ama bağlı bulgu kaydı yok → 400 (bağımsız fixture ile izole doğrulama)', async () => {
             const directorate = await createTestDirectorate(prisma);
             const control = await createTestControl(prisma, { ownerId: adminUserId, directorateId: directorate.id });
-            const controlTest = await createTestControlTest(prisma, { controlId: control.id, assigneeId: adminUserId });
+            const controlTest = await createTestControlTest(prisma, { controlId: control.id, assigneeId: adminUserId, secondControllerId: managerUserId });
 
             await request(app.getHttpServer())
                 .patch(`/controls/tests/${controlTest.id}/start`)
@@ -985,8 +1026,10 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 .get(`/findings/${findingId}/status-logs`)
                 .set('Authorization', `Bearer ${adminToken}`)
                 .expect(200);
-            expect(logsAfter.body.length).toBe(logsBefore.body.length + 1);
+            // Onaylanan değerlendirme satırı + yeni takip kaydına yönlendiren not.
+            expect(logsAfter.body.length).toBe(logsBefore.body.length + 2);
             expect(logsAfter.body.some((l: any) => String(l.text).includes('Test tarihi ertelendi'))).toBe(true);
+            expect(logsAfter.body.some((l: any) => String(l.text).includes('kodlu Bulgu Takip Çalışması ile takip edilecek'))).toBe(true);
         });
         it('ardışık ertelemeler: her onay yeni takip üretir, geçmiş korunur ve son tarih bulguya yansır', async () => {
             const { findingId } = await setupFinding();
@@ -1298,12 +1341,15 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
             const dueDate = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             const payload = { description: 'RBAC matrisi aksiyon testi açıklaması', ownerId: adminUserId, dueDate };
 
-            for (const token of [adminToken, managerToken, auditorToken]) {
+            // Aksiyon girişi bulgunun birinci kontrolcüsünündür (admin); diğer yetkili roller 403.
+            await request(app.getHttpServer()).post(`/findings/${findingId}/actions`)
+                .set('Authorization', `Bearer ${adminToken}`).send(payload).expect(201);
+            for (const token of [managerToken, auditorToken]) {
                 await request(app.getHttpServer())
                     .post(`/findings/${findingId}/actions`)
                     .set('Authorization', `Bearer ${token}`)
                     .send(payload)
-                    .expect(201);
+                    .expect(403);
             }
             await request(app.getHttpServer())
                 .post(`/findings/${findingId}/actions`)
@@ -1409,14 +1455,25 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
                 .set('Authorization', `Bearer ${viewerToken}`)
                 .expect(403);
 
-            for (const token of [adminToken, managerToken, auditorToken]) {
-                const { findingId } = await setupFinding();
-                const action = await addAction(findingId);
-                await request(app.getHttpServer())
-                    .delete(`/findings/${findingId}/actions/${action.id}`)
-                    .set('Authorization', `Bearer ${token}`)
-                    .expect(200);
-            }
+            // Silme doğrudan yapılmaz: birinci kontrolcü talep eder (gerekçe zorunlu), ikinci kontrolcü onaylar.
+            const { findingId } = await setupFinding();
+            const action = await addAction(findingId);
+            await request(app.getHttpServer()).delete(`/findings/${findingId}/actions/${action.id}`)
+                .set('Authorization', `Bearer ${adminToken}`).send({}).expect(400);
+            await request(app.getHttpServer()).delete(`/findings/${findingId}/actions/${action.id}`)
+                .set('Authorization', `Bearer ${auditorToken}`).send({ reason: 'x' }).expect(403);
+            const req = await request(app.getHttpServer()).delete(`/findings/${findingId}/actions/${action.id}`)
+                .set('Authorization', `Bearer ${adminToken}`).send({ reason: 'Mükerrer aksiyon' }).expect(200);
+            expect(req.body.deletionRequestedAt).toBeTruthy();
+            expect((await prisma.action.findUniqueOrThrow({ where: { id: action.id } })).deletedAt).toBeNull();
+            await request(app.getHttpServer()).post(`/findings/${findingId}/actions/${action.id}/delete-approve`)
+                .set('Authorization', `Bearer ${adminToken}`).expect(403); // talep eden onaylayamaz
+            await request(app.getHttpServer()).post(`/findings/${findingId}/actions/${action.id}/delete-approve`)
+                .set('Authorization', `Bearer ${managerToken}`).expect(201);
+            const deleted = await prisma.action.findUniqueOrThrow({ where: { id: action.id } });
+            expect(deleted).toMatchObject({ status: 'IPTAL', deletedById: managerUserId });
+            const fus = await prisma.findingFollowUp.findMany({ where: { actionId: action.id } });
+            expect(fus.every(f => f.status === 'IPTAL' && f.deletedAt)).toBe(true);
         });
 
         it('çoklu aksiyonda hedef tarih en geç termindir; silmede ilişkili geçmiş korunur ve son aksiyonda hedef tarih temizlenir', async () => {
@@ -1432,14 +1489,19 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
 
             expect(new Date((await getFinding(findingId)).targetResolutionDate).toISOString().split('T')[0]).toBe(lateDate);
 
-            await request(app.getHttpServer()).delete(`/findings/${findingId}/actions/${late.id}`)
-                .set('Authorization', `Bearer ${adminToken}`).expect(200);
+            const deleteAction = async (id: string) => {
+                await request(app.getHttpServer()).delete(`/findings/${findingId}/actions/${id}`)
+                    .set('Authorization', `Bearer ${adminToken}`).send({ reason: 'Silme bütünlüğü testi' }).expect(200);
+                await request(app.getHttpServer()).post(`/findings/${findingId}/actions/${id}/delete-approve`)
+                    .set('Authorization', `Bearer ${managerToken}`).expect(201);
+            };
+            await deleteAction(late.id);
             expect(new Date((await getFinding(findingId)).targetResolutionDate).toISOString().split('T')[0]).toBe(earlyDate);
-            expect((await prisma.findingFollowUp.findUnique({ where: { id: lateFollowUp.id } }))?.actionId).toBeNull();
-            expect((await prisma.findingStatusHistory.findUnique({ where: { id: history.id } }))?.actionId).toBeNull();
+            // "Silindi" işareti: kayıtlar ve bağlar korunur, takip de silinir.
+            expect((await prisma.findingFollowUp.findUnique({ where: { id: lateFollowUp.id } }))).toMatchObject({ actionId: late.id, status: 'IPTAL' });
+            expect((await prisma.findingStatusHistory.findUnique({ where: { id: history.id } }))?.actionId).toBe(late.id);
 
-            await request(app.getHttpServer()).delete(`/findings/${findingId}/actions/${early.id}`)
-                .set('Authorization', `Bearer ${adminToken}`).expect(200);
+            await deleteAction(early.id);
             const findingAfterLastDelete = await getFinding(findingId);
             expect(findingAfterLastDelete.targetResolutionDate).toBeNull();
             expect(findingAfterLastDelete.status).toBe('IN_PROGRESS');
@@ -1557,7 +1619,7 @@ describe('E2E — Bulgu/Aksiyon/Takip Workflow Zinciri', () => {
     describe('Audit / History Doğrulaması', () => {
         it('Action create/update işlemleri AuditLog kaydı bırakır', async () => {
             const { findingId } = await setupFinding();
-            const action = await addAction(findingId);
+            const action = await addAction(findingId, {}, { approve: false }); // taslak düzenlenebilir
 
             const createLogs = await prisma.auditLog.findMany({ where: { entityType: 'Action', entityId: action.id, action: 'CREATE' } });
             expect(createLogs.length).toBeGreaterThan(0);

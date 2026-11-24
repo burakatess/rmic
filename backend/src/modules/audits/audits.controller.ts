@@ -279,15 +279,46 @@ export class AuditsController {
         return this.auditsService.reassignFollowUpAssignee(id, followUpId, body, userId, userRole);
     }
 
-    @FindingWriteScope()
+    @FindingWriteScope('follow-up')
     @Delete('findings/:id/follow-ups/:followUpId')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
     async deleteFollowUp(
         @Param('id') id: string,
         @Param('followUpId') followUpId: string,
+        @Body() body: WorkflowReasonDto,
         @CurrentUser('id') userId: string,
     ) {
-        return this.auditsService.deleteFollowUp(id, followUpId, userId);
+        // Doğrudan silme yok: ikinci kontrolcü onayına silme talebi açılır.
+        return this.auditsService.deleteFollowUp(id, followUpId, userId, body?.reason);
+    }
+
+    // ── Takip çalışması: onayı geri alma ve onaylı silme (kontrolcü kimliği serviste doğrulanır) ──
+    @FindingWriteScope()
+    @Post('findings/:id/follow-ups/:followUpId/revert')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    revertFollowUp(@Param('id') id: string, @Param('followUpId') followUpId: string, @Body() body: WorkflowReasonDto, @CurrentUser('id') userId: string) {
+        return this.auditsService.revertFollowUp(id, followUpId, body.reason, userId);
+    }
+
+    @FindingWriteScope('follow-up')
+    @Post('findings/:id/follow-ups/:followUpId/delete-request')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    requestFollowUpDeletion(@Param('id') id: string, @Param('followUpId') followUpId: string, @Body() body: WorkflowReasonDto, @CurrentUser('id') userId: string) {
+        return this.auditsService.requestFollowUpDeletion(id, followUpId, body.reason, userId);
+    }
+
+    @FindingWriteScope()
+    @Post('findings/:id/follow-ups/:followUpId/delete-approve')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    approveFollowUpDeletion(@Param('id') id: string, @Param('followUpId') followUpId: string, @CurrentUser('id') userId: string) {
+        return this.auditsService.decideFollowUpDeletion(id, followUpId, true, undefined, userId);
+    }
+
+    @FindingWriteScope()
+    @Post('findings/:id/follow-ups/:followUpId/delete-reject')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    rejectFollowUpDeletion(@Param('id') id: string, @Param('followUpId') followUpId: string, @Body() body: WorkflowReasonDto, @CurrentUser('id') userId: string) {
+        return this.auditsService.decideFollowUpDeletion(id, followUpId, false, body.reason, userId);
     }
 
     // ─── Actions (Finding-Scoped) ─────────────────────────────────────────────
@@ -305,8 +336,9 @@ export class AuditsController {
         @Param('id') id: string,
         @Body() data: CreateActionDto,
         @CurrentUser('id') userId: string,
+        @CurrentUser('role') userRole: string,
     ) {
-        return this.auditsService.createAction(id, data, userId);
+        return this.auditsService.createAction(id, data, userId, undefined, { actorRole: userRole ?? '' });
     }
 
     @FindingWriteScope()
@@ -327,9 +359,63 @@ export class AuditsController {
     async deleteAction(
         @Param('id') id: string,
         @Param('actionId') actionId: string,
+        @Body() body: WorkflowReasonDto,
         @CurrentUser('id') userId: string,
     ) {
-        return this.auditsService.deleteAction(id, actionId, userId);
+        // Doğrudan silme yok: ikinci kontrolcü onayına silme talebi açılır.
+        return this.auditsService.deleteAction(id, actionId, userId, body?.reason);
+    }
+
+    // ── Aksiyon maker-checker: birinci kontrolcü onaya gönderir / silme talep eder;
+    // ikinci kontrolcü onaylar, gerekçeyle reddeder, onayı geri alır, silmeyi sonuçlandırır.
+    // Kontrolcü kimliği serviste doğrulanır (rol tek başına yetmez).
+    @FindingWriteScope()
+    @Post('findings/:id/actions/:actionId/submit')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    submitAction(@Param('id') id: string, @Param('actionId') actionId: string, @CurrentUser('id') userId: string) {
+        return this.auditsService.submitAction(id, actionId, userId);
+    }
+
+    @FindingWriteScope()
+    @Post('findings/:id/actions/:actionId/approve')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    approveActionApproval(@Param('id') id: string, @Param('actionId') actionId: string, @CurrentUser('id') userId: string) {
+        return this.auditsService.approveAction(id, actionId, userId);
+    }
+
+    @FindingWriteScope()
+    @Post('findings/:id/actions/:actionId/reject')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    rejectActionApproval(@Param('id') id: string, @Param('actionId') actionId: string, @Body() body: WorkflowReasonDto, @CurrentUser('id') userId: string) {
+        return this.auditsService.rejectAction(id, actionId, body.reason, userId);
+    }
+
+    @FindingWriteScope()
+    @Post('findings/:id/actions/:actionId/revert')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    revertActionApproval(@Param('id') id: string, @Param('actionId') actionId: string, @Body() body: WorkflowReasonDto, @CurrentUser('id') userId: string) {
+        return this.auditsService.revertAction(id, actionId, body.reason, userId);
+    }
+
+    @FindingWriteScope()
+    @Post('findings/:id/actions/:actionId/delete-request')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR')
+    requestActionDeletion(@Param('id') id: string, @Param('actionId') actionId: string, @Body() body: WorkflowReasonDto, @CurrentUser('id') userId: string) {
+        return this.auditsService.requestActionDeletion(id, actionId, body.reason, userId);
+    }
+
+    @FindingWriteScope()
+    @Post('findings/:id/actions/:actionId/delete-approve')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    approveActionDeletion(@Param('id') id: string, @Param('actionId') actionId: string, @CurrentUser('id') userId: string) {
+        return this.auditsService.decideActionDeletion(id, actionId, true, undefined, userId);
+    }
+
+    @FindingWriteScope()
+    @Post('findings/:id/actions/:actionId/delete-reject')
+    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
+    rejectActionDeletion(@Param('id') id: string, @Param('actionId') actionId: string, @Body() body: WorkflowReasonDto, @CurrentUser('id') userId: string) {
+        return this.auditsService.decideActionDeletion(id, actionId, false, body.reason, userId);
     }
 
     // ─── Action-Scoped Follow-Up ──────────────────────────────────────────────

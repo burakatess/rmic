@@ -52,7 +52,7 @@ describe('ActionsService — nesne bazlı yetkilendirme + ortak domain delegasyo
         expect(audits.updateAction).not.toHaveBeenCalled();
         // Değişmeyen değerleri geri göndermek reddedilmez; not alanı serbest.
         await service.update('a-1', { notes: 'İlerleme', ownerId: 'auditee-1', dueDate: '2026-12-01T00:00:00.000Z' }, 'auditee-1', 'AUDITEE');
-        expect(audits.updateAction).toHaveBeenCalledWith('f-1', 'a-1', expect.objectContaining({ notes: 'İlerleme' }), 'auditee-1');
+        expect(audits.updateAction).toHaveBeenCalledWith('f-1', 'a-1', expect.objectContaining({ notes: 'İlerleme' }), 'auditee-1', { progress: true });
     });
 
     it('AUDITEE başka kullanıcının aksiyonunu tamamlayamaz', async () => {
@@ -93,7 +93,7 @@ describe('ActionsService — nesne bazlı yetkilendirme + ortak domain delegasyo
     it('yönetici rolü başkasının aksiyonunu güncelleyebilir — ortak domain servisine delege', async () => {
         prisma.action.findUnique.mockResolvedValue({ id: 'a-1', findingId: 'f-1', ownerId: 'other-user' });
         await service.update('a-1', { description: 'x' }, 'admin-1', 'SYSTEM_ADMIN');
-        expect(audits.updateAction).toHaveBeenCalledWith('f-1', 'a-1', expect.objectContaining({ description: 'x' }), 'admin-1');
+        expect(audits.updateAction).toHaveBeenCalledWith('f-1', 'a-1', expect.objectContaining({ description: 'x' }), 'admin-1', { progress: true });
     });
 
     it('/actions create — bulguya bağlı olmalı; ortak createAction\'a delege', async () => {
@@ -111,7 +111,7 @@ describe('ActionsService — nesne bazlı yetkilendirme + ortak domain delegasyo
         prisma.action.findUnique.mockResolvedValue({ id: 'a-1', findingId: 'f-1', ownerId: 'u-1' });
         await service.extend('a-1', { newDueDate: '2026-12-15', reason: 'gerekçe' }, 'u-1', 'SYSTEM_ADMIN');
         expect(audits.updateAction).toHaveBeenCalledWith('f-1', 'a-1',
-            expect.objectContaining({ dueDate: '2026-12-15', extensionReason: 'gerekçe', extensionApproved: false }), 'u-1');
+            expect.objectContaining({ dueDate: '2026-12-15', extensionReason: 'gerekçe', extensionApproved: false }), 'u-1', { extension: true });
     });
 
     it('aksiyon yoksa NotFoundException (Prisma 500 değil)', async () => {

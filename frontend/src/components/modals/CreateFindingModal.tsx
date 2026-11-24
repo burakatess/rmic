@@ -105,8 +105,12 @@ export function CreateFindingModal({
         testDate: '',
         attachment: '',
         assigneeId: '',
+        // Boş = kontrol noktasının (dönem kontrolü / kontrol testi) kontrolcüleri kullanılır.
+        firstControllerId: '',
+        secondControllerId: '',
         sendEmail: true,
     });
+    const [approvers, setApprovers] = useState<User[]>([]);
 
     const [actions, setActions] = useState<any[]>([
         { description: '', ownerId: '', responsibleDepartment: '', dueDate: '', attachments: [], notes: '' }
@@ -128,6 +132,7 @@ export function CreateFindingModal({
                     userList = await api.getUserChoices() as User[];
                 } catch { /* yetki yoksa boş liste */ }
                 setUsers(userList || []);
+                try { setApprovers(await api.getApproverChoices() as User[]); } catch { setApprovers([]); }
 
                 const res = await api.getControls() as any;
                 setControls(Array.isArray(res) ? res : (res?.data || []));
@@ -157,6 +162,8 @@ export function CreateFindingModal({
                         testDate: formatDateForInput(editContext.testDate),
                         attachment: editContext.attachment || '',
                         assigneeId: editContext.assigneeId || (editContext.assignee?.id || ''),
+                        firstControllerId: editContext.firstControllerId || editContext.firstController?.id || '',
+                        secondControllerId: editContext.secondControllerId || editContext.secondController?.id || '',
                         sendEmail: editContext.sendEmail ?? false,
                     });
                     return;
@@ -211,6 +218,9 @@ export function CreateFindingModal({
                     testDate: new Date().toISOString().split('T')[0],
                     attachment: '',
                     assigneeId: initialAssigneeId,
+                    // Kontrol testinden açılan bulgu: varsayılan kontrolcüler kontrol testininkiler.
+                    firstControllerId: (testContext as any)?.assigneeId || (testContext as any)?.assignee?.id || '',
+                    secondControllerId: (testContext as any)?.secondControllerId || (testContext as any)?.secondController?.id || '',
                     sendEmail: true,
                 });
             } catch (err) {
@@ -313,6 +323,11 @@ export function CreateFindingModal({
                 ...formData,
                 controlId: resolvedControlId,
             };
+            // Yeni bulguda boş kontrolcü gönderilmez (backend kontrol noktasındakini kullanır).
+            if (!editContext) {
+                if (!payload.firstControllerId) delete payload.firstControllerId;
+                if (!payload.secondControllerId) delete payload.secondControllerId;
+            }
 
             if (!editContext) {
                 // Yalnızca YENİ bulgu oluştururken source/impact ata — düzenlemede orijinal değerler korunur
@@ -470,6 +485,25 @@ export function CreateFindingModal({
                                     <option key={c.id} value={c.id}>{c.controlId} — {c.name}</option>
                                 ))}
                             </select>
+                        </div>
+
+                        {/* Birinci / ikinci kontrolcü (maker-checker) */}
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">1. Kontrolcü</label>
+                            <select value={formData.firstControllerId} onChange={e => setFormData({ ...formData, firstControllerId: e.target.value })}
+                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/10 outline-none">
+                                <option value="">{editContext ? 'Seçiniz...' : 'Kontrol noktasındaki (varsayılan)'}</option>
+                                {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">2. Kontrolcü (onaylayan)</label>
+                            <select value={formData.secondControllerId} onChange={e => setFormData({ ...formData, secondControllerId: e.target.value })}
+                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/10 outline-none">
+                                <option value="">{editContext ? 'Seçiniz...' : 'Kontrol noktasındaki (varsayılan)'}</option>
+                                {approvers.filter(u => u.id !== formData.firstControllerId).map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+                            </select>
+                            <p className="mt-1 text-[10px] text-slate-400">Aksiyon ve takip çalışmaları bu kontrolcüleri devralır; her birinde değiştirilebilir.</p>
                         </div>
 
                         {/* Atanan Sorumlu */}

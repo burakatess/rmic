@@ -91,6 +91,9 @@ export class CreateFindingDto {
     // Legacy/dead alan — Finding modelinde skaler karşılığı yok, backend yok sayar.
     @IsOptional() @IsString() attachment?: string;
     @IsOptional() @IsString() assigneeId?: string;
+    // Birinci / ikinci kontrolcü (maker-checker). Boşsa kontrol testinin kontrolcüleri kullanılır.
+    @IsOptional() @IsString() firstControllerId?: string;
+    @IsOptional() @IsString() secondControllerId?: string;
     @IsOptional() @IsBoolean() sendEmail?: boolean;
     @IsOptional() @IsString() riskId?: string;
     @IsOptional() @IsString() controlTestId?: string;
@@ -130,6 +133,9 @@ export class UpdateFindingDto {
     // mutabakat-onayla|mutabakat-geri-gonder|iptal-et|kapat|yeniden-ac} ve takip akışı.
     @IsOptional() @IsString() attachment?: string;
     @IsOptional() @IsString() assigneeId?: string;
+    // Birinci / ikinci kontrolcü (maker-checker). Boşsa kontrol testinin kontrolcüleri kullanılır.
+    @IsOptional() @IsString() firstControllerId?: string;
+    @IsOptional() @IsString() secondControllerId?: string;
     @IsOptional() @IsBoolean() sendEmail?: boolean;
     @IsOptional() @IsString() riskId?: string;
     @IsOptional() @IsEnum(FindingSource) source?: FindingSource;
@@ -148,6 +154,9 @@ export class CreateActionDto {
     @IsOptional() @IsString() notes?: string;
     @IsOptional() @IsEnum(ActionStatus) status?: ActionStatus;
     @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => AttachmentMetaDto) attachments?: AttachmentMetaDto[];
+    // Boşsa bulgunun kontrolcüleri kullanılır.
+    @IsOptional() @IsString() firstControllerId?: string;
+    @IsOptional() @IsString() secondControllerId?: string;
 }
 
 export class UpdateActionDto {
@@ -158,6 +167,8 @@ export class UpdateActionDto {
     @IsOptional() @IsString() notes?: string;
     // TAMAMLANDI özel /actions/:id/complete; KAPATILDI yalnız onaylı takip yan etkisidir.
     @IsOptional() @IsIn(['BEKLIYOR', 'DEVAM_EDIYOR', 'YETERSIZ', 'OPEN', 'IN_PROGRESS']) status?: ActionStatus;
+    @IsOptional() @IsString() firstControllerId?: string;
+    @IsOptional() @IsString() secondControllerId?: string;
 }
 
 export class WorkflowReasonDto {

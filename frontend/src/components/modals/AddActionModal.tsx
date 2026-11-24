@@ -26,6 +26,9 @@ interface ActionFormData {
     dueDate: string;
     status: 'BEKLIYOR' | 'DEVAM_EDIYOR' | 'TAMAMLANDI' | 'YETERSIZ';
     notes: string;
+    // Boş = bulgunun kontrolcüleri (varsayılan zincir).
+    firstControllerId: string;
+    secondControllerId: string;
 }
 
 const STATUS_OPTIONS = [
@@ -43,8 +46,11 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
         dueDate: '',
         status: 'BEKLIYOR',
         notes: '',
+        firstControllerId: '',
+        secondControllerId: '',
     });
     const [users, setUsers] = useState<User[]>([]);
+    const [approvers, setApprovers] = useState<User[]>([]);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState(false);
     const [loadingUsers, setLoadingUsers] = useState(false);
@@ -57,6 +63,7 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
             try {
                 const userList = await api.getUserChoices() as User[];
                 setUsers(userList || []);
+                try { setApprovers(await api.getApproverChoices() as User[]); } catch { setApprovers([]); }
             } catch { /* yetki yoksa boş liste */ } finally {
                 setLoadingUsers(false);
             }
@@ -80,6 +87,8 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
                 dueDate: formatD(action.dueDate),
                 status: action.status || 'BEKLIYOR',
                 notes: action.notes || '',
+                firstControllerId: action.firstControllerId || '',
+                secondControllerId: action.secondControllerId || '',
             });
         } else {
             setFormData({
@@ -89,6 +98,8 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
                 dueDate: '',
                 status: 'BEKLIYOR',
                 notes: '',
+                firstControllerId: '',
+                secondControllerId: '',
             });
         }
         setErrors({});
@@ -126,7 +137,9 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
 
         setSubmitting(true);
         try {
-            await onSubmit(formData);
+            // Boş kontrolcü gönderilmez: yeni aksiyonda bulgunun kontrolcüleri kullanılır.
+            const { firstControllerId, secondControllerId, ...rest } = formData;
+            await onSubmit({ ...rest, ...(firstControllerId ? { firstControllerId } : {}), ...(secondControllerId ? { secondControllerId } : {}) });
             // Reset form
             setFormData({
                 description: '',
@@ -135,6 +148,8 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
                 dueDate: '',
                 status: 'BEKLIYOR',
                 notes: '',
+                firstControllerId: '',
+                secondControllerId: '',
             });
             onClose();
         } catch (err) {
@@ -204,6 +219,27 @@ export default function AddActionModal({ isOpen, onClose, onSubmit, findingId, f
                                     {formData.description.length}/30 karakter minimum
                                 </span>
                             </div>
+                        </div>
+
+                        {/* Kontrolcüler (maker-checker) */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">1. Kontrolcü</label>
+                                <select value={formData.firstControllerId} onChange={e => setFormData(prev => ({ ...prev, firstControllerId: e.target.value }))}
+                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+                                    <option value="">{findingData?.firstController ? `Bulgudaki: ${findingData.firstController.firstName} ${findingData.firstController.lastName}` : 'Bulgudaki (varsayılan)'}</option>
+                                    {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">2. Kontrolcü (onaylayan)</label>
+                                <select value={formData.secondControllerId} onChange={e => setFormData(prev => ({ ...prev, secondControllerId: e.target.value }))}
+                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+                                    <option value="">{findingData?.secondController ? `Bulgudaki: ${findingData.secondController.firstName} ${findingData.secondController.lastName}` : 'Bulgudaki (varsayılan)'}</option>
+                                    {approvers.filter(u => u.id !== formData.firstControllerId).map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+                                </select>
+                            </div>
+                            <p className="col-span-2 -mt-2 text-[11px] text-slate-500">Aksiyon taslak kaydedilir; aksiyon kartındaki &quot;2. kontrolcü onayına gönder&quot; ile onaya gider. Onaylanınca takip çalışması oluşur.</p>
                         </div>
 
                         {/* 2 & 3. Aksiyon Sahibi & Sorumlu Birim */}

@@ -210,7 +210,7 @@ export class ActionsService {
             dueDate: data.dueDate,
             status: data.status,
             notes: data.notes,
-        }, userId);
+        }, userId, { progress: true }); // ilerleme notu/durumu onaylı aksiyonda da güncellenir
     }
 
     async delete(id: string, userId: string) {
@@ -255,7 +255,7 @@ export class ActionsService {
             dueDate: data.newDueDate,
             extensionReason: data.reason,
             extensionApproved: false,
-        }, userId);
+        }, userId, { extension: true });
     }
 
     async createEffectivenessReview(id: string, data: any, userId: string) {

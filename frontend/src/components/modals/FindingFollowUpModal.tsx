@@ -37,10 +37,10 @@ interface FindingFollowUpModalProps {
 
 // ONAYLANDI bilinçli olarak DIŞARIDA: onay, değerlendirenin bu formda seçebileceği
 // bir statü değil — atanmış ikinci kontrolcünün ayrı "Onayla" işlemidir (Madde 3).
+// Onaya gönderme (TAMAMLANDI) de listede değil: ayrı "2. kontrolcü onayına gönder" düğmesidir.
 const FOLLOW_UP_STATUSES = [
     { value: 'BEKLIYOR',     label: 'Bekliyor' },
     { value: 'DEVAM_EDIYOR', label: 'Devam Ediyor' },
-    { value: 'TAMAMLANDI',   label: 'Tamamlandı' },
 ];
 
 const RESULT_OPTIONS = [
@@ -195,8 +195,10 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
         }));
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent | React.MouseEvent, sendToApproval = false) => {
         e.preventDefault();
+        // Kaydet: birinci kontrolcü istediği kadar kaydeder; onaya yalnız ayrı düğmeyle gider.
+        const targetStatus = sendToApproval ? 'TAMAMLANDI' : (form.status === 'TAMAMLANDI' ? 'DEVAM_EDIYOR' : form.status);
         if (!isEdit && !form.actionId) {
             showError('Zorunlu Alan', 'Takip çalışması için ilgili aksiyonu seçiniz.');
             return;
@@ -207,8 +209,12 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
             showError('Zorunlu Alan', 'Güncel Durum Açıklaması zorunludur.');
             return;
         }
-        if (form.status === 'TAMAMLANDI' && !form.result) {
-            showError('Zorunlu Alan', 'Tamamlanan takip için değerlendirme sonucu seçiniz.');
+        if (sendToApproval && !form.result) {
+            showError('Zorunlu Alan', 'Onaya göndermek için değerlendirme sonucu seçiniz.');
+            return;
+        }
+        if (sendToApproval && !form.secondControllerId) {
+            showError('Zorunlu Alan', 'Onaya göndermek için ikinci kontrolcü seçilmelidir.');
             return;
         }
         if (form.resolutionOutcome === 'ERTELENDI' && !form.newFollowUpDate) {
@@ -234,7 +240,7 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
         try {
             const payload: Record<string, any> = {
                 ...(!isEdit ? { actionId: form.actionId } : {}),
-                status:                    form.status,
+                status:                    targetStatus,
                 birimCevabi:               form.birimCevabi || null,
                 currentStatusDetail:       form.currentStatusDetail,
                 internalControlAssessment: form.internalControlAssessment || null,
@@ -274,9 +280,9 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                     ? `Yeni aksiyon oluşturuldu: ${res.createdAction.actionId}`
                     : res?.createdFollowUp
                     ? `Takip ertelendi. Yeni takip oluşturuldu: ${res.createdFollowUp.followUpId}`
-                    : form.status === 'TAMAMLANDI'
-                        ? 'Takip tamamlandı, ikinci kontrolcü onayı bekleniyor.'
-                        : 'Takip çalışması güncellendi.');
+                    : sendToApproval
+                        ? 'Takip ikinci kontrolcünün onayına gönderildi; artık düzenlenemez.'
+                        : 'Takip çalışması kaydedildi. Hazır olduğunuzda 2. kontrolcü onayına gönderin.');
             } else {
                 await api.createFollowUp(findingId, payload);
                 success('Oluşturuldu', 'Takip çalışması oluşturuldu.');
@@ -581,9 +587,15 @@ export function FindingFollowUpModal({ isOpen, onClose, onSuccess, findingId, fo
                         <p className="text-xs text-slate-400">{isEdit ? `Takip No: ${followUp?.followUpId}` : 'Yeni takip çalışması'}</p>
                         <div className="flex gap-3">
                             <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={saving}>İptal</Button>
-                            {!readOnly && <Button type="submit" variant="primary" size="sm" disabled={saving || !form.currentStatusDetail.trim()}>
-                                {saving ? 'Kaydediliyor…' : isEdit && form.status === 'TAMAMLANDI' ? 'Kaydet ve Onaya Gönder' : isEdit ? 'Güncelle' : 'Oluştur'}
+                            {!readOnly && <Button type="submit" variant={isEdit ? 'secondary' : 'primary'} size="sm" disabled={saving || !form.currentStatusDetail.trim()}>
+                                {saving ? 'Kaydediliyor…' : isEdit ? 'Kaydet' : 'Oluştur'}
                             </Button>}
+                            {!readOnly && isEdit && (
+                                <Button type="button" variant="primary" size="sm" disabled={saving || !form.currentStatusDetail.trim()}
+                                    onClick={(e) => handleSubmit(e, true)}>
+                                    2. kontrolcü onayına gönder
+                                </Button>
+                            )}
                         </div>
                     </div>
                 </form>

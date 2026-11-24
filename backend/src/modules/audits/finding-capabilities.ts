@@ -20,6 +20,12 @@ export interface FindingCapabilities {
 export interface ActionCapabilities {
     canEdit: boolean;
     canComplete: boolean;
+    // Maker-checker (birinci / ikinci kontrolcü)
+    canSubmit: boolean;
+    canApprove: boolean;
+    canRevert: boolean;
+    canRequestDelete: boolean;
+    canDecideDelete: boolean;
     canExtend: boolean;
     canManageAttachments: boolean;
 }
@@ -37,10 +43,12 @@ const CLOSED_ACTION = new Set(['KAPATILDI', 'CLOSED', 'IPTAL']);
 const COMPLETED_ACTION = new Set(['TAMAMLANDI', 'COMPLETED']);
 
 export function findingCapabilities(
-    finding: { status?: string | null; workflowStatus?: string | null },
-    actor: { role?: string | null },
+    finding: { status?: string | null; workflowStatus?: string | null; firstControllerId?: string | null },
+    actor: { id?: string; role?: string | null },
     level: FindingAccessLevel,
 ): FindingCapabilities {
+    // Aksiyon girişi bulgunun birinci kontrolcüsünündür (kontrolcüsü olmayan eski bulgularda rol yeterli).
+    const isFirstController = !finding.firstControllerId || finding.firstControllerId === actor.id;
     const role = norm(actor.role);
     const full = level === 'FULL';
     const writer = full && FINDING_WRITERS.has(role);
@@ -50,7 +58,7 @@ export function findingCapabilities(
         canEditFinding: writer && finding.workflowStatus !== 'IPTAL',
         canAdvanceWorkflow: writer,
         canApproveWorkflow: approver,
-        canCreateAction: writer && open,
+        canCreateAction: (writer && open) && isFirstController,
         canAddStatusNote: writer,
         canManageAttachments: writer,
         canLinkRisk: writer,
@@ -59,7 +67,11 @@ export function findingCapabilities(
 }
 
 export function actionCapabilities(
-    action: { status?: string | null; ownerId?: string | null },
+    action: {
+        status?: string | null; ownerId?: string | null; approvalState?: string | null;
+        firstControllerId?: string | null; secondControllerId?: string | null;
+        deletionRequestedAt?: Date | string | null; deletedAt?: Date | string | null;
+    },
     actor: { id: string; role?: string | null },
     level: FindingAccessLevel,
 ): ActionCapabilities {
@@ -71,11 +83,23 @@ export function actionCapabilities(
     const progress = open && ACTION_PROGRESS_ROLES.has(role)
         && (role !== 'AUDITEE' || isOwner) && (full || isOwner);
     const writer = full && FINDING_WRITERS.has(role);
+    const state = action.approvalState ?? 'ONAYLANDI';
+    const deleted = !!action.deletedAt;
+    const deletionPending = !!action.deletionRequestedAt && !deleted;
+    const isFirst = !action.firstControllerId || action.firstControllerId === actor.id;
+    const isSecond = !!action.secondControllerId && action.secondControllerId === actor.id;
+    const draft = state === 'TASLAK' || state === 'REDDEDILDI';
+    const approver = full && (role === 'SYSTEM_ADMIN' || role === 'RISK_CONTROL_MANAGER');
     return {
-        canEdit: writer && open,
-        canComplete: progress && !COMPLETED_ACTION.has(action.status ?? ''),
-        canExtend: progress,
-        canManageAttachments: writer && open,
+        canEdit: writer && open && draft && !deletionPending && !deleted && isFirst,
+        canComplete: progress && !COMPLETED_ACTION.has(action.status ?? '') && state === 'ONAYLANDI',
+        canExtend: progress && state === 'ONAYLANDI',
+        canManageAttachments: writer && open && !deleted,
+        canSubmit: writer && open && draft && !deletionPending && !deleted && isFirst && !!action.secondControllerId,
+        canApprove: approver && isSecond && state === 'ONAY_BEKLIYOR' && !deleted,
+        canRevert: approver && isSecond && state === 'ONAYLANDI' && !deleted && !deletionPending,
+        canRequestDelete: writer && !deleted && !deletionPending && state !== 'ONAY_BEKLIYOR' && isFirst && !!action.secondControllerId,
+        canDecideDelete: approver && isSecond && deletionPending,
     };
 }
 

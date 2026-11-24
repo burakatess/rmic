@@ -6,7 +6,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
 import {
     DetailShell, DetailHeader, DetailSection, Tabs, Timeline,
-    StatusBadge, Button, LoadingState, EmptyState, FileUpload,
+    StatusBadge, Button, LoadingState, EmptyState, FileUpload, Modal, Textarea,
 } from '@/components/ui';
 import type { TimelineItem, TimelineVariant, AttachmentMeta, UploadedAttachmentMeta } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
@@ -26,9 +26,19 @@ interface Action {
     responsibleDepartment?: string | null; notes?: string | null;
     attachments?: Attachment[];
     capabilities?: ActionCapabilities;
+    // Maker-checker
+    approvalState?: 'TASLAK' | 'ONAY_BEKLIYOR' | 'ONAYLANDI' | 'REDDEDILDI';
+    firstControllerId?: string | null; secondControllerId?: string | null;
+    firstController?: Person | null; secondController?: Person | null;
+    rejectionReason?: string | null; revertReason?: string | null; revertedAt?: string | null;
+    deletionRequestedAt?: string | null; deletionReason?: string | null; deletionRejectionReason?: string | null; deletedAt?: string | null;
 }
+interface Person { id: string; firstName: string; lastName: string }
 // Backend (finding-capabilities.ts) hesaplar; arayüz kuralı yeniden türetmez.
-interface ActionCapabilities { canEdit: boolean; canComplete: boolean; canExtend: boolean; canManageAttachments: boolean }
+interface ActionCapabilities {
+    canEdit: boolean; canComplete: boolean; canExtend: boolean; canManageAttachments: boolean;
+    canSubmit?: boolean; canApprove?: boolean; canRevert?: boolean; canRequestDelete?: boolean; canDecideDelete?: boolean;
+}
 interface FindingCapabilities {
     canEditFinding: boolean; canAdvanceWorkflow: boolean; canApproveWorkflow: boolean; canCreateAction: boolean;
     canAddStatusNote: boolean; canManageAttachments: boolean; canLinkRisk: boolean; canViewHistory: boolean;
@@ -46,6 +56,8 @@ interface FollowUp {
     internalControlAssessment?: string | null; targetResolutionDate?: string | null;
     testDate?: string | null; plannedDate?: string | null; notes?: string | null;
     newActionRequired?: boolean; attachments?: Attachment[];
+    revertReason?: string | null; revertedAt?: string | null;
+    deletionRequestedAt?: string | null; deletionReason?: string | null; deletionRejectionReason?: string | null; deletedAt?: string | null;
     createdAt: string; updatedAt?: string;
 }
 interface StatusLog { id: string; entryDate: string; text: string; authorName?: string | null }
@@ -59,6 +71,7 @@ interface Finding {
     id: string; findingId: string; findingType: string | null; description: string; summary: string | null;
     gmy: string | null; relatedDepartment: string | null; iletisimKisisi: string | null;
     responsiblePerson: string | null; assigneeId: string | null;
+    firstController?: Person | null; secondController?: Person | null;
     severity: string; status: string; workflowStatus: string; resolutionStatus: string;
     internalControlAssessment: string | null; currentStatusDetail: string | null;
     birimCevabi: string | null; recommendation: string | null;
@@ -83,6 +96,24 @@ interface Finding {
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 type BV = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'success' | 'warning' | 'neutral' | 'primary';
+
+// Aksiyon onay durumu (maker-checker)
+const approvalStateConfig: Record<string, { label: string; variant: BV }> = {
+    TASLAK: { label: 'Taslak', variant: 'neutral' },
+    ONAY_BEKLIYOR: { label: '2. kontrolcü onayında', variant: 'warning' },
+    ONAYLANDI: { label: 'Onaylandı', variant: 'success' },
+    REDDEDILDI: { label: 'Reddedildi', variant: 'critical' },
+};
+const personName = (p?: { firstName: string; lastName: string } | null) => (p ? `${p.firstName} ${p.lastName}` : '—');
+function ReasonBox({ tone, title, text }: { tone: 'red' | 'amber' | 'slate'; title: string; text: string }) {
+    const cls = tone === 'red' ? 'border-red-200 bg-red-50 text-red-800' : tone === 'amber' ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-50 text-slate-700';
+    return (
+        <div className={`rounded-lg border p-2.5 ${cls}`}>
+            <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">{title}</p>
+            <p className="mt-0.5 text-sm whitespace-pre-wrap">{text}</p>
+        </div>
+    );
+}
 
 const findingTypeConfig: Record<string, { label: string; variant: BV }> = {
     BT: { label: 'Bilgi Teknolojileri', variant: 'primary' },
@@ -218,6 +249,16 @@ export default function FindingDetailPage() {
     const [workflowInput, setWorkflowInput] = useState('');
     const [workflowLoading, setWorkflowLoading] = useState(false);
 
+    // Gerekçe isteyen işlemler (ret, onayı geri alma, silme talebi/reddi)
+    const [reasonDialog, setReasonDialog] = useState<{ title: string; label: string; confirm: string; danger?: boolean; onSubmit: (reason: string) => Promise<void> } | null>(null);
+    const [reasonText, setReasonText] = useState('');
+    const [reasonBusy, setReasonBusy] = useState(false);
+    const askReason = (cfg: NonNullable<typeof reasonDialog>) => { setReasonText(''); setReasonDialog(cfg); };
+    const runOp = async (fn: () => Promise<unknown>, okTitle: string, okText: string) => {
+        try { await fn(); success(okTitle, okText); load(); }
+        catch (err) { showError('İşlem yapılamadı', err instanceof Error ? err.message : 'İşlem başarısız'); throw err; }
+    };
+
     // Status log inline add
     const [logText, setLogText] = useState('');
     const [logSaving, setLogSaving] = useState(false);
@@ -304,17 +345,13 @@ export default function FindingDetailPage() {
         }
     };
 
-    const rejectFollowUp = async (fuId: string) => {
+    const rejectFollowUp = (fuId: string) => {
         if (!finding) return;
-        const reason = window.prompt('Ret gerekçesini yazın:')?.trim();
-        if (!reason) return;
-        try {
-            await api.updateFollowUp(finding.id, fuId, { approvalStatus: 'REDDEDILDI', explanation: reason });
-            success('Revizyona Gönderildi', 'Takip birinci kontrolcüye revizyon için gönderildi.');
-            load();
-        } catch (err) {
-            showError('Reddedilemedi', err instanceof Error ? err.message : 'İşlem başarısız');
-        }
+        askReason({
+            title: 'Takip değerlendirmesini reddet', label: 'Ret gerekçesi', confirm: 'Reddet', danger: true,
+            onSubmit: (reason) => runOp(() => api.updateFollowUp(finding.id, fuId, { approvalStatus: 'REDDEDILDI', explanation: reason }),
+                'Revizyona gönderildi', 'Takip birinci kontrolcüye düzeltme için döndü.'),
+        });
     };
 
     const addLog = async () => {
@@ -748,7 +785,8 @@ export default function FindingDetailPage() {
                         <div className="flex items-start justify-between">
                             <div>
                                 <h2 className="text-sm font-semibold text-slate-700">Düzeltici Aksiyonlar</h2>
-                                <p className="text-xs text-slate-500 mt-0.5">Aksiyon tamamlanma tarihine göre sistem otomatik Takip Çalışması oluşturur. Bulgunun hedef tarihi, en ileri aksiyona göre hesaplanır.</p>
+                                <p className="text-xs text-slate-500 mt-0.5">Aksiyonu birinci kontrolcü girer ve 2. kontrolcü onayına gönderir; ikinci kontrolcü onaylayınca hedef tarihte Takip Çalışması oluşur. Bulgunun hedef tarihi, en ileri aksiyona göre hesaplanır.</p>
+                                <p className="text-xs text-slate-600 mt-1">Bulgu kontrolcüleri: <b>1.</b> {personName(finding.firstController)} · <b>2.</b> {personName(finding.secondController)}</p>
                             </div>
                             {caps.canCreateAction && <Button variant="primary" size="sm" onClick={() => setAddActionOpen(true)}
                                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}
@@ -772,8 +810,13 @@ export default function FindingDetailPage() {
                                     const aOverdue = action.status !== 'KAPATILDI' && getDaysLeft(action.dueDate) !== null && getDaysLeft(action.dueDate)! < 0;
                                     const relFU = finding.followUps.filter(f => f.actionId === action.id);
                                     const aCaps = action.capabilities ?? NO_ACTION_CAPS;
+                                    const isDeleted = !!action.deletedAt;
+                                    const deletionPending = !!action.deletionRequestedAt && !isDeleted;
+                                    const apCfg = approvalStateConfig[action.approvalState ?? 'ONAYLANDI'];
+                                    const op = (o: Parameters<typeof api.findingActionOp>[2], okTitle: string, okText: string, reason?: string) =>
+                                        runOp(() => api.findingActionOp(finding.id, action.id, o, reason), okTitle, okText);
                                     return (
-                                        <div key={action.id} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                                        <div key={action.id} className={`bg-white border rounded-xl shadow-sm overflow-hidden ${isDeleted ? 'border-slate-200 opacity-60' : 'border-slate-200'}`}>
                                             <div className="flex items-start gap-4 p-5">
                                                 <div className="flex-shrink-0 w-10 h-10 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-center">
                                                     <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -784,9 +827,39 @@ export default function FindingDetailPage() {
                                                     <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
                                                         <div className="flex items-center gap-2 flex-wrap">
                                                             <Link href={`/actions/${action.id}`} className="font-mono text-xs text-orange-600 font-semibold hover:underline">{action.actionId}</Link>
-                                                            <StatusBadge variant={sCfg.variant}>{sCfg.label}</StatusBadge>
-                                                            {aOverdue && <StatusBadge variant="critical" dot>Gecikmiş</StatusBadge>}
+                                                            {isDeleted ? <StatusBadge variant="neutral">Silindi</StatusBadge> : <StatusBadge variant={sCfg.variant}>{sCfg.label}</StatusBadge>}
+                                                            {!isDeleted && apCfg && <StatusBadge variant={apCfg.variant} dot>{apCfg.label}</StatusBadge>}
+                                                            {deletionPending && <StatusBadge variant="critical" dot>Silme onayı bekliyor</StatusBadge>}
+                                                            {aOverdue && !isDeleted && <StatusBadge variant="critical" dot>Gecikmiş</StatusBadge>}
                                                         </div>
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                        {aCaps.canSubmit && (
+                                                            <Button variant="primary" size="xs" onClick={() => op('submit', 'Onaya gönderildi', `${action.actionId} ikinci kontrolcünün onayına gönderildi.`).catch(() => {})}>
+                                                                2. kontrolcü onayına gönder
+                                                            </Button>
+                                                        )}
+                                                        {aCaps.canApprove && (
+                                                            <Button variant="success" size="xs" onClick={() => op('approve', 'Onaylandı', `${action.actionId} onaylandı; takip çalışması oluşturuldu.`).catch(() => {})}>Onayla</Button>
+                                                        )}
+                                                        {aCaps.canApprove && (
+                                                            <Button variant="danger" size="xs" onClick={() => askReason({ title: `${action.actionId} — reddet`, label: 'Ret gerekçesi', confirm: 'Reddet', danger: true,
+                                                                onSubmit: (r) => op('reject', 'Reddedildi', 'Aksiyon birinci kontrolcüye düzeltme için döndü.', r) })}>Reddet</Button>
+                                                        )}
+                                                        {aCaps.canRevert && (
+                                                            <Button variant="secondary" size="xs" onClick={() => askReason({ title: `${action.actionId} — onayı geri al`, label: 'Onayı geri alma gerekçesi', confirm: 'Onayı geri al', danger: true,
+                                                                onSubmit: (r) => op('revert', 'Onay geri alındı', 'Aksiyon taslağa döndü; başlamamış takip çalışması iptal edildi.', r) })}>Onayı geri al</Button>
+                                                        )}
+                                                        {aCaps.canDecideDelete && (
+                                                            <Button variant="danger" size="xs" onClick={() => op('delete-approve', 'Silindi', `${action.actionId} ve bağlı takip çalışmaları silindi.`).catch(() => {})}>Silmeyi onayla</Button>
+                                                        )}
+                                                        {aCaps.canDecideDelete && (
+                                                            <Button variant="secondary" size="xs" onClick={() => askReason({ title: `${action.actionId} — silme talebini reddet`, label: 'Ret gerekçesi', confirm: 'Silme talebini reddet',
+                                                                onSubmit: (r) => op('delete-reject', 'Silme reddedildi', 'Aksiyon korunuyor.', r) })}>Silmeyi reddet</Button>
+                                                        )}
+                                                        {aCaps.canRequestDelete && (
+                                                            <Button variant="ghost" size="xs" onClick={() => askReason({ title: `${action.actionId} — silme talebi`, label: 'Silme gerekçesi (ikinci kontrolcü onayına gider)', confirm: 'Silme talebi gönder', danger: true,
+                                                                onSubmit: (r) => op('delete-request', 'Silme talebi gönderildi', 'İkinci kontrolcü onaylayınca aksiyon silinecek.', r) })}>Sil</Button>
+                                                        )}
                                                         {!aCaps.canEdit && aCaps.canComplete && (
                                                             <Button variant="success" size="xs" onClick={() => completeOwnAction(action)}>
                                                                 Tamamlandı Olarak Bildir
@@ -803,6 +876,7 @@ export default function FindingDetailPage() {
                                                                 Düzenle
                                                             </Button>
                                                         )}
+                                                        </div>
                                                     </div>
                                                     <p className="text-sm text-slate-800 leading-relaxed mb-3">{action.description}</p>
                                                     <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">
@@ -811,7 +885,14 @@ export default function FindingDetailPage() {
                                                         <span className={aOverdue ? 'text-red-600 font-semibold' : ''}>Hedef: {fmt(action.dueDate)}</span>
                                                         {action.completedAt && <span className="text-emerald-600">Kapandı: {fmt(action.completedAt)}</span>}
                                                     </div>
+                                                    <p className="mt-1.5 text-xs text-slate-500">Kontrolcüler: <b>1.</b> {personName(action.firstController)} · <b>2.</b> {personName(action.secondController)}</p>
                                                     {action.notes && <p className="text-xs text-slate-500 mt-2 bg-slate-50 rounded-lg p-2 border border-slate-100">{action.notes}</p>}
+                                                    <div className="mt-2 space-y-2">
+                                                        {action.approvalState === 'REDDEDILDI' && action.rejectionReason && <ReasonBox tone="red" title="Ret gerekçesi" text={action.rejectionReason} />}
+                                                        {action.approvalState === 'TASLAK' && action.revertedAt && action.revertReason && <ReasonBox tone="amber" title="Onay geri alındı" text={action.revertReason} />}
+                                                        {(deletionPending || isDeleted) && action.deletionReason && <ReasonBox tone="slate" title={isDeleted ? 'Silme gerekçesi' : 'Silme talebi'} text={action.deletionReason} />}
+                                                        {!deletionPending && !isDeleted && action.deletionRejectionReason && <ReasonBox tone="slate" title="Silme talebi reddedildi" text={action.deletionRejectionReason} />}
+                                                    </div>
                                                 </div>
                                             </div>
                                             {/* Action attachments */}
@@ -882,9 +963,14 @@ export default function FindingDetailPage() {
                                     const isPendingApproval = fu.status === 'TAMAMLANDI' && fu.approvalStatus === 'BEKLIYOR' && !!fu.result;
                                     const isApproved = fu.status === 'ONAYLANDI' || fu.approvalStatus === 'ONAYLANDI';
                                     const isRevisionRequired = fu.approvalStatus === 'REDDEDILDI';
-                                    const canEditFollowUp = !isPendingApproval && !isApproved
-                                        && (!fu.assigneeId || fu.assigneeId === user?.id);
-                                    const fuCfg = isPendingApproval
+                                    const fuDeleted = !!fu.deletedAt;
+                                    const fuDeletionPending = !!fu.deletionRequestedAt && !fuDeleted;
+                                    const isMaker = !fu.assigneeId || fu.assigneeId === user?.id;
+                                    const isChecker = !!fu.secondControllerId && fu.secondControllerId === user?.id;
+                                    const canEditFollowUp = !isPendingApproval && !isApproved && !fuDeleted && !fuDeletionPending && fu.status !== 'IPTAL' && isMaker;
+                                    const fuOp = (o: Parameters<typeof api.followUpOp>[2], okTitle: string, okText: string, reason?: string) =>
+                                        runOp(() => api.followUpOp(finding.id, fu.id, o, reason), okTitle, okText);
+                                    const fuCfg = fuDeleted ? { label: 'Silindi', variant: 'neutral' as BV } : isPendingApproval
                                         ? { label: 'Onay Bekliyor', variant: 'warning' as BV }
                                         : isRevisionRequired
                                             ? { label: 'Revizyon Gerekli', variant: 'high' as BV }
@@ -904,6 +990,7 @@ export default function FindingDetailPage() {
                                                             {fu.followUpId}
                                                         </button>
                                                         <StatusBadge variant={fuCfg.variant}>{fuCfg.label}</StatusBadge>
+                                                        {fuDeletionPending && <StatusBadge variant="critical" dot>Silme onayı bekliyor</StatusBadge>}
                                                         {resOutCfg && <StatusBadge variant={resOutCfg.variant} dot>{resOutCfg.label}</StatusBadge>}
                                                         {fu.newActionRequired && <StatusBadge variant="high">Yeni Aksiyon Gerekli</StatusBadge>}
                                                     </div>
@@ -921,6 +1008,21 @@ export default function FindingDetailPage() {
                                                     {isPendingApproval && fu.secondControllerId === user?.id && (
                                                         <Button variant="danger" size="sm" onClick={() => rejectFollowUp(fu.id)}>Reddet</Button>
                                                     )}
+                                                    {isApproved && isChecker && !fuDeleted && (
+                                                        <Button variant="secondary" size="sm" onClick={() => askReason({ title: `${fu.followUpId} — onayı geri al`, label: 'Onayı geri alma gerekçesi', confirm: 'Onayı geri al', danger: true,
+                                                            onSubmit: (r) => fuOp('revert', 'Onay geri alındı', 'Takip birinci kontrolcünün düzenlemesine döndü; onayın sonuçları geri alındı.', r) })}>Onayı geri al</Button>
+                                                    )}
+                                                    {fuDeletionPending && isChecker && (
+                                                        <Button variant="danger" size="sm" onClick={() => fuOp('delete-approve', 'Silindi', `${fu.followUpId} silindi.`).catch(() => {})}>Silmeyi onayla</Button>
+                                                    )}
+                                                    {fuDeletionPending && isChecker && (
+                                                        <Button variant="secondary" size="sm" onClick={() => askReason({ title: `${fu.followUpId} — silme talebini reddet`, label: 'Ret gerekçesi', confirm: 'Silme talebini reddet',
+                                                            onSubmit: (r) => fuOp('delete-reject', 'Silme reddedildi', 'Takip çalışması korunuyor.', r) })}>Silmeyi reddet</Button>
+                                                    )}
+                                                    {canEditFollowUp && !!fu.secondControllerId && (
+                                                        <Button variant="ghost" size="sm" onClick={() => askReason({ title: `${fu.followUpId} — silme talebi`, label: 'Silme gerekçesi (ikinci kontrolcü onayına gider)', confirm: 'Silme talebi gönder', danger: true,
+                                                            onSubmit: (r) => fuOp('delete-request', 'Silme talebi gönderildi', 'İkinci kontrolcü onaylayınca takip silinecek.', r) })}>Sil</Button>
+                                                    )}
                                                     <Button variant="secondary" size="sm" onClick={() => { setSelectedFollowUp(fu); setFollowUpOpen(true); }}>
                                                         {canEditFollowUp ? 'Düzenle' : 'Görüntüle'}
                                                     </Button>
@@ -930,7 +1032,7 @@ export default function FindingDetailPage() {
                                                 {fu.currentStatusDetail && (
                                                     <div>
                                                         <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest mb-1">Güncel Durum</p>
-                                                        <p className="text-sm text-slate-700 bg-amber-50 border border-amber-100 rounded-lg p-3 leading-relaxed">{fu.currentStatusDetail}</p>
+                                                        <p className="text-sm text-slate-700 bg-amber-50 border border-amber-100 rounded-lg p-3 leading-relaxed whitespace-pre-wrap">{fu.currentStatusDetail}</p>
                                                     </div>
                                                 )}
                                                 <div className="grid grid-cols-2 gap-4">
@@ -955,6 +1057,9 @@ export default function FindingDetailPage() {
                                                         </StatusBadge>
                                                     </div>
                                                 )}
+                                                {fu.revertReason && !isApproved && <ReasonBox tone="amber" title="Onay geri alındı" text={fu.revertReason} />}
+                                                {(fuDeletionPending || fuDeleted) && fu.deletionReason && <ReasonBox tone="slate" title={fuDeleted ? 'Silme gerekçesi' : 'Silme talebi'} text={fu.deletionReason} />}
+                                                {!fuDeletionPending && !fuDeleted && fu.deletionRejectionReason && <ReasonBox tone="slate" title="Silme talebi reddedildi" text={fu.deletionRejectionReason} />}
                                                 {fu.rejectionReason && (
                                                     <div className="rounded-lg border border-red-200 bg-red-50 p-3">
                                                         <p className="text-[10px] font-bold uppercase tracking-widest text-red-600">Ret Gerekçesi</p>
@@ -1105,6 +1210,7 @@ export default function FindingDetailPage() {
             {addActionOpen && (
                 <AddActionModal
                     findingId={finding.id}
+                    findingData={finding}
                     isOpen={addActionOpen}
                     action={editAction}
                     onClose={() => {
@@ -1137,12 +1243,26 @@ export default function FindingDetailPage() {
                         || selectedFollowUp.approvalStatus === 'ONAYLANDI'
                         || (selectedFollowUp.status === 'TAMAMLANDI' && selectedFollowUp.approvalStatus === 'BEKLIYOR' && !!selectedFollowUp.result)
                         || (!!selectedFollowUp.assigneeId && selectedFollowUp.assigneeId !== user?.id)
+                        || !!selectedFollowUp.deletedAt || !!selectedFollowUp.deletionRequestedAt || selectedFollowUp.status === 'IPTAL'
                     )}
                     isOpen={followUpOpen}
                     onClose={() => { setFollowUpOpen(false); setSelectedFollowUp(null); }}
                     onSuccess={() => load()}
                 />
             )}
+            <Modal open={reasonDialog !== null} onClose={() => !reasonBusy && setReasonDialog(null)} title={reasonDialog?.title} size="md"
+                footer={<>
+                    <Button variant="secondary" onClick={() => setReasonDialog(null)} disabled={reasonBusy}>Vazgeç</Button>
+                    <Button variant={reasonDialog?.danger ? 'danger' : 'primary'} loading={reasonBusy} disabled={!reasonText.trim()}
+                        onClick={async () => {
+                            if (!reasonDialog || !reasonText.trim()) return;
+                            setReasonBusy(true);
+                            try { await reasonDialog.onSubmit(reasonText.trim()); setReasonDialog(null); } catch { /* hata bildirildi */ }
+                            finally { setReasonBusy(false); }
+                        }}>{reasonDialog?.confirm}</Button>
+                </>}>
+                <Textarea label={reasonDialog?.label} value={reasonText} onChange={e => setReasonText(e.target.value)} rows={4} maxLength={2000} />
+            </Modal>
         </DetailShell>
     );
 }

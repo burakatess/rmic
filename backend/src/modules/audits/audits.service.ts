@@ -262,7 +262,7 @@ export class AuditsService {
             targetResolutionDate, closedDate, relatedDepartment, responsiblePerson,
             findingType, summary, gmy, internalControlAssessment, currentStatusDetail,
             testDate, attachment, sendEmail, birimCevabi, assigneeId, actions,
-            iletisimKisisi, workflowStatus, resolutionStatus,
+            iletisimKisisi, workflowStatus, resolutionStatus, firstControllerId, secondControllerId,
             ...rest
         } = data;
         // controlTestId doğrulaması (varsa)
@@ -287,6 +287,16 @@ export class AuditsService {
             const assigneeExists = await this.prisma.user.findUnique({ where: { id: assigneeId }, select: { id: true } });
             if (!assigneeExists) throw new BadRequestException('Geçersiz kullanıcı: seçilen sorumlu bulunamadı');
         }
+        // Kontrolcü zinciri: kontrol noktası (dönem kontrolü → kontrol testi) → bulgu. Bulguyu oluşturan
+        // değiştirebilir; seçilmezse kontrol testinin kontrolcüleri kullanılır.
+        const ctControllers = resolvedTestId
+            ? await this.prisma.controlTest.findUnique({ where: { id: resolvedTestId }, select: { assigneeId: true, secondControllerId: true } })
+            : null;
+        const controllers = await this.resolveControllerPair(
+            { first: firstControllerId, second: secondControllerId },
+            { first: ctControllers?.assigneeId ?? assigneeId ?? null, second: ctControllers?.secondControllerId ?? null },
+            this.prisma,
+        );
         let resolvedRelatedDepartment = relatedDepartment || null;
         if (directorateId) {
             const dir = await this.prisma.directorate.findUnique({ where: { id: directorateId }, select: { id: true, name: true } });
@@ -330,6 +340,8 @@ export class AuditsService {
             testDate: testDate ? new Date(testDate) : null,
             sendEmail: sendEmail === true || sendEmail === 'true',
             assigneeId: assigneeId || null,
+            firstControllerId: controllers.first,
+            secondControllerId: controllers.second,
             iletisimKisisi: iletisimKisisi || null,
             workflowStatus: workflowStatus || 'TASLAK',
             resolutionStatus: resolutionStatus || 'DEVAM_EDIYOR',
@@ -389,7 +401,7 @@ export class AuditsService {
             source, affectedSystem, recommendation, managementResponse,
             targetResolutionDate, closedDate, relatedDepartment, responsiblePerson,
             findingType, summary, gmy, internalControlAssessment, currentStatusDetail,
-            testDate, attachment, sendEmail, birimCevabi, assigneeId,
+            testDate, attachment, sendEmail, birimCevabi, assigneeId, firstControllerId, secondControllerId,
             iletisimKisisi, workflowStatus, resolutionStatus,
             ...rest
         } = data;
@@ -475,6 +487,16 @@ export class AuditsService {
             if (!assigneeExists) throw new BadRequestException('Geçersiz kullanıcı: seçilen sorumlu bulunamadı');
         }
 
+        if (firstControllerId !== undefined || secondControllerId !== undefined) {
+            const current = await this.prisma.finding.findUnique({ where: { id }, select: { firstControllerId: true, secondControllerId: true } });
+            const pair = await this.resolveControllerPair(
+                { first: firstControllerId !== undefined ? (firstControllerId || null) : current?.firstControllerId ?? null,
+                  second: secondControllerId !== undefined ? (secondControllerId || null) : current?.secondControllerId ?? null },
+                { first: null, second: null }, this.prisma, true,
+            );
+            findingData.firstControllerId = pair.first;
+            findingData.secondControllerId = pair.second;
+        }
         const finding = await this.prisma.finding.update({
             where: { id },
             data: findingData,
@@ -509,9 +531,13 @@ export class AuditsService {
                         owner: { select: { id: true, firstName: true, lastName: true } },
                     }
                 },
+                firstController: { select: { id: true, firstName: true, lastName: true } },
+                secondController: { select: { id: true, firstName: true, lastName: true } },
                 actions: {
                     include: {
                         owner: { select: { id: true, firstName: true, lastName: true } },
+                        firstController: { select: { id: true, firstName: true, lastName: true } },
+                        secondController: { select: { id: true, firstName: true, lastName: true } },
                         attachments: { orderBy: { createdAt: 'desc' } },
                     },
                     orderBy: { createdAt: 'desc' },
@@ -575,12 +601,15 @@ export class AuditsService {
                     ? 'Son onaylı takipte ilgili aksiyon yeterli bulunmuştur; bulguyla ilişkili diğer açık aksiyonların takip çalışmaları devam etmektedir.'
                     : 'Son onaylı takipte alınan aksiyonların yeterli olduğu doğrulanmıştır; bulgunun güncel iş akışı durumu esas alınmaktadır.';
             } else if (latest.result === 'YETERSIZ') {
-                systemSummary = 'Son onaylı takipte çalışma yetersiz bulunmuştur; ilgili aksiyon ve bulgu açık kalmaya devam etmektedir.';
+                const successor = finding.followUps.find((item: any) => item.previousFollowUpId === latest.id);
+                systemSummary = successor
+                    ? `Son onaylı takipte çalışma yetersiz bulunmuştur; aksiyon ${successor.followUpId} kodlu takip çalışması ile takip edilecektir.`
+                    : 'Son onaylı takipte çalışma yetersiz bulunmuştur; ilgili aksiyon ve bulgu açık kalmaya devam etmektedir.';
             } else if (latest.result === 'YENI_AKSIYON_GEREKLI') {
                 const successor = finding.followUps.find((item: any) => item.previousFollowUpId === latest.id);
                 systemSummary = successor
-                    ? `Son onaylı takip ertelenmiş ve aynı aksiyon için ${successor.followUpId} numaralı yeni takip planlanmıştır.`
-                    : 'Son onaylı takip ertelenmiştir; aynı aksiyon için yeni takip planlaması sürmektedir.';
+                    ? `Son onaylı takipte yeni aksiyon gerekli bulunmuştur; yeni aksiyon ${successor.followUpId} kodlu takip çalışması ile takip edilecektir.`
+                    : 'Son onaylı takipte yeni aksiyon gerekli bulunmuştur; yeni aksiyonun takip planlaması sürmektedir.';
             }
         }
         if (finding.workflowStatus === 'IPTAL') systemSummary = 'Bulgu iptal edilmiştir; eski takip sonuçları tarihsel kayıt olarak korunmaktadır.';
@@ -1088,33 +1117,9 @@ export class AuditsService {
         });
     }
 
-    async deleteFollowUp(findingId: string, followUpId: string, userId: string) {
-        const followUp = await this.prisma.findingFollowUp.findFirst({
-            where: { id: followUpId, findingId }, include: { action: { select: { id: true, actionId: true } } },
-        });
-        if (!followUp) throw new NotFoundException('Takip çalışması bulunamadı');
-        // Yetki controller'da (403); durum engeli 409 Conflict.
-        if (followUp.status === 'ONAYLANDI' || followUp.approvalStatus === 'ONAYLANDI') {
-            throw new ConflictException('Onaylanmış takip çalışması tarihsel kayıttır ve silinemez.');
-        }
-        if (followUp.status === 'TAMAMLANDI' && followUp.approvalStatus === 'BEKLIYOR') {
-            throw new ConflictException('Onay bekleyen takip çalışması silinemez.');
-        }
-
-        return this.prisma.$transaction(async (tx) => {
-            // FindingStatusHistory.followUpId cascade değil — silmeden önce bağı koparılır;
-            // geçmiş kaydı korunur. FollowUpAttachment onDelete: Cascade.
-            await tx.findingStatusHistory.updateMany({ where: { followUpId }, data: { followUpId: null } });
-            // Koşullu silme: bu arada onaya gönderildiyse/onaylandıysa silinmez.
-            const deleted = await tx.findingFollowUp.deleteMany({
-                where: { id: followUpId, approvalStatus: { not: 'ONAYLANDI' }, status: { not: 'ONAYLANDI' }, NOT: { status: 'TAMAMLANDI', approvalStatus: 'BEKLIYOR' } },
-            });
-            if (deleted.count !== 1) throw new ConflictException('Takip bu sırada değişti; silinmedi.');
-            await tx.auditLog.create({
-                data: { userId, action: 'DELETE', entityType: 'FindingFollowUp', entityId: followUpId, oldValue: followUp },
-            });
-            return { message: 'Takip çalışması silindi' };
-        });
+    /** Eski uç (DELETE): artık doğrudan silmez, ikinci kontrolcü onayına silme talebi açar. */
+    async deleteFollowUp(findingId: string, followUpId: string, userId: string, reason?: string) {
+        return this.requestFollowUpDeletion(findingId, followUpId, reason ?? '', userId);
     }
 
     /**
@@ -1182,6 +1187,12 @@ export class AuditsService {
             ?? null;
         const standaloneReschedule = newFollowUpDate !== undefined && !recordingEvaluation && !resolutionOutcome && !approvalRequestedNow;
 
+        if ((followUp as any).deletedAt || followUp.status === 'IPTAL') {
+            throw new ConflictException('Silinmiş veya iptal edilmiş takip çalışması düzenlenemez.');
+        }
+        if ((followUp as any).deletionRequestedAt) {
+            throw new ConflictException('Silme onayı bekleyen takip çalışması düzenlenemez.');
+        }
         if (pendingApproval && !approvalRequestedNow && !rejectionRequestedNow) {
             throw new ForbiddenException('Onay bekleyen takip çalışması düzenlenemez.');
         }
@@ -1399,6 +1410,11 @@ export class AuditsService {
                 },
             });
 
+            // Onayın yan etkilerinden önceki durum: ikinci kontrolcü onayı geri alırsa buna döner.
+            const effectsBefore = approvalRequestedNow && wonApprovalRace
+                ? await this.captureFollowUpEffectsBefore(findingId, updated, tx)
+                : null;
+
             // Değerlendirmenin kaydedilmesi tek başına bulgu/aksiyon yan etkisi
             // üretmez. Çözüm durumu yalnız atanmış ikinci kontrolcünün onayıyla
             // yürürlüğe girer.
@@ -1462,7 +1478,13 @@ export class AuditsService {
                         const existing = await tx.findingFollowUp.findFirst({ where: { findingId, actionId: updated.actionId, plannedDate: updated.newFollowUpDate, status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] } } });
                         const actionForNo = await tx.action.findUnique({ where: { id: updated.actionId }, select: { id: true, actionId: true } });
                         if (!actionForNo) throw new BadRequestException('Takibin bağlı olduğu aksiyon bulunamadı.');
-                        if (!existing) await tx.findingFollowUp.create({ data: { followUpId: await this.generateFollowUpId(actionForNo.id, actionForNo.actionId, tx), findingId, actionId: updated.actionId, plannedDate: updated.newFollowUpDate, status: 'BEKLIYOR', notes: updated.explanation } });
+                        // Yeni takip, onaylanan takibin birinci/ikinci kontrolcüsüyle açılır ve ona bağlanır.
+                        const successor = existing || await tx.findingFollowUp.create({ data: {
+                            followUpId: await this.generateFollowUpId(actionForNo.id, actionForNo.actionId, tx), findingId, actionId: updated.actionId,
+                            plannedDate: updated.newFollowUpDate, status: 'BEKLIYOR', notes: updated.explanation,
+                            assigneeId: updated.assigneeId, secondControllerId: updated.secondControllerId,
+                        } });
+                        await this.linkSuccessorFollowUp(findingId, updated, successor, null, userId, tx);
                     }
                 } else if (resolvedResult === 'YENI_AKSIYON_GEREKLI') {
                     if (!effectiveNewAction) {
@@ -1475,14 +1497,24 @@ export class AuditsService {
                         dueDate: effectiveNewAction.dueDate,
                         notes: effectiveNewAction.notes,
                         status: 'BEKLIYOR',
-                    }, userId, tx);
+                        // Yeni aksiyonun kontrolcüleri onaylanan takibinkilerdir.
+                        firstControllerId: updated.assigneeId ?? undefined,
+                        secondControllerId: updated.secondControllerId ?? undefined,
+                    }, userId, tx, { preApproved: true });
                     await this.recordAuditTrail({
                         findingId, followUpId: updated.id, actionId: createdAction.id,
                         operation: 'ACTION_CREATED', userId,
                         explanation: `${updated.followUpId} sonucunda yeni düzeltici aksiyon oluşturuldu: ${createdAction.actionId}.`,
                     }, tx);
+                    // Yeni aksiyonun hedef tarihinde otomatik açılan takip, bu takibin devamıdır.
+                    const successor = await tx.findingFollowUp.findFirst({
+                        where: { actionId: createdAction.id, status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] } }, orderBy: { createdAt: 'desc' },
+                    });
+                    if (successor) await this.linkSuccessorFollowUp(findingId, updated, successor, createdAction, userId, tx);
                 }
             }
+
+            if (effectsBefore) await this.captureFollowUpEffectsAfter(effectsBefore, updated, createdAction?.id ?? null, tx);
 
             await tx.auditLog.create({
                 data: { userId, action: 'UPDATE', entityType: 'FindingFollowUp', entityId: followUpId, newValue: updated },
@@ -1711,13 +1743,71 @@ export class AuditsService {
      * otomatik takip + bulgu hedef tarihi + audit; hepsi tek transaction'da.
      * `db` verilirse (dış transaction) o istemci kullanılır, yeni transaction açılmaz.
      */
-    async createAction(findingId: string, data: any, userId: string, db?: PrismaLike) {
+    /**
+     * Onaylanan takibin devamı olan yeni takip çalışmasını ona bağlar ve eski takibin Güncel
+     * Durum alanına + bulgunun Güncel Durum günlüğüne "Aksiyon, {tarih} tarihli {kod} kodlu
+     * Bulgu Takip Çalışması ile takip edilecek." notunu yazar. Onay transaction'ı içinde çalışır.
+     */
+    private async linkSuccessorFollowUp(
+        findingId: string,
+        source: { id: string; followUpId: string; currentStatusDetail: string | null; actionId: string | null },
+        successor: { id: string; followUpId: string; plannedDate: Date | null; previousFollowUpId: string | null },
+        newAction: { id: string; actionId: string } | null,
+        userId: string,
+        tx: PrismaLike,
+    ) {
+        if (!successor.previousFollowUpId) {
+            const taken = await tx.findingFollowUp.findFirst({ where: { previousFollowUpId: source.id }, select: { id: true } });
+            if (!taken) await tx.findingFollowUp.update({ where: { id: successor.id }, data: { previousFollowUpId: source.id } });
+        }
+        const date = successor.plannedDate
+            ? successor.plannedDate.toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' })
+            : 'tarihi belirlenecek';
+        const note = newAction
+            ? `Yeni aksiyon ${newAction.actionId} oluşturuldu. Aksiyon, ${date} tarihli ${successor.followUpId} kodlu Bulgu Takip Çalışması ile takip edilecek.`
+            : `Aksiyon, ${date} tarihli ${successor.followUpId} kodlu Bulgu Takip Çalışması ile takip edilecek.`;
+        const detail = source.currentStatusDetail?.trim() ? `${source.currentStatusDetail.trim()}\n\n${note}` : note;
+        await tx.findingFollowUp.update({
+            where: { id: source.id },
+            data: { currentStatusDetail: detail, ...(newAction ? { newActionId: newAction.id } : {}) },
+        });
+        await this.appendStatusLog(findingId, `${new Date().toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' })} — ${source.followUpId}: ${note}`, userId, undefined, source.id, tx);
+        await this.recordAuditTrail({
+            findingId, followUpId: successor.id, actionId: (newAction?.id ?? source.actionId) || undefined,
+            operation: 'FOLLOWUP_SUCCESSOR_CREATED', userId, explanation: `${source.followUpId} → ${successor.followUpId}. ${note}`,
+            oldValue: { sourceFollowUpId: source.id, sourceFollowUpNo: source.followUpId },
+            newValue: { followUpId: successor.id, followUpNo: successor.followUpId, plannedDate: successor.plannedDate, newActionId: newAction?.id ?? null },
+        }, tx);
+        await tx.auditLog.create({
+            data: {
+                userId, action: 'FOLLOWUP_SUCCESSOR_CREATED', entityType: 'FindingFollowUp', entityId: successor.id,
+                oldValue: { sourceFollowUpId: source.id }, newValue: { followUpNo: successor.followUpId, plannedDate: successor.plannedDate, note },
+            },
+        });
+    }
+
+    /**
+     * Aksiyon oluşturma. Normal yol: birinci kontrolcünün TASLAK aksiyonu — takip çalışması
+     * yalnız ikinci kontrolcü onayında oluşur. `preApproved`: ikinci kontrolcünün onayladığı
+     * bir takip sonucunda doğan aksiyon (onay zaten verildi) — onaylı oluşur ve takibi açılır.
+     */
+    async createAction(findingId: string, data: any, userId: string, db?: PrismaLike, opts: { preApproved?: boolean; actorRole?: string } = {}) {
         const run = async (tx: PrismaLike) => {
-            const finding = await tx.finding.findUnique({ where: { id: findingId } });
+            const finding = await tx.finding.findUnique({ where: { id: findingId }, include: { controlTest: { select: { assigneeId: true, secondControllerId: true } } } });
             if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
             if (finding.status === 'CLOSED' || finding.workflowStatus === 'IPTAL') {
                 throw new BadRequestException('Kapalı veya iptal edilmiş bulguya yeni aksiyon eklenemez.');
             }
+            const findingFirst = finding.firstControllerId ?? finding.controlTest?.assigneeId ?? finding.assigneeId ?? null;
+            // Aksiyon girişi bulgunun birinci kontrolcüsünündür (kontrolcüsü olmayan eski bulgularda rol yeterli).
+            if (!opts.preApproved && findingFirst && findingFirst !== userId && opts.actorRole !== undefined) {
+                throw new ForbiddenException('Bu bulguya aksiyonu yalnızca bulgunun birinci kontrolcüsü girebilir.');
+            }
+            const controllers = await this.resolveControllerPair(
+                { first: data.firstControllerId, second: data.secondControllerId },
+                { first: findingFirst ?? userId, second: finding.secondControllerId ?? finding.controlTest?.secondControllerId ?? null },
+                tx,
+            );
 
             if (data.ownerId) {
                 const ownerExists = await tx.user.findUnique({ where: { id: data.ownerId }, select: { id: true } });
@@ -1747,11 +1837,17 @@ export class AuditsService {
                     status: data.status || 'BEKLIYOR',
                     controlId: finding.controlId,
                     riskId: finding.riskId,
+                    firstControllerId: controllers.first,
+                    secondControllerId: controllers.second,
+                    ...(opts.preApproved ? { approvalState: 'ONAYLANDI' as const, approvedById: userId, approvedAt: new Date() } : { approvalState: 'TASLAK' as const }),
                 },
                 include: { owner: { select: { id: true, firstName: true, lastName: true } } },
             });
 
-            await this.autoCreateFollowUpForAction(action.id, action.actionId, findingId, dueDate, finding, userId, tx);
+            if (opts.preApproved) {
+                const fu = await this.autoCreateFollowUpForAction(action.id, action.actionId, findingId, dueDate, finding, userId, tx);
+                await tx.action.update({ where: { id: action.id }, data: { approvalEffects: { followUpId: fu.id, followUpCreated: fu.created } } });
+            }
             await this.recalculateFindingTargetDate(findingId, tx);
             await tx.auditLog.create({
                 data: { userId, action: 'CREATE', entityType: 'Action', entityId: action.id, newValue: action },
@@ -1771,20 +1867,27 @@ export class AuditsService {
         userId: string,
         db: PrismaLike = this.prisma,
     ) {
-        const action = await db.action.findUnique({ where: { id: actionId }, select: { ownerId: true } });
-        const assignment = await this.resolveFollowUpAssignment(findingId, action?.ownerId ?? null, db);
+        const action = await db.action.findUnique({ where: { id: actionId }, select: { ownerId: true, firstControllerId: true, secondControllerId: true } });
+        const resolved = await this.resolveFollowUpAssignment(findingId, action?.ownerId ?? null, db);
+        // Takip çalışması varsayılan olarak aksiyonun kontrolcülerini devralır (zincir: kontrol → bulgu → aksiyon → takip).
+        const assignment = {
+            assigneeId: action?.firstControllerId ?? resolved.assigneeId,
+            secondControllerId: action?.secondControllerId ?? resolved.secondControllerId,
+        };
         // Eğer bu aksiyon için zaten BEKLIYOR/DEVAM_EDIYOR durumunda bir takip var → güncelle
         const existing = await db.findingFollowUp.findFirst({
             where: { actionId, status: { in: ['BEKLIYOR', 'DEVAM_EDIYOR'] } },
         });
 
+        let result: { id: string; created: boolean };
         if (existing) {
             await db.findingFollowUp.update({
                 where: { id: existing.id },
                 data: { plannedDate: dueDate },
             });
+            result = { id: existing.id, created: false };
         } else {
-            await db.findingFollowUp.create({
+            const createdFu = await db.findingFollowUp.create({
                 data: {
                     followUpId: await this.generateFollowUpId(actionId, actionNo, db),
                     findingId,
@@ -1795,6 +1898,7 @@ export class AuditsService {
                     secondControllerId: assignment.secondControllerId,
                 },
             });
+            result = { id: createdFu.id, created: true };
         }
 
         await db.findingStatusHistory.create({
@@ -1805,6 +1909,7 @@ export class AuditsService {
                 explanation: `Aksiyon oluşturuldu. Takip tarihi: ${dueDate.toLocaleDateString('tr-TR')}`,
             },
         });
+        return result;
     }
 
     /**
@@ -1814,9 +1919,32 @@ export class AuditsService {
      * transaction içinde + audit. Onaylı biçimde kapatılmış aksiyon (KAPATILDI)
      * içerik/tarih/durum değişimine kapalıdır.
      */
-    async updateAction(findingId: string, actionId: string, data: any, userId: string) {
+    async updateAction(findingId: string, actionId: string, data: any, userId: string, opts: { extension?: boolean; progress?: boolean } = {}) {
         const action = await this.prisma.action.findFirst({ where: { id: actionId, findingId } });
         if (!action) throw new NotFoundException(`Action ${actionId} not found under finding ${findingId}`);
+        // Tanım değişikliği (açıklama, sorumlu, termin, kontrolcüler) maker-checker'a tabidir: yalnız
+        // birinci kontrolcü, taslak/reddedilmiş aksiyonda. İlerleme notu/durumu onaylı aksiyonda da
+        // güncellenebilir (yetki çağıran uçta). Süre uzatma (extension) ayrı, gerekçeli akıştır.
+        const definitionChange =
+            (data.description !== undefined && data.description !== action.description) ||
+            (data.ownerId !== undefined && data.ownerId !== action.ownerId) ||
+            (data.responsibleDepartment !== undefined && (data.responsibleDepartment || null) !== action.responsibleDepartment) ||
+            (data.dueDate !== undefined && !opts.extension && new Date(data.dueDate).getTime() !== action.dueDate.getTime()) ||
+            data.firstControllerId !== undefined || data.secondControllerId !== undefined;
+        if (action.deletedAt || action.status === 'IPTAL') throw new ConflictException('Silinmiş veya iptal edilmiş aksiyon düzenlenemez.');
+        if (action.deletionRequestedAt) throw new ConflictException('Silme onayı bekleyen aksiyon düzenlenemez.');
+        // Bulgu ekranındaki düzenleme (birinci kontrolcü) her zaman maker-checker'a tabidir; aksiyon
+        // sorumlusunun ilerleme güncellemesi (progress) yalnız tanım değiştirirse.
+        if (definitionChange || (!opts.progress && !opts.extension)) this.assertActionEditable(action, userId);
+        let controllerData: { firstControllerId?: string | null; secondControllerId?: string | null } = {};
+        if (data.firstControllerId !== undefined || data.secondControllerId !== undefined) {
+            const pair = await this.resolveControllerPair(
+                { first: data.firstControllerId !== undefined ? (data.firstControllerId || null) : action.firstControllerId,
+                  second: data.secondControllerId !== undefined ? (data.secondControllerId || null) : action.secondControllerId },
+                { first: null, second: null }, this.prisma, true,
+            );
+            controllerData = { firstControllerId: pair.first, secondControllerId: pair.second };
+        }
 
         if (action.status === 'KAPATILDI' || action.status === 'CLOSED') {
             const changesCore =
@@ -1846,17 +1974,15 @@ export class AuditsService {
                     extensionReason: data.extensionReason !== undefined ? (data.extensionReason || null) : undefined,
                     extensionApproved: data.extensionApproved !== undefined ? !!data.extensionApproved : undefined,
                     status: data.status || undefined,
+                    ...controllerData,
                 },
                 include: { owner: { select: { id: true, firstName: true, lastName: true } } },
             });
-
-            if (data.dueDate) {
-                const finding = await tx.finding.findUnique({
-                    where: { id: findingId }, select: { id: true, findingId: true, findingType: true },
-                });
-                if (finding) {
-                    await this.autoCreateFollowUpForAction(actionId, action.actionId, findingId, new Date(data.dueDate), finding, userId, tx);
-                }
+            // Takip çalışması burada üretilmez: taslak aksiyon ikinci kontrolcü onayında takibini açar.
+            // Onaylı aksiyonda süre uzatma: açık takibin planlanan tarihi yeni termine taşınır.
+            if (opts.extension && data.dueDate && action.approvalState === 'ONAYLANDI') {
+                const finding = await tx.finding.findUnique({ where: { id: findingId }, select: { id: true, findingId: true, findingType: true } });
+                await this.autoCreateFollowUpForAction(actionId, action.actionId, findingId, new Date(data.dueDate), finding, userId, tx);
             }
             await this.recalculateFindingTargetDate(findingId, tx);
             await tx.auditLog.create({
@@ -1866,26 +1992,344 @@ export class AuditsService {
         });
     }
 
-    async deleteAction(findingId: string, actionId: string, userId: string) {
-        const action = await this.prisma.action.findFirst({ where: { id: actionId, findingId } });
-        if (!action) throw new NotFoundException(`Action ${actionId} not found under finding ${findingId}`);
+    /** Eski uç (DELETE): artık doğrudan silmez, ikinci kontrolcü onayına silme talebi açar. */
+    async deleteAction(findingId: string, actionId: string, userId: string, reason?: string) {
+        return this.requestActionDeletion(findingId, actionId, reason ?? '', userId);
+    }
 
+    // ═══ Kontrolcü zinciri ve maker-checker (aksiyon / takip çalışması) ═══════════════════════
+    //
+    // Zincir: kontrol noktası (Yıllık Plan dönem kontrolü → kontrol testi) → bulgu → aksiyon →
+    // takip çalışması. Her seviye bir üsttekini varsayılan alır, değiştirilebilir.
+    // Birinci kontrolcü (maker) taslağı girer/düzenler ve onaya gönderir; ikinci kontrolcü
+    // (checker) onaylar, gerekçeyle reddeder, onayı gerekçeyle geri alır ve silme taleplerini
+    // sonuçlandırır. Silme "Silindi" işaretidir (status=IPTAL + deletedAt), kayıt korunur.
+
+    /**
+     * Birinci/ikinci kontrolcü çiftini çözer ve doğrular. Açıkça seçilen değerler hatalıysa
+     * 400 döner; varsayılandan gelen ikinci kontrolcü birinciyle aynıysa sessizce boşaltılır.
+     */
+    private async resolveControllerPair(
+        explicit: { first?: string | null; second?: string | null },
+        defaults: { first: string | null; second: string | null },
+        db: PrismaLike,
+        strict = false,
+    ): Promise<{ first: string | null; second: string | null }> {
+        const firstGiven = explicit.first !== undefined && explicit.first !== null && explicit.first !== '';
+        const secondGiven = explicit.second !== undefined && explicit.second !== null && explicit.second !== '';
+        let first = firstGiven ? explicit.first as string : (strict && explicit.first === null ? null : defaults.first);
+        let second = secondGiven ? explicit.second as string : (strict && explicit.second === null ? null : defaults.second);
+        if (first) {
+            const u = await db.user.findUnique({ where: { id: first }, select: { isActive: true } });
+            if (!u || !u.isActive) {
+                if (firstGiven || strict) throw new BadRequestException('Geçersiz birinci kontrolcü: kullanıcı bulunamadı veya aktif değil.');
+                first = null;
+            }
+        }
+        if (second) {
+            const u = await db.user.findUnique({ where: { id: second }, select: { isActive: true, role: { select: { name: true } } } });
+            const eligible = !!u && u.isActive && FOLLOWUP_APPROVER_ROLES.has(normalizeRole(u.role?.name));
+            if (!eligible) {
+                if (secondGiven || strict) throw new BadRequestException('Geçersiz ikinci kontrolcü: kullanıcı aktif değil veya onay yetkisine sahip değil.');
+                second = null;
+            }
+        }
+        if (first && second && first === second) {
+            if (firstGiven || secondGiven || strict) throw new BadRequestException('Birinci ve ikinci kontrolcü aynı kişi olamaz.');
+            second = null;
+        }
+        return { first, second };
+    }
+
+    private assertActionEditable(action: any, userId: string) {
+        if (action.deletedAt || action.status === 'IPTAL') throw new ConflictException('Silinmiş veya iptal edilmiş aksiyon düzenlenemez.');
+        if (action.deletionRequestedAt) throw new ConflictException('Silme onayı bekleyen aksiyon düzenlenemez.');
+        if (action.approvalState === 'ONAY_BEKLIYOR') throw new ConflictException('İkinci kontrolcü onayında bekleyen aksiyon düzenlenemez.');
+        if (action.approvalState === 'ONAYLANDI') throw new ConflictException('Onaylanmış aksiyon düzenlenemez; düzenlemek için ikinci kontrolcünün onayı geri alması gerekir.');
+        if (action.firstControllerId && action.firstControllerId !== userId) throw new ForbiddenException('Aksiyonu yalnızca birinci kontrolcüsü düzenleyebilir.');
+    }
+
+    private async loadAction(findingId: string, actionId: string, db: PrismaLike = this.prisma) {
+        const action = await db.action.findFirst({ where: { id: actionId, findingId } });
+        if (!action) throw new NotFoundException('Aksiyon bulunamadı');
+        return action;
+    }
+
+    private requireSecondController(record: { secondControllerId: string | null }, userId: string, what: string) {
+        if (!record.secondControllerId) throw new BadRequestException(`Bu ${what} için ikinci kontrolcü atanmamış.`);
+        if (record.secondControllerId !== userId) throw new ForbiddenException(`Bu işlemi yalnızca ${what} ikinci kontrolcüsü yapabilir.`);
+    }
+
+    async submitAction(findingId: string, actionId: string, userId: string) {
+        const action = await this.loadAction(findingId, actionId);
+        if (!['TASLAK', 'REDDEDILDI'].includes(action.approvalState)) throw new ConflictException('Yalnızca taslak veya reddedilmiş aksiyon onaya gönderilebilir.');
+        this.assertActionEditable(action, userId);
+        if (!action.secondControllerId) throw new BadRequestException('Onaya göndermek için aksiyonun ikinci kontrolcüsü seçilmelidir.');
+        if (action.secondControllerId === userId) throw new BadRequestException('Birinci ve ikinci kontrolcü aynı kişi olamaz.');
         return this.prisma.$transaction(async (tx) => {
-            // İlişkileri koru: bağlı takipler ve geçmiş kayıtları actionId=null (kayıt silinmez).
-            await tx.findingFollowUp.updateMany({ where: { actionId }, data: { actionId: null } });
-            await tx.findingStatusHistory.updateMany({ where: { actionId }, data: { actionId: null } });
-            await tx.action.delete({ where: { id: actionId } });
-            await this.recalculateFindingTargetDate(findingId, tx);
-            await tx.auditLog.create({
-                data: { userId, action: 'DELETE', entityType: 'Action', entityId: actionId, oldValue: action },
+            const claim = await tx.action.updateMany({
+                where: { id: actionId, approvalState: { in: ['TASLAK', 'REDDEDILDI'] }, deletionRequestedAt: null },
+                data: { approvalState: 'ONAY_BEKLIYOR', submittedAt: new Date(), rejectionReason: null },
             });
-            return { message: 'Action deleted successfully' };
+            if (claim.count !== 1) throw new ConflictException('Aksiyon bu sırada değişti; tekrar deneyin.');
+            await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_SUBMITTED', userId, explanation: `${action.actionId} ikinci kontrolcü onayına gönderildi.` }, tx);
+            await tx.auditLog.create({ data: { userId, action: 'ACTION_SUBMIT', entityType: 'Action', entityId: actionId, newValue: { approvalState: 'ONAY_BEKLIYOR' } } });
+            return tx.action.findUnique({ where: { id: actionId } });
         });
     }
 
+    async approveAction(findingId: string, actionId: string, userId: string) {
+        const action = await this.loadAction(findingId, actionId);
+        if (action.approvalState !== 'ONAY_BEKLIYOR') throw new ConflictException('Yalnızca onay bekleyen aksiyon onaylanabilir.');
+        this.requireSecondController(action, userId, 'aksiyonun');
+        return this.prisma.$transaction(async (tx) => {
+            const claim = await tx.action.updateMany({
+                where: { id: actionId, approvalState: 'ONAY_BEKLIYOR', secondControllerId: userId },
+                data: { approvalState: 'ONAYLANDI', approvedById: userId, approvedAt: new Date(), rejectionReason: null, revertReason: null, revertedAt: null },
+            });
+            if (claim.count !== 1) throw new ConflictException('Aksiyon bu sırada değişti; tekrar deneyin.');
+            const finding = await tx.finding.findUnique({ where: { id: findingId }, select: { id: true, findingId: true, findingType: true } });
+            // Onayla birlikte aksiyonun takip çalışması açılır (hedef tarihte).
+            const fu = await this.autoCreateFollowUpForAction(actionId, action.actionId, findingId, action.dueDate, finding, userId, tx);
+            await tx.action.update({ where: { id: actionId }, data: { approvalEffects: { followUpId: fu.id, followUpCreated: fu.created } } });
+            await this.recalculateFindingTargetDate(findingId, tx);
+            const fuRow = await tx.findingFollowUp.findUnique({ where: { id: fu.id }, select: { followUpId: true } });
+            await this.recordAuditTrail({ findingId, actionId, followUpId: fu.id, operation: 'ACTION_APPROVED', userId, explanation: `${action.actionId} onaylandı; takip çalışması ${fuRow?.followUpId ?? ''} oluşturuldu.` }, tx);
+            await tx.auditLog.create({ data: { userId, action: 'ACTION_APPROVE', entityType: 'Action', entityId: actionId, newValue: { approvalState: 'ONAYLANDI', followUpId: fu.id } } });
+            return { ...(await tx.action.findUnique({ where: { id: actionId } })), createdFollowUp: fuRow ? { id: fu.id, followUpId: fuRow.followUpId } : null };
+        });
+    }
+
+    async rejectAction(findingId: string, actionId: string, reason: string, userId: string) {
+        if (!reason?.trim()) throw new BadRequestException('Ret gerekçesi zorunludur.');
+        const action = await this.loadAction(findingId, actionId);
+        if (action.approvalState !== 'ONAY_BEKLIYOR') throw new ConflictException('Yalnızca onay bekleyen aksiyon reddedilebilir.');
+        this.requireSecondController(action, userId, 'aksiyonun');
+        return this.prisma.$transaction(async (tx) => {
+            const claim = await tx.action.updateMany({ where: { id: actionId, approvalState: 'ONAY_BEKLIYOR' }, data: { approvalState: 'REDDEDILDI', rejectionReason: reason.trim() } });
+            if (claim.count !== 1) throw new ConflictException('Aksiyon bu sırada değişti; tekrar deneyin.');
+            await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_REJECTED', userId, explanation: `${action.actionId} reddedildi: ${reason.trim()}` }, tx);
+            await tx.auditLog.create({ data: { userId, action: 'ACTION_REJECT', entityType: 'Action', entityId: actionId, newValue: { approvalState: 'REDDEDILDI', reason: reason.trim() } } });
+            return tx.action.findUnique({ where: { id: actionId } });
+        });
+    }
+
+    /** Onaylı aksiyonun onayını geri alır: takibinde işlem başlamadıysa takip iptal edilir, aksiyon taslağa döner. */
+    async revertAction(findingId: string, actionId: string, reason: string, userId: string) {
+        if (!reason?.trim()) throw new BadRequestException('Onayı geri alma gerekçesi zorunludur.');
+        const action = await this.loadAction(findingId, actionId);
+        if (action.approvalState !== 'ONAYLANDI') throw new ConflictException('Yalnızca onaylanmış aksiyonun onayı geri alınabilir.');
+        if (action.deletedAt || action.status === 'IPTAL') throw new ConflictException('Silinmiş aksiyonun onayı geri alınamaz.');
+        this.requireSecondController(action, userId, 'aksiyonun');
+        const followUps = await this.prisma.findingFollowUp.findMany({ where: { actionId, status: { not: 'IPTAL' } } });
+        const started = followUps.filter(f => f.status !== 'BEKLIYOR' || f.result || f.evaluatorId);
+        if (started.length) {
+            throw new ConflictException(`Aksiyonun takip çalışmasında işlem yapılmış (${started.map(f => f.followUpId).join(', ')}); önce takip çalışmasının onayını geri alın veya takibi silin.`);
+        }
+        return this.prisma.$transaction(async (tx) => {
+            const claim = await tx.action.updateMany({
+                where: { id: actionId, approvalState: 'ONAYLANDI', secondControllerId: userId },
+                data: { approvalState: 'TASLAK', approvedById: null, approvedAt: null, revertedAt: new Date(), revertReason: reason.trim(), submittedAt: null },
+            });
+            if (claim.count !== 1) throw new ConflictException('Aksiyon bu sırada değişti; tekrar deneyin.');
+            if (followUps.length) {
+                await tx.findingFollowUp.updateMany({
+                    where: { id: { in: followUps.map(f => f.id) }, status: 'BEKLIYOR', result: null },
+                    data: { status: 'IPTAL', notes: `Aksiyon onayı geri alındı: ${reason.trim()}` },
+                });
+            }
+            await this.recalculateFindingTargetDate(findingId, tx);
+            await this.recordAuditTrail({
+                findingId, actionId, operation: 'ACTION_APPROVAL_REVERTED', userId,
+                explanation: `${action.actionId} onayı geri alındı: ${reason.trim()}${followUps.length ? ` — iptal edilen takip: ${followUps.map(f => f.followUpId).join(', ')}` : ''}`,
+            }, tx);
+            await tx.auditLog.create({ data: { userId, action: 'ACTION_REVERT', entityType: 'Action', entityId: actionId, oldValue: { approvalState: 'ONAYLANDI' }, newValue: { approvalState: 'TASLAK', reason: reason.trim(), cancelledFollowUps: followUps.map(f => f.id) } } });
+            return tx.action.findUnique({ where: { id: actionId } });
+        });
+    }
+
+    async requestActionDeletion(findingId: string, actionId: string, reason: string, userId: string) {
+        if (!reason?.trim()) throw new BadRequestException('Silme gerekçesi zorunludur.');
+        const action = await this.loadAction(findingId, actionId);
+        if (action.deletedAt || action.status === 'IPTAL') throw new ConflictException('Aksiyon zaten silinmiş veya iptal edilmiş.');
+        if (action.deletionRequestedAt) throw new ConflictException('Bu aksiyon için zaten bekleyen bir silme talebi var.');
+        if (action.approvalState === 'ONAY_BEKLIYOR') throw new ConflictException('Onay bekleyen aksiyon için silme talebi açılamaz.');
+        if (action.firstControllerId && action.firstControllerId !== userId) throw new ForbiddenException('Silme talebini yalnızca aksiyonun birinci kontrolcüsü açabilir.');
+        if (!action.secondControllerId) throw new BadRequestException('Silme talebi için aksiyonun ikinci kontrolcüsü atanmış olmalıdır.');
+        await this.prisma.action.update({ where: { id: actionId }, data: { deletionRequestedById: userId, deletionRequestedAt: new Date(), deletionReason: reason.trim(), deletionRejectionReason: null } });
+        await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_DELETE_REQUESTED', userId, explanation: `${action.actionId} için silme talebi: ${reason.trim()}` });
+        await this.prisma.auditLog.create({ data: { userId, action: 'ACTION_DELETE_REQUEST', entityType: 'Action', entityId: actionId, newValue: { reason: reason.trim() } } });
+        return this.prisma.action.findUnique({ where: { id: actionId } });
+    }
+
+    async decideActionDeletion(findingId: string, actionId: string, approve: boolean, reason: string | undefined, userId: string) {
+        const action = await this.loadAction(findingId, actionId);
+        if (!action.deletionRequestedAt || action.deletedAt) throw new ConflictException('Bu aksiyon için bekleyen silme talebi yok.');
+        this.requireSecondController(action, userId, 'aksiyonun');
+        if (!approve) {
+            if (!reason?.trim()) throw new BadRequestException('Silme talebini reddetme gerekçesi zorunludur.');
+            await this.prisma.action.update({ where: { id: actionId }, data: { deletionRequestedAt: null, deletionRequestedById: null, deletionRejectionReason: reason.trim() } });
+            await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_DELETE_REJECTED', userId, explanation: `${action.actionId} silme talebi reddedildi: ${reason.trim()}` });
+            await this.prisma.auditLog.create({ data: { userId, action: 'ACTION_DELETE_REJECT', entityType: 'Action', entityId: actionId, newValue: { reason: reason.trim() } } });
+            return this.prisma.action.findUnique({ where: { id: actionId } });
+        }
+        return this.prisma.$transaction(async (tx) => {
+            const now = new Date();
+            const claim = await tx.action.updateMany({ where: { id: actionId, deletedAt: null, deletionRequestedAt: { not: null } }, data: { status: 'IPTAL', deletedAt: now, deletedById: userId } });
+            if (claim.count !== 1) throw new ConflictException('Aksiyon bu sırada değişti; tekrar deneyin.');
+            // Aksiyona bağlı takip çalışmaları da silinir (kayıt korunur).
+            const fus = await tx.findingFollowUp.findMany({ where: { actionId, deletedAt: null }, select: { id: true, followUpId: true } });
+            if (fus.length) await tx.findingFollowUp.updateMany({ where: { id: { in: fus.map(f => f.id) } }, data: { status: 'IPTAL', deletedAt: now, deletedById: userId, deletionReason: `Aksiyon silindi: ${action.deletionReason ?? ''}`.trim() } });
+            await this.recalculateFindingTargetDate(findingId, tx);
+            await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_DELETED', userId, explanation: `${action.actionId} silindi (talep: ${action.deletionReason ?? '—'})${fus.length ? ` — silinen takip: ${fus.map(f => f.followUpId).join(', ')}` : ''}` }, tx);
+            await tx.auditLog.create({ data: { userId, action: 'DELETE', entityType: 'Action', entityId: actionId, oldValue: action as any, newValue: { deletedAt: now, followUps: fus.map(f => f.id) } } });
+            return tx.action.findUnique({ where: { id: actionId } });
+        });
+    }
+
+    // ── Takip çalışması: onayı geri alma ve onaylı silme ──
+
+    /** Onay yan etkilerinin "önce" durumu (onay transaction'ı içinde, yan etkilerden önce). */
+    private async captureFollowUpEffectsBefore(findingId: string, followUp: any, tx: PrismaLike) {
+        const [action, finding, openFus] = await Promise.all([
+            followUp.actionId ? tx.action.findUnique({ where: { id: followUp.actionId }, select: { id: true, status: true, completedAt: true } }) : null,
+            tx.finding.findUnique({ where: { id: findingId }, select: { status: true, resolutionStatus: true, testDate: true, closedDate: true } }),
+            tx.findingFollowUp.findMany({ where: { findingId, id: { not: followUp.id }, status: { not: 'IPTAL' } }, select: { id: true, status: true } }),
+        ]);
+        return {
+            action: action ? { id: action.id, status: action.status, completedAt: action.completedAt } : null,
+            finding,
+            openFollowUps: openFus,
+            prevCurrentStatusDetail: followUp.currentStatusDetail ?? null,
+            prevNewActionId: followUp.newActionId ?? null,
+        };
+    }
+
+    private async captureFollowUpEffectsAfter(before: any, followUp: any, createdActionId: string | null, tx: PrismaLike) {
+        const nowStatuses = await tx.findingFollowUp.findMany({ where: { id: { in: before.openFollowUps.map((f: any) => f.id) } }, select: { id: true, status: true } });
+        const cancelled = before.openFollowUps.filter((f: any) => nowStatuses.find(n => n.id === f.id)?.status === 'IPTAL');
+        const successor = await tx.findingFollowUp.findFirst({ where: { previousFollowUpId: followUp.id }, select: { id: true } });
+        const successorExisted = !!successor && before.openFollowUps.some((f: any) => f.id === successor.id);
+        const effects = {
+            version: 1,
+            action: before.action, finding: before.finding,
+            cancelledFollowUps: cancelled,
+            successor: successor ? { id: successor.id, created: !successorExisted } : null,
+            createdActionId,
+            prevCurrentStatusDetail: before.prevCurrentStatusDetail, prevNewActionId: before.prevNewActionId,
+        };
+        await tx.findingFollowUp.update({ where: { id: followUp.id }, data: { approvalEffects: effects as unknown as Prisma.InputJsonValue } });
+    }
+
+    /** Onaylı takibin onayını geri alır; onayın tüm sonuçları geri çevrilir. */
+    async revertFollowUp(findingId: string, followUpId: string, reason: string, userId: string) {
+        if (!reason?.trim()) throw new BadRequestException('Onayı geri alma gerekçesi zorunludur.');
+        const fu = await this.prisma.findingFollowUp.findFirst({ where: { id: followUpId, findingId } });
+        if (!fu) throw new NotFoundException('Takip çalışması bulunamadı');
+        if (fu.status !== 'ONAYLANDI') throw new ConflictException('Yalnızca onaylanmış takip çalışmasının onayı geri alınabilir.');
+        if (fu.deletedAt) throw new ConflictException('Silinmiş takip çalışmasının onayı geri alınamaz.');
+        this.requireSecondController(fu, userId, 'takip çalışmasının');
+        const effects = fu.approvalEffects as any;
+        if (!effects?.version) throw new ConflictException('Bu takip çalışması önceki akışta onaylandığı için onayın sonuçları bilinmiyor; onay geri alınamaz.');
+        // Onayla doğan kayıtlarda işlem başladıysa geri alma engellenir.
+        const blockers: string[] = [];
+        if (effects.successor?.id) {
+            const succ = await this.prisma.findingFollowUp.findUnique({ where: { id: effects.successor.id } });
+            if (succ && succ.status !== 'IPTAL' && (succ.status !== 'BEKLIYOR' || succ.result || succ.evaluatorId)) blockers.push(`devam takibi ${succ.followUpId} üzerinde işlem yapılmış`);
+        }
+        if (effects.createdActionId) {
+            const started = await this.prisma.findingFollowUp.findFirst({ where: { actionId: effects.createdActionId, status: { notIn: ['BEKLIYOR', 'IPTAL'] } }, select: { followUpId: true } });
+            if (started) blockers.push(`yeni aksiyonun takibi ${started.followUpId} üzerinde işlem yapılmış`);
+        }
+        if (blockers.length) throw new ConflictException(`Onay geri alınamaz: ${blockers.join('; ')}. Önce o kayıtların onayını geri alın.`);
+
+        return this.prisma.$transaction(async (tx) => {
+            const claim = await tx.findingFollowUp.updateMany({
+                where: { id: followUpId, status: 'ONAYLANDI', secondControllerId: userId },
+                data: {
+                    status: 'DEVAM_EDIYOR', approvalStatus: null, approvedBy: null, approvedAt: null,
+                    currentStatusDetail: effects.prevCurrentStatusDetail, newActionId: effects.prevNewActionId,
+                    revertedAt: new Date(), revertedById: userId, revertReason: reason.trim(), approvalEffects: Prisma.DbNull,
+                },
+            });
+            if (claim.count !== 1) throw new ConflictException('Takip çalışması bu sırada değişti; tekrar deneyin.');
+            const now = new Date();
+            if (effects.action) await tx.action.update({ where: { id: effects.action.id }, data: { status: effects.action.status, completedAt: effects.action.completedAt ? new Date(effects.action.completedAt) : null } });
+            if (effects.finding) {
+                await tx.finding.update({
+                    where: { id: findingId },
+                    data: {
+                        status: effects.finding.status, resolutionStatus: effects.finding.resolutionStatus,
+                        testDate: effects.finding.testDate ? new Date(effects.finding.testDate) : null,
+                        closedDate: effects.finding.closedDate ? new Date(effects.finding.closedDate) : null,
+                    },
+                });
+            }
+            for (const c of effects.cancelledFollowUps ?? []) {
+                await tx.findingFollowUp.updateMany({ where: { id: c.id, status: 'IPTAL', deletedAt: null }, data: { status: c.status } });
+            }
+            if (effects.successor?.id) {
+                if (effects.successor.created) {
+                    await tx.findingFollowUp.update({ where: { id: effects.successor.id }, data: { status: 'IPTAL', deletedAt: now, deletedById: userId, deletionReason: `Önceki takip onayı geri alındı: ${reason.trim()}`, previousFollowUpId: null } });
+                } else {
+                    await tx.findingFollowUp.update({ where: { id: effects.successor.id }, data: { previousFollowUpId: null } });
+                }
+            }
+            if (effects.createdActionId) {
+                await tx.action.update({ where: { id: effects.createdActionId }, data: { status: 'IPTAL', deletedAt: now, deletedById: userId, deletionReason: `Oluşturan takip onayı geri alındı: ${reason.trim()}` } });
+                await tx.findingFollowUp.updateMany({ where: { actionId: effects.createdActionId, deletedAt: null }, data: { status: 'IPTAL', deletedAt: now, deletedById: userId } });
+            }
+            await this.recalculateFindingTargetDate(findingId, tx);
+            await this.appendStatusLog(findingId, `${now.toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' })} — ${fu.followUpId} onayı geri alındı: ${reason.trim()}`, userId, undefined, fu.id, tx);
+            await this.recordAuditTrail({ findingId, followUpId, actionId: fu.actionId || undefined, operation: 'FOLLOWUP_APPROVAL_REVERTED', userId, explanation: `${fu.followUpId} onayı geri alındı: ${reason.trim()}`, oldValue: effects, newValue: { status: 'DEVAM_EDIYOR' } }, tx);
+            await tx.auditLog.create({ data: { userId, action: 'FOLLOWUP_REVERT', entityType: 'FindingFollowUp', entityId: followUpId, oldValue: effects, newValue: { status: 'DEVAM_EDIYOR', reason: reason.trim() } } });
+            return tx.findingFollowUp.findUnique({ where: { id: followUpId } });
+        }, { timeout: 20000 });
+    }
+
+    async requestFollowUpDeletion(findingId: string, followUpId: string, reason: string, userId: string) {
+        if (!reason?.trim()) throw new BadRequestException('Silme gerekçesi zorunludur.');
+        const fu = await this.prisma.findingFollowUp.findFirst({ where: { id: followUpId, findingId } });
+        if (!fu) throw new NotFoundException('Takip çalışması bulunamadı');
+        if (fu.deletedAt || fu.status === 'IPTAL') throw new ConflictException('Takip çalışması zaten silinmiş veya iptal edilmiş.');
+        if (fu.deletionRequestedAt) throw new ConflictException('Bu takip için zaten bekleyen bir silme talebi var.');
+        if (fu.status === 'TAMAMLANDI') throw new ConflictException('Onay bekleyen takip çalışması için silme talebi açılamaz.');
+        if (fu.status === 'ONAYLANDI') throw new ConflictException('Onaylanmış takip çalışması silinemez; önce ikinci kontrolcünün onayı geri alması gerekir.');
+        if (fu.assigneeId && fu.assigneeId !== userId) throw new ForbiddenException('Silme talebini yalnızca takibin birinci kontrolcüsü açabilir.');
+        if (!fu.secondControllerId) throw new BadRequestException('Silme talebi için takibin ikinci kontrolcüsü atanmış olmalıdır.');
+        await this.prisma.findingFollowUp.update({ where: { id: followUpId }, data: { deletionRequestedById: userId, deletionRequestedAt: new Date(), deletionReason: reason.trim(), deletionRejectionReason: null } });
+        await this.recordAuditTrail({ findingId, followUpId, operation: 'FOLLOWUP_DELETE_REQUESTED', userId, explanation: `${fu.followUpId} için silme talebi: ${reason.trim()}` });
+        await this.prisma.auditLog.create({ data: { userId, action: 'FOLLOWUP_DELETE_REQUEST', entityType: 'FindingFollowUp', entityId: followUpId, newValue: { reason: reason.trim() } } });
+        return this.prisma.findingFollowUp.findUnique({ where: { id: followUpId } });
+    }
+
+    async decideFollowUpDeletion(findingId: string, followUpId: string, approve: boolean, reason: string | undefined, userId: string) {
+        const fu = await this.prisma.findingFollowUp.findFirst({ where: { id: followUpId, findingId } });
+        if (!fu) throw new NotFoundException('Takip çalışması bulunamadı');
+        if (!fu.deletionRequestedAt || fu.deletedAt) throw new ConflictException('Bu takip için bekleyen silme talebi yok.');
+        this.requireSecondController(fu, userId, 'takip çalışmasının');
+        if (!approve) {
+            if (!reason?.trim()) throw new BadRequestException('Silme talebini reddetme gerekçesi zorunludur.');
+            await this.prisma.findingFollowUp.update({ where: { id: followUpId }, data: { deletionRequestedAt: null, deletionRequestedById: null, deletionRejectionReason: reason.trim() } });
+            await this.recordAuditTrail({ findingId, followUpId, operation: 'FOLLOWUP_DELETE_REJECTED', userId, explanation: `${fu.followUpId} silme talebi reddedildi: ${reason.trim()}` });
+            await this.prisma.auditLog.create({ data: { userId, action: 'FOLLOWUP_DELETE_REJECT', entityType: 'FindingFollowUp', entityId: followUpId, newValue: { reason: reason.trim() } } });
+            return this.prisma.findingFollowUp.findUnique({ where: { id: followUpId } });
+        }
+        const now = new Date();
+        const claim = await this.prisma.findingFollowUp.updateMany({
+            where: { id: followUpId, deletedAt: null, deletionRequestedAt: { not: null }, status: { notIn: ['ONAYLANDI', 'TAMAMLANDI'] } },
+            data: { status: 'IPTAL', deletedAt: now, deletedById: userId },
+        });
+        if (claim.count !== 1) throw new ConflictException('Takip çalışması bu sırada değişti; silinmedi.');
+        await this.recordAuditTrail({ findingId, followUpId, actionId: fu.actionId || undefined, operation: 'FOLLOWUP_DELETED', userId, explanation: `${fu.followUpId} silindi (talep: ${fu.deletionReason ?? '—'})` });
+        await this.prisma.auditLog.create({ data: { userId, action: 'DELETE', entityType: 'FindingFollowUp', entityId: followUpId, oldValue: fu as any, newValue: { deletedAt: now } } });
+        return this.prisma.findingFollowUp.findUnique({ where: { id: followUpId } });
+    }
+
     async recalculateFindingTargetDate(findingId: string, db: PrismaLike = this.prisma) {
+        // Silinmiş/iptal aksiyonlar (IPTAL) hedef tarihe katılmaz.
         const actions = await db.action.findMany({
-            where: { findingId, status: { not: 'KAPATILDI' } },
+            where: { findingId, status: { notIn: ['KAPATILDI', 'IPTAL'] } },
             select: { dueDate: true },
         });
 
@@ -1897,7 +2341,7 @@ export class AuditsService {
             });
         } else {
             const allActions = await db.action.findMany({
-                where: { findingId },
+                where: { findingId, status: { not: 'IPTAL' } },
                 select: { dueDate: true },
             });
             if (allActions.length > 0) {
@@ -1917,7 +2361,7 @@ export class AuditsService {
 
     async checkAndCloseFindinIfAllActionsClosed(findingId: string, userId: string, db: PrismaLike = this.prisma) {
         const actions = await db.action.findMany({
-            where: { findingId },
+            where: { findingId, status: { not: 'IPTAL' } }, // silinmiş/iptal aksiyonlar kapanışı engellemez
             select: { status: true },
         });
 

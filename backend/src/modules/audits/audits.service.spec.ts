@@ -635,6 +635,8 @@ describe('AuditsService — kritik iş kuralları', () => {
                 update: jest.fn().mockResolvedValue({ id: 'fu-1', actionId: null, result: 'YETERLI' }),
                 updateMany: jest.fn().mockResolvedValue({ count: 1 }),
                 create: jest.fn(),
+                // Onay yan etkilerinin önce/sonra kaydı (onayı geri alma için).
+                findMany: jest.fn().mockResolvedValue([]),
             };
         });
 
@@ -796,7 +798,7 @@ describe('AuditsService — kritik iş kuralları', () => {
             expect(createSpy).toHaveBeenCalledWith('f-1', expect.objectContaining({
                 description: 'Kalıcı düzeltici aksiyon', directorateId: 'dir-1',
                 ownerId: 'owner-1', dueDate: '2099-12-31', status: 'BEKLIYOR',
-            }), 'second-ctrl', prisma);
+            }), 'second-ctrl', prisma, { preApproved: true }); // ikinci kontrolcü onayından doğduğu için onaylı oluşur
             expect(prisma.findingFollowUp.create).not.toHaveBeenCalled();
             expect((result as { createdAction?: unknown }).createdAction).toEqual({ id: 'a-2', actionId: 'A-2026-0034-02' });
         });
