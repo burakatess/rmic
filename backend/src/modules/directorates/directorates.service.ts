@@ -1,5 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma';
+import { CreateDirectorateDto, UpdateDirectorateDto } from './dto/directorate.dto';
 
 @Injectable()
 export class DirectoratesService {
@@ -32,29 +34,52 @@ export class DirectoratesService {
         return d;
     }
 
-    async create(data: { name: string; code?: string; gmy?: string }, userId?: string) {
-        return this.prisma.directorate.create({
+    async create(data: CreateDirectorateDto, userId?: string) {
+        const created = await this.prisma.directorate.create({
+            data: { name: data.name.trim(), code: data.code?.trim() || null, gmy: data.gmy?.trim() || null, isActive: true },
+        }).catch(e => this.rethrowUnique(e));
+        await this.audit(userId, 'CREATE', created.id, undefined, created);
+        return created;
+    }
+
+    async update(id: string, data: UpdateDirectorateDto, userId?: string) {
+        const existing = await this.prisma.directorate.findUnique({ where: { id } });
+        if (!existing) throw new NotFoundException('Direktörlük bulunamadı');
+        const updated = await this.prisma.directorate.update({
+            where: { id },
             data: {
-                name: data.name,
-                code: data.code || null,
-                gmy: data.gmy || null,
-                isActive: true,
+                ...(data.name !== undefined && { name: data.name.trim() }),
+                ...(data.code !== undefined && { code: data.code.trim() || null }),
+                ...(data.gmy !== undefined && { gmy: data.gmy.trim() || null }),
+                ...(data.isActive !== undefined && { isActive: data.isActive }),
             },
-        });
+        }).catch(e => this.rethrowUnique(e));
+        await this.audit(userId, 'UPDATE', id, existing, updated);
+        return updated;
     }
 
-    async update(id: string, data: Partial<{ name: string; code: string; gmy: string; isActive: boolean }>) {
-        return this.prisma.directorate.update({
-            where: { id },
-            data,
-        });
-    }
-
-    async delete(id: string) {
+    async delete(id: string, userId?: string) {
+        const existing = await this.prisma.directorate.findUnique({ where: { id } });
+        if (!existing) throw new NotFoundException('Direktörlük bulunamadı');
         // Soft delete — sadece pasif yap
-        return this.prisma.directorate.update({
-            where: { id },
-            data: { isActive: false },
-        });
+        const updated = await this.prisma.directorate.update({ where: { id }, data: { isActive: false } });
+        await this.audit(userId, 'DEACTIVATE', id, existing, updated);
+        return updated;
+    }
+
+    /** Ad/kod tekil — Prisma P2002 kullanıcıya okunur mesaj olarak döner. */
+    private rethrowUnique(e: unknown): never {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+            throw new BadRequestException('Aynı ad veya kodla bir direktörlük zaten var.');
+        }
+        throw e;
+    }
+
+    /** Denetim kaydı ana işlemi düşürmez (fire-and-forget deseni). */
+    private async audit(userId: string | undefined, action: string, entityId: string, oldValue?: unknown, newValue?: unknown) {
+        if (!userId) return;
+        await this.prisma.auditLog.create({
+            data: { userId, action, entityType: 'Directorate', entityId, oldValue: oldValue as Prisma.InputJsonValue, newValue: newValue as Prisma.InputJsonValue },
+        }).catch(() => undefined);
     }
 }

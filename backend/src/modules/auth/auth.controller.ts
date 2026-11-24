@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { LoginDto, RegisterDto, RefreshTokenDto, UpdateProfileDto, ChangePasswordDto } from './dto';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Public, Roles } from '../../common/decorators';
+import { LogoutDto } from '../../common/dto/misc-bodies.dto';
 
 // Hassas auth route'ları için sıkı rate limit — brute-force koruması (CLAUDE.md önerisi: 5 istek/60sn).
 // Test ortamında (jest NODE_ENV=test) devre dışı — çok sayıda fixture login'i 429'a takılmasın.
@@ -49,7 +50,7 @@ export class AuthController {
     @Post('logout')
     @UseGuards(JwtAuthGuard)
     @HttpCode(HttpStatus.OK)
-    async logout(@Req() req: Request & { user: { id: string } }, @Body() body: { refreshToken?: string }) {
+    async logout(@Req() req: Request & { user: { id: string } }, @Body() body: LogoutDto) {
         await this.authService.logout(req.user.id, body.refreshToken);
         return { message: 'Logged out successfully' };
     }

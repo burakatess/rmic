@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma';
+import { definedOnly, toDateField } from '../../common/util/dto-mapping';
+import { CreateAuditExecutionDto, CreateAuditPlanDto, UpdateAuditExecutionDto, UpdateAuditPlanDto } from './dto/audit-plan.dto';
 import { nextFindingNo, nextActionNo, nextFollowUpNo } from '../../common/util/sequential-id';
 import { projectActionStatus, projectFindingStatus, projectFollowUpStatus } from '../../common/workflow/workflow-projection';
 import { personFieldWhere } from '../../common/util/person-filter';
@@ -113,14 +115,32 @@ export class AuditsService {
         return { ...rest, totalFindings, openFindings, actionStatus, ...(includeExecutions ? { executions: executionsSummary } : {}) };
     }
 
-    async createPlan(data: any, userId: string) {
+    async createPlan(data: CreateAuditPlanDto, userId: string) {
         const auditCode = `AP-${data.year}-${(await this.nextPlanSequence(data.year)).toString().padStart(3, '0')}`;
-        const { auditCode: _ignored, ...rest } = data;
-        const plan = await this.prisma.auditPlan.create({ data: { ...rest, planId: auditCode } });
+        const plan = await this.prisma.auditPlan.create({
+            data: {
+                ...this.auditPlanData(data),
+                name: data.name, year: data.year, periodType: data.periodType, objectives: data.objectives, scope: data.scope,
+                planId: auditCode,
+            } as Prisma.AuditPlanUncheckedCreateInput,
+        });
         await this.prisma.auditLog.create({
             data: { userId, action: 'CREATE', entityType: 'AuditPlan', entityId: plan.id, newValue: plan },
         });
         return plan;
+    }
+
+    /** DTO → Prisma (tarih dönüşümü; null/'' temizler, undefined dokunmaz; zorunlu alanlara null yazılmaz). */
+    private auditPlanData(d: UpdateAuditPlanDto) {
+        const { plannedStartDate, plannedEndDate, draftReportDate, finalReportDate, name, year, periodType, objectives, scope, status, phase, priority, ...rest } = d;
+        return definedOnly({
+            ...rest,
+            name: name ?? undefined, year: year ?? undefined, periodType: periodType ?? undefined,
+            objectives: objectives ?? undefined, scope: scope ?? undefined,
+            status: status ?? undefined, phase: phase ?? undefined, priority: priority ?? undefined,
+            plannedStartDate: toDateField(plannedStartDate), plannedEndDate: toDateField(plannedEndDate),
+            draftReportDate: toDateField(draftReportDate), finalReportDate: toDateField(finalReportDate),
+        });
     }
 
     private async nextPlanSequence(year: number): Promise<number> {
@@ -134,11 +154,12 @@ export class AuditsService {
         return isNaN(n) ? 1 : n + 1;
     }
 
-    async updatePlan(id: string, data: any, userId: string) {
-        const { auditCode, totalFindings, openFindings, actionStatus, ...rest } = data;
-        const plan = await this.prisma.auditPlan.update({ where: { id }, data: rest });
+    async updatePlan(id: string, data: UpdateAuditPlanDto, userId: string) {
+        const existing = await this.prisma.auditPlan.findUnique({ where: { id } });
+        if (!existing) throw new NotFoundException('Denetim planı bulunamadı');
+        const plan = await this.prisma.auditPlan.update({ where: { id }, data: this.auditPlanData(data) as Prisma.AuditPlanUncheckedUpdateInput });
         await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'AuditPlan', entityId: id, newValue: plan },
+            data: { userId, action: 'UPDATE', entityType: 'AuditPlan', entityId: id, oldValue: existing, newValue: plan },
         });
         return plan;
     }
@@ -180,23 +201,47 @@ export class AuditsService {
         return isNaN(n) ? 1 : n + 1;
     }
 
-    async createExecution(data: any, userId: string) {
-        const year = new Date(data.startDate || Date.now()).getFullYear();
+    async createExecution(data: CreateAuditExecutionDto, userId: string) {
+        const plan = await this.prisma.auditPlan.findUnique({ where: { id: data.auditPlanId }, select: { id: true } });
+        if (!plan) throw new BadRequestException('Geçersiz denetim planı: seçilen plan bulunamadı');
+        const startDate = toDateField(data.startDate)!;
+        const year = startDate.getFullYear();
         const executionId = `AE-${year}-${(await this.nextExecutionSequence(year)).toString().padStart(3, '0')}`;
-        const execution = await this.prisma.auditExecution.create({ data: { ...data, executionId } });
+        const execution = await this.prisma.auditExecution.create({
+            data: {
+                ...this.auditExecutionData(data),
+                auditPlanId: data.auditPlanId, auditor: data.auditor, startDate, executionId,
+            } as Prisma.AuditExecutionUncheckedCreateInput,
+        });
         await this.prisma.auditLog.create({
             data: { userId, action: 'CREATE', entityType: 'AuditExecution', entityId: execution.id, newValue: execution },
         });
         return execution;
     }
 
-    async updateExecution(id: string, data: any, userId: string) {
-        const { executionId, ...rest } = data;
-        const execution = await this.prisma.auditExecution.update({ where: { id }, data: rest });
+    async updateExecution(id: string, data: UpdateAuditExecutionDto, userId: string) {
+        const existing = await this.prisma.auditExecution.findUnique({ where: { id } });
+        if (!existing) throw new NotFoundException('Denetim yürütmesi bulunamadı');
+        const execution = await this.prisma.auditExecution.update({
+            where: { id },
+            data: definedOnly({
+                ...this.auditExecutionData(data),
+                auditor: data.auditor ?? undefined,
+                startDate: data.startDate ? toDateField(data.startDate)! : undefined,
+            }) as Prisma.AuditExecutionUncheckedUpdateInput,
+        });
         await this.prisma.auditLog.create({
-            data: { userId, action: 'UPDATE', entityType: 'AuditExecution', entityId: id, newValue: execution },
+            data: { userId, action: 'UPDATE', entityType: 'AuditExecution', entityId: id, oldValue: existing, newValue: execution },
         });
         return execution;
+    }
+
+    private auditExecutionData(d: UpdateAuditExecutionDto) {
+        return definedOnly({
+            endDate: toDateField(d.endDate),
+            status: d.status ?? undefined, progress: d.progress ?? undefined, workpapers: d.workpapers ?? undefined,
+            controlTests: d.controlTests === undefined ? undefined : (d.controlTests as unknown as Prisma.InputJsonValue),
+        });
     }
 
     // ─── Findings ────────────────────────────────────────────────────────────
@@ -2603,12 +2648,20 @@ export class AuditsService {
     // ─── FindingStatusLog (Append-only Güncel Durum) ──────────────────────────
 
     async appendStatusLog(findingId: string, text: string, authorId: string, authorName?: string, followUpId?: string, db: PrismaLike = this.prisma) {
+        // Yazar adı istemciden değil kullanıcı kaydından (kimlik kuralı); sistem çağrıları ad verebilir.
+        let resolvedName = authorName ?? null;
+        if (!resolvedName) {
+            try {
+                const u = await db.user.findUnique({ where: { id: authorId }, select: { firstName: true, lastName: true } });
+                resolvedName = u ? `${u.firstName} ${u.lastName}`.trim() : null;
+            } catch { resolvedName = null; }
+        }
         return db.findingStatusLog.create({
             data: {
                 findingId,
                 text,
                 authorId,
-                authorName: authorName || authorId,
+                authorName: resolvedName || authorId,
                 followUpId: followUpId || null,
             },
         });

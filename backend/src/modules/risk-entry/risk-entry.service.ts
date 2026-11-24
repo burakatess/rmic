@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { RiskEntryRecordType, RiskEntryStatus, RiskEntryLevel, ControlEffectivenessLevel, RiskTreatmentOption } from '@prisma/client';
+import { Prisma, RiskEntryRecordType, RiskEntryStatus, RiskEntryLevel, ControlEffectivenessLevel, RiskTreatmentOption } from '@prisma/client';
+import { definedOnly, toDateField } from '../../common/util/dto-mapping';
+import { CreateRiskEntryDto, UpdateRiskEntryDto } from './dto/risk-entry.dto';
 
 @Injectable()
 export class RiskEntryService {
@@ -120,14 +122,16 @@ export class RiskEntryService {
     }
 
     async findOne(id: string) {
-        return this.prisma.riskEntry.findUnique({ where: { id } });
+        const entry = await this.prisma.riskEntry.findUnique({ where: { id } });
+        if (!entry) throw new NotFoundException('Risk kaydı bulunamadı');
+        return entry;
     }
 
-    async create(data: any, userId: string) {
+    async create(data: CreateRiskEntryDto, userId: string) {
         const riskId = await this.generateRiskId();
         const calculated = this.calculateFields(data);
 
-        return this.prisma.riskEntry.create({
+        const created = await this.prisma.riskEntry.create({
             data: {
                 riskId,
                 kayitId: data.kayitId || riskId,
@@ -148,60 +152,65 @@ export class RiskEntryService {
                 olasilik: data.olasilik,
                 butunlesikKontrolPuani: data.butunlesikKontrolPuani,
                 riskIsleme: data.riskIsleme,
-                mutabakatTarihi: data.mutabakatTarihi ? new Date(data.mutabakatTarihi) : null,
+                mutabakatTarihi: toDateField(data.mutabakatTarihi) ?? null,
                 riskSorumlusu: data.riskSorumlusu,
                 atanan: data.atanan,
                 olusturan: userId,
                 kaydiAcan: userId,
                 ...calculated,
             },
-        });
+        }).catch(e => this.rethrowUnique(e));
+        await this.prisma.auditLog.create({ data: { userId, action: 'CREATE', entityType: 'RiskEntry', entityId: created.id, newValue: { riskId, kayitId: created.kayitId } } }).catch(() => undefined);
+        return created;
     }
 
-    async update(id: string, data: any, userId: string) {
-        const calculated = this.calculateFields(data);
+    /**
+     * Kısmi güncelleme: gönderilmeyen alan DOKUNULMAZ (önceden mutabakat tarihi vb. null'a
+     * çekiliyordu). Hesaplanan skorlar mevcut kayıtla birleştirilmiş değerlerden üretilir.
+     */
+    async update(id: string, data: UpdateRiskEntryDto, userId: string) {
+        const existing = await this.prisma.riskEntry.findUnique({ where: { id } });
+        if (!existing) throw new NotFoundException('Risk kaydı bulunamadı');
+        const { mutabakatTarihi, ...rest } = data;
+        const patch = definedOnly({ ...rest, mutabakatTarihi: toDateField(mutabakatTarihi) });
+        const calculated = this.calculateFields({ ...existing, ...patch });
 
-        return this.prisma.riskEntry.update({
+        const updated = await this.prisma.riskEntry.update({
             where: { id },
-            data: {
-                kayitTipi: data.kayitTipi,
-                riskStatus: data.riskStatus,
-                riskSahibi: data.riskSahibi,
-                surec: data.surec,
-                altSurec: data.altSurec,
-                riskTanimi: data.riskTanimi,
-                flagForIT: data.flagForIT,
-                finansalEtki: data.finansalEtki,
-                itibarEtkisi: data.itibarEtkisi,
-                regulasyonEtkisi: data.regulasyonEtkisi,
-                musteriEtkisi: data.musteriEtkisi,
-                gizlilikEtkisi: data.gizlilikEtkisi,
-                butunlukEtkisi: data.butunlukEtkisi,
-                erisebilirlikEtkisi: data.erisebilirlikEtkisi,
-                olasilik: data.olasilik,
-                butunlesikKontrolPuani: data.butunlesikKontrolPuani,
-                riskIsleme: data.riskIsleme,
-                mutabakatTarihi: data.mutabakatTarihi ? new Date(data.mutabakatTarihi) : null,
-                riskSorumlusu: data.riskSorumlusu,
-                atanan: data.atanan,
-                version: { increment: 1 },
-                ...calculated,
-            },
-        });
+            data: { ...patch, version: { increment: 1 }, ...calculated },
+        }).catch(e => this.rethrowUnique(e));
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'UPDATE', entityType: 'RiskEntry', entityId: id, oldValue: { version: existing.version, dogalRiskPuani: existing.dogalRiskPuani, kalintiRiskPuani: existing.kalintiRiskPuani }, newValue: { ...(patch as object), version: updated.version } as Prisma.InputJsonValue },
+        }).catch(() => undefined);
+        return updated;
     }
 
-    async delete(id: string) {
-        return this.prisma.riskEntry.delete({ where: { id } });
+    async delete(id: string, userId?: string) {
+        const existing = await this.prisma.riskEntry.findUnique({ where: { id } });
+        if (!existing) throw new NotFoundException('Risk kaydı bulunamadı');
+        await this.prisma.riskEntry.delete({ where: { id } });
+        if (userId) await this.prisma.auditLog.create({ data: { userId, action: 'DELETE', entityType: 'RiskEntry', entityId: id, oldValue: { riskId: existing.riskId, kayitId: existing.kayitId } } }).catch(() => undefined);
+        return { message: 'Risk kaydı silindi' };
     }
 
-    async bulkCreate(entries: any[], userId: string) {
+    /** kayitId tekil — Prisma P2002 okunur 400 olarak döner. */
+    private rethrowUnique(e: unknown): never {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+            throw new BadRequestException('Bu kayıt ID ile bir risk kaydı zaten var.');
+        }
+        throw e;
+    }
+
+    async bulkCreate(entries: CreateRiskEntryDto[], userId: string) {
         const results = [];
         for (const entry of entries) {
             try {
                 const created = await this.create(entry, userId);
                 results.push({ success: true, data: created });
             } catch (error) {
-                results.push({ success: false, error: (error as Error).message, data: entry });
+                // İç hata mesajı istemciye sızdırılmaz; okunur Nest istisnaları korunur.
+                const message = error instanceof BadRequestException ? error.message : 'Kayıt oluşturulamadı';
+                results.push({ success: false, error: message, data: entry });
             }
         }
         return results;

@@ -13,6 +13,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ComplianceService } from './compliance.service';
 import { Roles, CurrentUser } from '../../common/decorators';
 import { RolesGuard } from '../../common/guards';
+import { CreateArticleDto, CreateRegulationDto, UpdateRegulationDto } from '../../common/dto/misc-bodies.dto';
 
 @ApiTags('Compliance')
 @ApiBearerAuth('JWT-Auth')
@@ -35,7 +36,7 @@ export class ComplianceController {
     @UseGuards(RolesGuard)
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
     async createRegulation(
-        @Body() body: { code: string; name: string; description?: string },
+        @Body() body: CreateRegulationDto,
     ) {
         return this.complianceService.createRegulation(body);
     }
@@ -45,7 +46,7 @@ export class ComplianceController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
     async updateRegulation(
         @Param('id') id: string,
-        @Body() body: { code?: string; name?: string; description?: string; isActive?: boolean },
+        @Body() body: UpdateRegulationDto,
     ) {
         return this.complianceService.updateRegulation(id, body);
     }
@@ -70,7 +71,7 @@ export class ComplianceController {
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
     async createArticle(
         @Param('id') regulationId: string,
-        @Body() body: { articleCode: string; title: string; description: string },
+        @Body() body: CreateArticleDto,
     ) {
         return this.complianceService.createArticle({
             regulationId,

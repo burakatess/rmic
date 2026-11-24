@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { TestResult, ControlEffectivenessLevel } from '@prisma/client';
+import { ControlEffectivenessLevel } from '@prisma/client';
+import { toDateField } from '../../common/util/dto-mapping';
+import { CreateRiskManagementControlDto, CreateRmControlTestDto, UpdateRiskManagementControlDto } from './dto/risk-management-control.dto';
 
 @Injectable()
 export class RiskManagementControlsService {
@@ -140,7 +142,7 @@ export class RiskManagementControlsService {
         return control;
     }
 
-    async create(data: any, userId: string) {
+    async create(data: CreateRiskManagementControlDto, userId: string) {
         const controlCode = await this.generateControlCode();
         const controlScore = this.calculateControlScore({
             effectiveness: data.effectiveness || 3,
@@ -148,7 +150,7 @@ export class RiskManagementControlsService {
             automationLevel: data.automationLevel || 3,
         });
 
-        return this.prisma.riskManagementControl.create({
+        const created = await this.prisma.riskManagementControl.create({
             data: {
                 controlCode,
                 name: data.name,
@@ -161,9 +163,11 @@ export class RiskManagementControlsService {
                 isActive: data.isActive ?? true,
             },
         });
+        await this.prisma.auditLog.create({ data: { userId, action: 'CREATE', entityType: 'RiskManagementControl', entityId: created.id, newValue: { controlCode, name: created.name } } }).catch(() => undefined);
+        return created;
     }
 
-    async update(id: string, data: any, userId: string) {
+    async update(id: string, data: UpdateRiskManagementControlDto, userId: string) {
         const existing = await this.findOne(id);
 
         const controlScore = this.calculateControlScore({
@@ -172,7 +176,7 @@ export class RiskManagementControlsService {
             automationLevel: data.automationLevel ?? existing.automationLevel,
         });
 
-        return this.prisma.riskManagementControl.update({
+        const updated = await this.prisma.riskManagementControl.update({
             where: { id },
             data: {
                 name: data.name,
@@ -184,11 +188,17 @@ export class RiskManagementControlsService {
                 isActive: data.isActive,
             },
         });
+        await this.prisma.auditLog.create({
+            data: { userId, action: 'UPDATE', entityType: 'RiskManagementControl', entityId: id, oldValue: { effectiveness: existing.effectiveness, frequency: existing.frequency, automationLevel: existing.automationLevel, isActive: existing.isActive }, newValue: { ...data, controlScore } as object },
+        }).catch(() => undefined);
+        return updated;
     }
 
-    async delete(id: string) {
-        await this.findOne(id); // Check exists
-        return this.prisma.riskManagementControl.delete({ where: { id } });
+    async delete(id: string, userId?: string) {
+        const existing = await this.findOne(id); // Check exists
+        const deleted = await this.prisma.riskManagementControl.delete({ where: { id } });
+        if (userId) await this.prisma.auditLog.create({ data: { userId, action: 'DELETE', entityType: 'RiskManagementControl', entityId: id, oldValue: { controlCode: existing.controlCode, name: existing.name } } }).catch(() => undefined);
+        return deleted;
     }
 
     // Risk Mapping Operations
@@ -299,18 +309,21 @@ export class RiskManagementControlsService {
     }
 
     // Test operations
-    async createTest(controlId: string, data: any, userId: string) {
+    async createTest(controlId: string, data: CreateRmControlTestDto, userId: string) {
         await this.findOne(controlId);
 
-        return this.prisma.rMControlTest.create({
+        // Testi yapan oturumdaki kullanıcıdır (istemciden "tester" kabul edilmez).
+        const test = await this.prisma.rMControlTest.create({
             data: {
                 controlId,
-                testDate: data.testDate ? new Date(data.testDate) : new Date(),
-                tester: data.tester || userId,
-                result: data.result as TestResult,
+                testDate: toDateField(data.testDate) ?? new Date(),
+                tester: userId,
+                result: data.result,
                 notes: data.notes,
             },
         });
+        await this.prisma.auditLog.create({ data: { userId, action: 'CREATE', entityType: 'RMControlTest', entityId: test.id, newValue: { controlId, result: test.result } } }).catch(() => undefined);
+        return test;
     }
 
     async getTests(controlId: string) {

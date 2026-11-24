@@ -3,6 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { RiskProposalsService } from './risk-proposals.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles, CurrentUser } from '../../common/decorators';
+import { CreateRiskProposalDto, RejectProposalDto } from '../../common/dto/misc-bodies.dto';
 
 @ApiTags('Risk Proposals')
 @ApiBearerAuth('JWT-Auth')
@@ -14,7 +15,7 @@ export class RiskProposalsController {
     // Herhangi bir kullanıcı (bulgu görebilen) risk tanımı önerebilir
     @Post()
     async create(
-        @Body() dto: { findingId?: string; directorateId?: string; riskTanimi: string },
+        @Body() dto: CreateRiskProposalDto,
         @CurrentUser('id') userId: string,
     ) {
         return this.service.create(dto, userId);
@@ -46,9 +47,9 @@ export class RiskProposalsController {
     @Roles('SYSTEM_ADMIN')
     async reject(
         @Param('id') id: string,
-        @Body('reviewNote') reviewNote: string,
+        @Body() body: RejectProposalDto,
         @CurrentUser('id') userId: string,
     ) {
-        return this.service.reject(id, reviewNote, userId);
+        return this.service.reject(id, body.reviewNote ?? '', userId);
     }
 }
