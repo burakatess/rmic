@@ -20,6 +20,8 @@ export const SYSTEM_ROLES: { name: string; description?: string; permissions: st
             // Riskin direktörlüğünü değiştirmek erişimi etkiler → ayrı izin + denetim kaydı.
             'risk:directorate:change',
             'ai:view', 'ai:run', 'ai:accept', 'ai:review', 'ai:admin',
+            // Doğal dil sorgu + kaynak gizlilik seviyesi (rol adı yerine izin): RCM tüm seviyeleri görür.
+            'ai:query', 'ai:source:restricted', 'ai:source:confidential',
         ],
     },
     {
@@ -35,10 +37,11 @@ export const SYSTEM_ROLES: { name: string; description?: string; permissions: st
             // ve yazma/onay/export izinleri bundan bağımsızdır.
             'scope:org', 'evidence:view',
             'ai:view', 'ai:run', 'ai:accept',
+            'ai:query', 'ai:source:restricted',
         ],
     },
     // Risk modülünde kurum geneli; test/bulgu/aksiyon/takipte birim + doğrudan atama.
-    { name: 'RISK_ANALYST', description: 'Risk Analisti', permissions: ['dashboard:view', 'finding:view', 'control:view', 'scope:org:risk', 'evidence:view'] },
+    { name: 'RISK_ANALYST', description: 'Risk Analisti', permissions: ['dashboard:view', 'finding:view', 'control:view', 'scope:org:risk', 'evidence:view', 'ai:query'] },
     // AUDITEE (denetlenen birim): yalnızca kendisine atanmış kayıtların raporları.
     // Kurum geneli özet / dışa aktarma KAPALI.
     // Kapsam: DirectorateMembership birimleri + doğrudan atanan işler (çoklu üyelik yönetici yetkisi VERMEZ).
@@ -49,13 +52,15 @@ export const SYSTEM_ROLES: { name: string; description?: string; permissions: st
     { name: 'VIEWER', description: 'Görüntüleyici', permissions: ['dashboard:view', 'finding:view', 'control:view', 'action:view'] },
     {
         name: 'IKS_EMPLOYEE', description: 'İç Kontrol Sistemi Çalışanı',
-        permissions: ['dashboard:view', 'control:view', 'finding:view', 'action:view', 'test:execute'],
+        permissions: ['dashboard:view', 'control:view', 'finding:view', 'action:view', 'test:execute', 'ai:query'],
     },
     {
         name: 'IKS_MANAGER', description: 'İç Kontrol Sistemi Yöneticisi',
         permissions: [
             'dashboard:view', 'control:view', 'finding:view', 'action:view', 'test:execute',
             'finding:update', 'finding:create', 'action:update', 'action:create', 'report:view',
+            // Önceden rol adıyla veriliyordu (AI_EVAL_ROLES/AI_QUERY_ROLES + KISITLI seviye): izin karşılıkları.
+            'ai:run', 'ai:query', 'ai:source:restricted',
         ],
     },
 ];

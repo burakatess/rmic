@@ -58,15 +58,7 @@ export const AI_TEST_ROLES = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR']
 // 2. kontrolcü inceleme copilot'u — onay verebilen roller (bkz. approveTest).
 export const AI_REVIEW_ROLES = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER'] as const;
 
-// Doğal dil sorgu — salt okunur özet veri; geniş erişim.
-export const AI_QUERY_ROLES = [
-    'SYSTEM_ADMIN',
-    'RISK_CONTROL_MANAGER',
-    'AUDITOR',
-    'RISK_ANALYST',
-    'IKS_MANAGER',
-    'IKS_EMPLOYEE',
-] as const;
-
-// Kontrol & Kanıt Değerlendirme — kontrol/kanıt inceleyebilen roller.
-export const AI_EVAL_ROLES = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR', 'IKS_MANAGER'] as const;
+// Doğal dil sorgu ve Kontrol & Kanıt Değerlendirme erişimi artık ROL ADIYLA değil İZİNLE verilir:
+//   ai:query (doğal dil sorgu), ai:run (kontrol & kanıt değerlendirme + Kaynak Kataloğu okuma),
+//   ai:source:restricted / ai:source:confidential (kaynak gizlilik seviyesi).
+// Bkz. common/permissions/permission-catalog.ts ve prisma/system-roles.ts.

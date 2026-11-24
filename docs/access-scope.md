@@ -75,14 +75,14 @@ Rol adı listesi kaldırıldı (`backend/src/common/services/controller-eligibil
 
 ## IKS_MANAGER / IKS_EMPLOYEE uyumluluk envanteri
 
-Bu turda rol silinmedi veya birleştirilmedi. İki rolde de kullanıcı yok, ancak roller kodda etkin olarak kullanılıyor:
+Roller silinmedi veya birleştirilmedi. **2026-11: AI ve rapor kurallarındaki rol adı bağımlılıkları İZİNLERE taşındı** (aşağıdaki tablo güncel durumu gösterir; ayrıntı ve geçiş: `migrations/20261123100000_ai_permissions_from_role_names`):
 
 | Yer | Kullanım | Risk |
 |---|---|---|
 | ~~`annual-plan.service.ts` `ALWAYS_ELIGIBLE_ROLES`~~ | **Kaldırıldı** — uygunluk izin tabanlı (`controller-eligibility.ts`); AUDITOR ve RCM artık dışlanmıyor. IKS rolleri `test:execute` izniyle uygun kalır (uyumluluk) | — |
-| `backend/src/modules/ai/ai.constants.ts:67-72` | AI rollerinde ve `AI_EVAL_ROLES` içinde IKS_MANAGER var | Rol kaldırılırsa AI erişim listeleri değişir |
-| `backend/src/modules/ai/ai-eval.service.ts:735`, `library.controller.ts:27` | AUDITOR ve IKS_MANAGER için RESTRICTED gizlilik seviyesi | Rol adına bağlı gizlilik kuralı |
-| `backend/src/modules/reports/reports.controller.ts:14` | `REPORT_ROLES` içinde IKS_MANAGER | — |
+| ~~`ai.constants.ts` `AI_EVAL_ROLES` / `AI_QUERY_ROLES`~~ | **Kaldırıldı** — değerlendirme ve Kaynak Kataloğu okuma `ai:run`, doğal dil sorgu `ai:query` iznine bağlandı. Eski erişim korunarak IKS_MANAGER'a `ai:run`, ilgili rollere `ai:query` verildi | — |
+| ~~`ai-eval.service.ts`, `library.controller.ts` gizlilik seviyesi~~ | **Kaldırıldı** — `common/permissions/source-confidentiality.ts`: `ai:source:restricted` → KISITLI, `ai:source:confidential` → GİZLİ (`*` ve `ai:*` ikisini de kapsar). Katalog yönlendirmesi `ai:admin` | — |
+| ~~`reports.controller.ts` `REPORT_ROLES`~~ | **Kaldırıldı** — `report:view` izni zaten yeterliydi; özel roller de rapor görebilir (kurum geneli için `report:org`) | — |
 | `backend/prisma/seed-roles.ts`, `migrate-permissions.ts`, `system-roles.ts` | Rol tanımları ve izin göçü | `seed-roles.ts` farklı izin seti tanımlar; tekrar çalıştırılırsa davranışı denetlenmeli |
 | `backend/test/helpers/fixtures.ts:42`, `security.e2e-spec.ts:38` | Güvenlik e2e testi IKS_MANAGER kullanıcısıyla dar rapor kapsamını doğruluyor | Rol kaldırılırsa test yeniden yazılmalı |
 | `frontend/src/app/(dashboard)/profile/page.tsx:15-16` | Görünen rol etiketi | — |

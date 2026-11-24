@@ -16,7 +16,7 @@ async function main() {
         {
             name: 'IKS_EMPLOYEE',
             description: 'İç Kontrol Sistemi Çalışanı',
-            permissions: ['dashboard:view', 'control:view', 'finding:view', 'action:view', 'test:execute'],
+            permissions: ['dashboard:view', 'control:view', 'finding:view', 'action:view', 'test:execute', 'ai:query'],
         },
         {
             name: 'IKS_MANAGER',
@@ -24,6 +24,7 @@ async function main() {
             permissions: [
                 'dashboard:view', 'control:view', 'finding:view', 'action:view', 'test:execute',
                 'finding:update', 'finding:create', 'action:update', 'action:create', 'report:view',
+                'ai:run', 'ai:query', 'ai:source:restricted',
             ],
         },
     ];

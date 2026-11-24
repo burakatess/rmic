@@ -3,8 +3,8 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
-import { CurrentUser, Roles } from '../../common/decorators';
-import { AI_EVAL_ROLES } from '../ai/ai.constants';
+import { CurrentUser, RequirePermissions, Roles } from '../../common/decorators';
+import { maxConfidentialityFor, type Confidentiality } from '../../common/permissions/source-confidentiality';
 import { SourcesService } from './sources.service';
 import { MappingsService } from './mappings.service';
 import { CardsService } from './cards.service';
@@ -22,11 +22,9 @@ import { FlagReReviewDto } from '../../common/dto/misc-bodies.dto';
 const WRITE_ROLES = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER'] as const;
 const MAP_ROLES = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR'] as const;
 
-/** Rol → görülebilecek en yüksek gizlilik seviyesi (retrieval yetki filtresi). */
-function viewerScope(role: string): { maxConfidentiality: 'PUBLIC' | 'INTERNAL' | 'RESTRICTED' | 'CONFIDENTIAL' } {
-    if (role === 'SYSTEM_ADMIN' || role === 'RISK_CONTROL_MANAGER') return { maxConfidentiality: 'CONFIDENTIAL' };
-    if (role === 'AUDITOR' || role === 'IKS_MANAGER') return { maxConfidentiality: 'RESTRICTED' };
-    return { maxConfidentiality: 'INTERNAL' };
+/** İzinler → görülebilecek en yüksek gizlilik seviyesi (retrieval yetki filtresi; rol adı DEĞİL izin). */
+function viewerScope(permissions: string[]): { maxConfidentiality: Confidentiality } {
+    return { maxConfidentiality: maxConfidentialityFor(permissions) };
 }
 
 @ApiTags('Kaynak Kataloğu (Genişletilmiş Kütüphane)')
@@ -45,13 +43,13 @@ export class LibraryController {
 
     // ─── Kaynak / sürüm / birim ────────────────────────────────────────────
     @Get('sources')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     listSources(@Query('q') q?: string, @Query('kind') kind?: string, @Query('confidentiality') confidentiality?: string, @Query('includeArchived') includeArchived?: string) {
         return this.sources.list({ q, kind, confidentiality, includeArchived: includeArchived === 'true' });
     }
 
     @Get('sources/:id')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     getSource(@Param('id') id: string) {
         return this.sources.get(id);
     }
@@ -75,7 +73,7 @@ export class LibraryController {
     }
 
     @Get('versions/:id')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     getVersion(@Param('id') id: string) {
         return this.sources.getVersion(id);
     }
@@ -87,7 +85,7 @@ export class LibraryController {
     }
 
     @Get('versions/:a/diff/:b')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     diffVersions(@Param('a') a: string, @Param('b') b: string) {
         return this.sources.diffVersions(a, b);
     }
@@ -118,7 +116,7 @@ export class LibraryController {
 
     // ─── Hazırlık akışı (içerik incelemesi + kullanım hakkı — AYRI) ─────────
     @Get('versions/:id/readiness')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     readiness(@Param('id') id: string) {
         return this.sources.readiness(id);
     }
@@ -162,33 +160,33 @@ export class LibraryController {
     }
 
     @Get('versions/:id/index-jobs')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     indexJobs(@Param('id') id: string) {
         return this.retrieval.listIndexJobs(id);
     }
 
     /** MANUEL SEÇİM — embedding gerekmez. Onaylı + hak izinli + erişilebilir birimler. */
     @Get('unit-lookup')
-    @Roles(...AI_EVAL_ROLES)
-    unitLookup(@Query() dto: UnitLookupDto, @CurrentUser('role') role: string) {
-        return this.retrieval.lookupUnits(dto, viewerScope(role));
+    @RequirePermissions('ai:run')
+    unitLookup(@Query() dto: UnitLookupDto, @CurrentUser('permissions') permissions: string[]) {
+        return this.retrieval.lookupUnits(dto, viewerScope(permissions));
     }
 
     @Post('retrieval/search')
-    @Roles(...AI_EVAL_ROLES)
-    search(@Body() dto: RetrievalQueryDto, @CurrentUser('role') role: string) {
-        return this.retrieval.search(dto, viewerScope(role));
+    @RequirePermissions('ai:run')
+    search(@Body() dto: RetrievalQueryDto, @CurrentUser('permissions') permissions: string[]) {
+        return this.retrieval.search(dto, viewerScope(permissions));
     }
 
     @Post('retrieval/verify-citations')
-    @Roles(...AI_EVAL_ROLES)
-    verifyCitations(@Body() body: VerifyCitationsDto, @CurrentUser('role') role: string) {
-        return this.retrieval.verifyCitations(body.citations ?? [], viewerScope(role), body.sentUnitIds ?? []);
+    @RequirePermissions('ai:run')
+    verifyCitations(@Body() body: VerifyCitationsDto, @CurrentUser('permissions') permissions: string[]) {
+        return this.retrieval.verifyCitations(body.citations ?? [], viewerScope(permissions), body.sentUnitIds ?? []);
     }
 
     // ─── Eşleştirme ────────────────────────────────────────────────────────
     @Get('mappings')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     listMappings(
         @Query('controlId') controlId?: string,
         @Query('testCardId') testCardId?: string,
@@ -199,13 +197,13 @@ export class LibraryController {
     }
 
     @Get('versions/:id/mappings')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     versionMappings(@Param('id') id: string) {
         return this.mappings.listForVersion(id);
     }
 
     @Get('versions/:id/used-in-evaluations')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     usedInEvaluations(@Param('id') id: string) {
         return this.mappings.usedInEvaluations(id);
     }
@@ -236,13 +234,13 @@ export class LibraryController {
 
     // ─── Kontrol test kartları ─────────────────────────────────────────────
     @Get('test-cards')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     listTestCards(@Query('status') status?: string, @Query('topicNo') topicNo?: string) {
         return this.cards.listTestCards({ status, topicNo: topicNo ? Number(topicNo) : undefined });
     }
 
     @Get('test-cards/:id')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     getTestCard(@Param('id') id: string) {
         return this.cards.getTestCard(id);
     }
@@ -261,13 +259,13 @@ export class LibraryController {
 
     // ─── Süreç kapsam kartları ─────────────────────────────────────────────
     @Get('process-cards')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     listProcessCards(@Query('area') area?: string) {
         return this.cards.listProcessCards(area);
     }
 
     @Get('process-cards/:id')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     getProcessCard(@Param('id') id: string) {
         return this.cards.getProcessCard(id);
     }
@@ -286,7 +284,7 @@ export class LibraryController {
 
     // ─── Kanıt yeterliliği rehberi ─────────────────────────────────────────
     @Get('evidence-rules')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     listEvidenceRules(@Query('category') category?: string) {
         return this.cards.listEvidenceRules(category);
     }
@@ -299,7 +297,7 @@ export class LibraryController {
 
     // ─── Veri setleri / senaryolar ─────────────────────────────────────────
     @Get('datasets')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     listDatasets() {
         return this.datasets.listDatasets();
     }
@@ -311,7 +309,7 @@ export class LibraryController {
     }
 
     @Get('scenarios')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     listScenarios(
         @Query('datasetId') datasetId?: string,
         @Query('status') status?: string,
@@ -322,13 +320,13 @@ export class LibraryController {
     }
 
     @Get('scenarios/:id')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     getScenario(@Param('id') id: string) {
         return this.datasets.getScenario(id);
     }
 
     @Post('scenarios')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     upsertScenario(@Body() dto: UpsertScenarioDto, @CurrentUser('id') userId: string) {
         return this.datasets.upsertScenario(dto, userId);
     }
@@ -347,25 +345,25 @@ export class LibraryController {
 
     // ─── Kalite ────────────────────────────────────────────────────────────
     @Get('quality-runs')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     listQualityRuns(@Query('datasetId') datasetId?: string) {
         return this.quality.list(datasetId);
     }
 
     @Get('quality-runs/:id')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     getQualityRun(@Param('id') id: string) {
         return this.quality.get(id);
     }
 
     @Post('quality-runs')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     recordQualityRun(@Body() dto: QualityRunDto, @CurrentUser('id') userId: string) {
         return this.quality.record(dto, userId);
     }
 
     @Get('quality-runs/:a/compare/:b')
-    @Roles(...AI_EVAL_ROLES)
+    @RequirePermissions('ai:run')
     compareQualityRuns(@Param('a') a: string, @Param('b') b: string) {
         return this.quality.compare(a, b);
     }
