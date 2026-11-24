@@ -15,6 +15,7 @@ import { CreateFindingModal } from '@/components/modals/CreateFindingModal';
 import { FREQUENCY_LABELS } from '@/lib/control-labels';
 import ControlScopePanel from '@/components/controls/ControlScopePanel';
 import ControlHistoryPanel from '@/components/controls/ControlHistoryPanel';
+import { DeletionRequestButton } from '@/components/workflow/DeletionRequestButton';
 
 interface User {
     id?: string;
@@ -110,6 +111,10 @@ interface Control {
     nextTestDate: string;
     owner: User | null;
     inventoryStatus: 'ACTIVE' | 'PASSIVE';
+    /** Yönetici onaylı silme: bekleyen talep ve onaylanmış silme (kayıt korunur) */
+    deletionPending: boolean;
+    deletedAt: string | null;
+    deletionReason: string | null;
     linkedRisks: { id: string; riskId: string; name: string; inherent: number | null; residual: number | null; category: string | null }[];
     regulations: Array<{ id: string; articleCode: string; title: string; regulationCode: string; regulationName: string }>;
     linkedFindings: Finding[];
@@ -191,6 +196,8 @@ export default function ControlDetailPage() {
     const { user } = useAuth();
     // Backend @Roles('SYSTEM_ADMIN','RISK_CONTROL_MANAGER') ile aynı küme — düğme yalnız izinli kullanıcıya görünür.
     const canToggleStatus = user?.role?.name === 'SYSTEM_ADMIN' || user?.role?.name === 'RISK_CONTROL_MANAGER';
+    // Kontrol silme talebini kontrol oluşturabilen roller açar; karar yöneticide (sunucu da denetler).
+    const canRequestDelete = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR'].includes(user?.role?.name ?? '');
     const [statusConfirm, setStatusConfirm] = useState(false);
     const [statusBusy, setStatusBusy] = useState(false);
 
@@ -232,6 +239,9 @@ export default function ControlDetailPage() {
                         department: data.owner.department
                     } : null,
                     inventoryStatus: data.status === 'PASSIVE' ? 'PASSIVE' : 'ACTIVE',
+                    deletionPending: !!data.deletionRequestedAt && !data.deletedAt,
+                    deletedAt: data.deletedAt ?? null,
+                    deletionReason: data.deletionReason ?? null,
                     effectivenessStatus: String(data.effectivenessStatus || 'NOT_TESTED'),
                     lastTestDate: data.lastTestDate || '',
                     nextTestDate: data.nextTestDate || '',
@@ -409,6 +419,7 @@ export default function ControlDetailPage() {
                 badges={
                     <>
                         {effCfg && <StatusBadge variant={effCfg.variant}>{effCfg.label}</StatusBadge>}
+                        {control.deletedAt && <StatusBadge variant="critical">Silindi</StatusBadge>}
                         {control.inventoryStatus === 'PASSIVE' && <StatusBadge variant="neutral">Envanterde pasif</StatusBadge>}
                         {hasFinding && <StatusBadge variant="critical" dot>{openFindings.length} Açık Bulgu</StatusBadge>}
                     </>
@@ -420,7 +431,7 @@ export default function ControlDetailPage() {
                         {control.directorate && <span>Direktörlük: {control.directorate}</span>}
                     </>
                 }
-                actions={
+                actions={control.deletedAt ? undefined :
                     <>
                         <Button variant="outline" size="sm" onClick={() => router.push(`/controls/${params.id}/edit`)}
                             icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>}
@@ -432,12 +443,22 @@ export default function ControlDetailPage() {
                                 {control.inventoryStatus === 'ACTIVE' ? 'Pasifleştir' : 'Aktifleştir'}
                             </Button>
                         )}
+                        {canRequestDelete && (
+                            <DeletionRequestButton type="CONTROL" id={control.id} code={control.controlId} pending={control.deletionPending} onDone={() => fetchControlData(true)} />
+                        )}
                         <Button variant="primary" size="sm" onClick={() => router.push(`/controls/testing?search=${encodeURIComponent(control.controlId)}`)}>
                             Bu Kontrolün Testleri
                         </Button>
                     </>
                 }
             />
+
+            {control.deletedAt && (
+                <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                    <span className="font-semibold">Bu kontrol yönetici onayıyla silindi</span> ({new Date(control.deletedAt).toLocaleDateString('tr-TR')}); envanterde listelenmez, kayıt denetim için korunur.
+                    {control.deletionReason && <span className="block mt-1">Gerekçe: {control.deletionReason}</span>}
+                </div>
+            )}
 
             {/* Hızlı durum kartları */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">

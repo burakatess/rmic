@@ -27,7 +27,7 @@ export class WorkflowBoardQueryDto {
     @IsOptional() @Type(() => Number) @IsInt() @Min(2000) @Max(2100) year?: number;
 }
 
-export const DELETION_TYPES = ['CONTROL_TEST', 'PERIOD_CONTROL', 'FINDING', 'ACTION', 'FOLLOW_UP'] as const;
+export const DELETION_TYPES = ['CONTROL', 'CONTROL_TEST', 'PERIOD_CONTROL', 'FINDING', 'ACTION', 'FOLLOW_UP'] as const;
 
 export class DeletionRequestDto {
     @IsIn(DELETION_TYPES) entityType: typeof DELETION_TYPES[number];

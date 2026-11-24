@@ -68,7 +68,7 @@ export class SearchService {
                 select: { id: true, riskId: true, name: true, description: true }, take,
             }).then(rows => rows.map(r => this.result('risk', r.id, r.riskId, r.name, r.description, `/risks/${r.id}`))) : [],
             selected(GlobalSearchCategory.CONTROL) ? this.prisma.control.findMany({
-                where: { AND: [sControl], OR: [{ controlId: contains }, { name: contains }, { description: contains }, { directorateRel: { name: contains } }] },
+                where: { AND: [sControl, { deletedAt: null }], OR: [{ controlId: contains }, { name: contains }, { description: contains }, { directorateRel: { name: contains } }] },
                 select: { id: true, controlId: true, name: true, description: true, directorateRel: { select: { name: true } } }, take,
             }).then(rows => rows.map(r => this.result('control', r.id, r.controlId, r.name, this.context(r.description, r.directorateRel?.name), `/controls/${r.id}`))) : [],
             selected(GlobalSearchCategory.PERIOD_CONTROL) ? this.prisma.controlYearScope.findMany({

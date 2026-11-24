@@ -27,7 +27,8 @@ describe('SearchService', () => {
         db.control.findMany.mockResolvedValue([{ id: 'c1', controlId: 'BTK.0042', name: 'İşlem Kontrolü', description: 'İç süreç', directorateRel: null }]);
         const response = await service.search({ q: '  İşlem  ', category: 'control' as any, limit: 10 }, 'u1', ['control:view']);
         expect(db.control.findMany).toHaveBeenCalledWith(expect.objectContaining({
-            where: expect.objectContaining({ AND: [{ ownerId: 'u1' }] }),
+            // Silinmiş (yönetici onaylı) kontroller aramada çıkmaz.
+            where: expect.objectContaining({ AND: [{ ownerId: 'u1' }, { deletedAt: null }] }),
         }));
         expect(response.query).toBe('İşlem');
         expect(response.data[0]).toMatchObject({ code: 'BTK.0042', url: '/controls/c1' });

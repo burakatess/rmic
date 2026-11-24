@@ -10,6 +10,7 @@ import ImportControlModal from '@/components/modals/ImportControlModal';
 import ScopeAddModal from '@/components/modals/ScopeAddModal';
 import { PermissionGate } from '@/components/auth/AuthProvider';
 import { FREQUENCY_LABELS } from '@/lib/control-labels';
+import { DeletionRequestButton } from '@/components/workflow/DeletionRequestButton';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -29,7 +30,12 @@ interface Control {
     /** Bu yılın test uyumu (sunucu özeti) */
     tests: { year: number; planned: number; completed: number; overdue: number; nextPlannedDate: string | null };
     openFindingCount: number;
+    /** Bekleyen yönetici onaylı silme talebi */
+    deletionPending: boolean;
 }
+
+// Kontrol silme talebini kontrol oluşturabilen roller açar; kararı yönetici verir (sunucu da denetler).
+const CONTROL_DELETE_REQUESTERS = ['SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER', 'AUDITOR'];
 
 type TabKey = 'all' | 'active' | 'overdue' | 'findings' | 'mine';
 type SortKey = 'controlId' | 'name' | 'lastTestDate' | 'nextPlannedDate';
@@ -98,6 +104,7 @@ export default function ControlInventoryPage() {
     const router = useRouter();
     const { success, error: showError } = useToast();
     const { user: currentUser } = useAuth();
+    const canRequestDelete = CONTROL_DELETE_REQUESTERS.includes(currentUser?.role?.name ?? '');
 
     const [controls, setControls] = useState<Control[]>([]);
     const [loading, setLoading] = useState(true);
@@ -137,6 +144,7 @@ export default function ControlInventoryPage() {
                     overdue: c.testSummary?.overdue ?? 0, nextPlannedDate: c.testSummary?.nextPlannedDate ?? null,
                 },
                 openFindingCount: c.openFindingCount ?? 0,
+                deletionPending: !!c.deletionRequestedAt,
             })));
         } catch (err) {
             console.error(err);
@@ -351,7 +359,12 @@ export default function ControlInventoryPage() {
                                             {eff && <div className={`mt-1 w-fit text-[10.5px] font-semibold border rounded px-1.5 py-0.5 ${eff.cls}`}>{eff.label}</div>}
                                         </td>
                                         <td className="px-3 py-3 text-right" onClick={e => e.stopPropagation()}>
-                                            <Link href={`/controls/${c.id}/edit`} title="Düzenle" className="text-[12px] font-medium text-slate-400 hover:text-blue-600">Düzenle</Link>
+                                            <div className="flex items-center justify-end gap-2">
+                                                <Link href={`/controls/${c.id}/edit`} title="Düzenle" className="text-[12px] font-medium text-slate-400 hover:text-blue-600">Düzenle</Link>
+                                                {canRequestDelete && (
+                                                    <DeletionRequestButton type="CONTROL" id={c.id} code={c.controlId} pending={c.deletionPending} onDone={fetchControls} size="xs" variant="ghost" />
+                                                )}
+                                            </div>
                                         </td>
                                     </tr>
                                 );
