@@ -13,6 +13,7 @@ import { useAuth } from '@/components/auth';
 import { useSearchParams } from 'next/navigation';
 import { WorkflowApprovalsPanel } from '@/components/approvals/WorkflowApprovalsPanel';
 import { DeletionRequestsPanel } from '@/components/approvals/DeletionRequestsPanel';
+import { MyRequestsPanel } from '@/components/approvals/MyRequestsPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -243,7 +244,10 @@ function ApprovalsContent() {
     const [loading, setLoading] = useState(true);
     const [detailId, setDetailId] = useState<string | null>(null);
     const searchParams = useSearchParams();
-    const [tab, setTab] = useState<'workflow' | 'tests' | 'deletions'>(searchParams.get('tab') === 'tests' ? 'tests' : searchParams.get('tab') === 'deletions' ? 'deletions' : 'workflow');
+    const initialTab = searchParams.get('tab');
+    const [tab, setTab] = useState<'workflow' | 'tests' | 'deletions' | 'mine'>(
+        initialTab === 'tests' || initialTab === 'deletions' || initialTab === 'mine' ? initialTab : 'workflow');
+    const [mineCount, setMineCount] = useState<number | null>(null);
     const [deletionCount, setDeletionCount] = useState<number | null>(null);
     const [workflowCount, setWorkflowCount] = useState<number | null>(null);
 
@@ -371,12 +375,13 @@ function ApprovalsContent() {
     return (
         <PageShell>
             <PageHeader
-                title="Bekleyen Onaylar"
-                description="Üzerinizde bekleyen ikinci kontrolcü onaylarını görüntüleyin ve karar verin"
-                breadcrumbs={[{ label: 'Onaylarım' }]}
+                title="Talepler & Onaylar"
+                description="Onayınıza gelen kayıtlar ve sizin gönderdiğiniz talepler — kimin onayında olduğu ve geri çekme burada"
+                breadcrumbs={[{ label: 'Talepler & Onaylar' }]}
             />
 
-            <div role="tablist" aria-label="Onay türü" className="flex gap-1 border-b border-slate-200">
+            <div role="tablist" aria-label="Talep ve onay türü" className="flex flex-wrap items-end gap-1 border-b border-slate-200">
+                <span className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Onayıma gelenler</span>
                 {([['workflow', 'Aksiyon & Takip', workflowCount], ['tests', 'Kontrol Testleri', loading ? null : items.length], ['deletions', 'Silme Talepleri', deletionCount]] as const).map(([key, label, count]) => (
                     <button key={key} role="tab" type="button" aria-selected={tab === key}
                         onClick={() => { setTab(key); window.history.replaceState(null, '', key === 'workflow' ? window.location.pathname : `?tab=${key}`); }}
@@ -384,10 +389,17 @@ function ApprovalsContent() {
                         {label}{count !== null ? ` (${count})` : ''}
                     </button>
                 ))}
+                <span className="ml-3 px-2 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400 border-l border-slate-200">Gönderdiklerim</span>
+                <button role="tab" type="button" aria-selected={tab === 'mine'} data-testid="tab-mine"
+                    onClick={() => { setTab('mine'); window.history.replaceState(null, '', '?tab=mine'); }}
+                    className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px ${tab === 'mine' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                    Taleplerim{mineCount !== null ? ` (${mineCount})` : ''}
+                </button>
             </div>
 
             {tab === 'workflow' && <WorkflowApprovalsPanel onCountChange={setWorkflowCount} />}
             {tab === 'deletions' && <DeletionRequestsPanel onCountChange={setDeletionCount} />}
+            {tab === 'mine' && <MyRequestsPanel onCountChange={setMineCount} />}
 
             {tab === 'tests' && (<>
 

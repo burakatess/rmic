@@ -2,7 +2,7 @@ import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, IsDateString, IsNotEmpty } from 'class-validator';
 
 export const ENTITY_TYPE_VALUES = ['CONTROL_TEST', 'FOLLOW_UP', 'FINDING', 'PERIOD_CONTROL', 'ACTION'] as const;
-export const ACTION_VALUES = ['START', 'COMPLETE', 'APPROVE', 'RETURN', 'REVERT', 'CANCEL', 'REOPEN'] as const;
+export const ACTION_VALUES = ['START', 'COMPLETE', 'APPROVE', 'RETURN', 'REVERT', 'CANCEL', 'REOPEN', 'WITHDRAW'] as const;
 export const STAGE_VALUES = ['BEKLIYOR', 'DEVAM_EDIYOR', 'TAMAMLANDI', 'ONAYLANDI'] as const;
 
 export class WorkflowTransitionDto {

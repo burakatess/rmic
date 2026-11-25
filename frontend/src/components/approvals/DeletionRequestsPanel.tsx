@@ -35,6 +35,17 @@ export function DeletionRequestsPanel({ onCountChange }: { onCountChange?: (n: n
     }, [onCountChange]);
     useEffect(() => { load(); }, [load]);
 
+    const withdraw = async (r: DeletionRequestRow) => {
+        setBusy(r.id);
+        try {
+            await api.withdrawDeletion(r.type, r.id);
+            success('Geri çekildi', `${r.code} silme talebi geri çekildi; kayıt mevcut haliyle kaldı.`);
+            load();
+        } catch (e) {
+            showError('Geri çekilemedi', (e as Error).message);
+        } finally { setBusy(null); }
+    };
+
     const decide = async (r: DeletionRequestRow, approve: boolean, why?: string) => {
         setBusy(r.id);
         try {
@@ -53,7 +64,7 @@ export function DeletionRequestsPanel({ onCountChange }: { onCountChange?: (n: n
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden" data-testid="deletion-requests">
             <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500">
-                    <tr><th className="px-4 py-2.5">Kayıt</th><th className="px-4 py-2.5">Gerekçe</th><th className="px-4 py-2.5">Talep eden</th><th className="px-4 py-2.5">Tarih</th><th className="px-4 py-2.5" /></tr>
+                    <tr><th className="px-4 py-2.5">Kayıt</th><th className="px-4 py-2.5">Gerekçe</th><th className="px-4 py-2.5">Talep eden</th><th className="px-4 py-2.5">Karar verebilecek</th><th className="px-4 py-2.5">Tarih</th><th className="px-4 py-2.5" /></tr>
                 </thead>
                 <tbody>
                     {rows.map(r => (
@@ -65,12 +76,18 @@ export function DeletionRequestsPanel({ onCountChange }: { onCountChange?: (n: n
                             </td>
                             <td className="px-4 py-3 text-slate-700 max-w-[320px]">{r.reason || '—'}</td>
                             <td className="px-4 py-3">{r.requestedBy?.name ?? '—'}</td>
+                            <td className="px-4 py-3 text-xs text-slate-600 max-w-[220px]">{r.approvers?.length ? r.approvers.map(a => a.name).join(', ') : 'Yönetici rolündeki kişiler'}</td>
                             <td className="px-4 py-3 whitespace-nowrap">{new Date(r.requestedAt).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}</td>
                             <td className="px-4 py-3">
                                 {r.canDecide ? (
                                     <div className="flex gap-2 justify-end">
                                         <Button size="sm" variant="danger" loading={busy === r.id} onClick={() => setConfirming(r)}>Silmeyi onayla</Button>
                                         <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => { setReason(''); setRejecting(r); }}>Reddet</Button>
+                                    </div>
+                                ) : r.canWithdraw ? (
+                                    <div className="flex flex-col items-end gap-1">
+                                        <span className="text-xs text-slate-500">Talebiniz yönetici kararını bekliyor</span>
+                                        <Button size="sm" variant="outline" loading={busy === r.id} onClick={() => withdraw(r)}>Geri çek</Button>
                                     </div>
                                 ) : <span className="text-xs text-slate-500">Başka bir yöneticinin kararını bekliyor</span>}
                             </td>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { DeletionApproversNote } from '@/components/workflow/DeletionApproversNote';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
@@ -35,7 +36,7 @@ interface Action {
     firstControllerId?: string | null; secondControllerId?: string | null;
     firstController?: Person | null; secondController?: Person | null;
     rejectionReason?: string | null; revertReason?: string | null; revertedAt?: string | null;
-    deletionRequestedAt?: string | null; deletionReason?: string | null; deletionRejectionReason?: string | null; deletedAt?: string | null;
+    deletionRequestedAt?: string | null; deletionRequestedById?: string | null; deletionReason?: string | null; deletionRejectionReason?: string | null; deletedAt?: string | null;
 }
 interface Person { id: string; firstName: string; lastName: string }
 // Backend (finding-capabilities.ts) hesaplar; arayüz kuralı yeniden türetmez.
@@ -265,7 +266,8 @@ export default function FindingDetailPage() {
     const [workflowLoading, setWorkflowLoading] = useState(false);
 
     // Gerekçe isteyen işlemler (ret, onayı geri alma, silme talebi/reddi)
-    const [reasonDialog, setReasonDialog] = useState<{ title: string; label: string; confirm: string; danger?: boolean; onSubmit: (reason: string) => Promise<void> } | null>(null);
+    // optional: not isteğe bağlı (geri çekme); info: pencerede gösterilecek bilgi (ör. kimin onayına gideceği).
+    const [reasonDialog, setReasonDialog] = useState<{ title: string; label: string; confirm: string; danger?: boolean; optional?: boolean; info?: React.ReactNode; onSubmit: (reason: string) => Promise<void> } | null>(null);
     const [reasonText, setReasonText] = useState('');
     const [reasonBusy, setReasonBusy] = useState(false);
     const askReason = (cfg: NonNullable<typeof reasonDialog>) => { setReasonText(''); setReasonDialog(cfg); };
@@ -840,9 +842,18 @@ export default function FindingDetailPage() {
                                             title={action.description}
                                             actions={<>
                                                         {aCaps.canSubmit && (
-                                                            <Button variant="primary" size="sm" onClick={() => op('submit', 'Onaya gönderildi', `${action.actionId} ikinci kontrolcünün onayına gönderildi.`).catch(() => {})}>
-                                                                2. kontrolcü onayına gönder
+                                                            <Button variant="primary" size="sm" title={action.secondController ? `Onaylayacak: ${action.secondController.firstName} ${action.secondController.lastName}` : undefined}
+                                                                onClick={() => op('submit', 'Onaya gönderildi', `${action.actionId} ${action.secondController ? `${action.secondController.firstName} ${action.secondController.lastName}` : 'ikinci kontrolcü'} onayına gönderildi.`).catch(() => {})}>
+                                                                {action.secondController ? `${action.secondController.firstName} ${action.secondController.lastName} onayına gönder` : '2. kontrolcü onayına gönder'}
                                                             </Button>
+                                                        )}
+                                                        {action.approvalState === 'ONAY_BEKLIYOR' && action.firstControllerId === user?.id && (
+                                                            <Button variant="secondary" size="sm" onClick={() => askReason({ title: `${action.actionId} — onaydan geri çek`, label: 'Not (isteğe bağlı)', confirm: 'Geri çek', optional: true,
+                                                                onSubmit: (r) => runOp(() => api.workflowTransition('ACTION', action.id, 'WITHDRAW', r || undefined), 'Geri çekildi', `${action.actionId} onay talebi geri çekildi; yeniden düzenlenebilir.`) })}>Onaydan geri çek</Button>
+                                                        )}
+                                                        {action.deletionRequestedAt && !action.deletedAt && action.deletionRequestedById === user?.id && (
+                                                            <Button variant="secondary" size="sm" onClick={() => askReason({ title: `${action.actionId} — silme talebini geri çek`, label: 'Not (isteğe bağlı)', confirm: 'Geri çek', optional: true,
+                                                                onSubmit: (r) => runOp(() => api.withdrawDeletion('ACTION', action.id, r), 'Geri çekildi', `${action.actionId} silme talebi geri çekildi.`) })}>Silme talebini geri çek</Button>
                                                         )}
                                                         {aCaps.canApprove && (
                                                             <Button variant="success" size="sm" onClick={() => op('approve', 'Onaylandı', `${action.actionId} onaylandı; takip çalışması oluşturuldu.`).catch(() => {})}>Onayla</Button>
@@ -863,7 +874,7 @@ export default function FindingDetailPage() {
                                                                 onSubmit: (r) => op('delete-reject', 'Silme reddedildi', 'Aksiyon korunuyor.', r) })}>Silmeyi reddet</Button>
                                                         )}
                                                         {aCaps.canRequestDelete && (
-                                                            <Button variant="ghost" size="sm" onClick={() => askReason({ title: `${action.actionId} — silme talebi`, label: 'Silme gerekçesi (yönetici onayına gider)', confirm: 'Silme talebi gönder', danger: true,
+                                                            <Button variant="ghost" size="sm" onClick={() => askReason({ title: `${action.actionId} — silme talebi`, label: 'Silme gerekçesi (yönetici onayına gider)', confirm: 'Silme talebi gönder', danger: true, info: <DeletionApproversNote />,
                                                                 onSubmit: (r) => op('delete-request', 'Silme talebi gönderildi', 'Yönetici onaylayınca aksiyon silinecek.', r) })}>Sil</Button>
                                                         )}
                                                         {!aCaps.canEdit && aCaps.canComplete && (
@@ -1026,8 +1037,16 @@ export default function FindingDetailPage() {
                                                         <Button variant="secondary" size="sm" onClick={() => askReason({ title: `${fu.followUpId} — silme talebini reddet`, label: 'Ret gerekçesi', confirm: 'Silme talebini reddet',
                                                             onSubmit: (r) => fuOp('delete-reject', 'Silme reddedildi', 'Takip çalışması korunuyor.', r) })}>Silmeyi reddet</Button>
                                                     )}
+                                                    {isPendingApproval && fu.assigneeId === user?.id && (
+                                                        <Button variant="secondary" size="sm" onClick={() => askReason({ title: `${fu.followUpId} — onaydan geri çek`, label: 'Not (isteğe bağlı)', confirm: 'Geri çek', optional: true,
+                                                            onSubmit: (r) => runOp(() => api.workflowTransition('FOLLOW_UP', fu.id, 'WITHDRAW', r || undefined), 'Geri çekildi', `${fu.followUpId} onay talebi geri çekildi; yeniden düzenlenebilir.`) })}>Onaydan geri çek</Button>
+                                                    )}
+                                                    {fuDeletionPending && fu.deletionRequestedById === user?.id && (
+                                                        <Button variant="secondary" size="sm" onClick={() => askReason({ title: `${fu.followUpId} — silme talebini geri çek`, label: 'Not (isteğe bağlı)', confirm: 'Geri çek', optional: true,
+                                                            onSubmit: (r) => runOp(() => api.withdrawDeletion('FOLLOW_UP', fu.id, r), 'Geri çekildi', `${fu.followUpId} silme talebi geri çekildi.`) })}>Silme talebini geri çek</Button>
+                                                    )}
                                                     {canEditFollowUp && !!fu.secondControllerId && (
-                                                        <Button variant="ghost" size="sm" onClick={() => askReason({ title: `${fu.followUpId} — silme talebi`, label: 'Silme gerekçesi (yönetici onayına gider)', confirm: 'Silme talebi gönder', danger: true,
+                                                        <Button variant="ghost" size="sm" onClick={() => askReason({ title: `${fu.followUpId} — silme talebi`, label: 'Silme gerekçesi (yönetici onayına gider)', confirm: 'Silme talebi gönder', danger: true, info: <DeletionApproversNote />,
                                                             onSubmit: (r) => fuOp('delete-request', 'Silme talebi gönderildi', 'Yönetici onaylayınca takip silinecek.', r) })}>Sil</Button>
                                                     )}
                                                     <Button variant="secondary" size="sm" onClick={() => { setSelectedFollowUp(fu); setFollowUpOpen(true); }}>
@@ -1237,14 +1256,15 @@ export default function FindingDetailPage() {
             <Modal open={reasonDialog !== null} onClose={() => !reasonBusy && setReasonDialog(null)} title={reasonDialog?.title} size="md"
                 footer={<>
                     <Button variant="secondary" onClick={() => setReasonDialog(null)} disabled={reasonBusy}>Vazgeç</Button>
-                    <Button variant={reasonDialog?.danger ? 'danger' : 'primary'} loading={reasonBusy} disabled={!reasonText.trim()}
+                    <Button variant={reasonDialog?.danger ? 'danger' : 'primary'} loading={reasonBusy} disabled={!reasonDialog?.optional && !reasonText.trim()}
                         onClick={async () => {
-                            if (!reasonDialog || !reasonText.trim()) return;
+                            if (!reasonDialog || (!reasonDialog.optional && !reasonText.trim())) return;
                             setReasonBusy(true);
                             try { await reasonDialog.onSubmit(reasonText.trim()); setReasonDialog(null); } catch { /* hata bildirildi */ }
                             finally { setReasonBusy(false); }
                         }}>{reasonDialog?.confirm}</Button>
                 </>}>
+                {reasonDialog?.info}
                 <Textarea label={reasonDialog?.label} value={reasonText} onChange={e => setReasonText(e.target.value)} rows={4} maxLength={2000} />
             </Modal>
         </DetailShell>

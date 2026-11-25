@@ -155,6 +155,7 @@ export class WorkflowService {
                 const exec = matchesPermission(this.perms(ctx), 'control:test') || matchesPermission(this.perms(ctx), 'test:execute');
                 const approve = matchesPermission(this.perms(ctx), 'control:approve');
                 if (exec && !isChecker) { add('START'); add('COMPLETE', s.href); }
+                if (isAssignee) add('WITHDRAW');
                 if (approve && !isAssignee && (isChecker || role === 'SYSTEM_ADMIN')) { add('APPROVE'); add('RETURN'); }
                 if (manager) add('REVERT');
                 if (manager && (s.stage !== 'ONAYLANDI' || role === 'SYSTEM_ADMIN')) add('CANCEL');
@@ -162,6 +163,7 @@ export class WorkflowService {
             }
             case 'FOLLOW_UP': {
                 if (EXEC_ROLES.has(role) && !isChecker) { add('START'); add('COMPLETE', s.href); }
+                if (s.stage === 'TAMAMLANDI' && s.extra.approvalStatus === 'BEKLIYOR' && (isAssignee || s.extra.evaluatorId === actor.id)) add('WITHDRAW');
                 if (EXEC_ROLES.has(role) && isChecker && s.submittedBy?.id !== actor.id) { add('APPROVE'); add('RETURN'); }
                 if (manager && isChecker && s.stage === 'ONAYLANDI') add('REVERT');
                 if (EXEC_ROLES.has(role)) add('CANCEL');
@@ -172,6 +174,7 @@ export class WorkflowService {
                 const f = s.extra;
                 const pendingDeletion = !!f.deletionRequestedAt;
                 if (EXEC_ROLES.has(role) && !isChecker && (isAssignee || manager) && !pendingDeletion) add('COMPLETE');
+                if (f.closureSubmittedById === actor.id) add('WITHDRAW');
                 if ((isChecker || manager) && f.closureSubmittedById !== actor.id) { add('APPROVE'); add('RETURN'); }
                 if (manager) add('REVERT');
                 if (EXEC_ROLES.has(role) && !pendingDeletion && s.stage === 'DEVAM_EDIYOR') add('CANCEL');
@@ -183,6 +186,7 @@ export class WorkflowService {
                 const pendingDeletion = !!a.deletionRequestedAt;
                 const isFirst = !a.firstControllerId || a.firstControllerId === actor.id;
                 if (EXEC_ROLES.has(role) && isFirst && !isChecker && !pendingDeletion && a.secondControllerId) add('COMPLETE');
+                if (isFirst && a.firstControllerId) add('WITHDRAW');
                 if (manager && isChecker) { add('APPROVE'); add('RETURN'); }
                 if (manager && isChecker && s.stage === 'ONAYLANDI' && !pendingDeletion) add('REVERT');
                 if (EXEC_ROLES.has(role) && isFirst && !pendingDeletion && s.stage !== 'TAMAMLANDI') add('CANCEL');
@@ -190,6 +194,7 @@ export class WorkflowService {
             }
             case 'PERIOD_CONTROL': {
                 if ((isAssignee || manager) && !isChecker && periodControlReady(s.extra.tasks)) add('COMPLETE');
+                if (s.extra.reviewSubmittedById === actor.id) add('WITHDRAW');
                 if ((isChecker || role === 'SYSTEM_ADMIN') && s.extra.reviewSubmittedById !== actor.id) { add('APPROVE'); add('RETURN'); }
                 if (manager && (s.stage === 'ONAYLANDI' || s.stage === 'TAMAMLANDI')) add('REVERT');
                 if (manager || isAssignee) add('CANCEL');
@@ -211,13 +216,32 @@ export class WorkflowService {
             stageLabel: stageLabelFor(type, snap.stage),
             stages: STAGE_DEFS[type].map(d => ({ key: d.key, label: d.label, hint: d.hint })),
             actions: this.hints(snap, actor, ctx),
-            deletion: extra?.deletionRequestedAt ? { requestedAt: extra.deletionRequestedAt, reason: extra.deletionReason, requestedBy: (await this.users([extra.deletionRequestedById]))[0] } : null,
+            // Onay talebi kimde: belirli 2. kontrolcü; yoksa / bulgu kapanışında onaylayabilecek yöneticiler de yazılır.
+            approval: snap.stage === 'TAMAMLANDI' ? await this.approvalTargets(type, snap) : null,
+            deletion: extra?.deletionRequestedAt ? {
+                requestedAt: extra.deletionRequestedAt, reason: extra.deletionReason, requestedBy: (await this.users([extra.deletionRequestedById]))[0],
+                approvers: await this.deletions.approversFor(extra.deletionRequestedById),
+                canWithdraw: extra.deletionRequestedById === actor.id,
+            } : null,
             history: history.map((h, i) => ({
                 id: h.id, action: h.action, actionLabel: actionLabelFor(type, h.action as WorkflowAction) ?? h.action,
                 from: h.fromStage, to: h.toStage, fromLabel: stageLabelFor(type, h.fromStage as Stage), toLabel: stageLabelFor(type, h.toStage as Stage),
                 reason: h.reason, at: h.createdAt, by: people[i],
             })),
         };
+    }
+
+    /** Onay bekleyen kaydın onaylayıcıları: atanmış 2. kontrolcü; bulgu kapanışı ve 2. kontrolcüsüz testte yöneticiler de onaylayabilir. */
+    private async approvalTargets(type: WorkflowEntityType, snap: WorkflowSnapshot & { extra: any }) {
+        const checker = snap.checker;
+        if (type === 'FINDING') {
+            const managers = (await this.deletions.approversFor(snap.extra.closureSubmittedById)).filter(m => m.id !== checker?.id);
+            return { approvers: checker ? [checker] : managers, alsoManagers: checker ? managers : [], note: 'Atanmış 2. kontrolcü veya yönetici rolündeki kişiler karar verebilir (gönderen hariç).' };
+        }
+        if (type === 'CONTROL_TEST' && !checker) {
+            return { approvers: await this.deletions.approversFor(snap.extra.assigneeId), alsoManagers: [], note: '2. kontrolcü atanmamış; yönetici rolündeki kişiler onaylayabilir.' };
+        }
+        return { approvers: checker ? [checker] : [], alsoManagers: [], note: checker ? null : '2. kontrolcü atanmamış.' };
     }
 
     private assertType(type: string): asserts type is WorkflowEntityType {
@@ -270,6 +294,7 @@ export class WorkflowService {
         switch (action) {
             case 'START': if (!exec) throw new ForbiddenException('Test yürütme yetkiniz yok.'); return this.controls.startTest(snap.entityId, actor.id);
             case 'COMPLETE': return this.formRequired(snap, 'Kontrol testi, değerlendirme ve kanıt ile');
+            case 'WITHDRAW': return this.controls.withdrawTest(snap.entityId, actor.id, reason);
             case 'APPROVE': if (!approve) throw new ForbiddenException('Test onaylama yetkiniz yok.'); return this.controls.approveTest(snap.entityId, actor.id);
             case 'RETURN': if (!approve) throw new ForbiddenException('Test iade yetkiniz yok.'); return this.controls.returnTest(snap.entityId, reason!, actor.id);
             case 'REVERT': this.requireRole(actor, MANAGER_ROLES, 'Geri alma yalnız yönetici rolündedir.'); return this.controls.revertTestStage(snap.entityId, reason!, actor.id);
@@ -283,8 +308,9 @@ export class WorkflowService {
 
     private async followUpTransition(snap: WorkflowSnapshot & { extra: any }, action: WorkflowAction, reason: string | undefined, actor: AccessActor) {
         const findingId = snap.extra.findingId as string;
-        if (action !== 'REVERT') this.requireRole(actor, EXEC_ROLES, 'Takip çalışmasında bu işlem için yetkiniz yok.');
+        if (action !== 'REVERT' && action !== 'WITHDRAW') this.requireRole(actor, EXEC_ROLES, 'Takip çalışmasında bu işlem için yetkiniz yok.');
         switch (action) {
+            case 'WITHDRAW': return this.audits.withdrawFollowUp(snap.entityId, actor.id, reason);
             case 'START': return this.audits.updateFollowUp(findingId, snap.entityId, { status: 'DEVAM_EDIYOR' }, actor.id, this.role(actor));
             case 'COMPLETE': return this.formRequired(snap, 'Takip çalışması, değerlendirme sonucu ile');
             case 'APPROVE': return this.audits.updateFollowUp(findingId, snap.entityId, { approvalStatus: 'ONAYLANDI' }, actor.id, this.role(actor));
@@ -304,6 +330,7 @@ export class WorkflowService {
         const manager = MANAGER_ROLES.has(this.role(actor));
         switch (action) {
             case 'COMPLETE': this.requireRole(actor, EXEC_ROLES, 'Bulguyu kapanışa gönderme yetkiniz yok.'); return this.audits.submitFindingClosure(snap.entityId, reason!, actor.id, manager);
+            case 'WITHDRAW': return this.audits.withdrawFindingClosure(snap.entityId, actor.id, reason);
             case 'APPROVE': return this.audits.approveFindingClosure(snap.entityId, actor.id, manager);
             case 'RETURN': return this.audits.returnFindingClosure(snap.entityId, reason!, actor.id, manager);
             case 'REVERT': this.requireRole(actor, MANAGER_ROLES, 'Geri alma yalnız yönetici rolündedir.'); return this.audits.revertFindingStage(snap.entityId, reason!, actor.id);
@@ -318,6 +345,7 @@ export class WorkflowService {
         if (a.findingId && (await this.scope.findingAccess(ctx, a.findingId)) !== 'FULL') throw new ForbiddenException('Bu aksiyon üzerinde işlem yetkiniz yok.');
         switch (action) {
             case 'COMPLETE': this.requireRole(actor, EXEC_ROLES, 'Aksiyonu onaya gönderme yetkiniz yok.'); return this.audits.submitAction(a.findingId, a.id, actor.id);
+            case 'WITHDRAW': return this.audits.withdrawAction(a.findingId, a.id, actor.id, reason);
             case 'APPROVE': this.requireRole(actor, MANAGER_ROLES, 'Aksiyon onayı yönetici rolündeki 2. kontrolcüdedir.'); return this.audits.approveAction(a.findingId, a.id, actor.id);
             case 'RETURN': this.requireRole(actor, MANAGER_ROLES, 'Aksiyon iadesi yönetici rolündeki 2. kontrolcüdedir.'); return this.audits.rejectAction(a.findingId, a.id, reason!, actor.id);
             case 'REVERT': this.requireRole(actor, MANAGER_ROLES, 'Onayı geri alma yönetici rolündeki 2. kontrolcüdedir.'); return this.audits.revertAction(a.findingId, a.id, reason!, actor.id);
@@ -353,6 +381,10 @@ export class WorkflowService {
                 if (!s.secondControllerId) throw new BadRequestException('Dönem kontrolünün 2. kontrolcüsü atanmamış; tamamlanıp onaya iletilemez.');
                 if (!periodControlReady(s.tasks)) throw new BadRequestException('Tüm testler onaylanmadan dönem kontrolü tamamlanamaz.');
                 return write({ reviewSubmittedAt: null }, { reviewSubmittedAt: now, reviewSubmittedById: actor.id, reviewReturnedAt: null, reviewReturnReason: null }, 'TAMAMLANDI', 'PERIOD_CONTROL_COMPLETE');
+            }
+            case 'WITHDRAW': {
+                if (s.reviewSubmittedById !== actor.id) throw new ForbiddenException('Onay talebini yalnız gönderen kişi geri çekebilir.');
+                return write({ reviewSubmittedAt: { not: null }, reviewApprovedAt: null, reviewSubmittedById: actor.id }, { reviewSubmittedAt: null, reviewSubmittedById: null }, 'DEVAM_EDIYOR', 'PERIOD_CONTROL_WITHDRAW');
             }
             case 'APPROVE': case 'RETURN': {
                 if (!(s.secondControllerId === actor.id || role === 'SYSTEM_ADMIN')) throw new ForbiddenException('Bu dönem kontrolünü yalnız atanmış 2. kontrolcü onaylar/iade eder.');

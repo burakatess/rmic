@@ -17,7 +17,7 @@ import type {
     DashboardScopeParams, DashboardScopeOptions, DashboardSummary, DashboardWorkItemsResponse,
     DashboardApprovals, DashboardCriticalIssue, DashboardAnnualPlan, DashboardUpcoming,
 } from '@/types/dashboard';
-import type { WorkflowEntityType, WorkflowState, WorkflowActionKey, BoardResponse, WorkflowStage, DeletionRequestRow } from '@/types/workflow';
+import type { WorkflowEntityType, WorkflowState, WorkflowActionKey, BoardResponse, WorkflowStage, DeletionRequestRow, MyRequestItem } from '@/types/workflow';
 import type {
     AnnualPlanWorkspace, AnnualPlanDraftItem, AnnualPlanPreview, AnnualPlanApplyResult, AnnualPlanAssignmentDecision,
     EligibleController, WorkloadByAssignee,
@@ -773,6 +773,18 @@ class ApiClient {
     }
     async requestDeletion(entityType: DeletionRequestRow['type'], entityId: string, reason: string) {
         return this.request<{ requested: boolean; message: string }>(`/deletion-requests`, { method: 'POST', body: { entityType, entityId, reason } });
+    }
+    /** Talep eden, silme talebini karar verilmeden önce geri çeker (not isteğe bağlı). */
+    async withdrawDeletion(entityType: DeletionRequestRow['type'], entityId: string, note?: string) {
+        return this.request<{ withdrawn: boolean }>(`/deletion-requests/${entityType}/${entityId}/withdraw`, { method: 'POST', body: note?.trim() ? { reason: note.trim() } : {} });
+    }
+    /** Silme talebine karar verebilecek kişiler (oturumdaki kullanıcı hariç). */
+    async getDeletionApprovers() {
+        return this.request<Array<{ id: string; name: string; role: string }>>(`/deletion-requests/approvers`);
+    }
+    /** Taleplerim: gönderdiğim ve karar bekleyen talepler + kayıtlarım hakkındaki son kararlar. */
+    async getMyRequests() {
+        return this.request<{ items: MyRequestItem[]; decisions: WorkflowDecisionItem[] }>(`/workflow-approvals/mine`);
     }
     async decideDeletion(entityType: DeletionRequestRow['type'], entityId: string, approve: boolean, reason?: string) {
         return this.request<unknown>(`/deletion-requests/${entityType}/${entityId}/${approve ? 'approve' : 'reject'}`, { method: 'POST', body: approve ? {} : { reason } });

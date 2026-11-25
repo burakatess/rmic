@@ -10,7 +10,7 @@
 export const STAGES = ['BEKLIYOR', 'DEVAM_EDIYOR', 'TAMAMLANDI', 'ONAYLANDI'] as const;
 export type Stage = typeof STAGES[number] | 'IPTAL';
 export type WorkflowEntityType = 'CONTROL_TEST' | 'FOLLOW_UP' | 'FINDING' | 'PERIOD_CONTROL' | 'ACTION';
-export type WorkflowAction = 'START' | 'COMPLETE' | 'APPROVE' | 'RETURN' | 'REVERT' | 'CANCEL' | 'REOPEN';
+export type WorkflowAction = 'START' | 'COMPLETE' | 'APPROVE' | 'RETURN' | 'REVERT' | 'CANCEL' | 'REOPEN' | 'WITHDRAW';
 
 export const STAGE_LABELS: Record<Stage, string> = {
     BEKLIYOR: 'Bekliyor', DEVAM_EDIYOR: 'Devam Ediyor', TAMAMLANDI: 'Tamamlandı', ONAYLANDI: 'Onaylandı', IPTAL: 'İptal',
@@ -18,6 +18,8 @@ export const STAGE_LABELS: Record<Stage, string> = {
 export const ACTION_LABELS: Record<WorkflowAction, string> = {
     START: 'Başlat', COMPLETE: 'Tamamla ve 2. kontrolcüye ilet', APPROVE: 'Onayla', RETURN: 'İade et',
     REVERT: 'Önceki aşamaya geri al', CANCEL: 'İptal et', REOPEN: 'Yeniden aç',
+    // Gönderen kişi, karar verilmeden önce onay talebini geri çeker (kayıt yeniden düzenlenebilir olur).
+    WITHDRAW: 'Onaydan geri çek',
 };
 
 /**
@@ -64,7 +66,7 @@ export function stageLabelFor(type: WorkflowEntityType, stage: Stage): string {
 
 /** Türe özel eylem adları (ortak eylem anahtarıyla). */
 const TYPE_ACTION_LABELS: Partial<Record<WorkflowEntityType, Partial<Record<WorkflowAction, string>>>> = {
-    FINDING: { COMPLETE: 'Kapanış değerlendirmesine gönder', APPROVE: 'Kapanışı onayla', RETURN: 'İade et (açık kalsın)', REVERT: 'Önceki aşamaya geri al', CANCEL: 'Silme talebi' },
+    FINDING: { WITHDRAW: 'Kapanış talebini geri çek', COMPLETE: 'Kapanış değerlendirmesine gönder', APPROVE: 'Kapanışı onayla', RETURN: 'İade et (açık kalsın)', REVERT: 'Önceki aşamaya geri al', CANCEL: 'Silme talebi' },
     ACTION: { COMPLETE: '2. kontrolcü onayına gönder', APPROVE: 'Onayla', RETURN: 'Gerekçeyle iade et', REVERT: 'Onayı geri al', CANCEL: 'Silme talebi' },
     FOLLOW_UP: { CANCEL: 'Silme talebi' },
     PERIOD_CONTROL: { CANCEL: 'Silme talebi' },
@@ -93,6 +95,7 @@ export const TRANSITIONS: Record<WorkflowAction, { from: Stage[]; to: Stage }> =
     REVERT: { from: ['DEVAM_EDIYOR', 'TAMAMLANDI', 'ONAYLANDI'], to: 'TAMAMLANDI' },
     CANCEL: { from: ['BEKLIYOR', 'DEVAM_EDIYOR', 'TAMAMLANDI', 'ONAYLANDI'], to: 'IPTAL' },
     REOPEN: { from: ['IPTAL'], to: 'DEVAM_EDIYOR' },
+    WITHDRAW: { from: ['TAMAMLANDI'], to: 'DEVAM_EDIYOR' },
 };
 
 /** Eylemin hedef aşaması (REVERT bir önceki aşamaya gider). Geçersizse null. */

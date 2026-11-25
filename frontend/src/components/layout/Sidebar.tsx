@@ -33,7 +33,7 @@ const navigation: NavItem[] = [
         ),
     },
     {
-        label: 'Onaylarım',
+        label: 'Talepler & Onaylar',
         href: '/approvals',
         // İkinci kontrolcüler (ör. Risk Kontrol Yöneticisi) kontrol modülünü görmese de aksiyon/takip onayı verir.
         permissions: ['control:view', 'finding:view', 'action:view'],
@@ -196,7 +196,7 @@ const navigation: NavItem[] = [
 export default function Sidebar() {
     const pathname = usePathname();
     const { user } = useAuth();
-    // "Onaylarım" rozeti: ikinci kontrolcü olarak bekleyen aksiyon/takip işleri (sayfa değişiminde tazelenir).
+    // "Talepler & Onaylar" rozeti: ikinci kontrolcü olarak bekleyen aksiyon/takip işleri (sayfa değişiminde tazelenir).
     const [pendingCount, setPendingCount] = useState(0);
     useEffect(() => {
         if (!user) return;

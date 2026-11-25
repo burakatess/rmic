@@ -187,25 +187,7 @@ export function WorkflowApprovalsPanel({ onCountChange }: { onCountChange?: (n: 
                 onRefresh={load}
             />
 
-            <section aria-labelledby="my-decisions-title" className="space-y-2">
-                <h2 id="my-decisions-title" className="text-sm font-semibold text-slate-700">Kayıtlarım hakkındaki kararlar</h2>
-                <p className="text-xs text-slate-500">Birinci kontrolcüsü olduğunuz kayıtlar. Retler düzeltilene kadar, diğer kararlar 7 gün görünür.</p>
-                {decisions.length === 0 ? (
-                    <p className="text-xs text-slate-400 py-3">Son 7 günde karar yok.</p>
-                ) : (
-                    <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-                        {decisions.map(d => (
-                            <li key={`${d.kind}-${d.recordId}`} className="flex flex-wrap items-center gap-3 px-3 py-2">
-                                <StatusBadge variant={DECISION[d.kind]?.variant || 'neutral'}>{DECISION[d.kind]?.label || d.kind}</StatusBadge>
-                                <span className="font-mono text-xs font-bold text-slate-700">{d.code}</span>
-                                <Link href={d.link} className="font-mono text-[11px] text-violet-700 hover:underline">{d.finding?.findingId ?? 'Kaydı aç'}</Link>
-                                {d.reason && <span className="text-xs text-slate-600 flex-1 min-w-0 truncate">Gerekçe: {d.reason}</span>}
-                                <span className="text-[11px] text-slate-400 ml-auto">{fmt(d.date)}</span>
-                            </li>
-                        ))}
-                    </ul>
-                )}
-            </section>
+            {/* Kayıtlarım hakkındaki kararlar "Taleplerim" sekmesine taşındı (MyRequestsPanel). */}
 
             <Modal open={!!deciding} onClose={() => { if (!saving) setDeciding(null); }} size="sm">
                 {deciding && (

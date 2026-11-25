@@ -6,6 +6,7 @@ import api, { ApiError } from '@/lib/api';
 import { Button, Modal } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { PendingApprovalNotice } from '@/components/approvals/PendingApprovalNotice';
+import { DeletionApproversNote } from './DeletionApproversNote';
 import type { WorkflowActionKey, WorkflowEntityType, WorkflowState } from '@/types/workflow';
 
 // Aşama listesi türe özeldir ve sunucudan gelir (ör. bulgu: Açık → Kapanış Değerlendirmesinde → Kapatıldı;
@@ -23,8 +24,9 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
     const { success, error: showError } = useToast();
     const [state, setState] = useState<WorkflowState | null>(null);
     const [failed, setFailed] = useState(false);
-    // confirmOnly: gerekçe istemeyen ama geri dönüşü önemli geçişler (bulgu kapanış onayı) için yalnız teyit.
-    const [pending, setPending] = useState<{ action: WorkflowActionKey; label: string; confirmOnly?: boolean } | null>(null);
+    // confirmOnly: gerekçe istemeyen ama geri dönüşü önemli geçişler (bulgu kapanış onayı, onaya gönderme) için teyit.
+    // optionalNote: not isteğe bağlı (onay talebini / silme talebini geri çekme).
+    const [pending, setPending] = useState<{ action: WorkflowActionKey | 'WITHDRAW_DELETION'; label: string; confirmOnly?: boolean; optionalNote?: boolean } | null>(null);
     const [reason, setReason] = useState('');
     const [busy, setBusy] = useState(false);
     const [historyOpen, setHistoryOpen] = useState(false);
@@ -34,11 +36,18 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
     }, [type, id]);
     useEffect(() => { load(); }, [load, refreshKey]);
 
-    const run = async (action: WorkflowActionKey, r?: string) => {
+    const run = async (action: WorkflowActionKey | 'WITHDRAW_DELETION', r?: string) => {
         setBusy(true);
         try {
+            if (action === 'WITHDRAW_DELETION') {
+                await api.withdrawDeletion(type, id, r);
+                success('Geri çekildi', 'Silme talebi geri çekildi; kayıt mevcut haliyle kaldı.');
+                setPending(null); setReason(''); load(); onChanged?.();
+                return;
+            }
             const res = await api.workflowTransition(type, id, action, r) as { deletionRequested?: boolean } | undefined;
-            success('Kaydedildi', res?.deletionRequested ? 'Silme talebi yönetici onayına gönderildi.' : 'Durum güncellendi.');
+            success('Kaydedildi', res?.deletionRequested ? 'Silme talebi yönetici onayına gönderildi.'
+                : action === 'WITHDRAW' ? 'Onay talebi geri çekildi; kayıt yeniden düzenlenebilir.' : 'Durum güncellendi.');
             setPending(null); setReason('');
             load(); onChanged?.();
         } catch (e) {
@@ -54,6 +63,9 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
     const cancelled = state.stage === 'IPTAL';
     const idx = state.stages.findIndex(st => st.key === state.stage);
     const awaitingLabel = type === 'FINDING' ? 'kapanış değerlendirmesi' : 'onay';
+    // Kimin onayında: sunucunun hesapladığı onaylayıcılar (yoksa atanmış 2. kontrolcü).
+    const approvers = state.approval?.approvers?.length ? state.approval.approvers : (state.checker ? [state.checker] : []);
+    const approverText = approvers.map(a => a.name).join(', ');
     const buttons = state.actions.filter(a => a.action !== 'COMPLETE' || !a.formHref);
     const formAction = state.actions.find(a => a.action === 'COMPLETE' && a.formHref);
 
@@ -93,7 +105,8 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
                             variant={a.action === 'APPROVE' ? 'success' : a.action === 'CANCEL' ? 'danger' : a.action === 'START' ? 'primary' : 'outline'}
                             onClick={() => {
                                 if (a.needsReason) { setReason(''); setPending({ action: a.action, label: a.label }); }
-                                else if (type === 'FINDING' && a.action === 'APPROVE') setPending({ action: a.action, label: a.label, confirmOnly: true });
+                                else if (a.action === 'WITHDRAW') { setReason(''); setPending({ action: a.action, label: a.label, optionalNote: true }); }
+                                else if ((type === 'FINDING' && a.action === 'APPROVE') || a.action === 'COMPLETE') setPending({ action: a.action, label: a.label, confirmOnly: true });
                                 else run(a.action);
                             }}>
                             {a.label}
@@ -109,16 +122,29 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
                 <div className="mt-3">
                     <PendingApprovalNotice
                         title={`${state.code} ${awaitingLabel} bekliyor`}
-                        waitingFor={state.checker ? [{ name: state.checker.name, role: type === 'FINDING' ? '2. kontrolcü (veya yönetici)' : '2. kontrolcü' }] : []}
+                        waitingFor={approvers.map(a => ({ name: a.name, role: state.checker && a.id === state.checker.id ? '2. kontrolcü' : 'yönetici' }))}
                         sentBy={state.submittedBy?.name ?? null}
                         sentAt={state.history.find(h => h.to === 'TAMAMLANDI')?.at ?? null}
+                        hint={[state.approval?.note, state.approval?.alsoManagers?.length ? `Ayrıca karar verebilecek: ${state.approval.alsoManagers.map(m => m.name).join(', ')}` : null].filter(Boolean).join(' ') || undefined}
                     />
                 </div>
             )}
             {state.deletion && (
-                <p className="mt-3 text-sm rounded-lg border border-red-200 bg-red-50 text-red-800 px-3 py-2" data-testid="deletion-pending">
-                    Silme talebi yönetici onayı bekliyor{state.deletion.requestedBy ? ` · Talep eden: ${state.deletion.requestedBy.name}` : ''}{state.deletion.reason ? ` · Gerekçe: ${state.deletion.reason}` : ''}
-                </p>
+                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 text-red-800 px-3 py-2 text-sm" data-testid="deletion-pending">
+                    <p className="font-semibold">Silme talebi onay bekliyor</p>
+                    <p className="mt-0.5">
+                        Karar verebilecek: <b>{state.deletion.approvers?.length ? state.deletion.approvers.map(a => a.name).join(', ') : 'yönetici rolündeki kişiler'}</b> (talep eden hariç)
+                    </p>
+                    <p className="mt-0.5 text-[13px]">
+                        {state.deletion.requestedBy ? `Talep eden: ${state.deletion.requestedBy.name}` : ''}{state.deletion.reason ? ` · Gerekçe: ${state.deletion.reason}` : ''}
+                    </p>
+                    {state.deletion.canWithdraw && (
+                        <Button size="sm" variant="outline" className="mt-2" disabled={busy}
+                            onClick={() => { setReason(''); setPending({ action: 'WITHDRAW_DELETION', label: 'Silme talebini geri çek', optionalNote: true }); }}>
+                            Silme talebini geri çek
+                        </Button>
+                    )}
+                </div>
             )}
 
             {historyOpen && (
@@ -136,18 +162,26 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
                 </ul>
             )}
 
-            <Modal open={!!pending} onClose={() => !busy && setPending(null)} title={pending?.label} description={pending?.confirmOnly
+            <Modal open={!!pending} onClose={() => !busy && setPending(null)} title={pending?.label} description={pending?.optionalNote
+                ? (pending.action === 'WITHDRAW_DELETION'
+                    ? 'Silme talebi geri çekilir ve onaylayıcıların kutusundan düşer; kayıt mevcut haliyle kalır.'
+                    : 'Onay talebi geri çekilir ve onaylayıcının kutusundan düşer; kayıt yeniden düzenlenebilir hale gelir. Not isteğe bağlıdır.')
+                : pending?.confirmOnly && pending.action === 'COMPLETE'
+                ? (approvers.length ? `Kayıt ${approverText} onayına gönderilecek. Karar verilene kadar düzenlenemez; gerekirse "Onaydan geri çek" ile geri alabilirsiniz.` : 'Onaylayıcı atanmamış; kayıt onaya gönderilemeyebilir.')
+                : pending?.confirmOnly
                 ? 'Bulgu kapatılacak ve kapanış tarihi bugün olarak yazılacak. Gerekirse "Önceki aşamaya geri al" ile yeniden değerlendirmeye alınabilir.'
                 : pending?.action === 'COMPLETE' && type === 'FINDING'
-                ? 'Kapanış değerlendirmenizi yazın; 2. kontrolcü veya yönetici onaylayınca bulgu kapanır. Durum geçmişine yazılır.'
+                ? `Kapanış değerlendirmenizi yazın. Karar verecek: ${state.checker?.name ?? 'atanmış 2. kontrolcü'} (veya yönetici rolündeki kişiler). Durum geçmişine yazılır.`
                 : pending?.action === 'CANCEL' ? 'Kayıt silinmez; yönetici (talep eden hariç) onaylarsa silinir. Gerekçe zorunludur.'
                 : 'Gerekçe zorunludur ve durum geçmişine yazılır.'} size="md"
                 footer={<div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => setPending(null)} disabled={busy}>Vazgeç</Button>
                     <Button variant={pending?.action === 'CANCEL' ? 'danger' : pending?.confirmOnly ? 'success' : 'primary'} size="sm" loading={busy}
-                        disabled={!pending?.confirmOnly && !reason.trim()}
-                        onClick={() => pending && run(pending.action, pending.confirmOnly ? undefined : reason.trim())}>
-                        {pending?.confirmOnly ? pending.label
+                        disabled={!pending?.confirmOnly && !pending?.optionalNote && !reason.trim()}
+                        onClick={() => pending && run(pending.action, pending.confirmOnly ? undefined : (reason.trim() || undefined))}>
+                        {pending?.optionalNote ? 'Geri çek'
+                            : pending?.confirmOnly && pending.action === 'COMPLETE' ? 'Onaya gönder'
+                            : pending?.confirmOnly ? pending.label
                             : pending?.action === 'COMPLETE' ? 'Gönder'
                             : pending?.action === 'CANCEL' ? 'Silme talebi gönder'
                             : pending?.action === 'RETURN' ? 'İade et'
@@ -155,9 +189,10 @@ export function WorkflowBar({ type, id, onChanged, compact = false, refreshKey }
                             : 'Onayla'}
                     </Button>
                 </div>}>
+                {pending?.action === 'CANCEL' && <DeletionApproversNote />}
                 {!pending?.confirmOnly && (
                     <>
-                        <label htmlFor="wf-reason" className="block text-xs font-semibold text-slate-600 mb-1">{pending?.action === 'COMPLETE' && type === 'FINDING' ? 'Kapanış değerlendirmesi *' : 'Gerekçe *'}</label>
+                        <label htmlFor="wf-reason" className="block text-xs font-semibold text-slate-600 mb-1">{pending?.optionalNote ? 'Not (isteğe bağlı)' : pending?.action === 'COMPLETE' && type === 'FINDING' ? 'Kapanış değerlendirmesi *' : 'Gerekçe *'}</label>
                         <textarea id="wf-reason" value={reason} onChange={e => setReason(e.target.value)} rows={3} maxLength={2000} autoFocus
                             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
                     </>

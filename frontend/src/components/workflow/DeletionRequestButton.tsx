@@ -4,6 +4,7 @@ import { useState } from 'react';
 import api from '@/lib/api';
 import { Button, Modal } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
+import { DeletionApproversNote } from './DeletionApproversNote';
 
 /**
  * Yönetici onaylı silme talebi. Kayıt silinmez; talep yönetici onayına gider (talep eden onaylayamaz).
@@ -45,6 +46,7 @@ export function DeletionRequestButton({ type, id, code, pending, onDone, size = 
                     <Button variant="danger" size="sm" loading={busy} disabled={!reason.trim()} onClick={submit}>Silme talebi gönder</Button>
                 </div>}>
                 <div onClick={e => e.stopPropagation()}>
+                    <DeletionApproversNote />
                     <label htmlFor={`del-${id}`} className="block text-xs font-semibold text-slate-600 mb-1">Silme gerekçesi *</label>
                     <textarea id={`del-${id}`} value={reason} onChange={e => setReason(e.target.value)} rows={3} maxLength={2000} autoFocus
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />

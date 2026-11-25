@@ -11,6 +11,7 @@ import ScopeAddModal from '@/components/modals/ScopeAddModal';
 import { PermissionGate } from '@/components/auth/AuthProvider';
 import { FREQUENCY_LABELS } from '@/lib/control-labels';
 import { Button, Modal } from '@/components/ui';
+import { DeletionApproversNote } from '@/components/workflow/DeletionApproversNote';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -425,6 +426,7 @@ export default function ControlInventoryPage() {
                     <Button variant="outline" size="sm" onClick={() => setDeleteOpen(false)} disabled={deleting}>Vazgeç</Button>
                     <Button variant="danger" size="sm" loading={deleting} disabled={!deleteReason.trim()} onClick={submitDeleteRequests}>Silme talebi gönder</Button>
                 </div>}>
+                <DeletionApproversNote />
                 <p className="text-xs text-slate-600 mb-2">
                     {controls.filter(c => selectedRows.has(c.id)).map(c => c.controlId).join(', ')}
                 </p>

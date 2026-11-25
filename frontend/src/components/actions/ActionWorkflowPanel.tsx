@@ -112,7 +112,7 @@ export function ActionWorkflowPanel({ action, onChanged }: { action: ActionWorkf
     const open = (o: Op) => { setReason(''); setOp(o); };
     const buttons: Array<[Op, string, 'primary' | 'outline' | 'danger']> = [];
     // Gönder / onayla / iade / geri al / silme talebi üstteki iş akışı çubuğundadır (tek yer).
-    // Burada yalnız yöneticinin silme kararı kalır (Onaylarım > Silme Talepleri ile aynı işlem).
+    // Burada yalnız yöneticinin silme kararı kalır (Talepler & Onaylar > Silme Talepleri ile aynı işlem).
     if (caps.canDecideDelete) buttons.push(['delete-approve', 'Silmeyi onayla', 'danger'], ['delete-reject', 'Silme talebini reddet', 'outline']);
 
     const nextHint = deleted ? 'Bu aksiyon silindi; kayıt tarihçe için korunuyor.'
