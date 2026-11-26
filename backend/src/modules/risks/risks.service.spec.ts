@@ -290,37 +290,6 @@ describe('RisksService', () => {
         });
     });
 
-    describe('delete', () => {
-        it('should delete a risk and log the action', async () => {
-            prisma.risk.findUnique.mockResolvedValue(mockRisk);
-            prisma.action.deleteMany.mockResolvedValue({ count: 0 });
-            prisma.finding.deleteMany.mockResolvedValue({ count: 0 });
-            prisma.processRisk.deleteMany.mockResolvedValue({ count: 0 });
-            prisma.systemRisk.deleteMany.mockResolvedValue({ count: 0 });
-            prisma.controlRiskMapping.deleteMany.mockResolvedValue({ count: 0 });
-            prisma.riskRegulation.deleteMany.mockResolvedValue({ count: 0 });
-            prisma.risk.delete.mockResolvedValue(mockRisk);
-            prisma.auditLog.create.mockResolvedValue({});
-
-            await service.delete('risk-1', 'user-1');
-
-            expect(prisma.risk.delete).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    where: { id: 'risk-1' },
-                }),
-            );
-            expect(prisma.auditLog.create).toHaveBeenCalled();
-        });
-
-        it('should throw NotFoundException when risk does not exist', async () => {
-            prisma.risk.findUnique.mockResolvedValue(null);
-
-            await expect(service.delete('non-existent', 'user-1')).rejects.toThrow(
-                NotFoundException,
-            );
-        });
-    });
-
     describe('treat', () => {
         it('IDENTIFIED statüsündeki riski tedaviye almaya izin vermez (önce değerlendirilmeli)', async () => {
             prisma.risk.findUnique.mockResolvedValue({ ...mockRisk, status: RiskStatus.IDENTIFIED });

@@ -46,39 +46,39 @@ export class WorkflowController {
     }
 
     @Get('deletion-requests')
-    @RequireAnyPermission('control:view')
+    @RequireAnyPermission('control:view', 'risk:view')
     pendingDeletions(@CurrentUser() user: AccessActor) {
         return this.deletions.pending(user);
     }
 
     @Post('deletion-requests')
-    @RequireAnyPermission('control:view')
+    @RequireAnyPermission('control:view', 'risk:view')
     requestDeletion(@Body() dto: DeletionRequestDto, @CurrentUser() user: AccessActor) {
         return this.deletions.request(dto.entityType, dto.entityId, dto.reason, user);
     }
 
     @Post('deletion-requests/:type/:id/approve')
-    @RequireAnyPermission('control:view')
+    @RequireAnyPermission('control:view', 'risk:view')
     approveDeletion(@Param('type') type: string, @Param('id') id: string, @CurrentUser() user: AccessActor) {
         return this.deletions.approve(this.delType(type), id, user);
     }
 
     /** Talep eden kişi silme talebini karar verilmeden önce geri çeker (not isteğe bağlı). */
     @Post('deletion-requests/:type/:id/withdraw')
-    @RequireAnyPermission('control:view')
+    @RequireAnyPermission('control:view', 'risk:view')
     withdrawDeletion(@Param('type') type: string, @Param('id') id: string, @Body() dto: DeletionDecisionDto, @CurrentUser() user: AccessActor) {
         return this.deletions.withdraw(this.delType(type), id, user, dto.reason);
     }
 
     /** Silme talebine karar verebilecek kişiler (talep eden hariç) — talep penceresinde "kimin onayına gidecek" bilgisi. */
     @Get('deletion-requests/approvers')
-    @RequireAnyPermission('control:view')
+    @RequireAnyPermission('control:view', 'risk:view')
     deletionApprovers(@CurrentUser() user: AccessActor) {
         return this.deletions.approversFor(user.id);
     }
 
     @Post('deletion-requests/:type/:id/reject')
-    @RequireAnyPermission('control:view')
+    @RequireAnyPermission('control:view', 'risk:view')
     rejectDeletion(@Param('type') type: string, @Param('id') id: string, @Body() dto: DeletionDecisionDto, @CurrentUser() user: AccessActor) {
         return this.deletions.reject(this.delType(type), id, dto.reason ?? '', user);
     }

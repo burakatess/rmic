@@ -9,6 +9,7 @@ import type { DeletionRequestRow } from '@/types/workflow';
 
 const TYPE_LABEL: Record<DeletionRequestRow['type'], string> = {
     CONTROL: 'Kontrol', CONTROL_TEST: 'Kontrol Testi', PERIOD_CONTROL: 'Dönem Kontrolü', FINDING: 'Bulgu', ACTION: 'Aksiyon Planı', FOLLOW_UP: 'Takip Çalışması',
+    RISK: 'Risk (Risk Envanteri)', RISK_CONTROL: 'Kontrol (Kontrol Alanı)', RISK_ACTION: 'Aksiyon (Aksiyon Tablosu)',
 };
 
 const CONSEQUENCE: Record<DeletionRequestRow['type'], string> = {
@@ -18,9 +19,12 @@ const CONSEQUENCE: Record<DeletionRequestRow['type'], string> = {
     FOLLOW_UP: 'Takip çalışması "Silindi" olarak işaretlenir. Kayıt denetim için korunur.',
     CONTROL_TEST: 'Kontrol testi silinir ve listelerden düşer. Kayıt denetim için korunur.',
     PERIOD_CONTROL: 'Dönem kontrolü kapsamdan çıkarılır; başlamamış testleri iptal edilir. Kayıt denetim için korunur.',
+    RISK: 'Risk "Silindi" olarak işaretlenir ve Risk Envanteri, raporlar ve simülasyondan düşer; kontrol, regülasyon, Kontrol Alanı ve Aksiyon Tablosu bağları kaldırılır. Kayıt ve değerlendirme geçmişi denetim için korunur.',
+    RISK_CONTROL: 'Kontrol Alanı kaydı "Silindi" olarak işaretlenir ve listelerden düşer. Kayıt denetim için korunur.',
+    RISK_ACTION: 'Aksiyon Tablosu kaydı "Silindi" olarak işaretlenir ve listelerden düşer. Kayıt denetim için korunur.',
 };
 
-/** Yönetici onayı bekleyen silme talepleri (bulgu, aksiyon planı, takip, kontrol testi, dönem kontrolü). Talep eden kendi talebine karar veremez. */
+/** Yönetici onayı bekleyen silme talepleri (kontrol, kontrol testi, dönem kontrolü, bulgu, aksiyon planı, takip ve Risk Yönetimi kayıtları). Talep eden kendi talebine karar veremez. */
 export function DeletionRequestsPanel({ onCountChange }: { onCountChange?: (n: number) => void }) {
     const { success, error: showError } = useToast();
     const [rows, setRows] = useState<DeletionRequestRow[] | null>(null);

@@ -9,12 +9,6 @@ export class LogoutDto {
     @IsOptional() @IsString() @MaxLength(2000) refreshToken?: string;
 }
 
-export class CreateRiskProposalDto {
-    @IsOptional() @EmptyToUndefined() @IsString() findingId?: string;
-    @IsOptional() @EmptyToUndefined() @IsString() directorateId?: string;
-    @IsString() @IsNotEmpty() @MaxLength(5000) riskTanimi: string;
-}
-
 export class IcKontrolOnayinaGonderDto {
     @IsString() @IsNotEmpty() @MaxLength(10000) birimCevabi: string;
     @IsOptional() @EmptyToUndefined() @IsDateString() targetResolutionDate?: string;

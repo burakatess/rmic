@@ -299,10 +299,22 @@ model Risk {
   riskControls   RiskControlRisk[] // Risk Yönetimi Kontrolleri
   riskActions    RiskActionRisk[] // Risk Yönetimi Aksiyonları
 
+  // Yönetici onaylı silme talebi (Talepler & Onaylar). Kayıt fiziksel silinmez; deletedAt ile
+  // işaretlenir ve listelerden, raporlardan, simülasyondan düşer (iz korunur).
+  deletionRequestedById   String?
+  deletionRequestedAt     DateTime?
+  deletionReason          String?   @db.Text
+  deletionRejectionReason String?   @db.Text
+  deletionDecidedById     String?
+  deletionDecidedAt       DateTime?
+  deletedAt               DateTime?
+  deletedById             String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([status])
+  @@index([deletedAt])
   @@index([directorateId])
   @@index([ownerId])
   @@index([categoryId])
@@ -2048,8 +2060,21 @@ model RiskControl {
   risks   RiskControlRisk[]
   actions RiskAction[]
 
+  // Yönetici onaylı silme talebi (Talepler & Onaylar). Kayıt fiziksel silinmez; deletedAt ile
+  // işaretlenir ve listelerden, raporlardan, simülasyondan düşer (iz korunur).
+  deletionRequestedById   String?
+  deletionRequestedAt     DateTime?
+  deletionReason          String?   @db.Text
+  deletionRejectionReason String?   @db.Text
+  deletionDecidedById     String?
+  deletionDecidedAt       DateTime?
+  deletedAt               DateTime?
+  deletedById             String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([deletedAt])
 }
 
 // Risk ↔ RiskControl many-to-many
@@ -2097,8 +2122,21 @@ model RiskAction {
   // Risk ↔ RiskAction many-to-many
   risks RiskActionRisk[]
 
+  // Yönetici onaylı silme talebi (Talepler & Onaylar). Kayıt fiziksel silinmez; deletedAt ile
+  // işaretlenir ve listelerden, raporlardan, simülasyondan düşer (iz korunur).
+  deletionRequestedById   String?
+  deletionRequestedAt     DateTime?
+  deletionReason          String?   @db.Text
+  deletionRejectionReason String?   @db.Text
+  deletionDecidedById     String?
+  deletionDecidedAt       DateTime?
+  deletedAt               DateTime?
+  deletedById             String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([deletedAt])
 }
 
 // Risk ↔ RiskAction many-to-many

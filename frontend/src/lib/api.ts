@@ -1100,22 +1100,6 @@ class ApiClient {
     }
 
     // ─── Risk Öneri Talepleri ─────────────────────────────────────────────────
-    async createRiskProposal(dto: { findingId?: string; directorateId?: string; riskTanimi: string }) {
-        return this.request<any>('/risk-proposals', { method: 'POST', body: dto });
-    }
-
-    async getRiskProposals(status?: string) {
-        return this.request<any[]>(`/risk-proposals${status ? `?status=${status}` : ''}`);
-    }
-
-    async approveRiskProposal(id: string) {
-        return this.request<any>(`/risk-proposals/${id}/approve`, { method: 'PATCH' });
-    }
-
-    async rejectRiskProposal(id: string, reviewNote: string) {
-        return this.request<any>(`/risk-proposals/${id}/reject`, { method: 'PATCH', body: { reviewNote } });
-    }
-
     // ── Finding Follow-Ups ───────────────────────────────────────────────────
 
     async getFollowUps(findingId: string) {

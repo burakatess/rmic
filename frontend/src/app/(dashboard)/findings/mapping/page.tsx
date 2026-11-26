@@ -19,7 +19,6 @@ interface Finding {
     linkedRisks: LinkedRisk[];
 }
 interface Risk { id: string; riskId: string; name: string; category?: string; }
-interface Directorate { id: string; name: string; }
 
 const SEVERITY: Record<string, { label: string; variant: 'critical' | 'high' | 'medium' | 'low' }> = {
     CRITICAL: { label: 'Kritik', variant: 'critical' },
@@ -32,7 +31,6 @@ export default function FindingRiskMappingPage() {
     const { success, error: showError } = useToast();
     const [findings, setFindings] = useState<Finding[]>([]);
     const [risks, setRisks] = useState<Risk[]>([]);
-    const [directorates, setDirectorates] = useState<Directorate[]>([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<'all' | 'mapped' | 'unmapped'>('all');
     const [search, setSearch] = useState('');
@@ -40,25 +38,18 @@ export default function FindingRiskMappingPage() {
     // Risk ekleme modalı
     const [linkModal, setLinkModal] = useState<Finding | null>(null);
     const [riskSearch, setRiskSearch] = useState('');
-    // Risk öneri modalı
-    const [proposeModal, setProposeModal] = useState<Finding | null>(null);
-    const [proposeForm, setProposeForm] = useState({ directorateId: '', riskTanimi: '' });
-    const [proposePending, setProposePending] = useState(false);
-    const [pendingProposalCount, setPendingProposalCount] = useState(0);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const [f, r, d] = await Promise.all([
+            const [f, r] = await Promise.all([
                 api.getFindings(),
                 api.getRisks(),
-                api.getDirectorates({ isActive: 'true' }),
             ]);
             const fList = (Array.isArray(f) ? f : (f as any).data) || [];
             const rList = (Array.isArray(r) ? r : (r as any).data) || [];
             setFindings(fList.map((x: any) => ({ ...x, linkedRisks: x.linkedRisks || [] })));
             setRisks(rList.map((x: any) => ({ id: x.id, riskId: x.riskId, name: x.name, category: x.category?.name })));
-            setDirectorates((d as Directorate[]) || []);
         } catch {
             showError('Hata', 'Veriler yüklenemedi.');
         } finally {
@@ -66,14 +57,7 @@ export default function FindingRiskMappingPage() {
         }
     }, [showError]);
 
-    const fetchProposalCount = useCallback(async () => {
-        try {
-            const p = await api.getRiskProposals('PENDING');
-            setPendingProposalCount((p || []).length);
-        } catch { /* admin değilse 403 — yok say */ }
-    }, []);
-
-    useEffect(() => { fetchData(); fetchProposalCount(); }, [fetchData, fetchProposalCount]);
+    useEffect(() => { fetchData(); }, [fetchData]);
 
     // ── Filtreleme ──
     const filtered = useMemo(() => {
@@ -113,30 +97,6 @@ export default function FindingRiskMappingPage() {
         }
     };
 
-    // ── Risk öneri talebi ──
-    const submitProposal = async () => {
-        if (proposeForm.riskTanimi.trim().length < 10) {
-            showError('Hata', 'Risk tanımı en az 10 karakter olmalıdır.');
-            return;
-        }
-        setProposePending(true);
-        try {
-            await api.createRiskProposal({
-                findingId: proposeModal!.id,
-                directorateId: proposeForm.directorateId || undefined,
-                riskTanimi: proposeForm.riskTanimi.trim(),
-            });
-            success('Talep oluşturuldu', 'Risk tanımı önerisi admin onayına iletildi.');
-            setProposeModal(null);
-            setProposeForm({ directorateId: '', riskTanimi: '' });
-            fetchProposalCount();
-        } catch (err: any) {
-            showError('Hata', err.message || 'Talep oluşturulamadı.');
-        } finally {
-            setProposePending(false);
-        }
-    };
-
     const availableRisks = useMemo(() => {
         if (!linkModal) return [];
         const linkedIds = new Set(linkModal.linkedRisks.map(r => r.id));
@@ -156,16 +116,8 @@ export default function FindingRiskMappingPage() {
             <div className="px-8 pt-8">
                 <PageHeader
                     title="Bulgu-Risk Eşleştirme"
-                    description="Her bulguyu Risk Envanteri'nden en az bir risk ile eşleştirin. Karşılayan risk yoksa yeni risk tanımı önerin."
+                    description="Her bulguyu Risk Envanteri'nden en az bir risk ile eşleştirin."
                     breadcrumbs={[{ label: 'Bulgu & Aksiyon' }, { label: 'Bulgu-Risk Eşleştirme' }]}
-                    actions={
-                        pendingProposalCount > 0 ? (
-                            <Link href="/admin/risk-proposals"
-                                className="inline-flex items-center gap-2 px-3 py-2 bg-amber-100 text-amber-800 text-sm font-medium rounded-lg hover:bg-amber-200 transition-colors">
-                                {pendingProposalCount} bekleyen öneri
-                            </Link>
-                        ) : undefined
-                    }
                 />
 
                 {/* KPI */}
@@ -239,12 +191,6 @@ export default function FindingRiskMappingPage() {
                                                     className="px-2.5 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg">
                                                     + Risk Ekle
                                                 </button>
-                                                {f.linkedRisks.length === 0 && (
-                                                    <button onClick={() => { setProposeModal(f); setProposeForm({ directorateId: '', riskTanimi: '' }); }}
-                                                        className="ml-1 px-2.5 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 rounded-lg">
-                                                        Risk Tanımı Öner
-                                                    </button>
-                                                )}
                                             </td>
                                         </tr>
                                     );
@@ -286,42 +232,6 @@ export default function FindingRiskMappingPage() {
                 </div>
             )}
 
-            {/* Risk Tanımı Öner Modalı */}
-            {proposeModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setProposeModal(null)}>
-                    <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl" onClick={e => e.stopPropagation()}>
-                        <div className="px-6 py-4 border-b border-slate-100">
-                            <h3 className="font-bold text-slate-900">Risk Tanımı Öner</h3>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                                <span className="font-mono text-violet-600">{proposeModal.findingId}</span> bulgusunu karşılayan risk bulunmuyor. Yeni risk tanımı önerin — talep admin onayına iletilecek.
-                            </p>
-                        </div>
-                        <div className="p-6 space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">İlgili Direktörlük</label>
-                                <select value={proposeForm.directorateId} onChange={e => setProposeForm(p => ({ ...p, directorateId: e.target.value }))}
-                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-300">
-                                    <option value="">Seçiniz...</option>
-                                    {directorates.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Risk Tanımı *</label>
-                                <textarea rows={4} value={proposeForm.riskTanimi} onChange={e => setProposeForm(p => ({ ...p, riskTanimi: e.target.value }))}
-                                    placeholder="Önerilen risk tanımını açıklayın (en az 10 karakter)..."
-                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-300" />
-                            </div>
-                        </div>
-                        <div className="px-6 py-3 border-t border-slate-100 flex justify-end gap-3">
-                            <button onClick={() => setProposeModal(null)} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">İptal</button>
-                            <button onClick={submitProposal} disabled={proposePending}
-                                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60">
-                                {proposePending ? 'Gönderiliyor...' : 'Talep Oluştur'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

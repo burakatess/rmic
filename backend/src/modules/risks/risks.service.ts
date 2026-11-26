@@ -32,7 +32,8 @@ export class RisksService {
         const { search, categoryId, ownerId, status, page, limit, sortBy, sortOrder } = query;
         const skip = ((page || 1) - 1) * (limit || 20);
 
-        const where: any = riskScope ? { AND: [riskScope] } : {};
+        // Silme onaylı riskler (deletedAt) envanterden düşer.
+        const where: any = riskScope ? { AND: [riskScope], deletedAt: null } : { deletedAt: null };
 
         if (search) {
             where.OR = [
@@ -276,7 +277,7 @@ export class RisksService {
             },
         });
 
-        if (!risk) {
+        if (!risk || risk.deletedAt) {
             throw new NotFoundException(`Risk with ID ${id} not found`);
         }
 
@@ -869,70 +870,8 @@ export class RisksService {
         };
     }
 
-    async delete(id: string, userId: string) {
-        const risk = await this.findOne(id);
-
-        return this.prisma.$transaction(async (tx) => {
-            // Log the action before deletion
-            await tx.auditLog.create({
-                data: {
-                    userId,
-                    action: 'DELETE',
-                    entityType: 'Risk',
-                    entityId: id,
-                    oldValue: risk,
-                },
-            });
-
-            // Delete related records first (cascade)
-            // Delete actions related to this risk
-            await tx.action.deleteMany({
-                where: { riskId: id },
-            });
-
-            // Delete findings related to this risk
-            await tx.finding.deleteMany({
-                where: { riskId: id },
-            });
-
-            // Delete risk assessments
-            await tx.riskAssessment.deleteMany({
-                where: { riskId: id },
-            });
-
-            // Delete control-risk mappings
-            await tx.controlRiskMapping.deleteMany({
-                where: { riskId: id },
-            });
-
-            // Delete risk history
-            await tx.riskHistory.deleteMany({
-                where: { riskId: id },
-            });
-
-            // Delete process-risk mappings
-            await tx.processRisk.deleteMany({
-                where: { riskId: id },
-            });
-
-            // Delete system-risk mappings
-            await tx.systemRisk.deleteMany({
-                where: { riskId: id },
-            });
-
-            // Delete risk-regulation mappings
-            await tx.riskRegulation.deleteMany({
-                where: { riskId: id },
-            });
-
-            // Hard delete the risk
-            await tx.risk.delete({
-                where: { id },
-            });
-
-            return { message: 'Risk deleted successfully' };
-        }, { timeout: 30000 });
-    }
+    // Risk silme doğrudan yapılmaz: yönetici onaylı silme talebi (deletion-requests, tür RISK) ile
+    // "Silindi" işaretlenir; bağlı bulgu/aksiyonlar silinmez (eski uç bunları kalıcı siliyordu).
 
     async getCategories() {
         return this.prisma.riskCategory.findMany({

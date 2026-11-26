@@ -44,6 +44,8 @@ const DECISION: Record<string, { label: string; variant: BV }> = {
     TEST_APPROVED: { label: 'Test Onaylandı', variant: 'success' },
     TEST_DELETED: { label: 'Test Silindi', variant: 'neutral' },
     TEST_DELETE_REJECTED: { label: 'Test Silme Talebi Reddedildi', variant: 'warning' },
+    RISK_DELETED: { label: 'Risk Kaydı Silindi', variant: 'neutral' },
+    RISK_DELETE_REJECTED: { label: 'Risk Kaydı Silme Talebi Reddedildi', variant: 'warning' },
 };
 
 const fmt = (d?: string | null) => {

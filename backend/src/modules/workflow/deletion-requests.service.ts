@@ -8,7 +8,46 @@ import { AuditsService } from '../audits/audits.service';
 import { findingStage, logTransition, periodControlStage, testStage } from '../../common/workflow/workflow-stages';
 import { EXEC_ROLES, MANAGER_ROLES } from './workflow-roles';
 
-export type DeletionEntity = 'CONTROL' | 'CONTROL_TEST' | 'PERIOD_CONTROL' | 'FINDING' | 'ACTION' | 'FOLLOW_UP';
+export type DeletionEntity = 'CONTROL' | 'CONTROL_TEST' | 'PERIOD_CONTROL' | 'FINDING' | 'ACTION' | 'FOLLOW_UP' | RiskDeletionEntity;
+/** Risk Yönetimi kayıtları: Risk Envanteri (risk), Kontrol Alanı (risk kontrolü), Aksiyon Tablosu (risk aksiyonu). */
+export type RiskDeletionEntity = 'RISK' | 'RISK_CONTROL' | 'RISK_ACTION';
+const RISK_TYPES = new Set<DeletionEntity>(['RISK', 'RISK_CONTROL', 'RISK_ACTION']);
+const isRiskType = (t: DeletionEntity): t is RiskDeletionEntity => RISK_TYPES.has(t);
+const RISK_MODEL: Record<RiskDeletionEntity, 'risk' | 'riskControl' | 'riskAction'> = { RISK: 'risk', RISK_CONTROL: 'riskControl', RISK_ACTION: 'riskAction' };
+const RISK_ENTITY: Record<RiskDeletionEntity, string> = { RISK: 'Risk', RISK_CONTROL: 'RiskControl', RISK_ACTION: 'RiskAction' };
+const RISK_NOUN: Record<RiskDeletionEntity, string> = { RISK: 'Risk', RISK_CONTROL: 'Kontrol', RISK_ACTION: 'Aksiyon' };
+
+/**
+ * Risk Yönetimi silme engelleri. Silme onaylı ve geri izlenebilirdir (deletedAt); iş geçmişi taşıyan
+ * bağlar varken kayıt silinmez:
+ * - Risk: bağlı (silinmemiş) bulgu veya aksiyon varsa silinmez — önce eşleştirmeler kaldırılır.
+ *   Kontrol/regülasyon/süreç/sistem/Kontrol Alanı/Aksiyon Tablosu bağları onayda kaldırılır (denetim izine yazılır).
+ * - Kontrol Alanı kaydı: riske veya aksiyona bağlıysa silinmez (önceki doğrudan silme kuralıyla aynı).
+ * - Aksiyon Tablosu kaydı: riske bağlıysa silinmez.
+ */
+export async function riskDeletionBlockers(type: RiskDeletionEntity, id: string, db: PrismaLikeRisk): Promise<string[]> {
+    const out: string[] = [];
+    if (type === 'RISK') {
+        const [findings, actions] = await Promise.all([
+            db.finding.count({ where: { deletedAt: null, OR: [{ riskId: id }, { linkedRisks: { some: { id } } }] } }),
+            db.action.count({ where: { riskId: id, deletedAt: null } }),
+        ]);
+        if (findings) out.push(`${findings} bağlı bulgu`);
+        if (actions) out.push(`${actions} bağlı aksiyon`);
+    } else if (type === 'RISK_CONTROL') {
+        const [risks, actions] = await Promise.all([
+            db.riskControlRisk.count({ where: { riskControlId: id } }),
+            db.riskAction.count({ where: { riskControlId: id, deletedAt: null } }),
+        ]);
+        if (risks) out.push(`${risks} risk bağlantısı`);
+        if (actions) out.push(`${actions} bağlı aksiyon`);
+    } else {
+        const risks = await db.riskActionRisk.count({ where: { riskActionId: id } });
+        if (risks) out.push(`${risks} risk bağlantısı`);
+    }
+    return out;
+}
+type PrismaLikeRisk = Pick<PrismaService, 'finding' | 'action' | 'riskControlRisk' | 'riskAction' | 'riskActionRisk'>;
 
 type Db = Pick<PrismaService, 'controlTest' | 'finding' | 'action'>;
 
@@ -70,9 +109,10 @@ export class DeletionRequestsService {
         if (row.deletionRequestedById !== actor.id) throw new ForbiddenException('Silme talebini yalnız talebi açan kişi geri çekebilir.');
         const where = { id, deletionRequestedAt: { not: null }, deletionRequestedById: actor.id, deletedAt: null } as const;
         const data = { deletionRequestedAt: null, deletionRequestedById: null, deletionReason: null };
-        const entity: Record<DeletionEntity, string> = { CONTROL: 'Control', CONTROL_TEST: 'ControlTest', PERIOD_CONTROL: 'ControlYearScope', FINDING: 'Finding', ACTION: 'Action', FOLLOW_UP: 'FindingFollowUp' };
+        const entity: Record<DeletionEntity, string> = { CONTROL: 'Control', CONTROL_TEST: 'ControlTest', PERIOD_CONTROL: 'ControlYearScope', FINDING: 'Finding', ACTION: 'Action', FOLLOW_UP: 'FindingFollowUp', ...RISK_ENTITY };
         return this.prisma.$transaction(async (tx) => {
-            const res = type === 'CONTROL' ? await tx.control.updateMany({ where, data })
+            const res = isRiskType(type) ? await (tx[RISK_MODEL[type]] as any).updateMany({ where, data })
+                : type === 'CONTROL' ? await tx.control.updateMany({ where, data })
                 : type === 'CONTROL_TEST' ? await tx.controlTest.updateMany({ where, data })
                 : type === 'FINDING' ? await tx.finding.updateMany({ where, data })
                 : type === 'ACTION' ? await tx.action.updateMany({ where, data })
@@ -85,6 +125,21 @@ export class DeletionRequestsService {
     }
 
     private async load(type: DeletionEntity, id: string) {
+        if (type === 'RISK') {
+            const r = await this.prisma.risk.findUnique({ where: { id } });
+            if (!r || r.deletedAt) throw new NotFoundException('Risk bulunamadı');
+            return { kind: type, row: r as any, code: r.riskId, title: r.name };
+        }
+        if (type === 'RISK_CONTROL') {
+            const c = await this.prisma.riskControl.findUnique({ where: { id } });
+            if (!c || c.deletedAt) throw new NotFoundException('Kontrol bulunamadı');
+            return { kind: type, row: c as any, code: c.kontrolId, title: c.kontrolTanimi.slice(0, 120) };
+        }
+        if (type === 'RISK_ACTION') {
+            const a = await this.prisma.riskAction.findUnique({ where: { id } });
+            if (!a || a.deletedAt) throw new NotFoundException('Aksiyon bulunamadı');
+            return { kind: type, row: a as any, code: a.aksiyonId, title: a.aksiyonTanimi.slice(0, 120) };
+        }
         if (type === 'CONTROL') {
             const c = await this.prisma.control.findUnique({ where: { id } });
             if (!c || c.deletedAt) throw new NotFoundException('Kontrol bulunamadı');
@@ -132,6 +187,7 @@ export class DeletionRequestsService {
             return this.audits.requestFindingDeletion(id, reason, actor.id);
         }
         if (type === 'CONTROL') return this.requestControlDeletion(id, reason, actor);
+        if (isRiskType(type)) return this.requestRiskDeletion(type, id, reason, actor);
         if (!(this.isManager(actor) || matchesPermission(ctx.permissions, 'control:test') || matchesPermission(ctx.permissions, 'test:execute'))) {
             throw new ForbiddenException('Silme talebi oluşturma yetkiniz yok.');
         }
@@ -164,6 +220,7 @@ export class DeletionRequestsService {
         if (type === 'ACTION') return this.audits.decideActionDeletion(row.findingId, id, true, undefined, actor.id);
         if (type === 'FOLLOW_UP') return this.audits.decideFollowUpDeletion(row.findingId, id, true, undefined, actor.id);
         if (type === 'CONTROL') return this.approveControlDeletion(row, actor, now, reason);
+        if (isRiskType(type)) return this.approveRiskDeletion(type, row, actor, now);
         if (type === 'FINDING') {
             return this.prisma.$transaction(async (tx) => {
                 const claim = await tx.finding.updateMany({
@@ -218,6 +275,14 @@ export class DeletionRequestsService {
         if (type === 'ACTION') return this.audits.decideActionDeletion(row.findingId, id, false, reason, actor.id);
         if (type === 'FOLLOW_UP') return this.audits.decideFollowUpDeletion(row.findingId, id, false, reason, actor.id);
         const data = { deletionRequestedAt: null, deletionRequestedById: null, deletionRejectionReason: reason.trim(), deletionDecidedById: actor.id, deletionDecidedAt: new Date() };
+        if (isRiskType(type)) {
+            return this.prisma.$transaction(async (tx) => {
+                const res = await (tx[RISK_MODEL[type]] as any).updateMany({ where: { id, deletionRequestedAt: { not: null }, deletedAt: null }, data });
+                if (res.count !== 1) throw new ConflictException('Kayıt bu sırada değişti; sayfayı yenileyin.');
+                await tx.auditLog.create({ data: { userId: actor.id, action: 'DELETE_REJECT', entityType: RISK_ENTITY[type], entityId: id, newValue: { requestedBy: row.deletionRequestedById, requestReason: row.deletionReason, rejectionReason: reason.trim() } } });
+                return { rejected: true };
+            });
+        }
         if (type === 'FINDING') {
             return this.prisma.$transaction(async (tx) => {
                 const res = await tx.finding.updateMany({ where: { id, deletionRequestedAt: { not: null }, deletedAt: null }, data });
@@ -236,6 +301,69 @@ export class DeletionRequestsService {
             if (res.count !== 1) throw new ConflictException('Kayıt bu sırada değişti; sayfayı yenileyin.');
             await tx.auditLog.create({ data: { userId: actor.id, action: 'DELETE_REJECT', entityType: type === 'CONTROL' ? 'Control' : type === 'CONTROL_TEST' ? 'ControlTest' : 'ControlYearScope', entityId: id, newValue: { requestedBy: row.deletionRequestedById, requestReason: row.deletionReason, rejectionReason: reason.trim() } } });
             return { rejected: true };
+        });
+    }
+
+    /**
+     * Risk Yönetimi silme talebi: yalnız yönetici rolleri (risk kaydı ekleyip düzenleyebilenler) açar;
+     * karar talep eden dışındaki bir yöneticidedir. Engel varsa talep açılmaz.
+     */
+    private async requestRiskDeletion(type: RiskDeletionEntity, id: string, reason: string, actor: AccessActor) {
+        if (!this.isManager(actor)) throw new ForbiddenException('Risk Yönetimi kayıtları için silme talebi oluşturma yetkiniz yok.');
+        const { row } = await this.load(type, id);
+        if (type === 'RISK') await this.scope.assertRiskAccess(await this.scope.context(actor), id);
+        if (row.deletionRequestedAt) throw new ConflictException(`Bu ${RISK_NOUN[type].toLowerCase()} için zaten bekleyen bir silme talebi var.`);
+        const blockers = await riskDeletionBlockers(type, id, this.prisma);
+        if (blockers.length) {
+            throw new ConflictException(`${RISK_NOUN[type]} silinemez: ${blockers.join(', ')} var. Önce bağlantıları kaldırın.`);
+        }
+        return this.prisma.$transaction(async (tx) => {
+            const res = await (tx[RISK_MODEL[type]] as any).updateMany({
+                where: { id, deletionRequestedAt: null, deletedAt: null },
+                data: { deletionRequestedById: actor.id, deletionRequestedAt: new Date(), deletionReason: reason.trim(), deletionRejectionReason: null, deletionDecidedById: null, deletionDecidedAt: null },
+            });
+            if (res.count !== 1) throw new ConflictException('Kayıt bu sırada değişti; sayfayı yenileyin.');
+            await tx.auditLog.create({ data: { userId: actor.id, action: 'DELETE_REQUEST', entityType: RISK_ENTITY[type], entityId: id, newValue: { reason: reason.trim() } } });
+            return { requested: true, message: 'Silme talebi yönetici onayına gönderildi; onaylanana kadar kayıt mevcut haliyle kalır.' };
+        });
+    }
+
+    /** Onay: kayıt "Silindi" işaretlenir (fiziksel silme yok). Riskte kaldırılan eşleştirmeler denetim izine yazılır. */
+    private async approveRiskDeletion(type: RiskDeletionEntity, row: any, actor: AccessActor, now: Date) {
+        const id = row.id as string;
+        return this.prisma.$transaction(async (tx) => {
+            // Engeller onay anında yeniden denetlenir (talepten sonra bağ eklenmiş olabilir).
+            const blockers = await riskDeletionBlockers(type, id, tx as any);
+            if (blockers.length) throw new ConflictException(`${RISK_NOUN[type]} silinemez: ${blockers.join(', ')} var. Önce bağlantıları kaldırın veya talebi reddedin.`);
+            const claim = await (tx[RISK_MODEL[type]] as any).updateMany({
+                where: { id, deletedAt: null, deletionRequestedAt: { not: null }, deletionDecidedAt: null },
+                data: { deletedAt: now, deletedById: actor.id, deletionDecidedById: actor.id, deletionDecidedAt: now },
+            });
+            if (claim.count !== 1) throw new ConflictException('Kayıt bu sırada değişti; sayfayı yenileyin.');
+            let removed: Record<string, unknown> = {};
+            if (type === 'RISK') {
+                const [controls, regulations, processes, systems] = await Promise.all([
+                    tx.controlRiskMapping.findMany({ where: { riskId: id }, select: { controlId: true, mappingType: true } }),
+                    tx.riskRegulation.findMany({ where: { riskId: id }, select: { articleId: true } }),
+                    tx.processRisk.findMany({ where: { riskId: id }, select: { processId: true } }),
+                    tx.systemRisk.findMany({ where: { riskId: id }, select: { systemId: true } }),
+                ]);
+                await tx.controlRiskMapping.deleteMany({ where: { riskId: id } });
+                await tx.riskRegulation.deleteMany({ where: { riskId: id } });
+                await tx.processRisk.deleteMany({ where: { riskId: id } });
+                await tx.systemRisk.deleteMany({ where: { riskId: id } });
+                const rc = await tx.riskControlRisk.deleteMany({ where: { riskId: id } });
+                const ra = await tx.riskActionRisk.deleteMany({ where: { riskId: id } });
+                removed = { controlMappings: controls, regulations, processes, systems, riskControlLinks: rc.count, riskActionLinks: ra.count };
+            }
+            await tx.auditLog.create({
+                data: {
+                    userId: actor.id, action: 'DELETE_APPROVE', entityType: RISK_ENTITY[type], entityId: id,
+                    oldValue: row,
+                    newValue: { requestedBy: row.deletionRequestedById, requestedAt: row.deletionRequestedAt, reason: row.deletionReason, ...removed } as any,
+                },
+            });
+            return { deleted: true };
         });
     }
 
@@ -303,15 +431,18 @@ export class DeletionRequestsService {
     /** Bekleyen silme talepleri: yönetici için (kendi talepleri hariç karar verebileceği kayıtlar işaretli). */
     async pending(actor: AccessActor) {
         const pend = { deletionRequestedAt: { not: null }, deletedAt: null } as const;
-        const [controls, tests, scopes, findings, actions, followUps] = await Promise.all([
+        const [controls, tests, scopes, findings, actions, followUps, risks, riskControls, riskActions] = await Promise.all([
             this.prisma.control.findMany({ where: pend, orderBy: { deletionRequestedAt: 'asc' } }),
             this.prisma.controlTest.findMany({ where: pend, include: { control: { select: { controlId: true, name: true } } }, orderBy: { deletionRequestedAt: 'asc' } }),
             this.prisma.controlYearScope.findMany({ where: { deletionRequestedAt: { not: null }, status: 'ACTIVE' }, include: { control: { select: { controlId: true, name: true } } }, orderBy: { deletionRequestedAt: 'asc' } }),
             this.prisma.finding.findMany({ where: pend, orderBy: { deletionRequestedAt: 'asc' } }),
             this.prisma.action.findMany({ where: pend, orderBy: { deletionRequestedAt: 'asc' } }),
             this.prisma.findingFollowUp.findMany({ where: pend, orderBy: { deletionRequestedAt: 'asc' } }),
+            this.prisma.risk.findMany({ where: pend, orderBy: { deletionRequestedAt: 'asc' } }),
+            this.prisma.riskControl.findMany({ where: pend, orderBy: { deletionRequestedAt: 'asc' } }),
+            this.prisma.riskAction.findMany({ where: pend, orderBy: { deletionRequestedAt: 'asc' } }),
         ]);
-        const ids = [...new Set([...controls, ...tests, ...scopes, ...findings, ...actions, ...followUps].map(r => r.deletionRequestedById).filter((x): x is string => !!x))];
+        const ids = [...new Set([...controls, ...tests, ...scopes, ...findings, ...actions, ...followUps, ...risks, ...riskControls, ...riskActions].map(r => r.deletionRequestedById).filter((x): x is string => !!x))];
         const users = ids.length ? await this.prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, firstName: true, lastName: true } }) : [];
         const by = new Map(users.map(u => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
         const manager = this.isManager(actor);
@@ -330,6 +461,9 @@ export class DeletionRequestsService {
             ...findings.map(f => row('FINDING', f, f.findingId, f.summary || f.description.slice(0, 120), `/findings/${f.id}`)),
             ...actions.map(a => row('ACTION', a, a.actionId, a.description.slice(0, 120), `/actions/${a.id}`)),
             ...followUps.map(f => row('FOLLOW_UP', f, f.followUpId, f.notes?.slice(0, 120) || 'Takip çalışması', `/follow-ups/${f.id}`)),
+            ...risks.map(r => row('RISK', r, r.riskId, r.name, `/risks/${r.id}`)),
+            ...riskControls.map(c => row('RISK_CONTROL', c, c.kontrolId, c.kontrolTanimi.slice(0, 120), `/risks/controls?highlight=${c.id}`)),
+            ...riskActions.map(a => row('RISK_ACTION', a, a.aksiyonId, a.aksiyonTanimi.slice(0, 120), `/risks/actions?highlight=${a.id}`)),
         ].filter(r => manager || r.requestedBy?.id === actor.id);
     }
 }

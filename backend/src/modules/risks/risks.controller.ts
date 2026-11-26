@@ -3,7 +3,6 @@ import {
     Get,
     Post,
     Put,
-    Delete,
     Body,
     Param,
     Query,
@@ -124,9 +123,4 @@ export class RisksController {
         return this.risksService.getActions(id, await this.gate(user, id));
     }
 
-    @Delete(':id')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    async delete(@Param('id') id: string, @CurrentUser('id') userId: string) {
-        return this.risksService.delete(id, userId);
-    }
 }

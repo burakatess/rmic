@@ -28,7 +28,7 @@ export interface BoardResponse {
 }
 
 export interface DeletionRequestRow {
-    type: 'CONTROL' | 'CONTROL_TEST' | 'PERIOD_CONTROL' | 'FINDING' | 'ACTION' | 'FOLLOW_UP'; id: string; code: string; title: string; href: string;
+    type: 'CONTROL' | 'CONTROL_TEST' | 'PERIOD_CONTROL' | 'FINDING' | 'ACTION' | 'FOLLOW_UP' | 'RISK' | 'RISK_CONTROL' | 'RISK_ACTION'; id: string; code: string; title: string; href: string;
     reason: string | null; requestedAt: string; requestedBy: Person; canDecide: boolean;
     canWithdraw?: boolean; approvers?: Approver[];
 }
