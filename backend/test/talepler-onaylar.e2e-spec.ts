@@ -136,4 +136,15 @@ describe('E2E — Talepler & Onaylar: kimin onayında, geri çekme, taleplerim',
         expect(log.oldValue).toMatchObject({ reason: 'Mükerrer aksiyon' });
         await http().post(`/deletion-requests/ACTION/${aId}/withdraw`).set(as('maker')).send({}).expect(409);
     });
+
+    it('bulgu silme talebi: bulgunun 2. kontrolcüsünün kutusuna (FINDING_DELETION) düşer, oradan karar verilir', async () => {
+        const { fId } = await findingWithAction();
+        await http().post('/deletion-requests').set(as('maker')).send({ entityType: 'FINDING', entityId: fId, reason: 'Yanlış açılmış bulgu' }).expect(201);
+        const item = (await inbox('checker')).find(i => i.recordId === fId);
+        expect(item).toMatchObject({ kind: 'FINDING_DELETION', reason: 'Yanlış açılmış bulgu', requestedBy: expect.objectContaining({ id: id.maker }) });
+        expect((await inbox('manager2')).some(i => i.recordId === fId)).toBe(false);
+        await http().post(`/deletion-requests/FINDING/${fId}/approve`).set(as('checker')).send({}).expect(201);
+        expect((await prisma.finding.findUniqueOrThrow({ where: { id: fId } })).deletedAt).not.toBeNull();
+        expect((await inbox('checker')).some(i => i.recordId === fId)).toBe(false);
+    });
 });

@@ -17,32 +17,33 @@ import { useToast } from '@/components/ui/Toast';
 type BV = 'critical' | 'warning' | 'success' | 'info' | 'neutral';
 
 const KIND: Record<WorkflowPendingItem['kind'], { label: string; variant: BV }> = {
-    ACTION_APPROVAL: { label: 'Aksiyon onayı', variant: 'warning' },
-    ACTION_DELETION: { label: 'Aksiyon silme', variant: 'critical' },
-    FOLLOWUP_APPROVAL: { label: 'Takip onayı', variant: 'info' },
-    FOLLOWUP_DELETION: { label: 'Takip silme', variant: 'critical' },
-    FINDING_CLOSURE: { label: 'Bulgu kapanışı', variant: 'success' },
+    ACTION_APPROVAL: { label: 'Aksiyon Onayı', variant: 'warning' },
+    ACTION_DELETION: { label: 'Aksiyon Silme', variant: 'critical' },
+    FOLLOWUP_APPROVAL: { label: 'Takip Onayı', variant: 'info' },
+    FOLLOWUP_DELETION: { label: 'Takip Silme', variant: 'critical' },
+    FINDING_CLOSURE: { label: 'Bulgu Kapanışı', variant: 'success' },
+    FINDING_DELETION: { label: 'Bulgu Silme', variant: 'critical' },
 };
 
 const DECISION: Record<string, { label: string; variant: BV }> = {
-    ACTION_REJECTED: { label: 'Aksiyon reddedildi — düzeltin', variant: 'critical' },
-    ACTION_APPROVED: { label: 'Aksiyon onaylandı', variant: 'success' },
-    ACTION_REVERTED: { label: 'Aksiyon onayı geri alındı', variant: 'warning' },
-    ACTION_DELETED: { label: 'Aksiyon silindi', variant: 'neutral' },
-    ACTION_DELETE_REJECTED: { label: 'Aksiyon silme talebi reddedildi', variant: 'warning' },
-    FOLLOWUP_REJECTED: { label: 'Takip reddedildi — düzeltin', variant: 'critical' },
-    FOLLOWUP_APPROVED: { label: 'Takip onaylandı', variant: 'success' },
-    FOLLOWUP_REVERTED: { label: 'Takip onayı geri alındı', variant: 'warning' },
-    FOLLOWUP_DELETED: { label: 'Takip silindi', variant: 'neutral' },
-    FOLLOWUP_DELETE_REJECTED: { label: 'Takip silme talebi reddedildi', variant: 'warning' },
-    FINDING_CLOSED: { label: 'Bulgu kapatıldı', variant: 'success' },
-    FINDING_CLOSURE_RETURNED: { label: 'Bulgu kapanışı iade edildi', variant: 'warning' },
-    FINDING_DELETED: { label: 'Bulgu silindi', variant: 'neutral' },
-    FINDING_DELETE_REJECTED: { label: 'Bulgu silme talebi reddedildi', variant: 'warning' },
-    TEST_RETURNED: { label: 'Test geri gönderildi — düzeltin', variant: 'critical' },
-    TEST_APPROVED: { label: 'Test onaylandı', variant: 'success' },
-    TEST_DELETED: { label: 'Test silindi', variant: 'neutral' },
-    TEST_DELETE_REJECTED: { label: 'Test silme talebi reddedildi', variant: 'warning' },
+    ACTION_REJECTED: { label: 'Aksiyon Reddedildi — Düzeltin', variant: 'critical' },
+    ACTION_APPROVED: { label: 'Aksiyon Onaylandı', variant: 'success' },
+    ACTION_REVERTED: { label: 'Aksiyon Onayı Geri Alındı', variant: 'warning' },
+    ACTION_DELETED: { label: 'Aksiyon Silindi', variant: 'neutral' },
+    ACTION_DELETE_REJECTED: { label: 'Aksiyon Silme Talebi Reddedildi', variant: 'warning' },
+    FOLLOWUP_REJECTED: { label: 'Takip Reddedildi — Düzeltin', variant: 'critical' },
+    FOLLOWUP_APPROVED: { label: 'Takip Onaylandı', variant: 'success' },
+    FOLLOWUP_REVERTED: { label: 'Takip Onayı Geri Alındı', variant: 'warning' },
+    FOLLOWUP_DELETED: { label: 'Takip Silindi', variant: 'neutral' },
+    FOLLOWUP_DELETE_REJECTED: { label: 'Takip Silme Talebi Reddedildi', variant: 'warning' },
+    FINDING_CLOSED: { label: 'Bulgu Kapatıldı', variant: 'success' },
+    FINDING_CLOSURE_RETURNED: { label: 'Bulgu Kapanışı İade Edildi', variant: 'warning' },
+    FINDING_DELETED: { label: 'Bulgu Silindi', variant: 'neutral' },
+    FINDING_DELETE_REJECTED: { label: 'Bulgu Silme Talebi Reddedildi', variant: 'warning' },
+    TEST_RETURNED: { label: 'Test Geri Gönderildi — Düzeltin', variant: 'critical' },
+    TEST_APPROVED: { label: 'Test Onaylandı', variant: 'success' },
+    TEST_DELETED: { label: 'Test Silindi', variant: 'neutral' },
+    TEST_DELETE_REJECTED: { label: 'Test Silme Talebi Reddedildi', variant: 'warning' },
 };
 
 const fmt = (d?: string | null) => {
@@ -92,6 +93,7 @@ export function WorkflowApprovalsPanel({ onCountChange }: { onCountChange?: (n: 
             if (item.kind === 'ACTION_APPROVAL') await api.findingActionOp(item.finding.id, item.recordId, approve ? 'approve' : 'reject', r);
             else if (item.kind === 'ACTION_DELETION') await api.findingActionOp(item.finding.id, item.recordId, approve ? 'delete-approve' : 'delete-reject', r);
             else if (item.kind === 'FOLLOWUP_DELETION') await api.followUpOp(item.finding.id, item.recordId, approve ? 'delete-approve' : 'delete-reject', r);
+            else if (item.kind === 'FINDING_DELETION') await api.decideDeletion('FINDING', item.recordId, approve, r);
             success('Kaydedildi', `${item.code}: ${approve ? 'onaylandı' : 'reddedildi'}.`);
             setDeciding(null); setReason('');
             load();
@@ -127,11 +129,11 @@ export function WorkflowApprovalsPanel({ onCountChange }: { onCountChange?: (n: 
             ),
         },
         {
-            key: 'requestedBy', header: 'Talep eden', defaultWidth: 120,
+            key: 'requestedBy', header: 'Talep Eden', defaultWidth: 120,
             render: (i) => <span className="text-xs text-slate-600">{i.requestedBy?.name || '—'}</span>,
         },
         {
-            key: 'requestedAt', header: 'Talep tarihi', defaultWidth: 120,
+            key: 'requestedAt', header: 'Talep Tarihi', defaultWidth: 120,
             render: (i) => <span className="text-xs text-slate-600">{fmt(i.requestedAt)}</span>,
         },
         {
@@ -139,11 +141,11 @@ export function WorkflowApprovalsPanel({ onCountChange }: { onCountChange?: (n: 
             render: (i) => i.kind === 'FOLLOWUP_APPROVAL' || i.kind === 'FINDING_CLOSURE' || !i.finding ? (
                 // Takip onayı ve bulgu kapanışı değerlendirmenin okunmasını gerektirir; manuel (bulgusuz)
                 // kayıtların işlemleri bulgu ucundan yapılamaz — karar kaydın kendi detay ekranında verilir.
-                <Link href={i.link}><Button size="sm" variant="primary">{i.kind === 'FINDING_CLOSURE' ? 'Kapanışı incele' : i.kind === 'FOLLOWUP_APPROVAL' ? 'Değerlendirmeyi incele' : 'İncele'}</Button></Link>
+                <Link href={i.link}><Button size="sm" variant="primary">{i.kind === 'FINDING_CLOSURE' ? 'Kapanışı İncele' : i.kind === 'FOLLOWUP_APPROVAL' ? 'Değerlendirmeyi İncele' : 'İncele'}</Button></Link>
             ) : (
                 <div className="flex gap-1.5">
                     <Button size="sm" variant="primary" onClick={() => { setReason(''); setDeciding({ item: i, approve: true }); }}>
-                        {i.kind === 'ACTION_APPROVAL' ? 'Onayla' : 'Silmeyi onayla'}
+                        {i.kind === 'ACTION_APPROVAL' ? 'Onayla' : 'Silmeyi Onayla'}
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => { setReason(''); setDeciding({ item: i, approve: false }); }}>Reddet</Button>
                 </div>
@@ -182,7 +184,7 @@ export function WorkflowApprovalsPanel({ onCountChange }: { onCountChange?: (n: 
                 pageSize={Math.max(filtered.length, 1)}
                 onPageChange={() => undefined}
                 storageKey="workflow-approvals-table"
-                emptyTitle="Onayınızı bekleyen aksiyon, takip veya bulgu kapanışı yok"
+                emptyTitle="Onayınızı bekleyen aksiyon, takip, bulgu kapanışı veya bulgu silme talebi yok"
                 emptyDescription="İkinci kontrolcüsü olduğunuz kayıtlar onaya gönderildiğinde burada görünür."
                 onRefresh={load}
             />
@@ -193,14 +195,16 @@ export function WorkflowApprovalsPanel({ onCountChange }: { onCountChange?: (n: 
                 {deciding && (
                     <div className="space-y-3">
                         <h3 className="text-lg font-semibold text-slate-800">
-                            {deciding.item.code} — {deciding.approve ? 'onayla' : 'reddet'}
+                            {deciding.item.code} — {deciding.approve ? 'Onayla' : 'Reddet'}
                         </h3>
                         <p className="text-sm text-slate-500">
                             {deciding.approve
                                 ? deciding.item.kind === 'ACTION_APPROVAL'
                                     ? 'Aksiyon onaylanınca takip çalışması hedef tarihte oluşturulur.'
-                                    : 'Silme onaylanınca kayıt "Silindi" olarak işaretlenir (kayıt korunur).'
-                                : 'Gerekçe birinci kontrolcüye iletilir.'}
+                                    : deciding.item.kind === 'FINDING_DELETION'
+                                        ? 'Bulgu "İptal" olarak işaretlenir; bağlı açık aksiyon ve takip çalışmaları da iptal edilir. Kayıtlar denetim için korunur.'
+                                        : 'Silme onaylanınca kayıt "Silindi" olarak işaretlenir (kayıt korunur).'
+                                : (deciding.item.kind === 'FINDING_DELETION' ? 'Gerekçe talep edene iletilir; bulgu mevcut haliyle kalır.' : 'Gerekçe birinci kontrolcüye iletilir.')}
                         </p>
                         {!deciding.approve && (
                             <>

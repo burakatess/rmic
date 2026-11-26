@@ -9,7 +9,7 @@ import { PrismaService } from '../../prisma';
  * Kapsam: kayıt yalnız kullanıcının ikinci (bekleyenler) veya birinci (kararlar)
  * kontrolcü olduğu satırlardan oluşur; başka kayıt kapsamı gerekmez.
  */
-export type PendingKind = 'ACTION_APPROVAL' | 'ACTION_DELETION' | 'FOLLOWUP_APPROVAL' | 'FOLLOWUP_DELETION' | 'FINDING_CLOSURE';
+export type PendingKind = 'ACTION_APPROVAL' | 'ACTION_DELETION' | 'FOLLOWUP_APPROVAL' | 'FOLLOWUP_DELETION' | 'FINDING_CLOSURE' | 'FINDING_DELETION';
 export type DecisionKind =
     | 'ACTION_REJECTED' | 'ACTION_APPROVED' | 'ACTION_REVERTED' | 'ACTION_DELETED' | 'ACTION_DELETE_REJECTED'
     | 'FOLLOWUP_REJECTED' | 'FOLLOWUP_APPROVED' | 'FOLLOWUP_REVERTED' | 'FOLLOWUP_DELETED' | 'FOLLOWUP_DELETE_REJECTED'
@@ -82,7 +82,7 @@ export class ApprovalsService {
 
     /** İkinci kontrolcü olarak kararımı bekleyen işler (en eski talep önce). */
     async pendingFor(userId: string): Promise<PendingApprovalItem[]> {
-        const [actionApprovals, actionDeletions, fuApprovals, fuDeletions, closures] = await Promise.all([
+        const [actionApprovals, actionDeletions, fuApprovals, fuDeletions, closures, findingDeletions] = await Promise.all([
             this.prisma.action.findMany({
                 where: { secondControllerId: userId, approvalState: 'ONAY_BEKLIYOR', deletedAt: null },
                 select: {
@@ -106,6 +106,12 @@ export class ApprovalsService {
                 where: closurePendingWhere(userId),
                 select: { id: true, findingId: true, summary: true, closureNote: true, closureSubmittedAt: true, closureSubmittedById: true, updatedAt: true },
             }),
+            // Bulgu silme talebi: aksiyon/takip silmede olduğu gibi bulgunun 2. kontrolcüsünün kutusuna düşer;
+            // karar yetkisi yönetici rolündedir (deletion-requests.service.ts::assertDecider).
+            this.prisma.finding.findMany({
+                where: { secondControllerId: userId, deletionRequestedAt: { not: null }, deletedAt: null, OR: [{ deletionRequestedById: null }, { deletionRequestedById: { not: userId } }] },
+                select: { id: true, findingId: true, summary: true, description: true, deletionRequestedAt: true, deletionRequestedById: true, deletionReason: true },
+            }),
         ]);
 
         const requesterIds = [...new Set([
@@ -113,6 +119,7 @@ export class ApprovalsService {
             ...fuApprovals.map(f => f.evaluatorId),
             ...fuDeletions.map(f => f.deletionRequestedById),
             ...closures.map(f => f.closureSubmittedById),
+            ...findingDeletions.map(f => f.deletionRequestedById),
         ].filter((x): x is string => !!x))];
         const users = requesterIds.length
             ? await this.prisma.user.findMany({ where: { id: { in: requesterIds } }, select: { id: true, firstName: true, lastName: true } })
@@ -151,19 +158,26 @@ export class ApprovalsService {
                 requestedBy: (f.closureSubmittedById && byId.get(f.closureSubmittedById)) || null,
                 requestedAt: f.closureSubmittedAt ?? f.updatedAt, reason: null, link: link(f.id),
             })),
+            ...findingDeletions.map(f => ({
+                kind: 'FINDING_DELETION' as const, recordId: f.id, code: f.findingId, description: f.summary || f.description.slice(0, 200),
+                finding: { id: f.id, findingId: f.findingId, summary: f.summary },
+                requestedBy: (f.deletionRequestedById && byId.get(f.deletionRequestedById)) || null,
+                requestedAt: f.deletionRequestedAt!, reason: f.deletionReason, link: link(f.id),
+            })),
         ];
         return items.sort((a, b) => +new Date(a.requestedAt) - +new Date(b.requestedAt));
     }
 
     async pendingCount(userId: string): Promise<number> {
-        const [a, b, c, d, e] = await Promise.all([
+        const [a, b, c, d, e, f] = await Promise.all([
             this.prisma.action.count({ where: { secondControllerId: userId, approvalState: 'ONAY_BEKLIYOR', deletedAt: null } }),
             this.prisma.action.count({ where: { secondControllerId: userId, deletionRequestedAt: { not: null }, deletedAt: null } }),
             this.prisma.findingFollowUp.count({ where: { secondControllerId: userId, status: 'TAMAMLANDI', approvalStatus: 'BEKLIYOR', result: { not: null }, deletedAt: null } }),
             this.prisma.findingFollowUp.count({ where: { secondControllerId: userId, deletionRequestedAt: { not: null }, deletedAt: null } }),
             this.prisma.finding.count({ where: closurePendingWhere(userId) }),
+            this.prisma.finding.count({ where: { secondControllerId: userId, deletionRequestedAt: { not: null }, deletedAt: null, OR: [{ deletionRequestedById: null }, { deletionRequestedById: { not: userId } }] } }),
         ]);
-        return a + b + c + d + e;
+        return a + b + c + d + e + f;
     }
 
     /**

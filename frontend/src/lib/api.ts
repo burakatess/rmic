@@ -44,7 +44,7 @@ function buildQuery(params?: object): string {
 
 
 export interface WorkflowPendingItem {
-    kind: 'ACTION_APPROVAL' | 'ACTION_DELETION' | 'FOLLOWUP_APPROVAL' | 'FOLLOWUP_DELETION' | 'FINDING_CLOSURE';
+    kind: 'ACTION_APPROVAL' | 'ACTION_DELETION' | 'FOLLOWUP_APPROVAL' | 'FOLLOWUP_DELETION' | 'FINDING_CLOSURE' | 'FINDING_DELETION';
     recordId: string;
     code: string;
     description: string | null;

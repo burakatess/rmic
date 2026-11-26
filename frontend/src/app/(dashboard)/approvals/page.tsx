@@ -272,6 +272,13 @@ function ApprovalsContent() {
 
     useEffect(() => { load(); }, [load]);
 
+    // Sekme sayaçları sayfa açılır açılmaz görünsün (yalnız tıklanan sekmede değil).
+    useEffect(() => {
+        api.getWorkflowApprovals().then(r => setWorkflowCount(r.items?.length ?? 0)).catch(() => undefined);
+        api.getDeletionRequests().then(r => setDeletionCount(r.filter(x => x.canDecide).length)).catch(() => undefined);
+        api.getMyRequests().then(r => setMineCount(r.items.length)).catch(() => undefined);
+    }, []);
+
     const filtered = useMemo(() => {
         return items.filter(it => {
             if (searchQuery) {
@@ -381,7 +388,7 @@ function ApprovalsContent() {
             />
 
             <div role="tablist" aria-label="Talep ve onay türü" className="flex flex-wrap items-end gap-1 border-b border-slate-200">
-                <span className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Onayıma gelenler</span>
+                <span className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Onayıma Gelenler</span>
                 {([['workflow', 'Aksiyon & Takip', workflowCount], ['tests', 'Kontrol Testleri', loading ? null : items.length], ['deletions', 'Silme Talepleri', deletionCount]] as const).map(([key, label, count]) => (
                     <button key={key} role="tab" type="button" aria-selected={tab === key}
                         onClick={() => { setTab(key); window.history.replaceState(null, '', key === 'workflow' ? window.location.pathname : `?tab=${key}`); }}

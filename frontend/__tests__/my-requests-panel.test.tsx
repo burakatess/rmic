@@ -41,16 +41,16 @@ describe('Taleplerim paneli', () => {
         expect(rows[1]).toHaveTextContent('Kontrol');
 
         // Onay talebi: iş akışı WITHDRAW (not isteğe bağlı)
-        fireEvent.click(within(rows[0]).getByRole('button', { name: 'Geri çek' }));
+        fireEvent.click(within(rows[0]).getByRole('button', { name: 'Geri Çek' }));
         const dialog = await screen.findByRole('dialog');
-        fireEvent.click(within(dialog).getByRole('button', { name: 'Geri çek' }));
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Geri Çek' }));
         await waitFor(() => expect(api.workflowTransition).toHaveBeenCalledWith('ACTION', 'a1', 'WITHDRAW', undefined));
 
         // Silme talebi: silme geri çekme ucu, not ile
-        fireEvent.click(within((await screen.findAllByTestId('my-request-row'))[1]).getByRole('button', { name: 'Geri çek' }));
+        fireEvent.click(within((await screen.findAllByTestId('my-request-row'))[1]).getByRole('button', { name: 'Geri Çek' }));
         const d2 = await screen.findByRole('dialog');
-        fireEvent.change(within(d2).getByLabelText('Not (isteğe bağlı)'), { target: { value: 'Vazgeçtim' } });
-        fireEvent.click(within(d2).getByRole('button', { name: 'Geri çek' }));
+        fireEvent.change(within(d2).getByLabelText('Not (İsteğe Bağlı)'), { target: { value: 'Vazgeçtim' } });
+        fireEvent.click(within(d2).getByRole('button', { name: 'Geri Çek' }));
         await waitFor(() => expect(api.withdrawDeletion).toHaveBeenCalledWith('CONTROL', 'c1', 'Vazgeçtim'));
     });
 });

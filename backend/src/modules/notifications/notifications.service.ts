@@ -23,6 +23,7 @@ const PENDING_TITLE: Record<PendingKind, string> = {
     FOLLOWUP_APPROVAL: 'Onayınızı bekleyen takip çalışması',
     FOLLOWUP_DELETION: 'Onayınızı bekleyen takip silme talebi',
     FINDING_CLOSURE: 'Onayınızı bekleyen bulgu kapanış değerlendirmesi',
+    FINDING_DELETION: 'Onayınızı bekleyen bulgu silme talebi',
 };
 
 const DECISION_TITLE: Record<DecisionKind, string> = {
