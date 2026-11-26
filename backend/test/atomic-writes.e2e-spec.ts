@@ -80,20 +80,4 @@ describe('E2E — ana kayıt + denetim kaydı atomikliği', () => {
         expect(await prisma.riskHistory.count({ where: { riskId: risk.id } })).toBe(1);
         expect((await prisma.risk.findUniqueOrThrow({ where: { id: risk.id } })).status).toBe('ASSESSED');
     });
-
-    it('risk silme: bağlı kayıtlarla birlikte tek işlemde (denetim yazılamazsa hiçbiri silinmez)', async () => {
-        const cat = await prisma.riskCategory.findFirstOrThrow({ where: { name: 'Atomik Kategori' } });
-        const risk = await prisma.risk.create({
-            data: { riskId: 'R-ATOMIK-2', name: 'Silinecek risk', description: 'Silinecek risk açıklaması yeterli uzunlukta', ownerId: realUser, categoryId: cat.id, status: 'IDENTIFIED', inherentProbability: 1, inherentImpact: 1, inherentRiskScore: 1 },
-        });
-        await prisma.riskAssessment.create({ data: { riskId: risk.id, assessor: realUser, probability: 2, impact: 2, inherentScore: 4, mitigatingControlIds: [] } });
-        const risks = svc(RisksService);
-        await expect(risks.delete(risk.id, GHOST)).rejects.toBeDefined();
-        expect(await prisma.risk.count({ where: { id: risk.id } })).toBe(1);
-        expect(await prisma.riskAssessment.count({ where: { riskId: risk.id } })).toBe(1);
-
-        await risks.delete(risk.id, realUser);
-        expect(await prisma.risk.count({ where: { id: risk.id } })).toBe(0);
-        expect(await prisma.riskAssessment.count({ where: { riskId: risk.id } })).toBe(0);
-    });
 });

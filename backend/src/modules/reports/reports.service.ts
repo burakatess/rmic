@@ -27,12 +27,13 @@ export class ReportsService {
             // Risk summary by status
             this.prisma.risk.groupBy({
                 by: ['status'],
+                where: { deletedAt: null },
                 _count: true,
             }),
             // Risk summary by score level
             this.getRisksByScoreLevel(),
             // Risks above appetite
-            this.prisma.risk.count({ where: { isAboveAppetite: true } }),
+            this.prisma.risk.count({ where: { isAboveAppetite: true, deletedAt: null } }),
             // Critical findings
             this.prisma.finding.count({ where: { severity: 'CRITICAL', status: { not: 'CLOSED' } } }),
             // Kritik + Yüksek önem düzeyindeki açık bulgular
@@ -128,6 +129,7 @@ export class ReportsService {
 
     private async getRisksByScoreLevel() {
         const risks = await this.prisma.risk.findMany({
+            where: { deletedAt: null },
             select: { inherentRiskScore: true, residualRiskScore: true },
         });
 
@@ -151,7 +153,7 @@ export class ReportsService {
         //   O aya kadar değerlendirmesi olmayan risk `unknownScore` sayılır — bugünkü
         //   skorla backfill YAPILMAZ.
         const [risks, assessments] = await Promise.all([
-            this.prisma.risk.findMany({ select: { id: true, createdAt: true } }),
+            this.prisma.risk.findMany({ where: { deletedAt: null }, select: { id: true, createdAt: true } }),
             this.prisma.riskAssessment.findMany({
                 select: { riskId: true, assessmentDate: true, inherentScore: true, residualScore: true },
                 orderBy: { assessmentDate: 'asc' },
@@ -203,6 +205,7 @@ export class ReportsService {
 
     async getRiskHeatmapData() {
         const risks = await this.prisma.risk.findMany({
+            where: { deletedAt: null },
             select: {
                 id: true,
                 riskId: true,
@@ -241,6 +244,7 @@ export class ReportsService {
 
         // Tek sorgu — önceden 12 ay için 12 ayrı findMany yapılıyordu.
         const allRisks = await this.prisma.risk.findMany({
+            where: { deletedAt: null },
             select: { createdAt: true, inherentRiskScore: true, residualRiskScore: true },
         });
 

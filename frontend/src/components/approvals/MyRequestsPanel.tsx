@@ -25,6 +25,7 @@ const KIND_LABEL: Record<MyRequestItem['kind'], { label: string; variant: BV }> 
 };
 const RECORD_LABEL: Record<string, string> = {
     CONTROL: 'Kontrol', CONTROL_TEST: 'Kontrol Testi', PERIOD_CONTROL: 'Dönem Kontrolü', FINDING: 'Bulgu', ACTION: 'Aksiyon', FOLLOW_UP: 'Takip',
+    RISK: 'Risk', RISK_CONTROL: 'Risk Kontrolü (Kontrol Alanı)', RISK_ACTION: 'Risk Aksiyonu (Aksiyon Tablosu)',
 };
 const DECISION: Record<string, { label: string; variant: BV }> = {
     ACTION_REJECTED: { label: 'Aksiyon Reddedildi — Düzeltin', variant: 'critical' },
@@ -45,6 +46,8 @@ const DECISION: Record<string, { label: string; variant: BV }> = {
     TEST_APPROVED: { label: 'Test Onaylandı', variant: 'success' },
     TEST_DELETED: { label: 'Test Silindi', variant: 'neutral' },
     TEST_DELETE_REJECTED: { label: 'Test Silme Talebi Reddedildi', variant: 'warning' },
+    RISK_DELETED: { label: 'Risk Kaydı Silindi', variant: 'neutral' },
+    RISK_DELETE_REJECTED: { label: 'Risk Kaydı Silme Talebi Reddedildi', variant: 'warning' },
 };
 
 const fmt = (d?: string | null) => {

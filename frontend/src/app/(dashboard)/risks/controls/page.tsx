@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import api, { ApiError } from '@/lib/api';
+import api from '@/lib/api';
+import { RiskDeletionRequestModal } from '@/components/risks/RiskDeletionRequestModal';
 import { PageHeader, DataTable, FilterBar, StatusBadge, Button, Modal } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
@@ -12,6 +13,7 @@ import { useAuth } from '@/components/auth';
 // ─── Types ─────────────────────────────────────────────────────────────────────
 interface RiskControl {
     id: string;
+    deletionRequestedAt?: string | null;
     kontrolId: string;
     kayitId?: string;
     status: string;
@@ -288,56 +290,6 @@ function KontrolFormModal({ open, onClose, onSaved, editing, risks }: {
     );
 }
 
-// ─── Silme onay modalı — tekil veya toplu ────────────────────────────────────
-function DeleteConfirmModal({ targets, onClose, onDone }: {
-    targets: RiskControl[]; onClose: () => void; onDone: () => void;
-}) {
-    const { success, error: showError } = useToast();
-    const [busy, setBusy] = useState(false);
-
-    const submit = async () => {
-        setBusy(true);
-        const failures: { code: string; message: string }[] = [];
-        let deleted = 0;
-        for (const t of targets) {
-            try {
-                await api.deleteRiskControl(t.id);
-                deleted++;
-            } catch (err) {
-                failures.push({ code: t.kontrolId, message: err instanceof ApiError ? err.message : 'Silme başarısız oldu.' });
-            }
-        }
-        setBusy(false);
-        if (deleted > 0) success('Silindi', `${deleted} kontrol silindi.`);
-        if (failures.length > 0) {
-            showError('Bazı kayıtlar silinemedi', failures.map(f => `${f.code}: ${f.message}`).join(' · '));
-        }
-        onDone();
-        if (failures.length === 0) onClose();
-    };
-
-    return (
-        <Modal open onClose={onClose} title={targets.length === 1 ? 'Kontrolü Sil' : `${targets.length} Kontrolü Sil`} size="md">
-            <div className="space-y-4">
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                    Bu işlem geri alınamayabilir.
-                </div>
-                <div className="max-h-64 overflow-y-auto space-y-1.5">
-                    {targets.map(t => (
-                        <div key={t.id} className="flex items-center gap-2 text-sm border border-slate-100 rounded-lg px-3 py-2">
-                            <span className="font-mono font-bold text-blue-700">{t.kontrolId}</span>
-                            <span className="text-slate-600 truncate">{t.kontrolTanimi}</span>
-                        </div>
-                    ))}
-                </div>
-                <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
-                    <Button variant="secondary" onClick={onClose} disabled={busy}>Vazgeç</Button>
-                    <Button variant="danger" onClick={submit} loading={busy}>Sil</Button>
-                </div>
-            </div>
-        </Modal>
-    );
-}
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function KontrolAlaniPage() {
@@ -486,9 +438,11 @@ export default function KontrolAlaniPage() {
                         className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Düzenle">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                     </button>
-                    {hasPermission('risk:delete') && (
+                    {c.deletionRequestedAt ? (
+                        <span className="px-1.5 py-0.5 text-[10px] font-semibold text-red-700 bg-red-50 border border-red-200 rounded" title="Silme talebi yönetici onayında">Silme Talebinde</span>
+                    ) : hasPermission('risk:delete') && (
                         <button onClick={() => setDeleteTargets([c])}
-                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Sil">
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Silme Talebi">
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         </button>
                     )}
@@ -581,7 +535,7 @@ export default function KontrolAlaniPage() {
                         {hasPermission('risk:delete') && (
                             <Button size="sm" variant="danger" className="ml-auto"
                                 onClick={() => setDeleteTargets(controls.filter(c => selectedRows.has(c.id)))}>
-                                Seçileni Sil
+                                Silme Talebi
                             </Button>
                         )}
                         <Button size="sm" variant="ghost" onClick={() => setSelectedRows(new Set())}>Temizle</Button>
@@ -620,10 +574,11 @@ export default function KontrolAlaniPage() {
             />
 
             {deleteTargets && (
-                <DeleteConfirmModal
-                    targets={deleteTargets}
-                    onClose={() => setDeleteTargets(null)}
-                    onDone={() => { setDeleteTargets(null); setSelectedRows(new Set()); load(); }}
+                <RiskDeletionRequestModal
+                    type="RISK_CONTROL"
+                    targets={deleteTargets.map(t => ({ id: t.id, code: t.kontrolId, title: t.kontrolTanimi }))}
+                    onClose={() => { setDeleteTargets(null); setSelectedRows(new Set()); }}
+                    onDone={() => load()}
                 />
             )}
         </div>

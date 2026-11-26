@@ -14,7 +14,8 @@ export type DecisionKind =
     | 'ACTION_REJECTED' | 'ACTION_APPROVED' | 'ACTION_REVERTED' | 'ACTION_DELETED' | 'ACTION_DELETE_REJECTED'
     | 'FOLLOWUP_REJECTED' | 'FOLLOWUP_APPROVED' | 'FOLLOWUP_REVERTED' | 'FOLLOWUP_DELETED' | 'FOLLOWUP_DELETE_REJECTED'
     | 'FINDING_CLOSED' | 'FINDING_CLOSURE_RETURNED' | 'FINDING_DELETED' | 'FINDING_DELETE_REJECTED'
-    | 'TEST_RETURNED' | 'TEST_APPROVED' | 'TEST_DELETED' | 'TEST_DELETE_REJECTED';
+    | 'TEST_RETURNED' | 'TEST_APPROVED' | 'TEST_DELETED' | 'TEST_DELETE_REJECTED'
+    | 'RISK_DELETED' | 'RISK_DELETE_REJECTED';
 
 /**
  * Bulgu kapanış değerlendirmesi: 2. kontrolcüsü olduğum, kapanışa gönderilmiş (PENDING_REVIEW) bulgular.
@@ -186,7 +187,7 @@ export class ApprovalsService {
      */
     async myRequests(userId: string): Promise<MyRequestItem[]> {
         const pendDel = { deletionRequestedById: userId, deletionRequestedAt: { not: null }, deletedAt: null } as const;
-        const [tests, actions, fus, closures, periods, dControls, dTests, dScopes, dFindings, dActions, dFus, managers] = await Promise.all([
+        const [tests, actions, fus, closures, periods, dControls, dTests, dScopes, dFindings, dActions, dFus, managers, dRisks, dRiskControls, dRiskActions] = await Promise.all([
             this.prisma.controlTest.findMany({ where: { assigneeId: userId, status: 'TAMAMLANDI', deletedAt: null }, select: { id: true, testNo: true, secondControllerId: true, completedAt: true, updatedAt: true, control: { select: { name: true } } } }),
             this.prisma.action.findMany({ where: { firstControllerId: userId, approvalState: 'ONAY_BEKLIYOR', deletedAt: null }, select: { id: true, actionId: true, title: true, description: true, secondControllerId: true, submittedAt: true, updatedAt: true } }),
             this.prisma.findingFollowUp.findMany({ where: { OR: [{ assigneeId: userId }, { evaluatorId: userId }], status: 'TAMAMLANDI', approvalStatus: 'BEKLIYOR', deletedAt: null }, select: { id: true, followUpId: true, secondControllerId: true, evaluatedAt: true, updatedAt: true, finding: findingSelect } }),
@@ -199,6 +200,9 @@ export class ApprovalsService {
             this.prisma.action.findMany({ where: pendDel, select: { id: true, actionId: true, title: true, description: true, deletionRequestedAt: true, deletionReason: true } }),
             this.prisma.findingFollowUp.findMany({ where: pendDel, select: { id: true, followUpId: true, deletionRequestedAt: true, deletionReason: true, finding: findingSelect } }),
             this.prisma.user.findMany({ where: { isActive: true, role: { name: { in: MANAGER_ROLE_NAMES } }, id: { not: userId } }, select: { id: true, firstName: true, lastName: true }, orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }] }),
+            this.prisma.risk.findMany({ where: pendDel, select: { id: true, riskId: true, name: true, deletionRequestedAt: true, deletionReason: true } }),
+            this.prisma.riskControl.findMany({ where: pendDel, select: { id: true, kontrolId: true, kontrolTanimi: true, deletionRequestedAt: true, deletionReason: true } }),
+            this.prisma.riskAction.findMany({ where: pendDel, select: { id: true, aksiyonId: true, aksiyonTanimi: true, deletionRequestedAt: true, deletionReason: true } }),
         ]);
         const checkerIds = [...new Set([...tests, ...actions, ...fus, ...closures, ...periods].map(r => r.secondControllerId).filter((x): x is string => !!x))];
         const checkers = checkerIds.length ? await this.prisma.user.findMany({ where: { id: { in: checkerIds } }, select: { id: true, firstName: true, lastName: true } }) : [];
@@ -239,6 +243,9 @@ export class ApprovalsService {
             ...dScopes.map(s => ({ kind: 'DELETION' as const, recordType: 'PERIOD_CONTROL', recordId: s.id, code: s.code ?? `${s.year}.${s.control.controlId}`, title: s.snapshotName || s.control.name, link: `/controls/agenda/${s.id}`, submittedAt: s.deletionRequestedAt!, reason: s.deletionReason, approvers: mgrs, approverNote: delNote, withdraw: del('PERIOD_CONTROL') })),
             ...dFindings.map(f => ({ kind: 'DELETION' as const, recordType: 'FINDING', recordId: f.id, code: f.findingId, title: f.summary, link: `/findings/${f.id}`, submittedAt: f.deletionRequestedAt!, reason: f.deletionReason, approvers: mgrs, approverNote: delNote, withdraw: del('FINDING') })),
             ...dActions.map(a => ({ kind: 'DELETION' as const, recordType: 'ACTION', recordId: a.id, code: a.actionId, title: a.title || a.description.slice(0, 120), link: `/actions/${a.id}`, submittedAt: a.deletionRequestedAt!, reason: a.deletionReason, approvers: mgrs, approverNote: delNote, withdraw: del('ACTION') })),
+            ...dRisks.map(r => ({ kind: 'DELETION' as const, recordType: 'RISK', recordId: r.id, code: r.riskId, title: r.name, link: `/risks/${r.id}`, submittedAt: r.deletionRequestedAt!, reason: r.deletionReason, approvers: mgrs, approverNote: delNote, withdraw: del('RISK') })),
+            ...dRiskControls.map(c => ({ kind: 'DELETION' as const, recordType: 'RISK_CONTROL', recordId: c.id, code: c.kontrolId, title: c.kontrolTanimi.slice(0, 120), link: `/risks/controls?highlight=${c.id}`, submittedAt: c.deletionRequestedAt!, reason: c.deletionReason, approvers: mgrs, approverNote: delNote, withdraw: del('RISK_CONTROL') })),
+            ...dRiskActions.map(a => ({ kind: 'DELETION' as const, recordType: 'RISK_ACTION', recordId: a.id, code: a.aksiyonId, title: a.aksiyonTanimi.slice(0, 120), link: `/risks/actions?highlight=${a.id}`, submittedAt: a.deletionRequestedAt!, reason: a.deletionReason, approvers: mgrs, approverNote: delNote, withdraw: del('RISK_ACTION') })),
             ...dFus.map(f => ({ kind: 'DELETION' as const, recordType: 'FOLLOW_UP', recordId: f.id, code: f.followUpId, title: f.finding?.summary ?? null, link: `/follow-ups/${f.id}`, submittedAt: f.deletionRequestedAt!, reason: f.deletionReason, approvers: mgrs, approverNote: delNote, withdraw: del('FOLLOW_UP') })),
         ];
         return items.sort((a, b) => +new Date(b.submittedAt) - +new Date(a.submittedAt));
@@ -364,6 +371,34 @@ export class ApprovalsService {
             if (f.deletedAt && f.deletedAt >= since) push('FINDING_DELETED', self, f.findingId, f.deletionReason, f.deletedAt);
             else if (f.deletionRejectionReason && !f.deletionRequestedAt && f.updatedAt >= since) push('FINDING_DELETE_REJECTED', self, f.findingId, f.deletionRejectionReason, f.updatedAt);
         }
+        await this.pushRiskDeletionDecisions(userId, since, items);
         return items.sort((a, b) => +new Date(b.date) - +new Date(a.date));
+    }
+
+    /**
+     * Risk Yönetimi silme talebi kararları (talebi ben açtıysam). Ret sonrası talep eden alanı temizlendiği
+     * için talep sahibi denetim izindeki DELETE_REQUEST kaydından bulunur.
+     */
+    private async pushRiskDeletionDecisions(userId: string, since: Date, items: ApprovalDecisionItem[]) {
+        const reqs = await this.prisma.auditLog.findMany({
+            where: { userId, action: 'DELETE_REQUEST', entityType: { in: ['Risk', 'RiskControl', 'RiskAction'] }, createdAt: { gte: new Date(since.getTime() - 90 * 86400000) } },
+            select: { entityType: true, entityId: true },
+        });
+        if (!reqs.length) return;
+        const ids = (t: string) => [...new Set(reqs.filter(r => r.entityType === t).map(r => r.entityId))];
+        const recent = { OR: [{ deletedAt: { gte: since } }, { deletionRejectionReason: { not: null }, deletionRequestedAt: null, updatedAt: { gte: since } }] };
+        const sel = { id: true, deletedAt: true, deletionReason: true, deletionRejectionReason: true, updatedAt: true } as const;
+        const [risks, controls, actions] = await Promise.all([
+            this.prisma.risk.findMany({ where: { id: { in: ids('Risk') }, ...recent }, select: { ...sel, riskId: true, name: true } }),
+            this.prisma.riskControl.findMany({ where: { id: { in: ids('RiskControl') }, ...recent }, select: { ...sel, kontrolId: true } }),
+            this.prisma.riskAction.findMany({ where: { id: { in: ids('RiskAction') }, ...recent }, select: { ...sel, aksiyonId: true } }),
+        ]);
+        const push = (r: { id: string; deletedAt: Date | null; deletionReason: string | null; deletionRejectionReason: string | null; updatedAt: Date }, code: string, link: string) =>
+            items.push(r.deletedAt
+                ? { kind: 'RISK_DELETED', recordId: r.id, code, finding: null, reason: r.deletionReason, date: r.deletedAt, link }
+                : { kind: 'RISK_DELETE_REJECTED', recordId: r.id, code, finding: null, reason: r.deletionRejectionReason, date: r.updatedAt, link });
+        risks.forEach(r => push(r, r.riskId, '/risks'));
+        controls.forEach(c => push(c, c.kontrolId, '/risks/controls'));
+        actions.forEach(a => push(a, a.aksiyonId, '/risks/actions'));
     }
 }

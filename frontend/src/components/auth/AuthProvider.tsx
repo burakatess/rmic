@@ -1,5 +1,6 @@
 'use client';
 
+import { matchesPermission } from '@/lib/permission-match';
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import api from '@/lib/api';
@@ -145,19 +146,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const hasPermission = useCallback((permission: string) => {
     if (!user) return false;
     if (isAdmin()) return true;
-    return user.role.permissions.includes(permission);
+    return matchesPermission(user.role.permissions, permission);
   }, [user, isAdmin]);
 
   const hasAnyPermission = useCallback((permissions: string[]) => {
     if (!user) return false;
     if (isAdmin()) return true;
-    return permissions.some(p => user.role.permissions.includes(p));
+    return permissions.some(p => matchesPermission(user.role.permissions, p));
   }, [user, isAdmin]);
 
   const hasAllPermissions = useCallback((permissions: string[]) => {
     if (!user) return false;
     if (isAdmin()) return true;
-    return permissions.every(p => user.role.permissions.includes(p));
+    return permissions.every(p => matchesPermission(user.role.permissions, p));
   }, [user, isAdmin]);
 
   const value: AuthContextType = {

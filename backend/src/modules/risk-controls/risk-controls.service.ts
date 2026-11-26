@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma';
 import { assertAllExist, definedOnly, toDateField } from '../../common/util/dto-mapping';
@@ -18,7 +18,7 @@ export class RiskControlsService {
         const { search, status, riskId, page = 1, limit = 50 } = query;
         const skip = (page - 1) * limit;
 
-        const where: any = {};
+        const where: any = { deletedAt: null }; // silme onaylı kayıtlar listeden düşer
         if (status) where.status = status;
         if (search) {
             where.OR = [
@@ -81,13 +81,13 @@ export class RiskControlsService {
                 actions: true,
             },
         });
-        if (!rc) throw new NotFoundException('Kontrol bulunamadı');
+        if (!rc || rc.deletedAt) throw new NotFoundException('Kontrol bulunamadı');
         return rc;
     }
 
     async create(data: CreateRiskControlDto, userId: string) {
         const kontrolId = await this.generateUniqueKontrolId();
-        const riskIds = await assertAllExist(ids => this.prisma.risk.count({ where: { id: { in: ids } } }), data.riskIds, 'risk');
+        const riskIds = await assertAllExist(ids => this.prisma.risk.count({ where: { id: { in: ids }, deletedAt: null } }), data.riskIds, 'risk');
         return this.prisma.$transaction(async (tx) => {
             const created = await tx.riskControl.create({
                 data: {
@@ -105,7 +105,7 @@ export class RiskControlsService {
 
     async update(id: string, data: UpdateRiskControlDto, userId: string) {
         const existing = await this.findOne(id);
-        const riskIds = await assertAllExist(ids => this.prisma.risk.count({ where: { id: { in: ids } } }), data.riskIds, 'risk');
+        const riskIds = await assertAllExist(ids => this.prisma.risk.count({ where: { id: { in: ids }, deletedAt: null } }), data.riskIds, 'risk');
         return this.prisma.$transaction(async (tx) => {
             const updated = await tx.riskControl.update({
                 where: { id },
@@ -130,38 +130,11 @@ export class RiskControlsService {
 
     // Bağımlılığı olmayan kayıt fiziksel olarak silinir; bağımlılık varsa 409
     // ile açık gerekçe döner (Risk Yönetimi kayıt silme politikası — madde 2).
-    async delete(id: string, userId: string) {
-        const rc = await this.prisma.riskControl.findUnique({
-            where: { id },
-            include: {
-                risks: { include: { risk: { select: { riskId: true } } } },
-                actions: { select: { id: true, aksiyonId: true } },
-            },
-        });
-        if (!rc) throw new NotFoundException('Kontrol bulunamadı');
-        if (rc.risks.length > 0) {
-            throw new ConflictException(
-                `Bu kontrol ${rc.risks.length} riske bağlı (${rc.risks.map(r => r.risk.riskId).join(', ')}). Önce risk bağlantılarını kaldırın.`,
-            );
-        }
-        if (rc.actions.length > 0) {
-            throw new ConflictException(
-                `Bu kontrole bağlı ${rc.actions.length} aksiyon var (${rc.actions.map(a => a.aksiyonId).join(', ')}). Önce bu aksiyonları kaldırın.`,
-            );
-        }
-
-        await this.prisma.$transaction(async (tx) => {
-            await tx.auditLog.create({
-                data: { userId, action: 'DELETE', entityType: 'RiskControl', entityId: rc.id, oldValue: rc as any },
-            });
-            await tx.riskControl.delete({ where: { id } });
-        });
-        return { message: 'Kontrol silindi' };
-    }
+    // Silme doğrudan yapılmaz: yönetici onaylı silme talebi (deletion-requests) ile "Silindi" işaretlenir.
 
     async linkRisk(kontrolId: string, riskId: string) {
         const rc = await this.prisma.riskControl.findUnique({ where: { id: kontrolId } });
-        if (!rc) throw new NotFoundException('Kontrol bulunamadı');
+        if (!rc || rc.deletedAt) throw new NotFoundException('Kontrol bulunamadı');
 
         await this.prisma.riskControlRisk.upsert({
             where: { riskId_riskControlId: { riskId, riskControlId: kontrolId } },

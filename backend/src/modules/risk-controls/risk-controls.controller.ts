@@ -34,12 +34,6 @@ export class RiskControlsController {
         return this.service.update(id, body, userId);
     }
 
-    @Delete(':id')
-    @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
-    remove(@Param('id') id: string, @CurrentUser('id') userId: string) {
-        return this.service.delete(id, userId);
-    }
-
     @Post(':id/link-risk/:riskId')
     @Roles('SYSTEM_ADMIN', 'RISK_CONTROL_MANAGER')
     linkRisk(@Param('id') id: string, @Param('riskId') riskId: string) {

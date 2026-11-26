@@ -45,6 +45,8 @@ const DECISION_TITLE: Record<DecisionKind, string> = {
     TEST_APPROVED: 'Kontrol testiniz onaylandı',
     TEST_DELETED: 'Kontrol testi silme talebiniz onaylandı',
     TEST_DELETE_REJECTED: 'Kontrol testi silme talebiniz reddedildi',
+    RISK_DELETED: 'Risk Yönetimi kaydı silme talebiniz onaylandı',
+    RISK_DELETE_REJECTED: 'Risk Yönetimi kaydı silme talebiniz reddedildi',
 };
 
 @Injectable()

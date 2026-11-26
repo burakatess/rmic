@@ -64,7 +64,7 @@ export class SearchService {
 
         const groups = await Promise.all([
             selected(GlobalSearchCategory.RISK) ? this.prisma.risk.findMany({
-                where: { AND: [sRisk], OR: [{ riskId: contains }, { name: contains }, { description: contains }, { ozet: contains }] },
+                where: { AND: [sRisk, { deletedAt: null }], OR: [{ riskId: contains }, { name: contains }, { description: contains }, { ozet: contains }] },
                 select: { id: true, riskId: true, name: true, description: true }, take,
             }).then(rows => rows.map(r => this.result('risk', r.id, r.riskId, r.name, r.description, `/risks/${r.id}`))) : [],
             selected(GlobalSearchCategory.CONTROL) ? this.prisma.control.findMany({

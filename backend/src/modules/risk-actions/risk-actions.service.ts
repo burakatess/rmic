@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma';
 import { assertAllExist, definedOnly, toDateField } from '../../common/util/dto-mapping';
@@ -18,7 +18,7 @@ export class RiskActionsService {
         const { search, status, riskId, riskControlId, page = 1, limit = 50 } = query;
         const skip = (page - 1) * limit;
 
-        const where: any = {};
+        const where: any = { deletedAt: null }; // silme onaylı kayıtlar listeden düşer
         if (status) where.status = status;
         if (riskControlId) where.riskControlId = riskControlId;
         if (riskId) where.risks = { some: { riskId } };
@@ -76,7 +76,7 @@ export class RiskActionsService {
                 riskControl: true,
             },
         });
-        if (!ra) throw new NotFoundException('Aksiyon bulunamadı');
+        if (!ra || ra.deletedAt) throw new NotFoundException('Aksiyon bulunamadı');
         return ra;
     }
 
@@ -133,38 +133,19 @@ export class RiskActionsService {
     /** FK doğrulaması: bağlı kontrol ve riskler var olmalı. */
     private async validateRefs(d: UpdateRiskActionDto) {
         if (d.riskControlId) {
-            const rc = await this.prisma.riskControl.findUnique({ where: { id: d.riskControlId }, select: { id: true } });
-            if (!rc) throw new BadRequestException('Geçersiz kontrol: seçilen risk kontrolü bulunamadı');
+            const rc = await this.prisma.riskControl.findUnique({ where: { id: d.riskControlId }, select: { id: true, deletedAt: true } });
+            if (!rc || rc.deletedAt) throw new BadRequestException('Geçersiz kontrol: seçilen risk kontrolü bulunamadı');
         }
-        return assertAllExist(ids => this.prisma.risk.count({ where: { id: { in: ids } } }), d.riskIds, 'risk');
+        return assertAllExist(ids => this.prisma.risk.count({ where: { id: { in: ids }, deletedAt: null } }), d.riskIds, 'risk');
     }
 
     // Bağımlılığı olmayan kayıt fiziksel olarak silinir; bağımlılık varsa 409
     // ile açık gerekçe döner (Risk Yönetimi kayıt silme politikası — madde 2).
-    async delete(id: string, userId: string) {
-        const ra = await this.prisma.riskAction.findUnique({
-            where: { id },
-            include: { risks: { include: { risk: { select: { riskId: true } } } } },
-        });
-        if (!ra) throw new NotFoundException('Aksiyon bulunamadı');
-        if (ra.risks.length > 0) {
-            throw new ConflictException(
-                `Bu aksiyon ${ra.risks.length} riske bağlı (${ra.risks.map(r => r.risk.riskId).join(', ')}). Önce risk bağlantılarını kaldırın.`,
-            );
-        }
-
-        await this.prisma.$transaction(async (tx) => {
-            await tx.auditLog.create({
-                data: { userId, action: 'DELETE', entityType: 'RiskAction', entityId: ra.id, oldValue: ra as any },
-            });
-            await tx.riskAction.delete({ where: { id } });
-        });
-        return { message: 'Aksiyon silindi' };
-    }
+    // Silme doğrudan yapılmaz: yönetici onaylı silme talebi (deletion-requests) ile "Silindi" işaretlenir.
 
     async linkRisk(aksiyonId: string, riskId: string) {
         const ra = await this.prisma.riskAction.findUnique({ where: { id: aksiyonId } });
-        if (!ra) throw new NotFoundException('Aksiyon bulunamadı');
+        if (!ra || ra.deletedAt) throw new NotFoundException('Aksiyon bulunamadı');
 
         await this.prisma.riskActionRisk.upsert({
             where: { riskId_riskActionId: { riskId, riskActionId: aksiyonId } },

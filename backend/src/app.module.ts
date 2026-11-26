@@ -23,7 +23,6 @@ import { GmysModule } from './modules/gmys/gmys.module';
 import { RiskControlsModule } from './modules/risk-controls/risk-controls.module';
 import { RiskActionsModule } from './modules/risk-actions/risk-actions.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
-import { RiskProposalsModule } from './modules/risk-proposals/risk-proposals.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ApprovalsModule } from './modules/approvals/approvals.module';
 import { AiModule } from './modules/ai/ai.module';
@@ -71,7 +70,6 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     RiskControlsModule,
     RiskActionsModule,
     UploadsModule,
-    RiskProposalsModule,
     AiModule,
     KnowledgeModule,
     LibraryModule,

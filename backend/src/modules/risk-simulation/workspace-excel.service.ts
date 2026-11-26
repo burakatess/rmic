@@ -179,12 +179,12 @@ export class WorkspaceExcelService {
         // (yalnız iz bağlantısı; envantere hiçbir şey yazılmaz).
         const ctx = await this.scope.context(actor);
         const platformRisks = await this.prisma.risk.findMany({
-            where: and<Prisma.RiskWhereInput>({ riskId: { in: [...risks.keys()] } }, riskWhere(ctx)),
+            where: and<Prisma.RiskWhereInput>({ riskId: { in: [...risks.keys()] }, deletedAt: null }, riskWhere(ctx)),
             select: { id: true, riskId: true, version: true },
         });
         const riskByCode = new Map(platformRisks.map(r => [r.riskId, r]));
         const kontrolIds = [...new Set([...built.values()].flatMap(b => b.controls.map(c => c.name)))];
-        const platformControls = await this.prisma.riskControl.findMany({ where: { kontrolId: { in: kontrolIds } }, select: { id: true, kontrolId: true } });
+        const platformControls = await this.prisma.riskControl.findMany({ where: { kontrolId: { in: kontrolIds }, deletedAt: null }, select: { id: true, kontrolId: true } });
         const controlByCode = new Map(platformControls.map(c => [c.kontrolId, c.id]));
 
         const methodology = await this.sims.getActiveMethodology();

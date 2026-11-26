@@ -71,7 +71,7 @@ export class WorkspaceService {
         const ctx = await this.scope.context(actor);
         const methodology = await this.sims.getActiveMethodology();
         const risks = await this.prisma.risk.findMany({
-            where: and<Prisma.RiskWhereInput>({ status: { not: 'CLOSED' } }, riskWhere(ctx)),
+            where: and<Prisma.RiskWhereInput>({ status: { not: 'CLOSED' }, deletedAt: null }, riskWhere(ctx)),
             include: {
                 owner: { select: { firstName: true, lastName: true } },
                 directorate: { select: { name: true } },
