@@ -1089,6 +1089,22 @@ export class AuditsService {
         });
     }
 
+    /** Kapanışa gönderen kişi, karar verilmeden önce kapanış talebini geri çeker: bulgu yeniden açık (önceki durumuna göre). */
+    async withdrawFindingClosure(id: string, userId: string, note?: string) {
+        const f = await this.loadFindingForClosure(id);
+        if (f.status !== 'PENDING_REVIEW') throw new ConflictException('Bulgu kapanış değerlendirmesinde değil.');
+        if (f.closureSubmittedById !== userId) throw new ForbiddenException('Kapanış talebini yalnız gönderen kişi geri çekebilir.');
+        return this.prisma.$transaction(async (tx) => {
+            const open = await this.openStatusFor(id, tx);
+            const res = await tx.finding.updateMany({ where: { id, status: 'PENDING_REVIEW', closureSubmittedById: userId }, data: { ...open, closureSubmittedAt: null, closureSubmittedById: null } });
+            if (res.count !== 1) throw new ConflictException('Bulgu bu sırada değişti (karar verilmiş olabilir); geri çekilmedi.');
+            await logTransition(tx, { entityType: 'FINDING', entityId: id, action: 'WITHDRAW', from: 'TAMAMLANDI', to: 'DEVAM_EDIYOR', userId, reason: note });
+            await this.appendStatusHistory(id, { explanation: `Kapanış talebi geri çekildi.${note?.trim() ? ` Not: ${note.trim()}` : ''}`, evaluator: userId }, userId, tx);
+            await tx.auditLog.create({ data: { userId, action: 'FINDING_CLOSURE_WITHDRAW', entityType: 'Finding', entityId: id, newValue: { ...open, note: note?.trim() || null } } });
+            return tx.finding.findUniqueOrThrow({ where: { id } });
+        });
+    }
+
     /** Yönetici geri alması: bir önceki aşamaya (Kapatıldı → Değerlendirmede, Değerlendirmede → Açık). */
     async revertFindingStage(id: string, reason: string, userId: string) {
         if (!reason?.trim()) throw new BadRequestException('Geri alma gerekçesi zorunludur.');
@@ -2352,6 +2368,37 @@ export class AuditsService {
             await logTransition(tx, { entityType: 'ACTION', entityId: actionId, action: 'COMPLETE', from: 'DEVAM_EDIYOR', to: 'TAMAMLANDI', userId });
             await tx.auditLog.create({ data: { userId, action: 'ACTION_SUBMIT', entityType: 'Action', entityId: actionId, newValue: { approvalState: 'ONAY_BEKLIYOR' } } });
             return tx.action.findUnique({ where: { id: actionId } });
+        });
+    }
+
+    /** 1. kontrolcü, 2. kontrolcü karar vermeden önce aksiyonu onaydan geri çeker: Onay bekliyor → Taslak. */
+    async withdrawAction(findingId: string | null, actionId: string, userId: string, note?: string) {
+        const action = await this.loadAction(findingId, actionId);
+        if (action.approvalState !== 'ONAY_BEKLIYOR') throw new ConflictException('Yalnız onay bekleyen aksiyon geri çekilebilir.');
+        if (action.firstControllerId && action.firstControllerId !== userId) throw new ForbiddenException('Onay talebini yalnız aksiyonu gönderen 1. kontrolcü geri çekebilir.');
+        return this.prisma.$transaction(async (tx) => {
+            const claim = await tx.action.updateMany({ where: { id: actionId, approvalState: 'ONAY_BEKLIYOR' }, data: { approvalState: 'TASLAK', submittedAt: null } });
+            if (claim.count !== 1) throw new ConflictException('Aksiyon bu sırada değişti (karar verilmiş olabilir); geri çekilmedi.');
+            await this.recordAuditTrail({ findingId, actionId, operation: 'ACTION_UPDATED', userId, explanation: `${action.actionId} onay talebi geri çekildi.${note?.trim() ? ` Not: ${note.trim()}` : ''}` }, tx);
+            await logTransition(tx, { entityType: 'ACTION', entityId: actionId, action: 'WITHDRAW', from: 'TAMAMLANDI', to: 'DEVAM_EDIYOR', userId, reason: note });
+            await tx.auditLog.create({ data: { userId, action: 'ACTION_WITHDRAW', entityType: 'Action', entityId: actionId, newValue: { approvalState: 'TASLAK', note: note?.trim() || null } } });
+            return tx.action.findUnique({ where: { id: actionId } });
+        });
+    }
+
+    /** Takibi değerlendiren kişi, onay kararından önce talebi geri çeker: Tamamlandı → Devam Ediyor (değerlendirme korunur). */
+    async withdrawFollowUp(followUpId: string, userId: string, note?: string) {
+        const fu = await this.prisma.findingFollowUp.findUnique({ where: { id: followUpId } });
+        if (!fu || fu.deletedAt) throw new NotFoundException('Takip çalışması bulunamadı');
+        if (fu.status !== 'TAMAMLANDI' || fu.approvalStatus !== 'BEKLIYOR') throw new ConflictException('Yalnız onay bekleyen takip çalışması geri çekilebilir.');
+        if (fu.assigneeId !== userId && fu.evaluatorId !== userId) throw new ForbiddenException('Onay talebini yalnız takibi gönderen kişi geri çekebilir.');
+        return this.prisma.$transaction(async (tx) => {
+            const res = await tx.findingFollowUp.updateMany({ where: { id: followUpId, status: 'TAMAMLANDI', approvalStatus: 'BEKLIYOR' }, data: { status: 'DEVAM_EDIYOR', approvalStatus: null } });
+            if (res.count !== 1) throw new ConflictException('Takip çalışması bu sırada değişti (karar verilmiş olabilir); geri çekilmedi.');
+            await this.recordAuditTrail({ findingId: fu.findingId, followUpId, operation: 'FOLLOWUP_UPDATED', userId, explanation: `${fu.followUpId} onay talebi geri çekildi.${note?.trim() ? ` Not: ${note.trim()}` : ''}` }, tx);
+            await logTransition(tx, { entityType: 'FOLLOW_UP', entityId: followUpId, action: 'WITHDRAW', from: 'TAMAMLANDI', to: 'DEVAM_EDIYOR', userId, reason: note });
+            await tx.auditLog.create({ data: { userId, action: 'FOLLOWUP_WITHDRAW', entityType: 'FindingFollowUp', entityId: followUpId, newValue: { status: 'DEVAM_EDIYOR', note: note?.trim() || null } } });
+            return tx.findingFollowUp.findUnique({ where: { id: followUpId } });
         });
     }
 

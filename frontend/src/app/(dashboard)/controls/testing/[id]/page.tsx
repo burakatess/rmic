@@ -693,6 +693,12 @@ export default function ControlTestDetailPage() {
                 )}
                 {canStart && canEditContent && <Button variant="primary" size="sm" onClick={handleStart} disabled={submitting} icon={<IconPlay />}>Testi Başlat</Button>}
                 {canComplete && canEditContent && (
+                    // Kimin onayına gideceği gönderimden önce görünür.
+                    <span className="text-xs text-slate-500" data-testid="test-approver-hint">
+                        Onaylayacak: <b className="text-slate-700">{test.secondController ? personLabel(test.secondController) : 'yönetici rolündeki kişiler'}</b>
+                    </span>
+                )}
+                {canComplete && canEditContent && (
                     <Button variant="primary" size="sm" onClick={handleComplete} disabled={submitting || !form.findingStatus || needsFindingFirst}
                         title={completeBlockedReason ?? undefined} icon={<IconCheck />}>
                         Testi Tamamla ve Onaya Gönder

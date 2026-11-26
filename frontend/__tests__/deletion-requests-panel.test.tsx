@@ -24,12 +24,12 @@ describe('Silme talepleri paneli', () => {
 
     it('silme onayı tek tıkla uygulanmaz; sonucu anlatan teyit penceresinden sonra gider', async () => {
         render(<DeletionRequestsPanel />);
-        fireEvent.click(await screen.findByRole('button', { name: 'Silmeyi onayla' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Silmeyi Onayla' }));
         expect(api.decideDeletion).not.toHaveBeenCalled();
         const dialog = await screen.findByRole('dialog');
         expect(dialog).toHaveTextContent('bağlı açık aksiyon ve takip çalışmaları da iptal edilir');
         expect(dialog).toHaveTextContent('Mükerrer bulgu');
-        const confirm = [...dialog.querySelectorAll('button')].find(b => b.textContent === 'Silmeyi onayla')!;
+        const confirm = [...dialog.querySelectorAll('button')].find(b => b.textContent === 'Silmeyi Onayla')!;
         fireEvent.click(confirm);
         await waitFor(() => expect(api.decideDeletion).toHaveBeenCalledWith('FINDING', 'f1', true, undefined));
     });

@@ -22,6 +22,7 @@ import {
 import type { ColumnDef, ActiveFilterChip, QuickFilterItem, AdvancedFilterField } from '@/components/ui';
 import { useToast } from '@/components/ui/Toast';
 import { CreateFindingModal } from '@/components/modals/CreateFindingModal';
+import { DeletionApproversNote } from '@/components/workflow/DeletionApproversNote';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -789,6 +790,7 @@ function FindingsContent() {
                     <Button variant="danger" size="sm" onClick={handleBulkDelete} loading={deleting} disabled={!deleteReason.trim()}>Silme talebi gönder</Button>
                 </div>}
             >
+                <DeletionApproversNote />
                 <label htmlFor="bulk-delete-reason" className="block text-xs font-semibold text-slate-600 mb-1">Silme gerekçesi *</label>
                 <textarea id="bulk-delete-reason" value={deleteReason} onChange={e => setDeleteReason(e.target.value)} rows={3} maxLength={2000} autoFocus
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />

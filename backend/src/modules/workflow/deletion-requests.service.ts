@@ -50,6 +50,40 @@ export class DeletionRequestsService {
 
     private isManager(actor: AccessActor) { return MANAGER_ROLES.has(String(actor.role ?? '')); }
 
+    /** Silme talebine (ve yönetici kararlı onaylara) karar verebilecek kişiler: aktif yöneticiler, talep eden hariç. */
+    async approversFor(excludeUserId?: string | null): Promise<Array<{ id: string; name: string; role: string }>> {
+        const rows = await this.prisma.user.findMany({
+            where: { isActive: true, role: { name: { in: [...MANAGER_ROLES] } }, ...(excludeUserId ? { id: { not: excludeUserId } } : {}) },
+            select: { id: true, firstName: true, lastName: true, role: { select: { name: true } } },
+            orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+        });
+        return rows.map(u => ({ id: u.id, name: `${u.firstName} ${u.lastName}`.trim(), role: u.role?.name ?? '' }));
+    }
+
+    /**
+     * Talep eden kişi, karar verilmeden önce silme talebini geri çeker; kayıt mevcut haliyle kalır.
+     * Not isteğe bağlıdır; geri çekme denetim izine yazılır.
+     */
+    async withdraw(type: DeletionEntity, id: string, actor: AccessActor, note?: string) {
+        const { row } = await this.load(type, id);
+        if (!row.deletionRequestedAt) throw new ConflictException('Bu kayıt için bekleyen silme talebi yok.');
+        if (row.deletionRequestedById !== actor.id) throw new ForbiddenException('Silme talebini yalnız talebi açan kişi geri çekebilir.');
+        const where = { id, deletionRequestedAt: { not: null }, deletionRequestedById: actor.id, deletedAt: null } as const;
+        const data = { deletionRequestedAt: null, deletionRequestedById: null, deletionReason: null };
+        const entity: Record<DeletionEntity, string> = { CONTROL: 'Control', CONTROL_TEST: 'ControlTest', PERIOD_CONTROL: 'ControlYearScope', FINDING: 'Finding', ACTION: 'Action', FOLLOW_UP: 'FindingFollowUp' };
+        return this.prisma.$transaction(async (tx) => {
+            const res = type === 'CONTROL' ? await tx.control.updateMany({ where, data })
+                : type === 'CONTROL_TEST' ? await tx.controlTest.updateMany({ where, data })
+                : type === 'FINDING' ? await tx.finding.updateMany({ where, data })
+                : type === 'ACTION' ? await tx.action.updateMany({ where, data })
+                : type === 'FOLLOW_UP' ? await tx.findingFollowUp.updateMany({ where, data })
+                : await tx.controlYearScope.updateMany({ where: { id, deletionRequestedAt: { not: null }, deletionRequestedById: actor.id, status: 'ACTIVE' }, data });
+            if (res.count !== 1) throw new ConflictException('Talep bu sırada sonuçlanmış olabilir; sayfayı yenileyin.');
+            await tx.auditLog.create({ data: { userId: actor.id, action: 'DELETE_WITHDRAW', entityType: entity[type], entityId: id, oldValue: { reason: row.deletionReason, requestedAt: row.deletionRequestedAt }, newValue: { note: note?.trim() || null } } });
+            return { withdrawn: true };
+        });
+    }
+
     private async load(type: DeletionEntity, id: string) {
         if (type === 'CONTROL') {
             const c = await this.prisma.control.findUnique({ where: { id } });
@@ -281,10 +315,13 @@ export class DeletionRequestsService {
         const users = ids.length ? await this.prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, firstName: true, lastName: true } }) : [];
         const by = new Map(users.map(u => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
         const manager = this.isManager(actor);
+        const allManagers = await this.approversFor(null);
         const row = (type: DeletionEntity, r: any, code: string, title: string, href: string) => ({
             type, id: r.id, code, title, href, reason: r.deletionReason, requestedAt: r.deletionRequestedAt,
             requestedBy: r.deletionRequestedById ? { id: r.deletionRequestedById, name: by.get(r.deletionRequestedById) ?? '—' } : null,
             canDecide: manager && r.deletionRequestedById !== actor.id,
+            canWithdraw: r.deletionRequestedById === actor.id,
+            approvers: allManagers.filter(m => m.id !== r.deletionRequestedById),
         });
         return [
             ...controls.map(c => row('CONTROL', c, c.controlId, c.name, `/controls/${c.id}`)),

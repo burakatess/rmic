@@ -18,6 +18,13 @@ export class WorkflowApprovalsController {
         return { items, decisions };
     }
 
+    /** Taleplerim: gönderdiğim, karar bekleyen onay ve silme talepleri + kayıtlarım hakkındaki son kararlar. */
+    @Get('mine')
+    async mine(@CurrentUser('id') userId: string) {
+        const [items, decisions] = await Promise.all([this.approvals.myRequests(userId), this.approvals.decisionsFor(userId)]);
+        return { items, decisions };
+    }
+
     @Get('count')
     async count(@CurrentUser('id') userId: string) {
         return { count: await this.approvals.pendingCount(userId) };

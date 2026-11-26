@@ -63,6 +63,20 @@ export class WorkflowController {
         return this.deletions.approve(this.delType(type), id, user);
     }
 
+    /** Talep eden kişi silme talebini karar verilmeden önce geri çeker (not isteğe bağlı). */
+    @Post('deletion-requests/:type/:id/withdraw')
+    @RequireAnyPermission('control:view')
+    withdrawDeletion(@Param('type') type: string, @Param('id') id: string, @Body() dto: DeletionDecisionDto, @CurrentUser() user: AccessActor) {
+        return this.deletions.withdraw(this.delType(type), id, user, dto.reason);
+    }
+
+    /** Silme talebine karar verebilecek kişiler (talep eden hariç) — talep penceresinde "kimin onayına gidecek" bilgisi. */
+    @Get('deletion-requests/approvers')
+    @RequireAnyPermission('control:view')
+    deletionApprovers(@CurrentUser() user: AccessActor) {
+        return this.deletions.approversFor(user.id);
+    }
+
     @Post('deletion-requests/:type/:id/reject')
     @RequireAnyPermission('control:view')
     rejectDeletion(@Param('type') type: string, @Param('id') id: string, @Body() dto: DeletionDecisionDto, @CurrentUser() user: AccessActor) {

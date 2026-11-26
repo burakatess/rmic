@@ -1103,6 +1103,24 @@ export class ControlsService {
     }
 
     /**
+     * Testi yapan kişi, 2. kontrolcü karar vermeden önce onay talebini geri çeker: Tamamlandı → Devam Ediyor.
+     * Not isteğe bağlıdır; geri çekme geçiş geçmişine ve denetim izine yazılır.
+     */
+    async withdrawTest(testId: string, userId: string, note?: string) {
+        const test = await this.prisma.controlTest.findUnique({ where: { id: testId } });
+        if (!test || test.deletedAt) throw new NotFoundException('Kontrol testi bulunamadı');
+        if (test.status !== 'TAMAMLANDI') throw new ConflictException('Yalnız onay bekleyen test geri çekilebilir.');
+        if (test.assigneeId !== userId) throw new ForbiddenException('Onay talebini yalnız testi gönderen kişi geri çekebilir.');
+        return this.prisma.$transaction(async (tx) => {
+            const res = await tx.controlTest.updateMany({ where: { id: testId, status: 'TAMAMLANDI', approvedAt: null }, data: { status: 'DEVAM_EDIYOR' } });
+            if (res.count !== 1) throw new ConflictException('Test bu sırada değişti (karar verilmiş olabilir); geri çekilmedi.');
+            await logTransition(tx, { entityType: 'CONTROL_TEST', entityId: testId, action: 'WITHDRAW', from: 'TAMAMLANDI', to: 'DEVAM_EDIYOR', userId, reason: note });
+            await tx.auditLog.create({ data: { userId, action: 'TEST_WITHDRAW', entityType: 'ControlTest', entityId: testId, newValue: { note: note?.trim() || null } } });
+            return tx.controlTest.findUniqueOrThrow({ where: { id: testId } });
+        });
+    }
+
+    /**
      * İş akışı: yetkili kullanıcı testi bir önceki aşamaya geri alır (gerekçe zorunlu).
      * Onaylandı → Tamamlandı (onay kaldırılır, kontrol özeti yeniden hesaplanır), Tamamlandı → Devam Ediyor,
      * Devam Ediyor → Bekliyor. Rol kısıtı WorkflowService'te uygulanır.
