@@ -10,6 +10,14 @@ const toStringArray = ({ value }: { value: unknown }) => {
     return Array.isArray(value) ? value : [value];
 };
 
+/** Kapsam tablosu: birden çok yıl için kontrol × yıl kapsam durumu (sayfa yenilenmeden işaretleme). */
+export class AnnualPlanScopeMatrixQueryDto {
+    @IsOptional() @IsIn(['MINE', 'UNIT', 'ORG']) scope?: 'MINE' | 'UNIT' | 'ORG';
+    @IsOptional() @Transform(toStringArray) @IsArray() @IsString({ each: true }) directorateId?: string[];
+    @Transform(toStringArray) @IsArray() @ArrayMaxSize(5) @Type(() => Number) @IsInt({ each: true }) @Min(2000, { each: true }) @Max(2100, { each: true }) years: number[];
+    @Transform(toStringArray) @IsArray() @ArrayMaxSize(200) @IsString({ each: true }) controlIds: string[];
+}
+
 export class AnnualPlanWorkspaceQueryDto {
     @IsOptional() @IsIn(['MINE', 'UNIT', 'ORG']) scope?: 'MINE' | 'UNIT' | 'ORG';
     @IsOptional() @Transform(toStringArray) @IsArray() @IsString({ each: true }) directorateId?: string[];

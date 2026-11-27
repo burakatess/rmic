@@ -16,6 +16,8 @@ interface WorkloadRow {
     frequency: ControlFrequency;
     selectedMonths: string[];
     controlDate: Date | null;
+    /** Yıla özel referans ay (QUARTERLY/SEMI_ANNUAL/ANNUAL). Verilmezse takvim-sabit varsayılan aylar kullanılır. */
+    referenceMonth?: number | null;
 }
 
 export interface WorkloadResult {
@@ -51,7 +53,7 @@ export function computeWorkload(rows: WorkloadRow[], year: number): WorkloadResu
         }
         if (row.frequency === 'DAILY') { dailyExcludedCount++; continue; }
 
-        const periods = computeScopePeriods(row.frequency, year, { selectedMonths: row.selectedMonths, controlDate: row.controlDate });
+        const periods = computeScopePeriods(row.frequency, year, { selectedMonths: row.selectedMonths, controlDate: row.controlDate, referenceMonth: row.referenceMonth });
         totalTasks += periods.length;
         for (const p of periods) byMonth[p.targetDate.getMonth()] += 1;
     }
@@ -111,7 +113,7 @@ export function computeWorkloadByAssignee(rows: AssigneeWorkloadRow[], year: num
         } else if (row.frequency === 'DAILY') {
             taskCount = 0;
         } else {
-            const periods = computeScopePeriods(row.frequency, year, { selectedMonths: row.selectedMonths, controlDate: row.controlDate });
+            const periods = computeScopePeriods(row.frequency, year, { selectedMonths: row.selectedMonths, controlDate: row.controlDate, referenceMonth: row.referenceMonth });
             taskCount = periods.length;
             monthsHit = periods.map(p => p.targetDate.getMonth());
         }
@@ -536,6 +538,48 @@ export class AnnualPlanService {
         });
     }
 
+    /**
+     * Kapsam tablosu yıl sütunları (kullanıcı kararı 2026-11): bir kontrolü 2027/2028 gibi başka bir yılın
+     * kapsamına sayfa yılı değişmeden almak için, sayfadaki kontrollerin her yıldaki ETKİN kapsam durumu
+     * (taslak satırı varsa o, yoksa gerçek ACTIVE kapsam) ve her yılın taslak revizyonu/durumu döner.
+     * Taslak burada OLUŞTURULMAZ (salt okuma); taslağı olmayan yıl revision 0 / OPEN sayılır.
+     */
+    async getScopeMatrix(userId: string, permissions: string[], query: { scope?: any; directorateId?: string[]; years: number[]; controlIds: string[] }) {
+        const years = [...new Set(query.years.map(Number))].sort((a, b) => a - b);
+        const resolved = await this.scopeService.resolveScope(userId, permissions, { scope: query.scope, directorateId: query.directorateId });
+        const rbacWhere: any = { status: 'ACTIVE', deletedAt: null, id: { in: query.controlIds } };
+        if (resolved.appliedScope === 'UNIT') rbacWhere.directorateId = { in: resolved.directorateIds! };
+        else if (resolved.appliedScope === 'MINE') {
+            rbacWhere.OR = [{ ownerId: userId }, { yearScopes: { some: { year: { in: years }, OR: [{ assigneeId: userId }, { secondControllerId: userId }] } } }];
+        }
+        const controls = await this.prisma.control.findMany({ where: rbacWhere, select: { id: true } });
+        const ids = controls.map(c => c.id);
+        const [drafts, scopes] = await Promise.all([
+            this.prisma.annualPlanDraft.findMany({ where: { year: { in: years } }, include: { items: { where: { controlId: { in: ids } }, select: { controlId: true, inScope: true } } } }),
+            this.prisma.controlYearScope.findMany({ where: { year: { in: years }, controlId: { in: ids }, status: 'ACTIVE' }, select: { controlId: true, year: true } }),
+        ]);
+        const draftByYear = new Map(drafts.map(d => [d.year, d]));
+        const real = new Set(scopes.map(s => `${s.year}:${s.controlId}`));
+        const cells: Record<string, Record<number, { inScope: boolean; pendingAction: 'ADD' | 'REMOVE' | 'NONE' }>> = {};
+        for (const id of ids) {
+            cells[id] = {};
+            for (const y of years) {
+                const item = draftByYear.get(y)?.items.find(i => i.controlId === id);
+                const isReal = real.has(`${y}:${id}`);
+                const inScope = item ? item.inScope : isReal;
+                cells[id][y] = { inScope, pendingAction: item && item.inScope !== isReal ? (item.inScope ? 'ADD' : 'REMOVE') : 'NONE' };
+            }
+        }
+        return {
+            years: years.map(y => {
+                const d = draftByYear.get(y);
+                const status = d?.status ?? 'OPEN';
+                return { year: y, draftRevision: d?.revision ?? 0, draftStatus: status, editable: status !== 'PENDING_APPROVAL' && status !== 'APPROVED' };
+            }),
+            cells,
+        };
+    }
+
     /** RBAC-scoped bağlam: hem Kapsam-Takvim hem Kontrolcü-Atamaları sekmesi
      * BUNU çağırır — iki ayrı hesap yazılmaz. */
     private async loadWorkspaceContext(year: number, userId: string, permissions: string[], scopeQuery: { scope?: any; directorateId?: string[] }) {
@@ -625,7 +669,7 @@ export class AnnualPlanService {
         // taslağın tamamına göre hesaplanır (Madde 11-12).
         const effectiveRows = this.buildEffectiveRows(allControls, draftByControl, realScopeByControl, year);
         const workloadRows: WorkloadRow[] = effectiveRows.filter(r => r.inScope).map(r => ({
-            controlId: r.controlId, frequency: r.effectiveFrequency, selectedMonths: r.effectiveSelectedMonths, controlDate: r.effectiveControlDate,
+            controlId: r.controlId, frequency: r.effectiveFrequency, selectedMonths: r.effectiveSelectedMonths, referenceMonth: r.effectiveReferenceMonth, controlDate: r.effectiveControlDate,
         }));
         const workload = computeWorkload(workloadRows, year);
         const changedCount = effectiveRows.filter(r => r.changedInDraft).length;
@@ -750,7 +794,7 @@ export class AnnualPlanService {
         const effectiveRows = this.buildEffectiveRows(allControls, draftByControl, realScopeByControl, year).filter(r => r.inScope);
 
         const rows: AssigneeWorkloadRow[] = effectiveRows.map(r => ({
-            controlId: r.controlId, frequency: r.effectiveFrequency, selectedMonths: r.effectiveSelectedMonths,
+            controlId: r.controlId, frequency: r.effectiveFrequency, selectedMonths: r.effectiveSelectedMonths, referenceMonth: r.effectiveReferenceMonth,
             controlDate: r.effectiveControlDate, assigneeId: r.assigneeId, secondControllerId: r.secondControllerId,
         }));
         const result = computeWorkloadByAssignee(rows, year);

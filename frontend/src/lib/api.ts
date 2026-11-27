@@ -19,7 +19,7 @@ import type {
 } from '@/types/dashboard';
 import type { WorkflowEntityType, WorkflowState, WorkflowActionKey, BoardResponse, WorkflowStage, DeletionRequestRow, MyRequestItem } from '@/types/workflow';
 import type {
-    AnnualPlanWorkspace, AnnualPlanDraftItem, AnnualPlanPreview, AnnualPlanApplyResult, AnnualPlanAssignmentDecision,
+    AnnualPlanWorkspace, AnnualPlanScopeMatrix, AnnualPlanDraftItem, AnnualPlanPreview, AnnualPlanApplyResult, AnnualPlanAssignmentDecision,
     EligibleController, WorkloadByAssignee,
 } from '@/types/annual-plan';
 
@@ -686,6 +686,10 @@ class ApiClient {
     // uç noktasıyla KARIŞTIRILMASIN, ayrı bir özellik.
     async getAnnualPlanWorkspace(year: number, params?: Record<string, unknown>): Promise<AnnualPlanWorkspace> {
         return this.request<AnnualPlanWorkspace>(`/controls/annual-plan/${year}/workspace${buildQuery(params)}`);
+    }
+
+    async getAnnualPlanScopeMatrix(years: number[], controlIds: string[], scopeParams?: Record<string, unknown>): Promise<AnnualPlanScopeMatrix> {
+        return this.request<AnnualPlanScopeMatrix>(`/controls/annual-plan/scope-matrix${buildQuery({ ...scopeParams, years, controlIds })}`);
     }
 
     async saveAnnualPlanDraftItems(year: number, data: { expectedRevision: number; items: Partial<AnnualPlanDraftItem & { referenceMonth?: number; assigneeId?: string; secondControllerId?: string }>[] }, scopeParams?: Record<string, unknown>) {

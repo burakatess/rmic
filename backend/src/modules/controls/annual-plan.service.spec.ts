@@ -7,6 +7,21 @@ const row = (frequency: any, overrides: Partial<{ selectedMonths: string[]; cont
     controlDate: overrides.controlDate ?? null,
 });
 
+describe('computeWorkload — yıla özel referans ay', () => {
+    it('6 aylık kontrol referans ay Ocak ise Ocak ve Temmuz sayılır (varsayılan Haziran/Aralık değil)', () => {
+        const w = computeWorkload([{ controlId: 'c1', frequency: 'SEMI_ANNUAL' as any, selectedMonths: ['Ocak', 'Temmuz'], controlDate: null, referenceMonth: 1 }], 2031);
+        expect(w.totalTasks).toBe(2);
+        expect(w.byMonth[0]).toBe(1);
+        expect(w.byMonth[6]).toBe(1);
+        expect(w.byMonth[5] + w.byMonth[11]).toBe(0);
+    });
+    it('referans ay yoksa takvim-sabit yarıyıl sonları sayılır', () => {
+        const w = computeWorkload([{ controlId: 'c1', frequency: 'SEMI_ANNUAL' as any, selectedMonths: [], controlDate: null }], 2031);
+        expect(w.byMonth[5]).toBe(1);
+        expect(w.byMonth[11]).toBe(1);
+    });
+});
+
 describe('computeWorkload — Madde 24 kabul testleri', () => {
     it('Aylık kontrol tam yıl için 12 task üretir', () => {
         const result = computeWorkload([row('MONTHLY')], 2026);
