@@ -9,28 +9,21 @@ import {
     LoadingState, EmptyState, ErrorState, Modal,
 } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
-import { PlanDecisionDialog, PlanDecisionHistory } from '@/components/controls/AnnualPlanLifecycle';
+import { AnnualPlanStepper, PlanDecisionDialog, PlanDecisionHistory } from '@/components/controls/AnnualPlanLifecycle';
+import { PendingApprovalNotice } from '@/components/approvals/PendingApprovalNotice';
 import { AnnualPlanAssignmentDecisions, hasUnresolvedPlanConflicts } from '@/components/controls/AnnualPlanAssignmentDecisions';
 import { PermissionGate } from '@/components/auth';
 import { useToast } from '@/components/ui/Toast';
 import type {
     AnnualPlanAssignmentDecision, AnnualPlanRow, AnnualPlanWorkspace, AnnualPlanPreview, AnnualPlanScope, EligibleController, WorkloadByAssignee,
-    AnnualPlanScopeMatrix,
+    AnnualPlanScopeMatrix, AnnualPlanWorkload,
 } from '@/types/annual-plan';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
-import { computeMonthGroup } from '@/lib/month-group';
+import { computeMonthGroup, MONTH_LABELS_TR } from '@/lib/month-group';
 
-/**
- * Yıllık Plan (kullanıcı tasarımı 2026-11):
- * - Sayfada TEK yıl seçimi: üstteki yıl düğmeleri (varsayılan içinde bulunulan yıl). İş yükü grafiği,
- *   kontrolcü iş yükü (hep açık), onay durumu ve "Takvim ve Atamalar" sekmesi bu yıla göredir.
- * - Kapsam sekmesi: her kontrolün satırında sabit üç yıl kutucuğu (bu yıl + 2). Kutucuk o yılın
- *   kapsamını yerinde değiştirir; sayfa yenilenmez. "Kaydet" her yılın kendi taslağına yazar.
- * - Takvim ve Atamalar sekmesi: seçili yıla açılmış kontroller; o yıla özel sıklık, aylar (satırda
- *   doğrudan seçilir), 1. ve 2. kontrolcü. Her yılın takvimi birbirinden bağımsızdır.
- */
+// ─── Sabitler ────────────────────────────────────────────────────────────────
 
 const FREQUENCY_LABELS: Record<string, string> = {
     DAILY: 'Günlük', WEEKLY: 'Haftalık', MONTHLY: 'Aylık', QUARTERLY: '3 Aylık',
@@ -38,31 +31,58 @@ const FREQUENCY_LABELS: Record<string, string> = {
 };
 const MONTH_LABELS_SHORT = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
 const SCOPE_LABELS: Record<AnnualPlanScope, string> = { MINE: 'İşlerim', UNIT: 'Birimim', ORG: 'Kurum' };
-const STATUS_LABELS: Record<AnnualPlanWorkspace['draftStatus'], string> = {
-    OPEN: 'Taslak', PENDING_APPROVAL: 'Onay bekliyor', CHANGES_REQUESTED: 'Değişiklik istendi', APPROVED: 'Onaylandı', APPLIED: 'Uygulandı',
-};
 const CURRENT_YEAR = new Date().getFullYear();
-const YEAR_BUTTONS = [CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2, CURRENT_YEAR + 3];
-/** Kapsam sekmesindeki sabit yıl sütunları: içinde bulunulan yıl + 2 yıl. */
-const SCOPE_YEARS = [CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2];
-const MONTH_PICKER_FREQS = new Set(['QUARTERLY', 'SEMI_ANNUAL', 'ANNUAL']);
+// Plan yılı ve iş yükü grafiği için seçilebilir yıllar (sabit aralık — seçime göre kaymaz).
+const YEAR_OPTIONS = [CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2, CURRENT_YEAR + 3];
 
 const inputCls = 'px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400';
 
-/** Takvim ve Atamalar satırındaki kaydedilmemiş düzenleme (yalnız seçili yıl). */
-interface RowEdit {
+// Bir kontrolün taslakta önerilen (henüz kaydedilmemiş) yerel düzenlemesi.
+interface PendingEdit {
+    inScope: boolean;
     frequency?: string;
     referenceMonth?: number | null;
-    controlDate?: string | null;
+    selectedMonths?: string[];
+    controlDate?: string;
+    reason?: string;
     assigneeId?: string | null;
     secondControllerId?: string | null;
 }
 
-const editable = (status?: AnnualPlanWorkspace['draftStatus']) => !!status && status !== 'PENDING_APPROVAL' && status !== 'APPROVED';
+const MONTH_ABBR_TR = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+
+// Artık serbest referans-ay seçimine göre (madde 6) — sabit takvim değil.
+// Yalnızca GÖSTERİM amaçlı; kalıcı hesap her zaman backend'de yapılır.
+function describeSchedule(row: AnnualPlanRow): string {
+    switch (row.effectiveFrequency) {
+        case 'MONTHLY': return 'Her ay (12 task) — otomatik';
+        case 'WEEKLY': return 'Her Cuma — otomatik';
+        case 'DAILY': return 'Otomatik task üretilmiyor';
+        case 'QUARTERLY':
+        case 'SEMI_ANNUAL':
+        case 'ANNUAL': {
+            if (row.effectiveReferenceMonth != null) {
+                const months = computeMonthGroup(row.effectiveFrequency, row.effectiveReferenceMonth);
+                return months.map(m => MONTH_ABBR_TR[m - 1]).join(', ');
+            }
+            // referenceMonth hiç seçilmemiş eski/legacy kapsam — takvim-sabit varsayılan.
+            if (row.effectiveFrequency === 'QUARTERLY') return 'Çeyrek sonu (Mar, Haz, Eyl, Ara) — varsayılan';
+            if (row.effectiveFrequency === 'SEMI_ANNUAL') return 'Yarıyıl sonu (Haz, Ara) — varsayılan';
+            return 'Yıl sonu (Ara) — varsayılan';
+        }
+        case 'AD_HOC':
+            if (row.effectiveControlDate) return new Date(row.effectiveControlDate).toLocaleDateString('tr-TR');
+            if (row.effectiveSelectedMonths?.length) return row.effectiveSelectedMonths[0];
+            return 'Ay seçilmedi';
+        default: return '—';
+    }
+}
+
+// ─── Sayfa ───────────────────────────────────────────────────────────────────
 
 export default function AnnualPlanPage() {
     return (
-        <Suspense fallback={<LoadingState message="Yükleniyor..." />}>
+        <Suspense fallback={<PageShell><LoadingState message="Yıllık Plan yükleniyor..." /></PageShell>}>
             <AnnualPlanPageContent />
         </Suspense>
     );
@@ -75,62 +95,164 @@ function AnnualPlanPageContent() {
 
     const [year, setYear] = useState<number>(Number(searchParams.get('year')) || CURRENT_YEAR);
     const [scope, setScope] = useState<AnnualPlanScope>((searchParams.get('scope') as AnnualPlanScope) || 'ORG');
-    const [view, setView] = useState<'scope' | 'schedule'>(searchParams.get('tab') === 'schedule' ? 'schedule' : 'scope');
-    const scopeParams = useMemo(() => ({ scope }), [scope]);
+    const [directorateIds, setDirectorateIds] = useState<string[]>(searchParams.getAll('dir'));
+    const [search, setSearch] = useState(searchParams.get('q') || '');
+    const [frequencyFilter, setFrequencyFilter] = useState(searchParams.get('freq') || '');
+    const [scopeFilter, setScopeFilter] = useState<'IN_SCOPE' | 'OUT_OF_SCOPE' | ''>((searchParams.get('sf') as any) || '');
+    const [missingOnly, setMissingOnly] = useState(searchParams.get('missing') === '1');
+    const [changedOnly, setChangedOnly] = useState(searchParams.get('changed') === '1');
+    const [page, setPage] = useState(Number(searchParams.get('page')) || 1);
+    const focusControlId = searchParams.get('controlId') || undefined;
 
-    // ── Seçili yıl: durum, iş yükü ve Takvim ve Atamalar satırları (tek istek) ──
-    const [plan, setPlan] = useState<AnnualPlanWorkspace | null>(null);
-    const [planLoading, setPlanLoading] = useState(true);
-    const [planError, setPlanError] = useState<string | null>(null);
-    const [workload, setWorkload] = useState<WorkloadByAssignee | null>(null);
-    const [schedSearch, setSchedSearch] = useState('');
-    const [schedMissingOnly, setSchedMissingOnly] = useState(false);
-    const [schedPage, setSchedPage] = useState(1);
-    const planReq = useRef(0);
-
-    // ── Kapsam listesi (yıldan bağımsız kontrol listesi) + üç yılın kapsam durumu ──
-    const [list, setList] = useState<AnnualPlanWorkspace | null>(null);
-    const [listLoading, setListLoading] = useState(false);
-    const [listSearch, setListSearch] = useState(searchParams.get('q') || '');
-    const [listFreq, setListFreq] = useState('');
-    const [listPage, setListPage] = useState(1);
-    const [matrix, setMatrix] = useState<AnnualPlanScopeMatrix | null>(null);
-    const listReq = useRef(0);
-    const matrixReq = useRef(0);
-
-    // ── Kaydedilmemiş değişiklikler ──
-    const [scopeEdits, setScopeEdits] = useState<Map<string, boolean>>(new Map()); // `yıl:kontrol` → kapsamda mı
-    const [rowEdits, setRowEdits] = useState<Map<string, RowEdit>>(new Map()); // seçili yıl, kontrol → düzenleme
+    const [workspace, setWorkspace] = useState<AnnualPlanWorkspace | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [pendingEdits, setPendingEdits] = useState<Map<string, PendingEdit>>(new Map());
+    const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
     const [saving, setSaving] = useState(false);
-    const [reasonPrompt, setReasonPrompt] = useState<string[] | null>(null); // gerekçe gereken kontrol kodları
-    const [reason, setReason] = useState('');
-
-    const [selectedScopeRows, setSelectedScopeRows] = useState<Set<string>>(new Set());
-    const [bulkYear, setBulkYear] = useState<number>(year);
-    const [selectedSchedRows, setSelectedSchedRows] = useState<Set<string>>(new Set());
+    const [editingRow, setEditingRow] = useState<AnnualPlanRow | null>(null);
+    const [assignmentDecisions, setAssignmentDecisions] = useState<AnnualPlanAssignmentDecision[]>([]);
+    const [previewData, setPreviewData] = useState<AnnualPlanPreview | null>(null);
+    const previewRequestId = useRef(0);
+    const [previewContext, setPreviewContext] = useState<{ year: number; revision: number } | null>(null);
+    const [previewOpen, setPreviewOpen] = useState(false);
+    const [applying, setApplying] = useState(false);
+    const [transitioning, setTransitioning] = useState(false);
+    // İki çalışma görünümü — AYNI taslak/state üzerinde (madde 4): sekme değişince
+    // pendingEdits/workspace kaybolmaz.
+    const [view, setView] = useState<'schedule' | 'assignments'>('schedule');
     const [bulkAssignRole, setBulkAssignRole] = useState<'assigneeId' | 'secondControllerId' | null>(null);
-    const [copyOpen, setCopyOpen] = useState(false);
-    const [historyOpen, setHistoryOpen] = useState(false);
+    const [copyModalOpen, setCopyModalOpen] = useState(false);
+    const [workloadData, setWorkloadData] = useState<WorkloadByAssignee | null>(null);
+    const reqId = useRef(0);
 
+    // Kapsam tablosu yıl sütunları (kullanıcı kararı 2026-11): kutucuk o yılın kapsamını yerinde
+    // değiştirir; sayfa yılı ve grafik yenilenmez. Plan yılı dışındaki yılların işaretlemeleri
+    // `scopeEdits`te (`yıl:kontrol`) tutulur ve "Taslağı Kaydet" ile o yılın taslağına yazılır.
+    const [yearWindowStart, setYearWindowStart] = useState(() => Math.min(CURRENT_YEAR, Number(searchParams.get('year')) || CURRENT_YEAR));
+    const windowYears = useMemo(() => [yearWindowStart, yearWindowStart + 1, yearWindowStart + 2], [yearWindowStart]);
+    const [matrix, setMatrix] = useState<AnnualPlanScopeMatrix | null>(null);
+    const matrixReqId = useRef(0);
+    const [scopeEdits, setScopeEdits] = useState<Map<string, boolean>>(new Map());
+    const [bulkYear, setBulkYear] = useState<number | null>(null);
+
+    // Aylık İş Yükü grafiği kendi yıl seçicisiyle çalışır (varsayılan: içinde bulunulan yıl);
+    // tablo/plan yılı değişiklikleri grafiği yenilemez, yalnız kayıt/uygulama sonrası tazelenir.
+    const [chartYear, setChartYear] = useState(CURRENT_YEAR);
+    const [chartWorkload, setChartWorkload] = useState<AnnualPlanWorkload | null>(null);
+    const [chartLoading, setChartLoading] = useState(false);
+    const [chartRefresh, setChartRefresh] = useState(0);
+    const chartReqId = useRef(0);
+
+    // Kontrolcü seçenekleri — TEK sefer sekme/yıl bazında çekilir ve tüm satır
+    // seçicileri arasında paylaşılır. Önceden her satırın kendi UserPicker'ı
+    // bağımsız fetch atıyordu (N satır × 2 alan = 2N eşzamanlı istek) ve hata
+    // sessizce yutuluyordu (.catch(() => setLoaded(true))) — bu da "seçim
+    // boş geliyor" şikayetinin kök nedeniydi: tek bir isteğin başarısız
+    // olması, hiçbir hata göstermeden o satırı kalıcı olarak boş bırakıyordu.
     const [controllerOptions, setControllerOptions] = useState<{ assignee: EligibleController[]; secondController: EligibleController[] }>({ assignee: [], secondController: [] });
     const [controllerOptionsLoading, setControllerOptionsLoading] = useState(false);
+    const [controllerOptionsError, setControllerOptionsError] = useState(false);
 
-    // Önizleme / onay / uygulama
-    const [preview, setPreview] = useState<AnnualPlanPreview | null>(null);
-    const [previewOpen, setPreviewOpen] = useState(false);
-    const [decisions, setDecisions] = useState<AnnualPlanAssignmentDecision[]>([]);
-    const [busy, setBusy] = useState(false);
-    const [decisionMode, setDecisionMode] = useState<'approve' | 'request-changes' | 'reopen' | null>(null);
-
-    const unsavedCount = scopeEdits.size + rowEdits.size;
+    const loadControllerOptions = useCallback(async () => {
+        setControllerOptionsLoading(true);
+        setControllerOptionsError(false);
+        try {
+            const [assignee, secondController] = await Promise.all([
+                api.getEligibleControllers(year, 'assignee'),
+                api.getEligibleControllers(year, 'secondController'),
+            ]);
+            setControllerOptions({ assignee: assignee.data, secondController: secondController.data });
+        } catch {
+            setControllerOptionsError(true);
+        } finally {
+            setControllerOptionsLoading(false);
+        }
+    }, [year]);
 
     useEffect(() => {
-        const params = new URLSearchParams({ year: String(year), scope });
-        if (view === 'schedule') params.set('tab', 'schedule');
+        if (view === 'assignments') loadControllerOptions();
+    }, [view, year, loadControllerOptions]);
+
+    const scopeParams = useMemo(() => ({ scope, directorateId: scope === 'UNIT' ? directorateIds : undefined }), [scope, directorateIds]);
+
+    // URL senkronizasyonu
+    useEffect(() => {
+        const params = new URLSearchParams();
+        params.set('year', String(year));
+        params.set('scope', scope);
+        directorateIds.forEach(d => params.append('dir', d));
+        if (search) params.set('q', search);
+        if (frequencyFilter) params.set('freq', frequencyFilter);
+        if (scopeFilter) params.set('sf', scopeFilter);
+        if (missingOnly) params.set('missing', '1');
+        if (changedOnly) params.set('changed', '1');
+        if (page !== 1) params.set('page', String(page));
         router.replace(`/controls/annual-plan?${params.toString()}`, { scroll: false });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [year, scope, view]);
+    }, [year, scope, directorateIds, search, frequencyFilter, scopeFilter, missingOnly, changedOnly, page]);
 
+    const loadWorkspace = useCallback(() => {
+        const id = ++reqId.current;
+        setLoading(true);
+        setError(null);
+        api.getAnnualPlanWorkspace(year, {
+            ...scopeParams,
+            search: search || undefined,
+            frequency: frequencyFilter || undefined,
+            // Yıllık Takvim ve Atamalar: yalnız plan yılının kapsamındaki kontroller.
+            scopeFilter: view === 'assignments' ? 'IN_SCOPE' : (scopeFilter || undefined),
+            missingSchedule: (view === 'assignments' && missingOnly) || undefined,
+            changedInDraft: changedOnly || undefined,
+            page, pageSize: 20,
+        }).then(data => {
+            if (id !== reqId.current) return;
+            setWorkspace(data);
+        }).catch(err => {
+            if (id !== reqId.current) return;
+            setError(err instanceof ApiError ? err.message : 'Yıllık Plan verileri alınamadı.');
+        }).finally(() => {
+            if (id === reqId.current) setLoading(false);
+        });
+    }, [year, scopeParams, search, frequencyFilter, scopeFilter, missingOnly, changedOnly, page, view]);
+
+    useEffect(() => { loadWorkspace(); }, [loadWorkspace]);
+    const refreshAll = () => { loadWorkspace(); setChartRefresh(k => k + 1); };
+
+    // Kapsam tablosundaki kontrollerin pencere yıllarındaki durumu.
+    const loadMatrix = useCallback(() => {
+        const ids = (workspace?.data ?? []).map(r => r.controlId);
+        if (view !== 'schedule' || ids.length === 0) { setMatrix(null); return; }
+        const id = ++matrixReqId.current;
+        api.getAnnualPlanScopeMatrix(windowYears, ids, scopeParams)
+            .then(m => { if (id === matrixReqId.current) setMatrix(m); })
+            .catch(() => { if (id === matrixReqId.current) setMatrix(null); });
+    }, [workspace, windowYears, scopeParams, view]);
+    useEffect(() => { loadMatrix(); }, [loadMatrix]);
+
+    // Aylık İş Yükü + Kontrolcü İş Yükü (her zaman açık) — grafik yılına göre.
+    useEffect(() => {
+        const id = ++chartReqId.current;
+        setChartLoading(true);
+        Promise.all([
+            api.getAnnualPlanWorkspace(chartYear, { ...scopeParams, page: 1, pageSize: 1 }),
+            api.getWorkloadByAssignee(chartYear, scopeParams),
+        ]).then(([w, byAssignee]) => {
+            if (id !== chartReqId.current) return;
+            setChartWorkload(w.workload);
+            setWorkloadData(byAssignee);
+        }).catch(() => {
+            if (id !== chartReqId.current) return;
+            setChartWorkload(null);
+            setWorkloadData(null);
+        }).finally(() => {
+            if (id === chartReqId.current) setChartLoading(false);
+        });
+    }, [chartYear, scopeParams, chartRefresh]);
+    useEffect(() => { setPage(1); }, [year, scope, directorateIds, search, frequencyFilter, scopeFilter, missingOnly, changedOnly, view]);
+
+    // Sayfadan ayrılmada kaydedilmemiş değişiklik koruması (Madde 22).
+    const unsavedCount = pendingEdits.size + scopeEdits.size;
     useEffect(() => {
         if (unsavedCount === 0) return;
         const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
@@ -138,648 +260,925 @@ function AnnualPlanPageContent() {
         return () => window.removeEventListener('beforeunload', handler);
     }, [unsavedCount]);
 
-    const loadPlan = useCallback(() => {
-        const id = ++planReq.current;
-        setPlanLoading(true);
-        setPlanError(null);
-        Promise.all([
-            api.getAnnualPlanWorkspace(year, {
-                ...scopeParams, scopeFilter: 'IN_SCOPE', search: schedSearch || undefined,
-                missingSchedule: schedMissingOnly || undefined, page: schedPage, pageSize: 50,
-            }),
-            api.getWorkloadByAssignee(year, scopeParams),
-        ]).then(([w, byAssignee]) => {
-            if (id !== planReq.current) return;
-            setPlan(w);
-            setWorkload(byAssignee);
-        }).catch(err => {
-            if (id !== planReq.current) return;
-            setPlanError(err instanceof ApiError ? err.message : 'Yıllık plan verileri alınamadı.');
-        }).finally(() => { if (id === planReq.current) setPlanLoading(false); });
-    }, [year, scopeParams, schedSearch, schedMissingOnly, schedPage]);
-    useEffect(() => { loadPlan(); }, [loadPlan]);
+    const effectiveRow = useCallback((row: AnnualPlanRow): AnnualPlanRow => {
+        const edit = pendingEdits.get(row.controlId);
+        if (!edit) return row;
+        const effFrequency = edit.frequency ?? row.effectiveFrequency;
+        const effReferenceMonth = edit.referenceMonth !== undefined ? edit.referenceMonth : row.effectiveReferenceMonth;
+        const effAssigneeId = edit.assigneeId !== undefined ? edit.assigneeId : row.assigneeId;
+        const effSecondControllerId = edit.secondControllerId !== undefined ? edit.secondControllerId : row.secondControllerId;
+        const isPeriodic = effFrequency !== 'AD_HOC' && effFrequency !== 'DAILY';
+        return {
+            ...row,
+            inScope: edit.inScope,
+            effectiveFrequency: effFrequency,
+            effectiveReferenceMonth: effReferenceMonth,
+            effectiveSelectedMonths: edit.selectedMonths ?? row.effectiveSelectedMonths,
+            effectiveControlDate: edit.controlDate ?? row.effectiveControlDate,
+            assigneeId: effAssigneeId, secondControllerId: effSecondControllerId,
+            assignmentComplete: !isPeriodic || !edit.inScope || (!!effAssigneeId && !!effSecondControllerId),
+            changedInDraft: true,
+        };
+    }, [pendingEdits]);
 
-    const loadList = useCallback(() => {
-        if (view !== 'scope') return;
-        const id = ++listReq.current;
-        setListLoading(true);
-        api.getAnnualPlanWorkspace(CURRENT_YEAR, { ...scopeParams, search: listSearch || undefined, frequency: listFreq || undefined, page: listPage, pageSize: 50 })
-            .then(w => { if (id === listReq.current) setList(w); })
-            .catch(() => { if (id === listReq.current) setList(null); })
-            .finally(() => { if (id === listReq.current) setListLoading(false); });
-    }, [view, scopeParams, listSearch, listFreq, listPage]);
-    useEffect(() => { loadList(); }, [loadList]);
-
-    const loadMatrix = useCallback(() => {
-        const ids = (list?.data ?? []).map(r => r.controlId);
-        if (ids.length === 0) { setMatrix(null); return; }
-        const id = ++matrixReq.current;
-        api.getAnnualPlanScopeMatrix(SCOPE_YEARS, ids, scopeParams)
-            .then(m => { if (id === matrixReq.current) setMatrix(m); })
-            .catch(() => { if (id === matrixReq.current) setMatrix(null); });
-    }, [list, scopeParams]);
-    useEffect(() => { loadMatrix(); }, [loadMatrix]);
-
-    useEffect(() => {
-        if (view !== 'schedule') return;
-        setControllerOptionsLoading(true);
-        Promise.all([api.getEligibleControllers(year, 'assignee'), api.getEligibleControllers(year, 'secondController')])
-            .then(([a, s]) => setControllerOptions({ assignee: a.data, secondController: s.data }))
-            .catch(() => toastError('Hata', 'Kontrolcü listesi yüklenemedi.'))
-            .finally(() => setControllerOptionsLoading(false));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [view, year]);
-
-    useEffect(() => { setListPage(1); }, [listSearch, listFreq, scope]);
-    useEffect(() => { setSchedPage(1); }, [schedSearch, schedMissingOnly, year, scope]);
-
-    const refreshAll = () => { loadPlan(); loadList(); };
-
-    const changeYear = (y: number) => {
-        if (y === year) return;
-        if (rowEdits.size > 0 && !window.confirm(`${year} takvim/atama sekmesinde ${rowEdits.size} kaydedilmemiş değişiklik var. Yıl değişirse bu değişiklikler kaybolur. Devam edilsin mi?`)) return;
-        setRowEdits(new Map());
-        setSelectedSchedRows(new Set());
-        setPreviewOpen(false);
-        setYear(y);
-        setBulkYear(y);
-    };
-
-    // ── Kapsam hücreleri ──
-    const yearMeta = (y: number) => matrix?.years.find(m => m.year === y);
-    const cellState = (controlId: string, y: number) => {
-        const cell = matrix?.cells[controlId]?.[y];
-        const edit = scopeEdits.get(`${y}:${controlId}`);
-        return { loaded: !!cell, inScope: edit ?? cell?.inScope ?? false, unsaved: edit !== undefined, pendingAction: cell?.pendingAction ?? 'NONE', editable: !!yearMeta(y)?.editable };
-    };
-    const setScope2 = (controlId: string, y: number, target: boolean) => {
-        const cell = matrix?.cells[controlId]?.[y];
-        if (!cell) return;
-        setScopeEdits(prev => {
+    const toggleScope = (row: AnnualPlanRow) => {
+        const current = effectiveRow(row);
+        setPendingEdits(prev => {
             const next = new Map(prev);
-            const key = `${y}:${controlId}`;
-            if (target === cell.inScope) next.delete(key); else next.set(key, target);
+            next.set(row.controlId, {
+                inScope: !current.inScope,
+                frequency: current.effectiveFrequency,
+                referenceMonth: current.effectiveReferenceMonth,
+                selectedMonths: current.effectiveSelectedMonths,
+                controlDate: current.effectiveControlDate ?? undefined,
+                assigneeId: current.assigneeId ?? undefined,
+                secondControllerId: current.secondControllerId ?? undefined,
+            });
             return next;
         });
     };
-    const bulkScope = (target: boolean) => {
-        if (!yearMeta(bulkYear)?.editable) { toastError('Düzenlenemez', `${bulkYear} planı onay sürecinde; önce değişiklik istenmeli.`); return; }
-        selectedScopeRows.forEach(id => setScope2(id, bulkYear, target));
-        setSelectedScopeRows(new Set());
+
+    const setAssignment = (row: AnnualPlanRow, patch: { assigneeId?: string | null; secondControllerId?: string | null }) => {
+        const current = effectiveRow(row);
+        setPendingEdits(prev => {
+            const next = new Map(prev);
+            next.set(row.controlId, {
+                inScope: current.inScope,
+                frequency: current.effectiveFrequency,
+                referenceMonth: current.effectiveReferenceMonth,
+                selectedMonths: current.effectiveSelectedMonths,
+                controlDate: current.effectiveControlDate ?? undefined,
+                assigneeId: patch.assigneeId !== undefined ? patch.assigneeId : current.assigneeId,
+                secondControllerId: patch.secondControllerId !== undefined ? patch.secondControllerId : current.secondControllerId,
+            });
+            return next;
+        });
     };
 
-    // ── Takvim ve Atamalar satırları ──
-    const effective = useCallback((row: AnnualPlanRow) => {
-        const e = rowEdits.get(row.controlId);
-        if (!e) return row;
-        const frequency = e.frequency ?? row.effectiveFrequency;
-        return {
-            ...row,
-            effectiveFrequency: frequency,
-            effectiveReferenceMonth: e.referenceMonth !== undefined ? e.referenceMonth : row.effectiveReferenceMonth,
-            effectiveControlDate: e.controlDate !== undefined ? e.controlDate : row.effectiveControlDate,
-            assigneeId: e.assigneeId !== undefined ? e.assigneeId : row.assigneeId,
-            secondControllerId: e.secondControllerId !== undefined ? e.secondControllerId : row.secondControllerId,
-        };
-    }, [rowEdits]);
-    const editRow = (row: AnnualPlanRow, patch: RowEdit) => setRowEdits(prev => {
-        const next = new Map(prev);
-        next.set(row.controlId, { ...(prev.get(row.controlId) ?? {}), ...patch });
-        return next;
-    });
-    const planEditable = editable(plan?.draftStatus);
+    const switchToYear = (targetYear: number) => {
+        if (unsavedCount > 0) {
+            const ok = window.confirm(`${unsavedCount} kaydedilmemiş değişikliğiniz var. Taslağı kaydetmeden plan yılını değiştirirseniz bu değişiklikler kaybolur. Devam edilsin mi?`);
+            if (!ok) return;
+            setPendingEdits(new Map());
+            setScopeEdits(new Map());
+        }
+        // Plan yılı Kapsam tablosundaki yıl sütunlarında görünsün.
+        if (targetYear < yearWindowStart) setYearWindowStart(targetYear);
+        else if (targetYear > yearWindowStart + 2) setYearWindowStart(targetYear - 2);
+        ++reqId.current;
+        ++previewRequestId.current;
+        setWorkspace(null);
+        setLoading(true);
+        setSelectedRows(new Set());
+        setPreviewOpen(false);
+        setPreviewData(null);
+        setPreviewContext(null);
+        setAssignmentDecisions([]);
+        setBulkAssignRole(null);
+        setEditingRow(null);
+        setPage(1);
+        setYear(targetYear);
+    };
 
-    // ── Kaydet ──
-    const save = async (reasonText?: string) => {
-        if (unsavedCount === 0) return;
-        // Uygulanmış (testleri üretilmiş) bir kontrolün takvimi değişiyorsa gerekçe istenir.
-        const needReason = [...rowEdits.entries()].filter(([id, e]) => {
-            const raw = plan?.data.find(r => r.controlId === id);
-            const applied = !!raw && raw.inScope && raw.pendingAction !== 'ADD';
-            return applied && (e.frequency !== undefined || e.referenceMonth !== undefined || e.controlDate !== undefined);
-        }).map(([id]) => plan?.data.find(r => r.controlId === id)?.controlCode ?? id);
-        if (needReason.length > 0 && !reasonText) { setReason(''); setReasonPrompt(needReason); return; }
-        setReasonPrompt(null);
+    const saveDraft = async () => {
+        if (!workspace || unsavedCount === 0) return;
         setSaving(true);
-        const byYear = new Map<number, Map<string, Record<string, unknown>>>();
-        const put = (y: number, controlId: string, item: Record<string, unknown>) => {
-            if (!byYear.has(y)) byYear.set(y, new Map());
-            const m = byYear.get(y)!;
-            m.set(controlId, { ...(m.get(controlId) ?? { controlId, inScope: true }), ...item });
-        };
-        scopeEdits.forEach((inScope, key) => { const [y, controlId] = key.split(':'); put(Number(y), controlId, { inScope }); });
-        rowEdits.forEach((e, controlId) => {
-            const scopeEdit = scopeEdits.get(`${year}:${controlId}`);
-            put(year, controlId, {
-                inScope: scopeEdit ?? true,
-                frequency: e.frequency,
-                referenceMonth: e.referenceMonth ?? undefined,
-                controlDate: e.controlDate ?? undefined,
-                reason: reasonText,
-                // '' = atamayı temizle, undefined = dokunulmadı.
-                assigneeId: e.assigneeId === undefined ? undefined : (e.assigneeId ?? ''),
-                secondControllerId: e.secondControllerId === undefined ? undefined : (e.secondControllerId ?? ''),
-            });
-        });
         let saved = 0;
         const failures: string[] = [];
-        for (const [y, items] of byYear) {
-            const revision = y === year && plan ? plan.draftRevision : (yearMeta(y)?.draftRevision ?? 0);
+        const errText = (err: unknown) => err instanceof ApiError && err.status === 409
+            ? 'taslak başka bir kullanıcı tarafından güncellendi veya plan onay sürecinde'
+            : err instanceof Error ? err.message : 'kaydedilemedi';
+        // 1) Plan yılı: kapsam + takvim + atama düzenlemeleri.
+        if (pendingEdits.size > 0) {
+            // '' = ataması sil, undefined = bu alana hiç dokunulmadı (backend deseni —
+            // bkz. dto/annual-plan.dto.ts::AnnualPlanDraftItemPatchDto).
+            const items = Array.from(pendingEdits.entries()).map(([controlId, edit]) => ({
+                controlId, inScope: edit.inScope, frequency: edit.frequency,
+                referenceMonth: edit.referenceMonth ?? undefined, selectedMonths: edit.selectedMonths,
+                controlDate: edit.controlDate, reason: edit.reason,
+                assigneeId: edit.assigneeId === undefined ? undefined : (edit.assigneeId ?? ''),
+                secondControllerId: edit.secondControllerId === undefined ? undefined : (edit.secondControllerId ?? ''),
+            }));
             try {
-                await api.saveAnnualPlanDraftItems(y, { expectedRevision: revision, items: [...items.values()] as any }, scopeParams);
-                saved += items.size;
-                setScopeEdits(prev => new Map([...prev].filter(([k]) => !k.startsWith(`${y}:`))));
-                if (y === year) setRowEdits(new Map());
+                await api.saveAnnualPlanDraftItems(year, { expectedRevision: workspace.draftRevision, items }, scopeParams);
+                saved += items.length;
+                setPendingEdits(new Map());
             } catch (err) {
-                failures.push(`${y}: ${err instanceof ApiError && err.status === 409 ? 'taslak başka biri tarafından değişti veya plan onay sürecinde; sayfa yenilendi' : err instanceof Error ? err.message : 'kaydedilemedi'}`);
-                if (err instanceof ApiError && err.status === 409) {
-                    setScopeEdits(prev => new Map([...prev].filter(([k]) => !k.startsWith(`${y}:`))));
-                    if (y === year) setRowEdits(new Map());
-                }
+                failures.push(`${year}: ${errText(err)}`);
+                if (err instanceof ApiError && err.status === 409) setPendingEdits(new Map());
+            }
+        }
+        // 2) Diğer yıllar: yalnız kapsam işaretlemeleri, her yılın kendi taslağına.
+        const byYear = new Map<number, Array<{ controlId: string; inScope: boolean }>>();
+        scopeEdits.forEach((inScope, key) => {
+            const [y, controlId] = key.split(':');
+            const list = byYear.get(Number(y)) ?? [];
+            list.push({ controlId, inScope });
+            byYear.set(Number(y), list);
+        });
+        for (const [y, items] of byYear) {
+            const meta = matrix?.years.find(m => m.year === y);
+            const dropYear = () => setScopeEdits(prev => new Map([...prev].filter(([k]) => !k.startsWith(`${y}:`))));
+            try {
+                await api.saveAnnualPlanDraftItems(y, { expectedRevision: meta?.draftRevision ?? 0, items }, scopeParams);
+                saved += items.length;
+                dropYear();
+            } catch (err) {
+                failures.push(`${y}: ${errText(err)}`);
+                if (err instanceof ApiError && err.status === 409) dropYear();
             }
         }
         setSaving(false);
-        if (saved > 0) toastSuccess('Kaydedildi', `${saved} kontrolün değişikliği kaydedildi.`);
+        if (saved > 0) toastSuccess('Kaydedildi', `${saved} değişiklik ilgili yılların taslağına kaydedildi.`);
         if (failures.length) toastError('Bazı değişiklikler kaydedilemedi', failures.join(' · '));
         refreshAll();
     };
 
-    const discard = async () => {
-        if (!window.confirm(`${year} taslağındaki kaydedilmiş ve kaydedilmemiş TÜM değişiklikler geri alınacak. Emin misiniz?`)) return;
-        setRowEdits(new Map());
+    const discardChanges = async () => {
+        if (!window.confirm(`${year} taslağındaki TÜM kaydedilmiş ve kaydedilmemiş değişiklikler geri alınacak. Emin misiniz?`)) return;
+        setPendingEdits(new Map());
         setScopeEdits(prev => new Map([...prev].filter(([k]) => !k.startsWith(`${year}:`))));
-        try { await api.discardAnnualPlanDraft(year); toastSuccess('Geri alındı', `${year} taslağı uygulanmış plana döndü.`); refreshAll(); }
-        catch (err) { toastError('Hata', err instanceof Error ? err.message : 'Geri alınamadı.'); }
+        try {
+            await api.discardAnnualPlanDraft(year);
+            toastSuccess('Geri alındı', 'Taslak gerçek duruma sıfırlandı.');
+            refreshAll();
+        } catch (err) {
+            toastError('Hata', err instanceof Error ? err.message : 'Geri alma başarısız.');
+        }
     };
 
-    const copyFromPrevious = async (options: { copyScope: boolean; copyCalendar: boolean; copyAssignments: boolean }) => {
-        if (unsavedCount > 0) { toastError('Önce kaydedin', 'Kopyalamadan önce değişikliklerinizi kaydedin.'); return; }
+    const copyFromPreviousYear = async (options: { copyScope: boolean; copyCalendar: boolean; copyAssignments: boolean }) => {
+        if (unsavedCount > 0) { toastError('Önce kaydedin', 'Kopyalamadan önce kaydedilmemiş değişikliklerinizi kaydedin veya geri alın.'); return; }
         try {
-            const r = await api.copyAnnualPlanFromYear(year, year - 1, options, scopeParams) as any;
-            toastSuccess('Kopyalandı', `${r.seeded} kontrol ${year - 1} yılından ${year} taslağına eklendi.`);
-            setCopyOpen(false);
+            const result = await api.copyAnnualPlanFromYear(year, year - 1, options, scopeParams) as any;
+            const parts = [`${result.seeded} kontrol ${year - 1} yılından taslağa eklendi`, `${result.skippedAlreadyInDraft} zaten taslaktaydı (atlandı)`];
+            if (options.copyAssignments && result.assignmentsDroppedInactive > 0) {
+                parts.push(`${result.assignmentsDroppedInactive} atama pasif/geçersiz kullanıcı nedeniyle düşürüldü`);
+            }
+            toastSuccess('Kopyalandı', parts.join(' · '));
+            setCopyModalOpen(false);
             refreshAll();
-        } catch (err) { toastError('Hata', err instanceof Error ? err.message : 'Kopyalanamadı.'); }
+        } catch (err) {
+            toastError('Hata', err instanceof Error ? err.message : 'Kopyalama başarısız.');
+        }
+    };
+
+    const openPreview = async () => {
+        if (!workspace || workspace.year !== year || loading) return;
+        const requestId = ++previewRequestId.current;
+        const context = { year, revision: workspace.draftRevision };
+        if (pendingEdits.size > 0) { toastError('Önce kaydedin', 'Önizleme, kaydedilmiş taslağı kullanır. Lütfen önce "Taslağı Kaydet" yapın.'); return; }
+        try {
+            const preview = await api.previewAnnualPlanApply(year);
+            if (requestId !== previewRequestId.current) return;
+            setAssignmentDecisions([]);
+            setPreviewContext(context);
+            setPreviewData(preview);
+            setPreviewOpen(true);
+        } catch (err) {
+            toastError('Hata', err instanceof Error ? err.message : 'Önizleme alınamadı.');
+        }
+    };
+
+    const applyPlan = async () => {
+        if (!workspace || !previewContext || previewContext.year !== year || workspace.year !== year) return;
+        setApplying(true);
+        try {
+            const result = await api.applyAnnualPlan(previewContext.year, previewContext.revision, assignmentDecisions);
+            if (!result.applied) {
+                await openPreview();
+                toastError('Uygulanamadı', 'Çözülmemiş çatışmalar/eksik takvimler var. Önizlemeyi tekrar kontrol edin.');
+            } else {
+                toastSuccess('Plan uygulandı', `${result.added} eklendi, ${result.removed} çıkarıldı, ${result.modified} güncellendi, ${result.tasksCreated} task oluşturuldu.`);
+                setPreviewOpen(false);
+                refreshAll();
+            }
+        } catch (err) {
+            if (err instanceof ApiError && (err.status === 400 || err.status === 409)) {
+                setPreviewOpen(false);
+                setAssignmentDecisions([]);
+                refreshAll();
+            }
+            toastError('Hata', err instanceof Error ? err.message : 'Plan uygulanamadı.');
+        } finally {
+            setApplying(false);
+        }
+    };
+
+    // Karar notu penceresi (onay / değişiklik iste / onayı geri aç) — window.prompt yerine.
+    const [decisionMode, setDecisionMode] = useState<'approve' | 'request-changes' | 'reopen' | null>(null);
+
+    const submitForApproval = async () => {
+        if (!workspace || pendingEdits.size > 0) {
+            toastError('Önce kaydedin', 'Planı onaya göndermeden önce taslak değişikliklerini kaydedin.');
+            return;
+        }
+        setTransitioning(true);
+        try {
+            await api.submitAnnualPlan(year, workspace.draftRevision, undefined, assignmentDecisions);
+            toastSuccess('Onaya gönderildi', `${year} Yıllık Planı yönetici onayına gönderildi.`);
+            setPreviewOpen(false);
+            refreshAll();
+        } catch (err) {
+            toastError('Gönderilemedi', err instanceof Error ? err.message : 'Plan onaya gönderilemedi.');
+        } finally { setTransitioning(false); }
+    };
+
+    const approvePlan = async (note?: string) => {
+        if (!workspace) return;
+        setTransitioning(true);
+        try {
+            await api.approveAnnualPlan(year, workspace.draftRevision, note || undefined);
+            toastSuccess('Plan onaylandı', 'Onaylanan revision artık uygulanabilir.');
+            setDecisionMode(null);
+            refreshAll();
+        } catch (err) {
+            toastError('Onaylanamadı', err instanceof Error ? err.message : 'Plan onaylanamadı.');
+        } finally { setTransitioning(false); }
+    };
+
+    const requestChanges = async (note: string) => {
+        if (!workspace || !note) return;
+        setTransitioning(true);
+        try {
+            await api.requestAnnualPlanChanges(year, workspace.draftRevision, note);
+            toastSuccess('Değişiklik istendi', 'Plan yeniden düzenlemeye açıldı.');
+            setDecisionMode(null);
+            refreshAll();
+        } catch (err) {
+            toastError('İşlem başarısız', err instanceof Error ? err.message : 'Değişiklik talebi kaydedilemedi.');
+        } finally { setTransitioning(false); }
+    };
+
+    const bulkAction = async (action: 'ADD' | 'REMOVE') => {
+        if (!workspace || selectedRows.size === 0) return;
+        // Yerel taslağa uygula (kaydetme "Taslağı Kaydet" ile ayrı adım — tutarlılık için).
+        setPendingEdits(prev => {
+            const next = new Map(prev);
+            for (const controlId of selectedRows) {
+                const row = workspace.data.find(r => r.controlId === controlId);
+                if (!row) continue;
+                const current = effectiveRow(row);
+                next.set(controlId, {
+                    inScope: action === 'ADD',
+                    frequency: current.effectiveFrequency,
+                    referenceMonth: current.effectiveReferenceMonth,
+                    selectedMonths: current.effectiveSelectedMonths,
+                    controlDate: current.effectiveControlDate ?? undefined,
+                    assigneeId: current.assigneeId ?? undefined,
+                    secondControllerId: current.secondControllerId ?? undefined,
+                });
+            }
+            return next;
+        });
+        setSelectedRows(new Set());
+    };
+
+    /** Toplu kapsama al/çıkar — seçilen yıl için (plan yılı ise takvim/atama ile birlikte). */
+    const bulkScope = (action: 'ADD' | 'REMOVE', y: number) => {
+        if (y === year) { bulkAction(action); return; }
+        const meta = matrix?.years.find(m => m.year === y);
+        if (!meta?.editable) { toastError('Düzenlenemez', `${y} planı onay sürecinde; değişiklik için önce değişiklik istenmeli.`); return; }
+        setScopeEdits(prev => {
+            const next = new Map(prev);
+            for (const controlId of selectedRows) {
+                const cell = matrix?.cells[controlId]?.[y];
+                if (!cell) continue;
+                const key = `${y}:${controlId}`;
+                const target = action === 'ADD';
+                if (target === cell.inScope) next.delete(key); else next.set(key, target);
+            }
+            return next;
+        });
+        setSelectedRows(new Set());
+    };
+
+    const planEditable = !!workspace && workspace.draftStatus !== 'PENDING_APPROVAL' && workspace.draftStatus !== 'APPROVED';
+    const cellState = (row: AnnualPlanRow, y: number) => {
+        if (y === year) {
+            return { inScope: effectiveRow(row).inScope, unsaved: pendingEdits.has(row.controlId), pendingAction: row.pendingAction === 'MODIFY' ? 'NONE' : row.pendingAction, editable: planEditable, loaded: true };
+        }
+        const cell = matrix?.cells[row.controlId]?.[y];
+        const edit = scopeEdits.get(`${y}:${row.controlId}`);
+        return { inScope: edit ?? cell?.inScope ?? false, unsaved: edit !== undefined, pendingAction: cell?.pendingAction ?? 'NONE', editable: !!matrix?.years.find(m => m.year === y)?.editable, loaded: !!cell };
+    };
+    const toggleYearScope = (row: AnnualPlanRow, y: number) => {
+        if (y === year) { toggleScope(row); return; }
+        const cell = matrix?.cells[row.controlId]?.[y];
+        if (!cell) return;
+        const key = `${y}:${row.controlId}`;
+        setScopeEdits(prev => {
+            const next = new Map(prev);
+            const target = !(prev.get(key) ?? cell.inScope);
+            if (target === cell.inScope) next.delete(key); else next.set(key, target);
+            return next;
+        });
     };
 
     const bulkAssign = async (role: 'assigneeId' | 'secondControllerId', userId: string, onlyMissing: boolean) => {
-        if (!plan || selectedSchedRows.size === 0) return;
-        if (rowEdits.size > 0) { toastError('Önce kaydedin', 'Toplu atamadan önce satır değişikliklerini kaydedin.'); return; }
+        if (!workspace || selectedRows.size === 0) return;
         try {
-            const r: any = await api.bulkAnnualPlanDraftAction(year, {
-                controlIds: [...selectedSchedRows], action: 'ASSIGN', [role]: userId, onlyMissing, expectedRevision: plan.draftRevision,
+            const result: any = await api.bulkAnnualPlanDraftAction(year, {
+                controlIds: Array.from(selectedRows), action: 'ASSIGN',
+                [role]: userId, onlyMissing, expectedRevision: workspace.draftRevision,
             } as any, scopeParams);
-            const n = r.affectedCount ?? selectedSchedRows.size;
-            if (n === 0) toastInfo('Atama yapılmadı', 'Seçili kontrollerde bu alan zaten dolu.');
-            else toastSuccess('Atandı', `${n} kontrole atama uygulandı.`);
-            loadPlan();
-        } catch (err) { toastError('Hata', err instanceof Error ? err.message : 'Toplu atama başarısız.'); }
-    };
-
-    // ── Onay akışı: tek düğme ──
-    const openPreview = async () => {
-        if (unsavedCount > 0) { toastError('Önce kaydedin', 'Onaya göndermeden / uygulamadan önce değişiklikleri kaydedin.'); return; }
-        try {
-            setDecisions([]);
-            setPreview(await api.previewAnnualPlanApply(year));
-            setPreviewOpen(true);
-        } catch (err) { toastError('Hata', err instanceof Error ? err.message : 'Önizleme alınamadı.'); }
-    };
-    const submit = async () => {
-        if (!plan) return;
-        setBusy(true);
-        try {
-            await api.submitAnnualPlan(year, plan.draftRevision, undefined, decisions);
-            toastSuccess('Onaya gönderildi', `${year} planı yönetici onayına gönderildi.`);
-            setPreviewOpen(false);
-            loadPlan();
-        } catch (err) { toastError('Gönderilemedi', err instanceof Error ? err.message : 'Plan onaya gönderilemedi.'); }
-        finally { setBusy(false); }
-    };
-    const apply = async () => {
-        if (!plan) return;
-        setBusy(true);
-        try {
-            const r = await api.applyAnnualPlan(year, plan.draftRevision, decisions);
-            if (!r.applied) { await openPreview(); toastError('Uygulanamadı', 'Eksikler veya çözülmemiş kararlar var.'); }
-            else { toastSuccess('Plan uygulandı', `${r.added} eklendi, ${r.removed} çıkarıldı, ${r.modified} güncellendi, ${r.tasksCreated} test oluşturuldu.`); setPreviewOpen(false); refreshAll(); }
-        } catch (err) { toastError('Hata', err instanceof Error ? err.message : 'Plan uygulanamadı.'); }
-        finally { setBusy(false); }
-    };
-    const decide = async (note: string) => {
-        if (!plan) return;
-        setBusy(true);
-        try {
-            if (decisionMode === 'approve') { await api.approveAnnualPlan(year, plan.draftRevision, note || undefined); toastSuccess('Onaylandı', `${year} planı onaylandı; artık uygulanabilir.`); }
-            else { await api.requestAnnualPlanChanges(year, plan.draftRevision, note); toastSuccess('Düzenlemeye açıldı', `${year} planı yeniden düzenlenebilir.`); }
-            setDecisionMode(null);
+            // Backend TÜM taslağı döner (result.items = taslağın tamamı) — bu
+            // işlemden gerçekten etkilenen kontrol sayısı ayrıca `affectedCount`
+            // olarak gelir (onlyMissing nedeniyle bazı seçili kontroller
+            // atlanmış olabilir, bu yüzden selectedRows.size de tam doğru değil).
+            const affectedCount = result.affectedCount ?? selectedRows.size;
+            if (affectedCount === 0) {
+                toastInfo('Atama yapılmadı', 'Seçili kontrollerde hedef kontrolcü alanı zaten dolu. Değiştirmek için “Yalnızca eksikler” seçimini kaldırın.');
+            } else {
+                toastSuccess('Atandı', `${affectedCount} kontrole atama uygulandı.`);
+            }
+            // Seçim BİLEREK korunur — aynı seçili gruba art arda 1. ve 2.
+            // kontrolcü ataması yapılabilsin (önceden burada sıfırlanıyordu,
+            // bu da "başarılı ama seçimler sıfırlanıyor" şikayetinin nedeniydi).
             refreshAll();
-        } catch (err) { toastError('İşlem yapılamadı', err instanceof Error ? err.message : 'Karar kaydedilemedi.'); }
-        finally { setBusy(false); }
+        } catch (err) {
+            if (err instanceof ApiError && err.status === 409) {
+                toastError('Çakışma', 'Taslak başka bir kullanıcı tarafından güncellendi. Sayfa yenileniyor.');
+                setSelectedRows(new Set());
+                refreshAll();
+            } else {
+                toastError('Hata', err instanceof Error ? err.message : 'Toplu atama başarısız.');
+            }
+        }
     };
 
-    // ── Kolonlar ──
-    const scopeColumns: ColumnDef<AnnualPlanRow>[] = useMemo(() => [
-        {
-            key: 'code', header: 'Kontrol', defaultWidth: 300,
-            render: (row) => (
-                <Link href={`/controls/${row.controlId}`} target="_blank" className="block hover:underline">
-                    <p className="text-xs font-mono font-bold text-blue-700">{row.controlCode}</p>
-                    <p className="text-sm text-slate-700 truncate max-w-[280px]" title={row.name}>{row.name}</p>
-                </Link>
-            ),
-        },
-        { key: 'dir', header: 'Direktörlük', defaultWidth: 180, render: (row) => <span className="text-xs text-slate-600">{row.directorateName || '—'}</span> },
-        { key: 'freq', header: 'Envanter sıklığı', defaultWidth: 120, render: (row) => <span className="text-xs text-slate-500">{FREQUENCY_LABELS[row.frequency] || row.frequency}</span> },
-        ...SCOPE_YEARS.map((y): ColumnDef<AnnualPlanRow> => ({
-            key: `y${y}`, header: String(y), defaultWidth: 90,
-            headerClassName: y === year ? 'bg-blue-50' : undefined, cellClassName: y === year ? 'bg-blue-50/40' : undefined,
-            render: (row) => {
-                const st = cellState(row.controlId, y);
-                if (!st.loaded) return <span className="inline-block w-5 h-5 rounded border border-slate-200 bg-slate-50 animate-pulse" aria-hidden />;
-                const title = !st.editable ? `${y} planı onay sürecinde; önce değişiklik istenmeli`
-                    : st.unsaved ? 'Kaydedilmedi'
-                    : st.pendingAction === 'ADD' ? 'Taslakta açılacak (plan uygulanınca testler oluşur)'
-                    : st.pendingAction === 'REMOVE' ? 'Taslakta kapsamdan çıkarılacak'
-                    : st.inScope ? `${y} için açık — çıkarmak için tıklayın` : `${y} için açmak üzere tıklayın`;
-                return (
-                    <button type="button" disabled={!st.editable} onClick={() => setScope2(row.controlId, y, !st.inScope)} title={title}
-                        aria-label={`${row.controlCode} ${y}`} aria-pressed={st.inScope} data-testid={`scope-${y}-${row.controlCode}`}
-                        className={`relative w-5 h-5 rounded border-2 flex items-center justify-center ${st.inScope ? 'bg-blue-600 border-blue-600' : 'border-slate-300 hover:border-blue-400'} ${st.unsaved ? 'ring-2 ring-amber-300 ring-offset-1' : ''} ${!st.editable ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                        {st.inScope && <span className="text-white text-[10px] leading-none">✓</span>}
-                        {!st.unsaved && st.pendingAction !== 'NONE' && <span className={`absolute -top-1 -right-1 w-2 h-2 rounded-full ${st.pendingAction === 'ADD' ? 'bg-emerald-500' : 'bg-red-500'}`} />}
-                    </button>
-                );
-            },
-        })),
-        // cellState/setScope2 aşağıdaki bağımlılıklardan türer.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    ], [matrix, scopeEdits, year]);
+    const rows = useMemo(() => (workspace?.data ?? []).map(effectiveRow), [workspace, effectiveRow]);
 
-    const scheduleColumns: ColumnDef<AnnualPlanRow>[] = useMemo(() => [
+    // ─── Kolonlar ───────────────────────────────────────────────────────────
+    const columns: ColumnDef<AnnualPlanRow>[] = useMemo(() => [
         {
-            key: 'code', header: 'Kontrol', defaultWidth: 240,
+            key: 'code', header: 'Kontrol', defaultWidth: 260,
             render: (row) => (
-                <Link href={`/controls/${row.controlId}`} target="_blank" className="block hover:underline">
+                <Link
+                    href={`/controls/${row.controlId}`} target="_blank"
+                    className={`block hover:underline ${row.controlId === focusControlId ? 'ring-2 ring-blue-300 rounded px-1 -mx-1' : ''}`}
+                >
                     <p className="text-xs font-mono font-bold text-blue-700">{row.controlCode}</p>
                     <p className="text-sm text-slate-700 truncate max-w-[220px]" title={row.name}>{row.name}</p>
                 </Link>
             ),
         },
         {
-            key: 'freq', header: 'Sıklık', defaultWidth: 120,
-            render: (raw) => {
-                const row = effective(raw);
+            key: 'description', header: 'Kontrol Tanımı', defaultWidth: 340,
+            render: (row) => (
+                <details className="group text-xs text-slate-600">
+                    <summary className="list-none cursor-pointer">
+                        <span className="line-clamp-3 leading-relaxed">{row.description || '—'}</span>
+                        {row.description?.length > 180 && <span className="mt-1 inline-block font-semibold text-blue-700 group-open:hidden">Tam metni gör</span>}
+                    </summary>
+                    <p className="mt-2 whitespace-pre-wrap leading-relaxed max-h-64 overflow-auto">{row.description}</p>
+                </details>
+            ),
+        },
+        {
+            key: 'directorate', header: 'İlgili Direktörlük', defaultWidth: 190,
+            render: (row) => <span className="text-xs text-slate-600" title="Kaynak kontrolün ilgili direktörlüğü">{row.directorateName || 'Atanmamış'}</span>,
+        },
+        { key: 'freq', header: 'Envanter Sıklığı', defaultWidth: 110, render: (row) => <span className="text-xs text-slate-500">{FREQUENCY_LABELS[row.frequency] || row.frequency}</span> },
+        // Yıl sütunları: kutucuk o yılın kapsamını yerinde değiştirir (sayfa yılı ve grafik değişmez).
+        ...windowYears.map((y): ColumnDef<AnnualPlanRow> => ({
+            key: `y${y}`, header: y === year ? `${y} (plan yılı)` : `${y}`, defaultWidth: y === year ? 120 : 90,
+            headerClassName: y === year ? 'bg-blue-50' : undefined, cellClassName: y === year ? 'bg-blue-50/40' : undefined,
+            render: (row) => {
+                const st = cellState(row, y);
+                if (!st.loaded) return <span className="inline-block w-5 h-5 rounded border border-slate-200 bg-slate-50 animate-pulse" aria-hidden />;
+                const title = !st.editable ? `${y} planı onay sürecinde; değişiklik için önce değişiklik istenmeli`
+                    : st.unsaved ? `${y}: kaydedilmedi (Taslağı Kaydet)`
+                    : st.pendingAction === 'ADD' ? `${y}: taslakta kapsama alınacak (plan uygulanınca)`
+                    : st.pendingAction === 'REMOVE' ? `${y}: taslakta kapsamdan çıkarılacak (plan uygulanınca)`
+                    : st.inScope ? `${y} kapsamında — çıkarmak için tıklayın` : `${y} kapsamına almak için tıklayın`;
                 return (
-                    <select aria-label={`${row.controlCode} sıklık`} value={row.effectiveFrequency} disabled={!planEditable}
-                        onChange={(e) => editRow(raw, { frequency: e.target.value, referenceMonth: null, controlDate: null })}
-                        className={`${inputCls} py-1 text-xs`}>
-                        {Object.entries(FREQUENCY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                    </select>
+                    <button type="button" disabled={!st.editable} onClick={() => toggleYearScope(row, y)} title={title}
+                        aria-label={`${row.controlCode} ${y} kapsamı`} aria-pressed={st.inScope} data-testid={`scope-${y}-${row.controlCode}`}
+                        className={`relative w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${st.inScope ? 'bg-blue-600 border-blue-600' : 'border-slate-300 hover:border-blue-400'} ${st.unsaved ? 'ring-2 ring-amber-300 ring-offset-1' : ''} ${!st.editable ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                        {st.inScope && <span className="text-white text-[10px] leading-none">✓</span>}
+                        {!st.unsaved && st.pendingAction !== 'NONE' && (
+                            <span className={`absolute -top-1 -right-1 w-2 h-2 rounded-full ${st.pendingAction === 'ADD' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                        )}
+                    </button>
                 );
             },
-        },
+        })),
         {
-            key: 'months', header: 'Uygulama ayları', defaultWidth: 330,
-            render: (raw) => {
-                const row = effective(raw);
-                const f = row.effectiveFrequency;
-                if (f === 'MONTHLY') return <span className="text-xs text-slate-500">Her ay (12 test)</span>;
-                if (f === 'WEEKLY') return <span className="text-xs text-slate-500">Her hafta</span>;
-                if (f === 'DAILY') return <span className="text-xs text-slate-500">Otomatik test üretilmez</span>;
-                if (f === 'AD_HOC') {
-                    return (
-                        <input type="date" aria-label={`${row.controlCode} hedef tarih`} disabled={!planEditable}
-                            value={row.effectiveControlDate ? row.effectiveControlDate.slice(0, 10) : ''}
-                            onChange={(e) => editRow(raw, { controlDate: e.target.value ? new Date(e.target.value).toISOString() : null })}
-                            className={`${inputCls} py-1 text-xs`} />
-                    );
-                }
-                const ref = row.effectiveReferenceMonth;
-                const group = ref != null && MONTH_PICKER_FREQS.has(f) ? computeMonthGroup(f, ref) : [];
-                return (
-                    <div className="flex flex-wrap gap-0.5" role="group" aria-label={`${row.controlCode} uygulama ayları`} data-testid={`months-${row.controlCode}`}>
-                        {MONTH_LABELS_SHORT.map((m, i) => {
-                            const on = group.includes(i + 1);
-                            return (
-                                <button key={m} type="button" disabled={!planEditable} aria-pressed={on}
-                                    onClick={() => editRow(raw, { referenceMonth: i + 1 })}
-                                    className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border ${on ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 text-slate-500 hover:border-blue-300'} disabled:cursor-not-allowed`}>
-                                    {m}
-                                </button>
-                            );
-                        })}
-                        {ref == null && <span className="text-[11px] text-amber-700 ml-1">Ay seçin (varsayılan: dönem sonları)</span>}
-                    </div>
-                );
-            },
+            key: 'status', header: `Durum (${year})`, defaultWidth: 150,
+            render: (row) => (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                    {row.pendingAction === 'ADD' && <StatusBadge variant="success" size="sm">Eklenecek</StatusBadge>}
+                    {row.pendingAction === 'REMOVE' && <StatusBadge variant="critical" size="sm">Kapsamdan çıkarılacak</StatusBadge>}
+                    {row.pendingAction === 'MODIFY' && <StatusBadge variant="info" size="sm">Değişti</StatusBadge>}
+                    {pendingEdits.has(row.controlId) && <StatusBadge variant="warning" size="sm" dot>Kaydedilmedi</StatusBadge>}
+                </div>
+            ),
         },
-        {
-            key: 'assignee', header: '1. kontrolcü', defaultWidth: 190,
-            render: (raw) => {
-                const row = effective(raw);
-                return <UserPicker role="assignee" options={controllerOptions.assignee} loading={controllerOptionsLoading} value={row.assigneeId} otherValue={row.secondControllerId} onChange={(v) => editRow(raw, { assigneeId: v })} />;
-            },
-        },
-        {
-            key: 'second', header: '2. kontrolcü', defaultWidth: 190,
-            render: (raw) => {
-                const row = effective(raw);
-                return <UserPicker role="secondController" options={controllerOptions.secondController} loading={controllerOptionsLoading} value={row.secondControllerId} otherValue={row.assigneeId} onChange={(v) => editRow(raw, { secondControllerId: v })} />;
-            },
-        },
-        {
-            key: 'status', header: 'Durum', defaultWidth: 150,
-            render: (raw) => {
-                const row = effective(raw);
-                const periodic = !['AD_HOC', 'DAILY'].includes(row.effectiveFrequency);
-                const assigned = !periodic || (!!row.assigneeId && !!row.secondControllerId);
-                return (
-                    <div className="flex flex-wrap gap-1">
-                        {rowEdits.has(raw.controlId) && <StatusBadge variant="warning" size="sm" dot>Kaydedilmedi</StatusBadge>}
-                        {raw.pendingAction === 'ADD' && <StatusBadge variant="success" size="sm">Yeni</StatusBadge>}
-                        {raw.pendingAction === 'MODIFY' && <StatusBadge variant="info" size="sm">Değişti</StatusBadge>}
-                        {raw.missingSchedule && <StatusBadge variant="warning" size="sm">Tarih eksik</StatusBadge>}
-                        {!assigned && <StatusBadge variant="warning" size="sm">Atama eksik</StatusBadge>}
-                    </div>
-                );
-            },
-        },
-        // effective/editRow aşağıdaki bağımlılıklardan türer.
+        // cellState/toggleYearScope bu bağımlılıklardan türer; her render'da yeniden oluşturulurlar.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    ], [rowEdits, controllerOptions, controllerOptionsLoading, planEditable]);
+    ], [year, focusControlId, windowYears, matrix, scopeEdits, pendingEdits, effectiveRow, planEditable]);
 
-    const status = plan?.draftStatus;
-    const hasDraftChanges = (plan?.changedCount ?? 0) > 0;
-    const scheduleRows = plan?.data ?? [];
-    const scopeRows = list?.data ?? [];
-    const yearScopeUnsaved = [...scopeEdits.keys()].some(k => k.startsWith(`${year}:`));
+    // ─── Kontrolcü Atamaları sekmesi — AYNI taslak, filtre olarak yalnızca kapsamdaki satırlar ──
+    const assignmentRows = useMemo(() => rows.filter(r => r.inScope), [rows]);
+    const assignmentColumns: ColumnDef<AnnualPlanRow>[] = useMemo(() => [
+        {
+            key: 'code', header: 'Kontrol', defaultWidth: 240,
+            render: (row) => (
+                <Link href={`/controls/${row.controlId}`} target="_blank" className="block hover:underline">
+                    <p className="text-xs font-mono font-bold text-blue-700">{row.controlCode}</p>
+                    <p className="text-sm text-slate-700 truncate max-w-[200px]" title={row.name}>{row.name}</p>
+                </Link>
+            ),
+        },
+        {
+            key: 'freq', header: `Sıklık (${year})`, defaultWidth: 110,
+            render: (row) => (
+                <span className="text-xs text-slate-600" title={row.effectiveFrequency !== row.frequency ? `Envanterdeki sıklık: ${FREQUENCY_LABELS[row.frequency] || row.frequency}` : undefined}>
+                    {FREQUENCY_LABELS[row.effectiveFrequency] || row.effectiveFrequency}
+                    {row.effectiveFrequency !== row.frequency && <span className="ml-1 text-[10px] text-amber-600">(bu yıl farklı)</span>}
+                </span>
+            ),
+        },
+        {
+            key: 'schedule', header: `Uygulama Takvimi (${year})`, defaultWidth: 210,
+            render: (row) => (
+                <button onClick={() => setEditingRow(row)} disabled={!planEditable} data-testid={`schedule-${row.controlCode}`}
+                    className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-blue-600 text-left disabled:opacity-60 disabled:cursor-not-allowed"
+                    title={planEditable ? `${year} uygulama takvimini düzenle` : 'Plan onay sürecinde; düzenlemek için önce değişiklik istenmeli'}>
+                    <span className="truncate max-w-[170px]">{describeSchedule(row)}</span>
+                    <span aria-hidden>✏️</span>
+                </button>
+            ),
+        },
+        { key: 'count', header: 'Planlanan Test', defaultWidth: 90, render: (row) => <span className="text-xs font-semibold text-slate-700">{row.plannedTestCount}</span> },
+        {
+            key: 'assignee', header: 'Atanan Kontrolcü', defaultWidth: 200,
+            render: (row) => (
+                <UserPicker
+                    role="assignee" options={controllerOptions.assignee} loading={controllerOptionsLoading}
+                    value={row.assigneeId} otherValue={row.secondControllerId}
+                    onChange={(v) => setAssignment(row, { assigneeId: v })}
+                />
+            ),
+        },
+        {
+            key: 'secondController', header: 'İkinci Kontrolcü', defaultWidth: 200,
+            render: (row) => (
+                <UserPicker
+                    role="secondController" options={controllerOptions.secondController} loading={controllerOptionsLoading}
+                    value={row.secondControllerId} otherValue={row.assigneeId}
+                    onChange={(v) => setAssignment(row, { secondControllerId: v })}
+                />
+            ),
+        },
+        {
+            key: 'status', header: 'Durum', defaultWidth: 170,
+            render: (row) => (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                    {pendingEdits.has(row.controlId) && <StatusBadge variant="warning" size="sm" dot>Kaydedilmedi</StatusBadge>}
+                    {row.pendingAction === 'ADD' && <StatusBadge variant="success" size="sm">Eklenecek</StatusBadge>}
+                    {row.pendingAction === 'MODIFY' && <StatusBadge variant="info" size="sm">Değişti</StatusBadge>}
+                    {row.missingSchedule && <StatusBadge variant="warning" size="sm">Takvim eksik</StatusBadge>}
+                    {row.assignmentComplete
+                        ? <StatusBadge variant="success" size="sm">Atama tamam</StatusBadge>
+                        : <StatusBadge variant="warning" size="sm">Atama eksik</StatusBadge>}
+                </div>
+            ),
+        },
+    ], [year, controllerOptions, controllerOptionsLoading, pendingEdits, planEditable]);
 
     return (
         <PageShell>
             <PageHeader
                 title="Yıllık Plan"
-                description="Kontrolleri yıllara açın, her yılın takvimini ve kontrolcülerini belirleyin"
+                description="Kontrolleri yıl bazında planlayın, iş yükünü canlı görün, taslağı önizleyip uygulayın"
                 breadcrumbs={[{ label: 'Kontrol Yönetimi', href: '/controls' }, { label: 'Yıllık Plan' }]}
+                actions={
+                    <div className="flex items-center gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setCopyModalOpen(true)}>Önceki Yıldan Kopyala</Button>
+                        <Button size="sm" variant="outline" onClick={discardChanges} disabled={!workspace || (workspace.draftRevision === 0 && pendingEdits.size === 0)}>Değişiklikleri Geri Al</Button>
+                        <Button size="sm" variant="outline" onClick={saveDraft} disabled={unsavedCount === 0 || saving}>
+                            {saving ? 'Kaydediliyor...' : `Taslağı Kaydet${unsavedCount > 0 ? ` (${unsavedCount})` : ''}`}
+                        </Button>
+                        <Button size="sm" variant="primary" onClick={openPreview} disabled={loading || !workspace || workspace.year !== year}>Önizle</Button>
+                    </div>
+                }
             />
 
-            {/* Üst satır: tek yıl seçimi, durum ve tek işlem düğmesi */}
-            <div className="flex flex-wrap items-center gap-3 mb-4 bg-white border border-slate-200 rounded-xl px-4 py-3">
-                <div role="group" aria-label="Yıl" className="flex items-center rounded-lg border border-slate-200 overflow-hidden">
-                    {YEAR_BUTTONS.map(y => (
-                        <button key={y} type="button" onClick={() => changeYear(y)} aria-pressed={year === y}
-                            className={`px-3 py-1.5 text-sm font-semibold ${year === y ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
-                            {y}
-                        </button>
-                    ))}
-                </div>
-                {plan && (
-                    <span className="flex items-center gap-2 text-sm text-slate-600" data-testid="plan-status">
-                        <StatusBadge variant={status === 'PENDING_APPROVAL' ? 'info' : hasDraftChanges && editable(status) ? 'warning' : status === 'APPLIED' ? 'success' : 'neutral'}>
-                            {hasDraftChanges && editable(status) ? 'Değişiklik Var' : STATUS_LABELS[status!]}
+            {/* Yıl + taslak durumu */}
+            <div className="flex flex-wrap items-center gap-3 mb-5 bg-white border border-slate-200 rounded-xl px-4 py-3">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    Plan Yılı
+                    <select aria-label="Plan yılı" value={year} onChange={(e) => switchToYear(Number(e.target.value))} className={inputCls}>
+                        {[...new Set([...YEAR_OPTIONS, year])].sort().map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                </label>
+                {workspace && (
+                    <>
+                        <StatusBadge variant={workspace.draftStatus === 'APPLIED' && workspace.changedCount === 0 ? 'success' : workspace.changedCount > 0 || pendingEdits.size > 0 ? 'warning' : 'neutral'}>
+                            {workspace.changedCount > 0 || pendingEdits.size > 0 ? 'Değişiklik Var' : ({ OPEN: 'Taslak', PENDING_APPROVAL: 'Onay Bekliyor', CHANGES_REQUESTED: 'Değişiklik İstendi', APPROVED: 'Onaylandı', APPLIED: 'Uygulandı' } as Record<string, string>)[workspace.draftStatus]}
                         </StatusBadge>
-                        {status === 'PENDING_APPROVAL' && plan.pendingApproval && (
-                            <span className="text-xs">Onaylayacak: {plan.pendingApproval.approvers.map(a => a.name).join(', ') || 'yönetici'}</span>
-                        )}
-                        {plan.decisionNote && status === 'CHANGES_REQUESTED' && <span className="text-xs text-amber-700">Not: {plan.decisionNote}</span>}
-                    </span>
+                        <span className="text-xs text-slate-400">
+                            Son güncelleme: {new Date(workspace.draftUpdatedAt).toLocaleString('tr-TR')}
+                            {workspace.draftLastAppliedAt && ` · Son uygulama: ${new Date(workspace.draftLastAppliedAt).toLocaleString('tr-TR')}`}
+                        </span>
+                    </>
                 )}
-                <div className="ml-auto flex flex-wrap items-center gap-2">
-                    <Button size="sm" variant="outline" onClick={() => save()} disabled={unsavedCount === 0 || saving}>
-                        {saving ? 'Kaydediliyor...' : `Kaydet${unsavedCount ? ` (${unsavedCount})` : ''}`}
-                    </Button>
-                    <PermissionGate permission="control:*">
-                        {status === 'PENDING_APPROVAL' ? (
-                            plan?.capabilities?.canApprove ? (
-                                <>
-                                    <Button size="sm" variant="outline" onClick={() => setDecisionMode('request-changes')} disabled={busy}>Değişiklik iste</Button>
-                                    <Button size="sm" variant="primary" onClick={() => setDecisionMode('approve')} disabled={busy}>Onayla</Button>
-                                </>
-                            ) : <span className="text-xs text-slate-500">Gönderen kendi planını onaylayamaz</span>
-                        ) : status === 'APPROVED' ? (
+
+                {workspace && (
+                    <div className="ml-auto flex items-center gap-2">
+                        {workspace.draftStatus === 'PENDING_APPROVAL' && (
                             <>
-                                <Button size="sm" variant="outline" onClick={() => setDecisionMode('reopen')} disabled={busy}>Düzenlemeye aç</Button>
-                                <Button size="sm" variant="primary" onClick={openPreview} disabled={busy}>Planı uygula</Button>
+                                {workspace.capabilities?.canRequestChanges && <Button size="sm" variant="outline" onClick={() => setDecisionMode('request-changes')} disabled={transitioning}>Değişiklik İste</Button>}
+                                {workspace.capabilities?.canApprove
+                                    ? <Button size="sm" variant="primary" onClick={() => setDecisionMode('approve')} disabled={transitioning}>Onayla</Button>
+                                    : <span className="text-xs text-slate-500">Onay başka bir yöneticide (gönderen kendi planını onaylayamaz)</span>}
                             </>
-                        ) : (
-                            <Button size="sm" variant="primary" onClick={openPreview} disabled={busy || !plan}>Onaya gönder</Button>
                         )}
-                    </PermissionGate>
-                </div>
-                <div className="w-full flex flex-wrap items-center gap-3 text-xs text-slate-500 border-t border-slate-100 pt-2">
-                    <div className="flex items-center rounded-md border border-slate-200 overflow-hidden">
-                        {(['MINE', 'UNIT', 'ORG'] as AnnualPlanScope[]).map(s => (
-                            <button key={s} type="button" onClick={() => setScope(s)} className={`px-2 py-0.5 ${scope === s ? 'bg-slate-700 text-white' : 'bg-white text-slate-600'}`}>{SCOPE_LABELS[s]}</button>
-                        ))}
+                        {workspace.draftStatus === 'APPROVED' && (
+                            <Button size="sm" variant="outline" onClick={() => setDecisionMode('reopen')} disabled={transitioning}>Onayı Geri Aç</Button>
+                        )}
                     </div>
-                    <button type="button" className="hover:text-blue-700" onClick={() => setCopyOpen(true)} disabled={!planEditable}>{year - 1} planını {year}&apos;e kopyala</button>
-                    <button type="button" className="hover:text-blue-700" onClick={discard} disabled={!planEditable}>{year} değişikliklerini geri al</button>
-                    <button type="button" className="hover:text-blue-700" onClick={() => setHistoryOpen(o => !o)}>{historyOpen ? 'Geçmişi gizle' : 'Onay geçmişi'}</button>
+                )}
+
+                <div className="h-5 w-px bg-slate-200 mx-1" />
+                <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden">
+                    {(['MINE', 'UNIT', 'ORG'] as AnnualPlanScope[])
+                        .filter(s => !workspace || s === 'MINE' || (s === 'UNIT' ? workspace.scope.options.unit.available : workspace.scope.options.org.available))
+                        .map(s => (
+                            <button key={s} onClick={() => setScope(s)} className={`px-3 py-1.5 text-sm font-medium ${scope === s ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+                                {SCOPE_LABELS[s]}
+                            </button>
+                        ))}
                 </div>
-                {historyOpen && plan && <div className="w-full"><PlanDecisionHistory year={year} refreshKey={`${plan.draftStatus}:${plan.draftRevision}`} /></div>}
             </div>
 
-            {/* Aylık iş yükü + kontrolcü iş yükü (hep açık) — seçili yıl */}
-            <section className="bg-white rounded-xl border border-slate-200 p-5 mb-5 space-y-4" data-testid="workload-section" aria-label={`${year} iş yükü`}>
-                {planLoading && !plan ? <LoadingState message="Yükleniyor..." /> : planError ? <ErrorState description={planError} onRetry={loadPlan} /> : plan && (
+            {workspace && (
+                <div className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                    <AnnualPlanStepper status={workspace.draftStatus} />
+                    {workspace.decisionNote && (workspace.draftStatus === 'CHANGES_REQUESTED' || workspace.draftStatus === 'APPROVED' || workspace.draftStatus === 'PENDING_APPROVAL') && (
+                        <p className="text-xs text-slate-600"><span className="font-semibold">Son karar notu:</span> {workspace.decisionNote}</p>
+                    )}
+                </div>
+            )}
+            {workspace?.draftStatus === 'PENDING_APPROVAL' && workspace.pendingApproval && (
+                <div className="mb-5">
+                    <PendingApprovalNotice
+                        title={`${year} Yıllık Planı onay bekliyor`}
+                        waitingFor={workspace.pendingApproval.approvers}
+                        sentBy={workspace.pendingApproval.submittedBy?.name}
+                        sentAt={workspace.pendingApproval.submittedAt}
+                        hint="Planı gönderen kişi kendi planını onaylayamaz; yetkili başka bir yönetici onaylar."
+                    />
+                </div>
+            )}
+            {workspace && <PlanDecisionHistory year={year} refreshKey={`${workspace.draftStatus}:${workspace.draftRevision}:${workspace.draftLastAppliedAt ?? ''}`} />}
+            <PlanDecisionDialog
+                mode={decisionMode} busy={transitioning} onCancel={() => setDecisionMode(null)}
+                onSubmit={(note) => (decisionMode === 'approve' ? approvePlan(note) : requestChanges(note))}
+            />
+
+            {/* Aylık İş Yükü — kendi yıl seçicisiyle; tablo ve plan yılı değişikliklerinde yenilenmez. */}
+            <section className="bg-white rounded-xl border border-slate-200 p-5 mb-6 space-y-4" aria-labelledby="workload-title" data-testid="workload-section">
+                <div className="flex flex-wrap items-center gap-3">
+                    <h3 id="workload-title" className="text-sm font-semibold text-slate-700">Aylık İş Yükü — {chartYear}</h3>
+                    <div role="group" aria-label="İş yükü yılı" className="flex items-center rounded-lg border border-slate-200 overflow-hidden">
+                        {YEAR_OPTIONS.map(y => (
+                            <button key={y} type="button" onClick={() => setChartYear(y)} aria-pressed={chartYear === y}
+                                className={`px-3 py-1 text-xs font-semibold ${chartYear === y ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+                                {y}
+                            </button>
+                        ))}
+                    </div>
+                    <span className="text-xs text-slate-400">Yetkili kapsamın tamamı, kaydedilmiş taslağa göre; tablo filtrelerinden ve plan yılından bağımsız.</span>
+                </div>
+                {chartLoading && !chartWorkload ? (
+                    <LoadingState message="Yükleniyor..." />
+                ) : !chartWorkload ? (
+                    <p className="text-sm text-slate-500">İş yükü yüklenemedi.</p>
+                ) : (
                     <>
-                        <div className="flex flex-wrap items-baseline gap-3">
-                            <h3 className="text-sm font-semibold text-slate-700">Aylık iş yükü — {year}</h3>
-                            <span className="text-xs text-slate-400">Kaydedilmiş taslağa göre</span>
-                        </div>
-                        <KpiGrid columns={4}>
-                            <KpiCard title="Açık kontrol" value={plan.workload.controlCount} variant="primary" />
-                            <KpiCard title="Planlanan test" value={plan.workload.totalTasks} variant="default" subtitle="Arızi ve günlük hariç" />
-                            <KpiCard title="Arızi" value={plan.workload.adHocCount} variant="violet" />
-                            <KpiCard title="En yoğun ay" value={plan.workload.peakMonths.length ? plan.workload.peakMonths.map(m => MONTH_LABELS_SHORT[m]).join(', ') : '—'} variant="warning" subtitle={plan.workload.peakCount ? `${plan.workload.peakCount} test` : undefined} />
+                        <KpiGrid columns={5}>
+                            <KpiCard title="Kapsamdaki Kontrol" value={chartWorkload.controlCount} variant="primary" />
+                            <KpiCard title="Toplam Task" value={chartWorkload.totalTasks} variant="default" subtitle="AD_HOC ve günlük hariç" />
+                            <KpiCard
+                                title="Sıklık Kırılımı"
+                                value={Object.keys(chartWorkload.byFrequency).length}
+                                variant="info"
+                                subtitle={
+                                    <span className="flex flex-col gap-0.5 mt-0.5">
+                                        {Object.entries(chartWorkload.byFrequency).map(([f, c]) => (
+                                            <span key={f}>{FREQUENCY_LABELS[f] || f}: <b>{c}</b></span>
+                                        ))}
+                                    </span>
+                                }
+                            />
+                            <KpiCard title="Arızi (İhtiyaç Halinde)" value={chartWorkload.adHocCount} variant="violet" subtitle={chartWorkload.missingScheduleCount > 0 ? `${chartWorkload.missingScheduleCount} takvimsiz` : undefined} />
+                            <KpiCard title="En Yoğun Ay" value={chartWorkload.peakMonths.length > 0 ? chartWorkload.peakMonths.map(m => MONTH_LABELS_SHORT[m]).join(', ') : '—'} variant="warning" subtitle={chartWorkload.peakCount > 0 ? `${chartWorkload.peakCount} task` : undefined} />
                         </KpiGrid>
-                        <div className="h-48">
+                        <div className="h-56">
                             <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={plan.workload.byMonth.map((count, i) => ({ month: MONTH_LABELS_SHORT[i], count }))}>
+                                <BarChart data={chartWorkload.byMonth.map((count, i) => ({ month: MONTH_LABELS_SHORT[i], count, idx: i }))}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                                     <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
                                     <YAxis tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} />
                                     <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
-                                    <Bar dataKey="count" name="Test" radius={[4, 4, 0, 0]}>
-                                        {plan.workload.byMonth.map((_, i) => <Cell key={i} fill={plan.workload.peakMonths.includes(i) ? '#2563eb' : '#93c5fd'} />)}
+                                    <Bar dataKey="count" name="Task" radius={[4, 4, 0, 0]}>
+                                        {chartWorkload.byMonth.map((_, i) => <Cell key={i} fill={chartWorkload.peakMonths.includes(i) ? '#2563eb' : '#93c5fd'} />)}
                                     </Bar>
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
-                        <div>
-                            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Kontrolcü iş yükü — {year}</h4>
-                            <WorkloadPanel data={workload} loading={planLoading} />
-                        </div>
                     </>
                 )}
+                <div>
+                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Kontrolcü İş Yükü — {chartYear}</h4>
+                    <WorkloadPanel data={workloadData} loading={chartLoading} />
+                </div>
             </section>
 
-            {/* Sekmeler */}
-            <div role="tablist" className="flex items-center gap-1 border-b border-slate-200 mb-4">
-                {([['scope', 'Kapsam'], ['schedule', `${year} Takvim ve Atamalar`]] as const).map(([k, l]) => (
-                    <button key={k} role="tab" type="button" aria-selected={view === k} onClick={() => setView(k)}
-                        className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px ${view === k ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-                        {l}
-                    </button>
-                ))}
+            {/* Görünüm sekmesi — aynı taslak, iki çalışma görünümü (madde 4) */}
+            <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden mb-5 w-fit">
+                <button onClick={() => { setView('schedule'); setSelectedRows(new Set()); }} className={`px-4 py-2 text-sm font-semibold ${view === 'schedule' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+                    Kapsam
+                </button>
+                <button onClick={() => { setView('assignments'); setSelectedRows(new Set()); }} className={`px-4 py-2 text-sm font-semibold ${view === 'assignments' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+                    Yıllık Takvim ve Atamalar — {year}
+                </button>
             </div>
 
-            {view === 'scope' ? (
+            {/* Tablolar */}
+            {loading && !workspace ? (
+                <LoadingState message="Yükleniyor..." />
+            ) : error ? (
+                <ErrorState description={error} onRetry={loadWorkspace} />
+            ) : workspace ? (
                 <>
-                    <div className="flex flex-wrap items-center gap-2 mb-3">
-                        <input value={listSearch} onChange={(e) => setListSearch(e.target.value)} placeholder="Kod veya ad ara..." className={`${inputCls} w-56`} />
-                        <select value={listFreq} onChange={(e) => setListFreq(e.target.value)} className={inputCls} aria-label="Sıklık filtresi">
-                            <option value="">Tüm sıklıklar</option>
-                            {Object.entries(FREQUENCY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                        </select>
-                        <span className="text-xs text-slate-500">Kutucuk kontrolü o yıla açar veya kapatır; değişiklikler &quot;Kaydet&quot; ile her yılın taslağına yazılır.</span>
-                        {selectedScopeRows.size > 0 && (
-                            <div className="flex items-center gap-2 ml-auto bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">
-                                <span className="text-xs font-semibold text-blue-700">{selectedScopeRows.size} seçili</span>
-                                <select aria-label="Toplu işlem yılı" value={bulkYear} onChange={(e) => setBulkYear(Number(e.target.value))} className={`${inputCls} py-1`}>
-                                    {SCOPE_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                    {view === 'schedule' ? (
+                        <>
+                            {/* Filtreler */}
+                            <div className="flex flex-wrap items-center gap-2 mb-3">
+                                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Kod veya tanım ara..." className={`${inputCls} w-56`} />
+                                <select value={frequencyFilter} onChange={(e) => setFrequencyFilter(e.target.value)} className={inputCls}>
+                                    <option value="">Tüm sıklıklar</option>
+                                    {Object.entries(FREQUENCY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                                 </select>
-                                <Button size="sm" variant="outline" onClick={() => bulkScope(true)}>Yıla aç</Button>
-                                <Button size="sm" variant="outline" onClick={() => bulkScope(false)}>Yıldan çıkar</Button>
-                                <Button size="sm" variant="ghost" onClick={() => setSelectedScopeRows(new Set())}>Temizle</Button>
+                                <select value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value as any)} className={inputCls}>
+                                    <option value="">{year} kapsamında / dışında (tümü)</option>
+                                    <option value="IN_SCOPE">Yalnızca {year} kapsamında</option>
+                                    <option value="OUT_OF_SCOPE">Yalnızca {year} kapsamı dışında</option>
+                                </select>
+                                <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+                                    <input type="checkbox" checked={changedOnly} onChange={(e) => setChangedOnly(e.target.checked)} className="rounded border-slate-300" />
+                                    Taslakta değiştirilmiş
+                                </label>
+                                {selectedRows.size > 0 && (
+                                    <div className="flex items-center gap-2 ml-auto bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">
+                                        <span className="text-xs font-semibold text-blue-700">{selectedRows.size} seçili</span>
+                                        <select aria-label="Toplu işlem yılı" value={bulkYear ?? year} onChange={(e) => setBulkYear(Number(e.target.value))} className={`${inputCls} py-1`}>
+                                            {windowYears.map(y => <option key={y} value={y}>{y}{y === year ? ' (plan yılı)' : ''}</option>)}
+                                        </select>
+                                        <Button size="sm" variant="outline" onClick={() => bulkScope('ADD', bulkYear ?? year)}>Kapsama Al</Button>
+                                        <Button size="sm" variant="outline" onClick={() => bulkScope('REMOVE', bulkYear ?? year)}>Kapsamdan Çıkar</Button>
+                                        <Button size="sm" variant="ghost" onClick={() => setSelectedRows(new Set())}>Temizle</Button>
+                                    </div>
+                                )}
                             </div>
-                        )}
-                    </div>
-                    {listLoading && !list ? <LoadingState message="Yükleniyor..." /> : scopeRows.length === 0 ? (
-                        <EmptyState title="Kontrol bulunamadı" description="Aramayı veya kapsam seçimini değiştirin." />
+
+                            <div className="flex flex-wrap items-center gap-3 mb-3 text-xs text-slate-500">
+                                <div className="flex items-center gap-1" role="group" aria-label="Yıl sütunları">
+                                    <Button size="sm" variant="outline" onClick={() => setYearWindowStart(s => s - 1)} aria-label="Önceki yıllar">◀</Button>
+                                    <span className="px-2 font-semibold text-slate-700">{windowYears[0]} – {windowYears[2]}</span>
+                                    <Button size="sm" variant="outline" onClick={() => setYearWindowStart(s => s + 1)} aria-label="Sonraki yıllar">▶</Button>
+                                </div>
+                                <span>Kutucuğa tıklayarak kontrolü o yılın kapsamına alın veya çıkarın; sayfa yenilenmez.</span>
+                                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> taslakta eklenecek</span>
+                                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> taslakta çıkarılacak</span>
+                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded ring-2 ring-amber-300" /> kaydedilmedi</span>
+                                <span>Takvim ve kontrolcüler: <button type="button" className="font-semibold text-blue-700 hover:underline" onClick={() => setView('assignments')}>Yıllık Takvim ve Atamalar</button></span>
+                            </div>
+
+                            {rows.length === 0 ? (
+                                <EmptyState title="Kayıt bulunamadı" description="Filtre kriterlerinizi değiştirin veya kapsamınızı kontrol edin." />
+                            ) : (
+                                <>
+                                    <DataTable
+                                        columns={columns}
+                                        data={rows}
+                                        rowKey={(r) => r.controlId}
+                                        showCheckbox
+                                        selectedRows={selectedRows}
+                                        onRowSelect={(id) => setSelectedRows(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; })}
+                                        onSelectAll={() => setSelectedRows(prev => prev.size === rows.length ? new Set() : new Set(rows.map(r => r.controlId)))}
+                                        loading={loading}
+                                        storageKey="annual-plan-table"
+                                        onRefresh={loadWorkspace}
+                                    />
+                                    <div className="flex items-center justify-between px-1 pt-3 text-sm text-slate-500">
+                                        <span>{rows.length} / {workspace.totalCount} kayıt (bu sayfa) — Bu sayfadakiler otomatik seçili değildir</span>
+                                        <div className="flex items-center gap-2">
+                                            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>Önceki</Button>
+                                            <span>{page} / {Math.max(1, Math.ceil(workspace.totalCount / workspace.pageSize))}</span>
+                                            <Button size="sm" variant="outline" disabled={page >= Math.ceil(workspace.totalCount / workspace.pageSize)} onClick={() => setPage(p => p + 1)}>Sonraki</Button>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </>
                     ) : (
                         <>
-                            <DataTable
-                                columns={scopeColumns} data={scopeRows} rowKey={(r) => r.controlId} loading={listLoading}
-                                showCheckbox selectedRows={selectedScopeRows}
-                                onRowSelect={(id) => setSelectedScopeRows(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
-                                onSelectAll={() => setSelectedScopeRows(prev => prev.size === scopeRows.length ? new Set() : new Set(scopeRows.map(r => r.controlId)))}
-                                storageKey="annual-plan-scope-v2" onRefresh={loadList}
-                            />
-                            <Pager page={listPage} total={list?.totalCount ?? 0} pageSize={list?.pageSize ?? 50} onChange={setListPage} />
+                            {/* Kontrolcü Atamaları — aynı taslak, yalnızca kapsamdaki satırlar */}
+                            {controllerOptionsError && (
+                                <div className="flex items-center justify-between gap-3 mb-3 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                                    <span className="text-sm text-red-700">Kontrolcü listesi yüklenemedi — seçim alanları bu nedenle boş görünüyor.</span>
+                                    <Button size="sm" variant="outline" onClick={loadControllerOptions}>Tekrar Dene</Button>
+                                </div>
+                            )}
+                            <div className="flex flex-wrap items-center gap-2 mb-3">
+                                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Kod veya tanım ara..." className={`${inputCls} w-56`} />
+                                <select value={frequencyFilter} onChange={(e) => setFrequencyFilter(e.target.value)} className={inputCls}>
+                                    <option value="">Tüm sıklıklar</option>
+                                    {Object.entries(FREQUENCY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                </select>
+                                <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+                                    <input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} className="rounded border-slate-300" />
+                                    Takvimi eksik
+                                </label>
+                                <span className="text-xs text-slate-500">Sıklık, uygulama ayları ve kontrolcüler yalnız {year} için geçerlidir; diğer yıllar ayrı planlanır.</span>
+                                {selectedRows.size > 0 && (
+                                    <div className="flex items-center gap-2 ml-auto bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">
+                                        <span className="text-xs font-semibold text-blue-700">{selectedRows.size} seçili</span>
+                                        <Button size="sm" variant="outline" onClick={() => setBulkAssignRole('assigneeId')}>Kontrolcü Ata</Button>
+                                        <Button size="sm" variant="outline" onClick={() => setBulkAssignRole('secondControllerId')}>İkinci Kontrolcü Ata</Button>
+                                        <Button size="sm" variant="ghost" onClick={() => setSelectedRows(new Set())}>Temizle</Button>
+                                    </div>
+                                )}
+                            </div>
+
+                            {[...pendingEdits.keys()].some(id => !workspace.data.some(r => r.controlId === id)) ? (
+                                <div className="flex items-center justify-between gap-3 mb-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                                    <span className="text-sm text-amber-800">Kapsam sekmesinde kaydedilmemiş değişiklikler var; yeni kapsama alınan kontroller kaydedince bu listede görünür.</span>
+                                    <Button size="sm" variant="outline" onClick={saveDraft} disabled={saving}>Taslağı Kaydet</Button>
+                                </div>
+                            ) : null}
+
+                            {assignmentRows.length === 0 ? (
+                                <EmptyState title={`${year} kapsamında kontrol yok`} description={`Önce Kapsam sekmesinden kontrolleri ${year} kapsamına alıp taslağı kaydedin.`} />
+                            ) : (
+                                <DataTable
+                                    columns={assignmentColumns}
+                                    data={assignmentRows}
+                                    rowKey={(r) => r.controlId}
+                                    showCheckbox
+                                    selectedRows={selectedRows}
+                                    onRowSelect={(id) => setSelectedRows(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; })}
+                                    onSelectAll={() => setSelectedRows(prev => prev.size === assignmentRows.length ? new Set() : new Set(assignmentRows.map(r => r.controlId)))}
+                                    loading={loading}
+                                    storageKey="annual-plan-assignments-table"
+                                    onRefresh={loadWorkspace}
+                                />
+                            )}
                         </>
                     )}
                 </>
-            ) : (
-                <>
-                    <div className="flex flex-wrap items-center gap-2 mb-3">
-                        <input value={schedSearch} onChange={(e) => setSchedSearch(e.target.value)} placeholder="Kod veya ad ara..." className={`${inputCls} w-56`} />
-                        <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
-                            <input type="checkbox" checked={schedMissingOnly} onChange={(e) => setSchedMissingOnly(e.target.checked)} className="rounded border-slate-300" />
-                            Tarihi eksik
-                        </label>
-                        <span className="text-xs text-slate-500">Yalnız {year} için geçerlidir; diğer yıllar ayrı planlanır. Aya tıklayınca dönemin diğer ayları kendiliğinden seçilir.</span>
-                        {selectedSchedRows.size > 0 && (
-                            <div className="flex items-center gap-2 ml-auto bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">
-                                <span className="text-xs font-semibold text-blue-700">{selectedSchedRows.size} seçili</span>
-                                <Button size="sm" variant="outline" onClick={() => setBulkAssignRole('assigneeId')}>1. kontrolcü ata</Button>
-                                <Button size="sm" variant="outline" onClick={() => setBulkAssignRole('secondControllerId')}>2. kontrolcü ata</Button>
-                                <Button size="sm" variant="ghost" onClick={() => setSelectedSchedRows(new Set())}>Temizle</Button>
-                            </div>
-                        )}
-                    </div>
-                    {yearScopeUnsaved && (
-                        <div className="flex items-center justify-between gap-3 mb-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                            <span className="text-sm text-amber-800">Kapsam sekmesinde {year} için kaydedilmemiş değişiklik var; kaydedince bu listeye yansır.</span>
-                            <Button size="sm" variant="outline" onClick={() => save()} disabled={saving}>Kaydet</Button>
-                        </div>
-                    )}
-                    {!planEditable && plan && (
-                        <p className="mb-3 text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">{year} planı {STATUS_LABELS[plan.draftStatus].toLowerCase()}; düzenlemek için önce değişiklik istenmeli.</p>
-                    )}
-                    {planLoading && !plan ? <LoadingState message="Yükleniyor..." /> : scheduleRows.length === 0 ? (
-                        <EmptyState title={`${year} için açılmış kontrol yok`} description={`Kapsam sekmesinde kontrolleri ${year} sütunundan işaretleyip kaydedin.`} />
-                    ) : (
-                        <>
-                            <DataTable
-                                columns={scheduleColumns} data={scheduleRows} rowKey={(r) => r.controlId} loading={planLoading}
-                                showCheckbox selectedRows={selectedSchedRows}
-                                onRowSelect={(id) => setSelectedSchedRows(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
-                                onSelectAll={() => setSelectedSchedRows(prev => prev.size === scheduleRows.length ? new Set() : new Set(scheduleRows.map(r => r.controlId)))}
-                                storageKey="annual-plan-schedule-v2" onRefresh={loadPlan}
-                            />
-                            <Pager page={schedPage} total={plan?.totalCount ?? 0} pageSize={plan?.pageSize ?? 50} onChange={setSchedPage} />
-                        </>
-                    )}
-                </>
+            ) : null}
+
+            {/* Ay/takvim düzenleme modalı */}
+            {editingRow && (
+                <ScheduleEditModal
+                    year={year}
+                    row={editingRow}
+                    applied={(() => { const raw = workspace?.data.find(r => r.controlId === editingRow.controlId); return !!raw && raw.inScope && raw.pendingAction !== 'ADD'; })()}
+                    onClose={() => setEditingRow(null)}
+                    onSave={(patch) => {
+                        setPendingEdits(prev => {
+                            const next = new Map(prev);
+                            const current = effectiveRow(editingRow);
+                            next.set(editingRow.controlId, {
+                                inScope: current.inScope,
+                                frequency: patch.frequency ?? current.effectiveFrequency,
+                                referenceMonth: patch.referenceMonth !== undefined ? patch.referenceMonth : current.effectiveReferenceMonth,
+                                selectedMonths: patch.selectedMonths ?? current.effectiveSelectedMonths,
+                                controlDate: patch.controlDate,
+                                reason: patch.reason,
+                                assigneeId: current.assigneeId ?? undefined,
+                                secondControllerId: current.secondControllerId ?? undefined,
+                            });
+                            return next;
+                        });
+                        setEditingRow(null);
+                    }}
+                />
             )}
 
-            {/* Gerekçe: uygulanmış takvim değişikliği */}
-            <Modal open={!!reasonPrompt} onClose={() => setReasonPrompt(null)} title="Takvim değişikliği gerekçesi" size="md"
-                description={`Şu kontrollerin ${year} takvimi uygulanmıştı; değişiklik testleri yeniden düzenler: ${reasonPrompt?.join(', ') ?? ''}`}
-                footer={<div className="flex justify-end gap-2">
-                    <Button size="sm" variant="outline" onClick={() => setReasonPrompt(null)}>Vazgeç</Button>
-                    <Button size="sm" variant="primary" disabled={!reason.trim()} onClick={() => save(reason.trim())}>Kaydet</Button>
-                </div>}>
-                <label htmlFor="plan-reason" className="block text-xs font-semibold text-slate-600 mb-1">Gerekçe *</label>
-                <textarea id="plan-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={2000} className={`${inputCls} w-full`} />
-            </Modal>
+            {/* Önceki yıldan kopyalama — üç bağımsız seçenek (madde 18) */}
+            {copyModalOpen && (
+                <CopyFromYearModal
+                    fromYear={year - 1}
+                    onClose={() => setCopyModalOpen(false)}
+                    onConfirm={copyFromPreviousYear}
+                />
+            )}
 
-            {copyOpen && <CopyFromYearModal fromYear={year - 1} onClose={() => setCopyOpen(false)} onConfirm={copyFromPrevious} />}
+            {/* Toplu kontrolcü/ikinci kontrolcü atama */}
             {bulkAssignRole && (
-                <BulkAssignModal role={bulkAssignRole} count={selectedSchedRows.size}
+                <BulkAssignModal
+                    role={bulkAssignRole}
+                    count={selectedRows.size}
                     options={bulkAssignRole === 'assigneeId' ? controllerOptions.assignee : controllerOptions.secondController}
                     onClose={() => setBulkAssignRole(null)}
-                    onConfirm={(userId, onlyMissing) => { bulkAssign(bulkAssignRole, userId, onlyMissing); setBulkAssignRole(null); }} />
+                    onConfirm={(userId, onlyMissing) => {
+                        bulkAssign(bulkAssignRole, userId, onlyMissing);
+                        setBulkAssignRole(null);
+                    }}
+                />
             )}
-            <PlanDecisionDialog mode={decisionMode} busy={busy} onCancel={() => setDecisionMode(null)} onSubmit={decide} />
 
-            {/* Onaya gönder / uygula önizlemesi */}
-            <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title={`${year} planı — ${status === 'APPROVED' ? 'uygula' : 'onaya gönder'}`} description="Önizleme hiçbir kaydı değiştirmez.">
-                {preview && (
-                    <div className="space-y-3">
+            {/* Planı Uygula önizleme */}
+            <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title={`Yıllık Plan — ${year} Önizleme`} description="Önizleme hiçbir gerçek kayıt değiştirmez.">
+                {previewData && (
+                    <div className="space-y-4">
                         <p className="text-sm text-slate-700 bg-slate-50 rounded-lg p-3">
-                            {preview.toAdd.length} kontrol açılacak, {preview.toRemove.length} çıkarılacak, {preview.toModify.length} değişecek —{' '}
-                            <b>{preview.taskSummary.toCreate} test oluşturulacak</b>, {preview.taskSummary.toCancel} iptal, {preview.taskSummary.protectedCount} korunacak.
+                            {previewData.toAdd.length} kontrol kapsama alınacak, {previewData.toRemove.length} kontrol kapsamdan çıkarılacak, {previewData.toModify.length} kontrolün takvimi veya ataması değişecek —{' '}
+                            <b>{previewData.taskSummary.toCreate} task oluşturulacak</b>, {previewData.taskSummary.toCancel} task iptal edilecek, {previewData.taskSummary.protectedCount} devam eden/tamamlanmış task korunacak.
                         </p>
-                        {preview.missingSchedule.length > 0 && (
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
-                                <p className="font-bold mb-1">Tarihi eksik (arızi):</p>
-                                {preview.missingSchedule.map(c => <p key={c.controlId}>{c.controlCode} — {c.name}</p>)}
+
+                        {previewData.missingSchedule.length > 0 && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                <p className="text-xs font-bold text-amber-700 mb-1">Eksik takvim — plan bu kontroller nedeniyle uygulanamaz:</p>
+                                {previewData.missingSchedule.map(c => <p key={c.controlId} className="text-xs text-amber-700">{c.controlCode} — {c.name}</p>)}
                             </div>
                         )}
-                        {preview.assignmentBlocked.length > 0 && (
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
-                                <p className="font-bold mb-1">Kontrolcü ataması eksik:</p>
-                                {preview.assignmentBlocked.map(c => (
-                                    <button key={c.controlId} type="button" className="block hover:underline" onClick={() => { setPreviewOpen(false); setView('schedule'); }}>{c.controlCode} — {c.name}</button>
+                        {previewData.conflicts.some(c => c.type !== 'ASSIGNMENT') && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                                <p className="text-xs font-bold text-red-700 mb-1">Kapsamdan çıkarma engellendi — devam eden görevler var:</p>
+                                {previewData.conflicts.filter(c => c.type !== 'ASSIGNMENT').map(c => <p key={c.controlId} className="text-xs text-red-700">{c.controlCode} — {c.name}: {c.reason}</p>)}
+                            </div>
+                        )}
+                        <PermissionGate permission="control:*">
+                            <AnnualPlanAssignmentDecisions preview={previewData} decisions={assignmentDecisions} onChange={setAssignmentDecisions} disabled={applying} />
+                        </PermissionGate>
+                        {previewData.assignmentBlocked.length > 0 && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                <p className="text-xs font-bold text-amber-700 mb-1">Atama eksik — periyodik kontroller için Atanan Kontrolcü + İkinci Kontrolcü tamamlanmadan plan uygulanamaz:</p>
+                                {previewData.assignmentBlocked.map(c => (
+                                    <button key={c.controlId} onClick={() => { setPreviewOpen(false); setView('assignments'); }} className="block text-xs text-amber-700 hover:underline">
+                                        {c.controlCode} — {c.name} (Yıllık Takvim ve Atamalar sekmesine git)
+                                    </button>
                                 ))}
                             </div>
                         )}
-                        {preview.conflicts.some(c => c.type !== 'ASSIGNMENT') && (
-                            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">
-                                <p className="font-bold mb-1">Kapsamdan çıkarma engellendi (devam eden testler):</p>
-                                {preview.conflicts.filter(c => c.type !== 'ASSIGNMENT').map(c => <p key={c.controlId}>{c.controlCode} — {c.name}: {c.reason}</p>)}
+
+                        {previewData.toAdd.length > 0 && (
+                            <div>
+                                <p className="text-xs font-bold text-emerald-700 mb-1">Eklenecek ({previewData.toAdd.length})</p>
+                                <div className="max-h-32 overflow-y-auto space-y-1">
+                                    {previewData.toAdd.map(c => <p key={c.controlId} className="text-xs text-slate-600">{c.controlCode} — {c.name} ({c.periodCount} task)</p>)}
+                                </div>
                             </div>
                         )}
-                        <AnnualPlanAssignmentDecisions preview={preview} decisions={decisions} onChange={setDecisions} disabled={busy} />
-                        <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                        {previewData.toRemove.length > 0 && (
+                            <div>
+                                <p className="text-xs font-bold text-red-700 mb-1">Kapsamdan çıkarılacak ({previewData.toRemove.length})</p>
+                                <div className="max-h-32 overflow-y-auto space-y-1">
+                                    {previewData.toRemove.map(c => <p key={c.controlId} className="text-xs text-slate-600">{c.controlCode} — {c.name}</p>)}
+                                </div>
+                            </div>
+                        )}
+                        {previewData.toModify.length > 0 && (
+                            <div>
+                                <p className="text-xs font-bold text-blue-700 mb-1">Değişecek ({previewData.toModify.length})</p>
+                                <div className="max-h-32 overflow-y-auto space-y-1">
+                                    {previewData.toModify.map(c => (
+                                        <div key={c.controlId} className="text-xs text-slate-600">
+                                            <span>{c.controlCode} — {c.name}: {c.toCreate} yeni, {c.toCancel} iptal, {c.protectedCount} korunan</span>
+                                            {c.assigneeChange && <span className="block text-blue-600 ml-4">Atanan Kontrolcü değişecek</span>}
+                                            {c.secondControllerChange && <span className="block text-blue-600 ml-4">İkinci Kontrolcü değişecek</span>}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
                             <Button variant="outline" onClick={() => setPreviewOpen(false)}>Vazgeç</Button>
-                            {status === 'APPROVED' ? (
-                                <Button variant="primary" onClick={apply} disabled={busy || hasUnresolvedPlanConflicts(preview, decisions)}>{busy ? 'Uygulanıyor...' : 'Planı uygula'}</Button>
-                            ) : (
-                                <Button variant="primary" onClick={submit} disabled={busy || hasUnresolvedPlanConflicts(preview, decisions)}>{busy ? 'Gönderiliyor...' : 'Onaya gönder'}</Button>
-                            )}
+                            <PermissionGate permission="control:*">
+                                {workspace?.draftStatus === 'APPROVED' ? (
+                                    <Button variant="primary" onClick={applyPlan} disabled={applying || hasUnresolvedPlanConflicts(previewData, assignmentDecisions)}>
+                                        {applying ? 'Uygulanıyor...' : hasUnresolvedPlanConflicts(previewData, assignmentDecisions) ? 'Eksikleri ve görev kararlarını tamamlayın' : 'Onaylanmış Planı Uygula'}
+                                    </Button>
+                                ) : (
+                                    <Button variant="primary" onClick={submitForApproval} disabled={transitioning || hasUnresolvedPlanConflicts(previewData, assignmentDecisions)}>
+                                        {transitioning ? 'Gönderiliyor...' : hasUnresolvedPlanConflicts(previewData, assignmentDecisions) ? 'Eksikleri tamamlayın' : 'Onaya Gönder'}
+                                    </Button>
+                                )}
+                            </PermissionGate>
                         </div>
                     </div>
                 )}
             </Modal>
         </PageShell>
-    );
-}
-
-function Pager({ page, total, pageSize, onChange }: { page: number; total: number; pageSize: number; onChange: (p: number) => void }) {
-    const pages = Math.max(1, Math.ceil(total / pageSize));
-    if (pages <= 1) return <p className="px-1 pt-3 text-sm text-slate-500">{total} kontrol</p>;
-    return (
-        <div className="flex items-center justify-between px-1 pt-3 text-sm text-slate-500">
-            <span>{total} kontrol</span>
-            <div className="flex items-center gap-2">
-                <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => onChange(page - 1)}>Önceki</Button>
-                <span>{page} / {pages}</span>
-                <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => onChange(page + 1)}>Sonraki</Button>
-            </div>
-        </div>
     );
 }
 
@@ -943,6 +1342,125 @@ function BulkAssignModal({ role, count, options, onClose, onConfirm }: {
                 <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
                     <Button variant="outline" onClick={onClose}>Vazgeç</Button>
                     <Button variant="primary" disabled={!userId} onClick={() => onConfirm(userId, onlyMissing)}>Uygula</Button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+// ─── Takvim düzenleme modalı ─────────────────────────────────────────────────
+
+function ScheduleEditModal({ year, row, applied, onClose, onSave }: {
+    year: number;
+    row: AnnualPlanRow;
+    /** Kontrol bu yılın kapsamında UYGULANMIŞ mı (testleri üretilmiş). Yeni planlanan yılda gerekçe istenmez. */
+    applied: boolean;
+    onClose: () => void;
+    onSave: (patch: { frequency?: string; referenceMonth?: number | null; selectedMonths?: string[]; controlDate?: string; reason?: string }) => void;
+}) {
+    const [frequency, setFrequency] = useState(row.effectiveFrequency);
+    const [referenceMonth, setReferenceMonth] = useState<number | null>(row.effectiveReferenceMonth);
+    const [controlDate, setControlDate] = useState(row.effectiveControlDate ? row.effectiveControlDate.slice(0, 10) : '');
+    const [reason, setReason] = useState('');
+    const isAdHoc = frequency === 'AD_HOC';
+    const usesMonthPicker = frequency === 'QUARTERLY' || frequency === 'SEMI_ANNUAL' || frequency === 'ANNUAL';
+    const frequencyChanged = frequency !== row.effectiveFrequency;
+    const referenceMonthChanged = usesMonthPicker && referenceMonth !== row.effectiveReferenceMonth;
+    // Gerekçe yalnız uygulanmış bir yılın takvimi değişirken istenir (testler yeniden üretilir).
+    // Önceden her ay değişikliğinde zorunluydu; 2028 için Ocak→Mart gibi yeni yıl seçimi
+    // gerekçe yazılmadan uygulanamıyordu.
+    const requiresReason = applied && (frequencyChanged || referenceMonthChanged);
+
+    const selectedGroup = usesMonthPicker && referenceMonth != null ? computeMonthGroup(frequency, referenceMonth) : [];
+    const taskCount = frequency === 'MONTHLY' ? 12 : frequency === 'WEEKLY' ? '~52' : frequency === 'DAILY' ? 0
+        : isAdHoc ? (controlDate ? 1 : 0) : selectedGroup.length;
+
+    return (
+        <Modal open onClose={onClose} title={`${row.controlCode} — ${row.name}`} description={`Planlanan yıl: ${year}`}>
+            <div className="space-y-4">
+                <p className="text-xs text-blue-800 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2" data-testid="schedule-year-note">
+                    Bu takvim yalnızca <b>{year}</b> için geçerlidir. Diğer yılların sıklığı ve ayları ayrı belirlenir
+                    (ör. 2027'de Ocak–Temmuz, 2028'de Mart–Eylül).
+                </p>
+                <Link href={`/controls/${row.controlId}`} target="_blank" className="text-xs text-blue-600 hover:underline -mt-2 inline-block">
+                    Kontrol detayını aç ↗
+                </Link>
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Sıklık</label>
+                    <select value={frequency} onChange={(e) => { setFrequency(e.target.value); setReferenceMonth(null); }} className={`${inputCls} w-full bg-white`}>
+                        {Object.entries(FREQUENCY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                </div>
+
+                {isAdHoc ? (
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Hedef Tarih (Arızi — tek tarih)</label>
+                        <input type="date" value={controlDate} onChange={(e) => setControlDate(e.target.value)} className={`${inputCls} w-full`} />
+                        <p className="text-xs text-slate-400 mt-1">Arızi kontroller yıllık periyodik toplama dahil edilmez, "İhtiyaç Halinde" olarak izlenir.</p>
+                    </div>
+                ) : usesMonthPicker ? (
+                    <div>
+                        <div className="flex items-center justify-between mb-1">
+                            <label className="block text-sm font-medium text-slate-700">12 Ay Seçicisi — bir referans ay seçin</label>
+                            {referenceMonth != null && (
+                                <button onClick={() => setReferenceMonth(null)} className="text-xs text-slate-400 hover:text-red-600">Seçimi Temizle</button>
+                            )}
+                        </div>
+                        <div className="grid grid-cols-4 gap-1.5">
+                            {MONTH_LABELS_TR.map((label, idx) => {
+                                const m = idx + 1;
+                                const isRef = referenceMonth === m;
+                                const isInGroup = referenceMonth != null && computeMonthGroup(frequency, referenceMonth).includes(m);
+                                return (
+                                    <button
+                                        key={m}
+                                        onClick={() => setReferenceMonth(m)}
+                                        className={`px-2 py-2 rounded-lg text-xs font-semibold border transition-colors ${isRef ? 'bg-blue-600 border-blue-600 text-white' : isInGroup ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'}`}
+                                    >
+                                        {label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 mt-3 text-sm text-slate-600">
+                            <p className="font-semibold text-slate-700 mb-1">
+                                {referenceMonth == null ? 'Referans ay seçilmedi' : `Otomatik seçilen aylar: ${selectedGroup.map(m => MONTH_LABELS_TR[m - 1]).join(', ')}`}
+                            </p>
+                            <p className="text-xs text-slate-400">
+                                Oluşacak uygulama sayısı: <b>{taskCount}</b> · Hedef tarih kuralı: her ayın son iş günü (hafta sonuysa bir önceki iş günü — resmî tatil takvimi yok).
+                            </p>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-sm text-slate-600">
+                        <p className="font-semibold text-slate-700 mb-1">{describeSchedule({ ...row, effectiveFrequency: frequency })}</p>
+                        <p className="text-xs text-slate-400">Oluşacak uygulama sayısı: <b>{taskCount}</b></p>
+                    </div>
+                )}
+
+                {requiresReason && (
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Değişiklik Gerekçesi <span className="text-red-500">*</span></label>
+                        <p className="text-xs text-slate-500 mb-1">Bu kontrolün {year} takvimi uygulanmış; değişiklik testleri yeniden düzenler.</p>
+                        <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className={`${inputCls} w-full`} placeholder="Sıklık/takvim değişikliği gerekçesi..." />
+                    </div>
+                )}
+
+                <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
+                    <Button variant="outline" onClick={onClose}>Vazgeç</Button>
+                    <Button
+                        variant="primary"
+                        disabled={requiresReason && !reason.trim()}
+                        onClick={() => onSave({
+                            frequency,
+                            referenceMonth: usesMonthPicker ? referenceMonth : undefined,
+                            selectedMonths: isAdHoc ? [] : row.effectiveSelectedMonths,
+                            controlDate: isAdHoc && controlDate ? new Date(controlDate).toISOString() : undefined,
+                            reason: requiresReason ? reason : undefined,
+                        })}
+                    >
+                        Taslağa Uygula
+                    </Button>
                 </div>
             </div>
         </Modal>
