@@ -4,7 +4,7 @@ import { AnnualPlanService } from './annual-plan.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { CurrentUser, Roles, RequirePermissions } from '../../common/decorators';
 import {
-    AnnualPlanWorkspaceQueryDto, ApplyPlanDto, BulkDraftActionDto, CopyFromYearDto, EligibleControllersQueryDto, SaveDraftItemsDto,
+    AnnualPlanWorkspaceQueryDto, AnnualPlanScopeMatrixQueryDto, ApplyPlanDto, BulkDraftActionDto, CopyFromYearDto, EligibleControllersQueryDto, SaveDraftItemsDto,
     AnnualPlanTransitionDto, AnnualPlanDecisionDto,
 } from './dto/annual-plan.dto';
 
@@ -21,6 +21,16 @@ import {
 @RequirePermissions('control:*')
 export class AnnualPlanController {
     constructor(private service: AnnualPlanService) { }
+
+    /** Kapsam tablosu yıl sütunları: verilen kontrollerin birden çok yıldaki etkin kapsam durumu. */
+    @Get('scope-matrix')
+    async getScopeMatrix(
+        @CurrentUser('id') userId: string,
+        @CurrentUser('permissions') permissions: string[],
+        @Query() query: AnnualPlanScopeMatrixQueryDto,
+    ) {
+        return this.service.getScopeMatrix(userId, permissions || [], query);
+    }
 
     @Get(':year/workspace')
     async getWorkspace(

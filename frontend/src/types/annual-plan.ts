@@ -141,3 +141,9 @@ export interface AnnualPlanApplyResult {
     modified?: number;
     tasksCreated?: number;
 }
+
+/** Kapsam tablosu yıl sütunları: kontrol × yıl etkin kapsam durumu ve her yılın taslak bilgisi. */
+export interface AnnualPlanScopeMatrix {
+    years: Array<{ year: number; draftRevision: number; draftStatus: AnnualPlanWorkspace['draftStatus']; editable: boolean }>;
+    cells: Record<string, Record<number, { inScope: boolean; pendingAction: 'ADD' | 'REMOVE' | 'NONE' }>>;
+}

@@ -288,8 +288,9 @@ test('yıllık plan kaydedilmiş taslağı yeniden açar ve geri alırken dönem
 test('yıllık planda iki seçili dönem kontrolüne toplu kontrolcü atanır', async ({ page }) => {
     await login(page);
     await page.goto('/controls/annual-plan?year=2026&scope=ORG');
-    await page.getByRole('button', { name: 'Kontrolcü Atamaları' }).click();
-    const table = page.locator('table').first();
+    await page.getByRole('button', { name: /Yıllık Takvim ve Atamalar/ }).click();
+    // Sayfada Kontrolcü İş Yükü tabloları da var; atama tablosu satır içeriğiyle bulunur.
+    const table = page.locator('table').filter({ hasText: 'E2E Test Kontrolü' }).first();
     await expect(table.getByRole('row').filter({ hasText: 'E2E Test Kontrolü' })).toBeVisible();
     await expect(table.getByRole('row').filter({ hasText: 'E2E BT Dışı Kontrol' })).toBeVisible();
     await table.locator('thead input[type="checkbox"]').check();
