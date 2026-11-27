@@ -270,7 +270,7 @@ test('onaylı kontrol testinde kanıt görünür ve değiştirme arayüzü kilit
 
 test('yıllık plan kaydedilmiş taslağı yeniden açar ve geri alırken dönem kayıtlarını korur', async ({ page }) => {
     await login(page);
-    await page.goto('/controls/annual-plan?year=2026&scope=ORG');
+    await page.goto('/controls/annual-plan?year=2026&scope=ORG&tab=schedule');
     await expect(page.getByText('Değişiklik Var', { exact: true })).toBeVisible();
     await expect(page.getByRole('row').filter({ hasText: 'E2E BT Dışı Kontrol' })).toContainText('Değişti');
 
@@ -279,7 +279,7 @@ test('yıllık plan kaydedilmiş taslağı yeniden açar ve geri alırken dönem
     await expect(page.getByRole('row').filter({ hasText: 'E2E BT Dışı Kontrol' })).toContainText('Değişti');
 
     page.once('dialog', dialog => dialog.accept());
-    await page.getByRole('button', { name: 'Değişiklikleri Geri Al' }).click();
+    await page.getByRole('button', { name: '2026 değişikliklerini geri al' }).click();
     await expect(page.getByText('Değişiklik Var', { exact: true })).toHaveCount(0);
     await expect(page.getByRole('row').filter({ hasText: 'E2E Test Kontrolü' })).toBeVisible();
     await expect(page.getByRole('row').filter({ hasText: 'E2E BT Dışı Kontrol' })).toBeVisible();
@@ -288,7 +288,7 @@ test('yıllık plan kaydedilmiş taslağı yeniden açar ve geri alırken dönem
 test('yıllık planda iki seçili dönem kontrolüne toplu kontrolcü atanır', async ({ page }) => {
     await login(page);
     await page.goto('/controls/annual-plan?year=2026&scope=ORG');
-    await page.getByRole('button', { name: /Yıllık Takvim ve Atamalar/ }).click();
+    await page.getByRole('tab', { name: /Takvim ve Atamalar/ }).click();
     // Sayfada Kontrolcü İş Yükü tabloları da var; atama tablosu satır içeriğiyle bulunur.
     const table = page.locator('table').filter({ hasText: 'E2E Test Kontrolü' }).first();
     await expect(table.getByRole('row').filter({ hasText: 'E2E Test Kontrolü' })).toBeVisible();
@@ -296,7 +296,7 @@ test('yıllık planda iki seçili dönem kontrolüne toplu kontrolcü atanır', 
     await table.locator('thead input[type="checkbox"]').check();
     await expect(page.getByText('2 seçili', { exact: true })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Kontrolcü Ata', exact: true }).click();
+    await page.getByRole('button', { name: '1. kontrolcü ata', exact: true }).click();
     await page.getByRole('dialog').getByRole('combobox').selectOption({ label: 'Playwright Denetçi' });
     await page.getByRole('dialog').getByRole('button', { name: 'Uygula' }).click();
     await expect(page.getByText('2 kontrole atama uygulandı.')).toBeVisible();
